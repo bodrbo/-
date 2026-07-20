@@ -28,17 +28,41 @@
 
   <section class="panel form-panel">
     <h2>Добавить запись</h2>
-    <form action="{{ url_for('add_entry') }}" method="post" class="entry-form">
+    <form action="{{ url_for('add_entry') }}" method="post" class="entry-form" id="entry-form">
+
       <div class="field">
         <label for="employee">Сотрудник</label>
-        <input type="text" id="employee" name="employee" placeholder="Например, Иван Петров"
-               value="{{ form_values.employee if form_values else '' }}" required>
+        <select id="employee" name="employee" required
+                onchange="toggleCustom('employee')">
+          <option value="" disabled {{ 'selected' if not form_values }}>Выберите сотрудника</option>
+          {% for name in employees_form %}
+          <option value="{{ name }}"
+            {{ 'selected' if form_values and form_values.employee == name }}>{{ name }}</option>
+          {% endfor %}
+          <option value="{{ custom_value }}"
+            {{ 'selected' if form_values and form_values.employee == custom_value }}>+ Другой (ввести вручную)</option>
+        </select>
+        <input type="text" id="employee_custom" name="employee_custom" class="custom-input hidden"
+               placeholder="Имя и фамилия"
+               value="{{ form_values.employee_custom if form_values else '' }}">
       </div>
+
       <div class="field">
         <label for="work_type">Вид работы</label>
-        <input type="text" id="work_type" name="work_type" placeholder="Например, сварка каркаса"
-               value="{{ form_values.work_type if form_values else '' }}" required>
+        <select id="work_type" name="work_type" required onchange="applyWorkType(this)">
+          <option value="" disabled {{ 'selected' if not form_values }}>Выберите вид работы</option>
+          {% for wt in work_types %}
+          <option value="{{ wt.name }}" data-rate="{{ wt.rate }}" data-hours="{{ wt.hours }}"
+            {{ 'selected' if form_values and form_values.work_type == wt.name }}>{{ wt.name }}</option>
+          {% endfor %}
+          <option value="{{ custom_value }}"
+            {{ 'selected' if form_values and form_values.work_type == custom_value }}>+ Другое (ввести вручную)</option>
+        </select>
+        <input type="text" id="work_type_custom" name="work_type_custom" class="custom-input hidden"
+               placeholder="Описание работы"
+               value="{{ form_values.work_type_custom if form_values else '' }}">
       </div>
+
       <div class="field field-narrow">
         <label for="quantity">Часы / кол-во</label>
         <input type="text" inputmode="decimal" id="quantity" name="quantity" placeholder="5"
@@ -49,15 +73,48 @@
         <input type="text" inputmode="decimal" id="rate" name="rate" placeholder="1500"
                value="{{ form_values.rate if form_values else '' }}" required>
       </div>
+      <div class="field field-narrow">
+        <label for="work_date">Дата работы</label>
+        <input type="date" id="work_date" name="work_date"
+               value="{{ form_values.work_date if form_values else today }}" required>
+      </div>
       <div class="field field-submit">
         <button type="submit">Добавить</button>
       </div>
+    </form>
+    <p class="hint">Выбор вида работы подставит обычную ставку и часы — при необходимости их можно поправить перед сохранением.</p>
+  </section>
+
+  <section class="panel filter-panel">
+    <h2>Период и сотрудник</h2>
+    <form action="{{ url_for('index') }}" method="get" class="filter-form">
+      <div class="field">
+        <label for="week">Неделя</label>
+        <select id="week" name="week" onchange="this.form.submit()">
+          <option value="all" {{ 'selected' if selected_week == 'all' }}>Все периоды</option>
+          {% for w in weeks %}
+          <option value="{{ w.key }}" {{ 'selected' if selected_week == w.key }}>
+            {{ w.label }}{{ ' (текущая)' if w.is_current }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="employee-filter">Сотрудник</label>
+        <select id="employee-filter" name="employee" onchange="this.form.submit()">
+          <option value="all" {{ 'selected' if selected_employee == 'all' }}>Все сотрудники</option>
+          {% for name in employees_filter %}
+          <option value="{{ name }}" {{ 'selected' if selected_employee == name }}>{{ name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <noscript><div class="field field-submit"><button type="submit">Показать</button></div></noscript>
     </form>
   </section>
 
   <section class="totals-grid">
     <div class="panel total-card total-card-grand">
-      <span class="k">Общая сумма</span>
+      <span class="k">Сумма за период</span>
       <span class="v">{{ "%.0f"|format(grand_total) }} ₽</span>
     </div>
     {% for employee, sum in totals_by_employee.items() %}
@@ -69,12 +126,12 @@
   </section>
 
   <section class="panel">
-    <h2>Все записи</h2>
+    <h2>Записи за выбранный период</h2>
     {% if entries %}
     <table class="records">
       <thead>
         <tr>
-          <th>Дата</th>
+          <th>Дата работы</th>
           <th>Сотрудник</th>
           <th>Вид работы</th>
           <th>Часы / кол-во</th>
@@ -86,7 +143,7 @@
       <tbody>
         {% for e in entries %}
         <tr>
-          <td class="muted">{{ e.created_at }}</td>
+          <td class="muted">{{ e.work_date }}</td>
           <td>{{ e.employee }}</td>
           <td>{{ e.work_type }}</td>
           <td>{{ e.quantity|float|round(2) }}</td>
@@ -103,11 +160,41 @@
       </tbody>
     </table>
     {% else %}
-    <p class="empty">Записей пока нет — добавьте первую через форму выше.</p>
+    <p class="empty">За выбранный период записей нет.</p>
     {% endif %}
   </section>
 
 </main>
+
+<script>
+function toggleCustom(fieldPrefix) {
+  var select = document.getElementById(fieldPrefix);
+  var custom = document.getElementById(fieldPrefix + '_custom');
+  if (select.value === '{{ custom_value }}') {
+    custom.classList.remove('hidden');
+    custom.required = true;
+  } else {
+    custom.classList.add('hidden');
+    custom.required = false;
+  }
+}
+
+function applyWorkType(select) {
+  toggleCustom('work_type');
+  var opt = select.options[select.selectedIndex];
+  var rate = opt.getAttribute('data-rate');
+  var hours = opt.getAttribute('data-hours');
+  if (rate) document.getElementById('rate').value = rate;
+  if (hours) document.getElementById('quantity').value = hours;
+}
+
+// Show custom fields on load if a custom value was already selected
+// (e.g. after a validation error re-render).
+document.addEventListener('DOMContentLoaded', function () {
+  toggleCustom('employee');
+  toggleCustom('work_type');
+});
+</script>
 
 </body>
 </html>
