@@ -1,9 +1,10 @@
-@import url('https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Lora:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
 
 :root {
   --navy: #16283f;
   --navy-light: #24405f;
   --gold: #a3742d;
+  --burgundy: #8c1c3f;
   --cream: #f7f1e4;
   --paper: #fffdf8;
   --ink: #2a2521;
@@ -25,12 +26,39 @@ body {
 .topbar {
   background: var(--navy);
   color: var(--cream);
-  padding: 28px 20px;
+  padding: 22px 20px;
 }
 .topbar-inner {
   max-width: 1000px;
   margin: 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px 24px;
 }
+
+.brand { display: flex; flex-direction: column; }
+.logo-text {
+  font-family: 'Bebas Neue', sans-serif;
+  font-weight: 700;
+  font-size: 34px;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  color: #ffffff;
+}
+.logo-text .mark { color: var(--burgundy); }
+.logo-sub {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #b9ad99;
+  margin-top: 3px;
+}
+
+.title-block { text-align: right; }
 .kicker {
   font-size: 11px;
   letter-spacing: 0.14em;
@@ -40,9 +68,14 @@ body {
 }
 .topbar h1 {
   font-family: 'Lora', serif;
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 700;
   margin: 6px 0 0 0;
+}
+
+@media (max-width: 560px) {
+  .topbar-inner { flex-direction: column; }
+  .title-block { text-align: left; }
 }
 
 .wrap {
