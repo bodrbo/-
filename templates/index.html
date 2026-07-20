@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Учёт выполненных работ</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="kicker">Учёт работ и оплаты</span>
+    <h1>Журнал выполненных работ</h1>
+  </div>
+</header>
+
+<main class="wrap">
+
+  {% if errors %}
+    <div class="alert">
+      <strong>Не удалось добавить запись:</strong>
+      <ul>
+        {% for err in errors %}<li>{{ err }}</li>{% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <section class="panel form-panel">
+    <h2>Добавить запись</h2>
+    <form action="{{ url_for('add_entry') }}" method="post" class="entry-form">
+      <div class="field">
+        <label for="employee">Сотрудник</label>
+        <input type="text" id="employee" name="employee" placeholder="Например, Иван Петров"
+               value="{{ form_values.employee if form_values else '' }}" required>
+      </div>
+      <div class="field">
+        <label for="work_type">Вид работы</label>
+        <input type="text" id="work_type" name="work_type" placeholder="Например, сварка каркаса"
+               value="{{ form_values.work_type if form_values else '' }}" required>
+      </div>
+      <div class="field field-narrow">
+        <label for="quantity">Часы / кол-во</label>
+        <input type="text" inputmode="decimal" id="quantity" name="quantity" placeholder="5"
+               value="{{ form_values.quantity if form_values else '' }}" required>
+      </div>
+      <div class="field field-narrow">
+        <label for="rate">Ставка, ₽</label>
+        <input type="text" inputmode="decimal" id="rate" name="rate" placeholder="1500"
+               value="{{ form_values.rate if form_values else '' }}" required>
+      </div>
+      <div class="field field-submit">
+        <button type="submit">Добавить</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="totals-grid">
+    <div class="panel total-card total-card-grand">
+      <span class="k">Общая сумма</span>
+      <span class="v">{{ "%.0f"|format(grand_total) }} ₽</span>
+    </div>
+    {% for employee, sum in totals_by_employee.items() %}
+    <div class="panel total-card">
+      <span class="k">{{ employee }}</span>
+      <span class="v">{{ "%.0f"|format(sum) }} ₽</span>
+    </div>
+    {% endfor %}
+  </section>
+
+  <section class="panel">
+    <h2>Все записи</h2>
+    {% if entries %}
+    <table class="records">
+      <thead>
+        <tr>
+          <th>Дата</th>
+          <th>Сотрудник</th>
+          <th>Вид работы</th>
+          <th>Часы / кол-во</th>
+          <th>Ставка, ₽</th>
+          <th>Сумма, ₽</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in entries %}
+        <tr>
+          <td class="muted">{{ e.created_at }}</td>
+          <td>{{ e.employee }}</td>
+          <td>{{ e.work_type }}</td>
+          <td>{{ e.quantity|float|round(2) }}</td>
+          <td>{{ e.rate|float|round(2) }}</td>
+          <td class="amount">{{ "%.0f"|format(e.amount) }}</td>
+          <td>
+            <form action="{{ url_for('delete_entry', entry_id=e.id) }}" method="post"
+                  onsubmit="return confirm('Удалить эту запись?');">
+              <button type="submit" class="btn-delete" title="Удалить">✕</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">Записей пока нет — добавьте первую через форму выше.</p>
+    {% endif %}
+  </section>
+
+</main>
+
+</body>
+</html>
