@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Рейсы и инвесторы</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="logo-text"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
+      <div class="logo-sub">Payroll system</div>
+    </div>
+    <nav class="main-nav">
+      <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'payroll' }}">Зарплаты</a>
+      <a href="{{ url_for('trips_index') }}" class="{{ 'active' if active_page == 'trips' }}">Рейсы и инвесторы</a>
+    </nav>
+    <div class="title-block">
+      <span class="kicker">Морские прогулки · Кронштадт</span>
+      <h1>Рейсы и выплаты инвесторам</h1>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  {% if errors %}
+    <div class="alert">
+      <strong>Не удалось сохранить рейс:</strong>
+      <ul>
+        {% for err in errors %}<li>{{ err }}</li>{% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <section class="panel form-panel">
+    <h2>{{ 'Редактировать рейс' if edit_trip else 'Добавить рейс' }}</h2>
+    <form action="{{ url_for('edit_trip', trip_id=edit_trip.id) if edit_trip else url_for('add_trip') }}"
+          method="post" class="entry-form" id="trip-form">
+
+      <div class="field">
+        <label for="boat">Катер</label>
+        <select id="boat" name="boat" required onchange="applyBoat(this)">
+          <option value="" disabled {{ 'selected' if not form_values }}>Выберите катер</option>
+          {% for b in boats %}
+          <option value="{{ b.name }}"
+                  data-fuel="{{ b.fuel }}" data-mooring="{{ b.mooring }}"
+                  data-comm-direct="{{ b.commission_direct }}" data-comm-agg="{{ b.commission_aggregator }}"
+            {{ 'selected' if form_values and form_values.boat == b.name }}>
+            {{ b.name }} ({{ b.investor }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field field-narrow">
+        <label for="trip_date">Дата рейса</label>
+        <input type="date" id="trip_date" name="trip_date"
+               value="{{ form_values.trip_date if form_values else today }}" required>
+      </div>
+
+      <div class="field">
+        <label for="sale_channel">Канал продажи</label>
+        <select id="sale_channel" name="sale_channel" onchange="applyChannelDefault()">
+          {% for c in sale_channels %}
+          <option value="{{ c.value }}"
+            {{ 'selected' if form_values and form_values.sale_channel == c.value }}>{{ c.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field field-narrow">
+        <label for="commission_pct">Комиссия, %</label>
+        <input type="text" inputmode="decimal" id="commission_pct" name="commission_pct"
+               value="{{ form_values.commission_pct if form_values else '' }}" required>
+      </div>
+
+      <div class="field">
+        <label for="employee">Капитан / гид</label>
+        <select id="employee" name="employee" required onchange="toggleCustom('employee')">
+          <option value="" disabled {{ 'selected' if not form_values }}>Выберите сотрудника</option>
+          {% for name in employees_form %}
+          <option value="{{ name }}"
+            {{ 'selected' if form_values and form_values.employee == name }}>{{ name }}</option>
+          {% endfor %}
+          <option value="{{ custom_value }}"
+            {{ 'selected' if form_values and form_values.employee == custom_value }}>+ Другой (ввести вручную)</option>
+        </select>
+        <input type="text" id="employee_custom" name="employee_custom" class="custom-input hidden"
+               placeholder="Имя и фамилия"
+               value="{{ form_values.employee_custom if form_values else '' }}">
+      </div>
+
+      <div class="field">
+        <label for="work_type">Вид рейса</label>
+        <select id="work_type" name="work_type" required onchange="applyWorkType(this)">
+          <option value="" disabled {{ 'selected' if not form_values }}>Выберите вид рейса</option>
+          {% for wt in work_types %}
+          <option value="{{ wt.name }}" data-rate="{{ wt.rate }}" data-hours="{{ wt.hours }}"
+            {{ 'selected' if form_values and form_values.work_type == wt.name }}>{{ wt.name }}</option>
+          {% endfor %}
+          <option value="{{ custom_value }}"
+            {{ 'selected' if form_values and form_values.work_type == custom_value }}>+ Другое (ввести вручную)</option>
+        </select>
+        <input type="text" id="work_type_custom" name="work_type_custom" class="custom-input hidden"
+               placeholder="Описание рейса"
+               value="{{ form_values.work_type_custom if form_values else '' }}">
+      </div>
+
+      <div class="field field-narrow">
+        <label for="quantity">Часы</label>
+        <input type="text" inputmode="decimal" id="quantity" name="quantity" placeholder="1"
+               value="{{ form_values.quantity if form_values else '' }}" required>
+      </div>
+      <div class="field field-narrow">
+        <label for="rate">Ставка, ₽</label>
+        <input type="text" inputmode="decimal" id="rate" name="rate" placeholder="1100"
+               value="{{ form_values.rate if form_values else '' }}" required>
+      </div>
+
+      <div class="field field-narrow">
+        <label for="revenue">Доход рейса, ₽</label>
+        <input type="text" inputmode="decimal" id="revenue" name="revenue" placeholder="5000"
+               value="{{ form_values.revenue if form_values else '' }}" required>
+      </div>
+      <div class="field field-narrow">
+        <label for="fuel_cost">Топливо, ₽</label>
+        <input type="text" inputmode="decimal" id="fuel_cost" name="fuel_cost"
+               value="{{ form_values.fuel_cost if form_values else '' }}" required>
+      </div>
+      <div class="field field-narrow">
+        <label for="mooring_cost">Стоянка, ₽</label>
+        <input type="text" inputmode="decimal" id="mooring_cost" name="mooring_cost"
+               value="{{ form_values.mooring_cost if form_values else '' }}" required>
+      </div>
+
+      <div class="field field-wide">
+        <label>Дополнительные разовые расходы (необязательно)</label>
+        <div id="expenses-container">
+          {% if expenses_prefill %}
+            {% for desc, amt in expenses_prefill %}
+            <div class="expense-row">
+              <input type="text" name="expense_desc[]" value="{{ desc }}" placeholder="Например, ремонт">
+              <input type="text" name="expense_amount[]" value="{{ amt }}" placeholder="Сумма" inputmode="decimal">
+              <button type="button" class="btn-delete" onclick="this.parentElement.remove()">✕</button>
+            </div>
+            {% endfor %}
+          {% endif %}
+        </div>
+        <button type="button" class="btn-secondary" onclick="addExpenseRow()">+ Добавить расход</button>
+      </div>
+
+      <div class="field field-submit">
+        <button type="submit">{{ 'Сохранить изменения' if edit_trip else 'Добавить рейс' }}</button>
+        {% if edit_trip %}
+        <a href="{{ url_for('trips_index') }}" class="btn-cancel">Отмена</a>
+        {% endif %}
+      </div>
+    </form>
+    <p class="hint">Выбор катера подставит топливо/стоянку/комиссию, вид рейса — ставку и часы. Все значения можно поправить вручную перед сохранением.</p>
+  </section>
+
+  <section class="panel filter-panel">
+    <h2>Период и катер</h2>
+    <form action="{{ url_for('trips_index') }}" method="get" class="filter-form">
+      <div class="field">
+        <label for="month">Месяц</label>
+        <select id="month" name="month" onchange="this.form.submit()">
+          <option value="all" {{ 'selected' if selected_month == 'all' }}>Все периоды</option>
+          {% for m in months %}
+          <option value="{{ m.key }}" {{ 'selected' if selected_month == m.key }}>
+            {{ m.label }}{{ ' (текущий)' if m.is_current }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="boat-filter">Катер</label>
+        <select id="boat-filter" name="boat" onchange="this.form.submit()">
+          <option value="all" {{ 'selected' if selected_boat == 'all' }}>Все катера</option>
+          {% for b in boats %}
+          <option value="{{ b.name }}" {{ 'selected' if selected_boat == b.name }}>{{ b.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </form>
+  </section>
+
+  <section class="totals-grid">
+    <div class="panel total-card total-card-grand">
+      <span class="k">Мой итог за период</span>
+      <span class="v">{{ "%.0f"|format(grand_my_share) }} ₽</span>
+    </div>
+    {% for investor, info in by_investor.items() %}
+    <div class="panel total-card">
+      <span class="k">{{ investor }}</span>
+      <span class="v">{{ "%.0f"|format(info.payout) }} ₽</span>
+    </div>
+    {% endfor %}
+  </section>
+
+  <section class="panel">
+    <h2>Сводка по катерам за период</h2>
+    {% if by_boat %}
+    <table class="gloss">
+      <tr>
+        <th>Катер</th><th>Рейсов</th><th>Доход</th><th>Комиссия</th><th>Прямые расходы</th>
+        <th>Остаток</th><th>Инвестору</th><th>Мне</th>
+      </tr>
+      {% for boat_name, t in by_boat.items() %}
+      <tr>
+        <td class="term">{{ boat_name }}</td>
+        <td>{{ t.count }}</td>
+        <td>{{ "%.0f"|format(t.revenue) }}</td>
+        <td>{{ "%.0f"|format(t.commission) }}</td>
+        <td>{{ "%.0f"|format(t.labor + t.fuel + t.mooring + t.extra) }}</td>
+        <td>{{ "%.0f"|format(t.remainder) }}</td>
+        <td class="amount">{{ "%.0f"|format(t.investor_payout) }}</td>
+        <td class="amount">{{ "%.0f"|format(t.my_share) }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">За выбранный период рейсов нет.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Все рейсы за период</h2>
+    {% if trips %}
+    <table class="records">
+      <thead>
+        <tr>
+          <th>Дата</th><th>Катер</th><th>Вид рейса</th><th>Доход</th><th>Канал</th>
+          <th>Комиссия</th><th>Расходы</th><th>Инвестору</th><th>Мне</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in trips %}
+        <tr>
+          <td class="muted">{{ t.trip_date }}</td>
+          <td>{{ t.boat }}</td>
+          <td>{{ t.work_type }}</td>
+          <td>{{ "%.0f"|format(t.revenue) }}</td>
+          <td class="muted">{{ 'Напрямую' if t.sale_channel == 'direct' else ('Агрегатор' if t.sale_channel == 'aggregator' else 'Смешанно') }}</td>
+          <td>{{ "%.0f"|format(t.commission_amount) }} ({{ t.commission_pct|float|round(1) }}%)</td>
+          <td title="Гид/капитан: {{ "%.0f"|format(t.labor_cost) }} · Топливо: {{ "%.0f"|format(t.fuel_cost) }} · Стоянка: {{ "%.0f"|format(t.mooring_cost) }}{% if t.extra_total %} · Доп: {{ "%.0f"|format(t.extra_total) }}{% endif %}">
+            {{ "%.0f"|format(t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total) }}
+          </td>
+          <td class="amount">{{ "%.0f"|format(t.investor_payout) }}</td>
+          <td class="amount">{{ "%.0f"|format(t.my_share) }}</td>
+          <td class="row-actions">
+            <a href="{{ url_for('edit_trip', trip_id=t.id) }}" class="btn-edit" title="Редактировать">✎</a>
+            <form action="{{ url_for('delete_trip', trip_id=t.id) }}" method="post"
+                  onsubmit="return confirm('Удалить этот рейс? Связанная запись в зарплатах тоже удалится.');">
+              <button type="submit" class="btn-delete" title="Удалить">✕</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">За выбранный период записей нет.</p>
+    {% endif %}
+  </section>
+
+</main>
+
+<script>
+function toggleCustom(fieldPrefix) {
+  var select = document.getElementById(fieldPrefix);
+  var custom = document.getElementById(fieldPrefix + '_custom');
+  if (select.value === '{{ custom_value }}') {
+    custom.classList.remove('hidden');
+    custom.required = true;
+  } else {
+    custom.classList.add('hidden');
+    custom.required = false;
+  }
+}
+
+function applyWorkType(select) {
+  toggleCustom('work_type');
+  var opt = select.options[select.selectedIndex];
+  var rate = opt.getAttribute('data-rate');
+  var hours = opt.getAttribute('data-hours');
+  if (rate) document.getElementById('rate').value = rate;
+  if (hours) document.getElementById('quantity').value = hours;
+}
+
+function applyBoat(select) {
+  var opt = select.options[select.selectedIndex];
+  var fuel = opt.getAttribute('data-fuel');
+  var mooring = opt.getAttribute('data-mooring');
+  if (fuel) document.getElementById('fuel_cost').value = fuel;
+  if (mooring) document.getElementById('mooring_cost').value = mooring;
+  applyChannelDefault();
+}
+
+function applyChannelDefault() {
+  var boatSelect = document.getElementById('boat');
+  var channelSelect = document.getElementById('sale_channel');
+  if (boatSelect.selectedIndex < 0) return;
+  var boatOpt = boatSelect.options[boatSelect.selectedIndex];
+  var channel = channelSelect.value;
+  var pct = null;
+  if (channel === 'direct') pct = boatOpt.getAttribute('data-comm-direct');
+  else if (channel === 'aggregator') pct = boatOpt.getAttribute('data-comm-agg');
+  if (pct) document.getElementById('commission_pct').value = pct;
+}
+
+function addExpenseRow() {
+  var container = document.getElementById('expenses-container');
+  var div = document.createElement('div');
+  div.className = 'expense-row';
+  div.innerHTML = '<input type="text" name="expense_desc[]" placeholder="Например, ремонт">' +
+                  '<input type="text" name="expense_amount[]" placeholder="Сумма" inputmode="decimal">' +
+                  '<button type="button" class="btn-delete" onclick="this.parentElement.remove()">✕</button>';
+  container.appendChild(div);
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  toggleCustom('employee');
+  toggleCustom('work_type');
+});
+</script>
+
+</body>
+</html>

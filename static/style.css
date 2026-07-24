@@ -59,6 +59,23 @@ body {
 }
 
 .title-block { text-align: right; }
+
+.main-nav {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.main-nav a {
+  font-size: 13px;
+  font-weight: 600;
+  color: #c9bda0;
+  text-decoration: none;
+  padding: 7px 14px;
+  border-radius: 5px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.main-nav a:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.main-nav a.active { background: var(--gold); color: #16283f; }
 .kicker {
   font-size: 11px;
   letter-spacing: 0.14em;
@@ -154,6 +171,52 @@ input[type="text"]:focus, input[type="date"]:focus, select:focus {
   align-items: end;
 }
 .filter-form .field { flex: 1 1 220px; }
+
+.field-wide { flex: 1 1 100%; }
+.expense-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.expense-row input[type="text"]:first-child { flex: 2; }
+.expense-row input[type="text"]:nth-child(2) { flex: 1; }
+
+.btn-secondary {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 14px;
+  background: #efe6d2;
+  color: var(--navy);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+.btn-secondary:hover { background: #e4d8bd; }
+
+.btn-cancel {
+  font-size: 13px;
+  color: var(--muted);
+  margin-left: 12px;
+  text-decoration: underline;
+}
+
+.row-actions { display: flex; gap: 6px; white-space: nowrap; }
+.btn-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--navy);
+  border-radius: 5px;
+  width: 26px;
+  height: 26px;
+  text-decoration: none;
+  font-size: 13px;
+}
+.btn-edit:hover { background: var(--navy); color: #fff; border-color: var(--navy); }
 
 button[type="submit"] {
   font-family: inherit;
