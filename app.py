@@ -36,15 +36,17 @@ YCLIENTS_PARTNER_TOKEN = os.environ.get("YCLIENTS_PARTNER_TOKEN") or "rtzn97gwz5
 YCLIENTS_USER_TOKEN = os.environ.get("YCLIENTS_USER_TOKEN") or "7a61e523fd03f146601add9408f69696"
 YCLIENTS_COMPANY_ID = os.environ.get("YCLIENTS_COMPANY_ID") or "979343"
 
-# Соответствие цвета записи/события в Yclients — катеру.
-# Цвет — единственный надёжный признак (есть и у одиночных записей, и у
-# групповых событий). Посмотреть код цвета конкретного катера можно в самой
-# записи в Yclients (или в ответе API — поле custom_color / color).
-# ЗАПОЛНИТЕ реальными цветами перед первым импортом.
+# Соответствие цвета записи/события в Yclients — катеру. Жёстко заданы по
+# вашему описанию (Ларус — синий, Бодрый Второй — тёмно-фиолетовый, Бодрый
+# Первый — светло-зелёный). Точный HEX-код каждого цвета в вашем аккаунте
+# может отличаться от указанного здесь — ПРОВЕРЬТЕ при первом импорте: если
+# катер не определится автоматически, на странице проверки будет показан
+# настоящий код цвета этой записи ("цвет в Yclients: #xxxxxx") — скопируйте
+# его сюда вместо приблизительного значения.
 BOAT_COLORS = {
-    # "#ffffff": "Ларус",
-    # "#ffcc00": "Бодрый Второй",
-    # "#00aaff": "Бодрый Первый",
+    "#3d85c6": "Ларус",             # синий
+    "#674ea7": "Бодрый Второй",     # тёмно-фиолетовый
+    "#93c47d": "Бодрый Первый",     # светло-зелёный
 }
 
 # ---------------------------------------------------------------------
@@ -921,10 +923,27 @@ def yclients_get_records(start_date, end_date):
     return all_records
 
 
+def _yclients_record_color(rec):
+    return (rec.get("custom_color") or rec.get("color") or "").strip().lower()
+
+
+def _yclients_record_datetime(rec):
+    return (rec.get("datetime") or rec.get("date") or "").strip()
+
+
 def _yclients_group_key(rec):
+    """Group by Yclients' own activity_id when present (real group events).
+    Otherwise, group by color + exact start time: this is how a captain and
+    a guide working the same trip end up as two separate individual records
+    (one with the real client/price, one an empty placeholder for the second
+    staff member) — same boat color, same slot, no shared activity_id."""
     activity_id = rec.get("activity_id")
     if activity_id:
         return f"activity:{activity_id}"
+    color = _yclients_record_color(rec)
+    when = _yclients_record_datetime(rec)
+    if color and when:
+        return f"slot:{color}:{when}"
     return f"record:{rec.get('id')}"
 
 
@@ -943,10 +962,24 @@ def _yclients_record_hours(rec):
     return None
 
 
+def _yclients_record_revenue(rec):
+    return sum(float(s.get("cost") or 0) for s in (rec.get("services") or []))
+
+
 def build_import_candidates(records):
-    """Group raw Yclients records into trip candidates (one per individual
-    record, or one per group event via activity_id), guessing boat/channel/
-    commission from the color and comment fields."""
+    """Group raw Yclients records into trip candidates:
+    - all bookings sharing an activity_id (a real group event with several
+      independent attendees) become one trip, revenue summed across all of
+      them;
+    - individual records with no activity_id but the same color + exact
+      start time become one trip too (this is how two staff — e.g. captain
+      and guide — are split across a "real" record and an empty placeholder
+      record for the same physical trip): revenue is taken from whichever
+      record actually carries a price, NOT summed, to avoid double-counting
+      the same single sale;
+    - anything else stays its own trip.
+    Boat/channel/commission are guessed from the color and comment fields.
+    """
     groups = {}
     for rec in records:
         if rec.get("deleted"):
@@ -956,12 +989,16 @@ def build_import_candidates(records):
 
     candidates = []
     for key, recs in groups.items():
+        is_activity_group = key.startswith("activity:")
         trip_date = _yclients_record_date(recs[0])
 
         # Boat: try every record's color until one matches a known boat.
         boat = None
+        raw_color_seen = ""
         for r in recs:
-            color = (r.get("custom_color") or r.get("color") or "").lower()
+            color = _yclients_record_color(r)
+            if color and not raw_color_seen:
+                raw_color_seen = color
             for c, b in BOAT_COLORS.items():
                 if c.lower() == color:
                     boat = b
@@ -992,44 +1029,54 @@ def build_import_candidates(records):
         if not labor_items:
             labor_items = [{"employee": "", "work_type": "", "quantity": "", "rate": ""}]
 
-        # Revenue: sum of every service's cost across all records in the group.
-        revenue = 0.0
-        for r in recs:
-            for s in (r.get("services") or []):
-                revenue += float(s.get("cost") or 0)
-
-        # Sale channel: any non-empty comment marks that booking as sold via
-        # an aggregator (the name is whatever was written in the comment).
-        channels = set()
-        agg_revenue = 0.0
-        direct_revenue = 0.0
-        notes = []
-        for r in recs:
-            comment = (r.get("comment") or "").strip()
-            rec_revenue = sum(float(s.get("cost") or 0) for s in (r.get("services") or []))
-            if comment:
-                channels.add("aggregator")
-                agg_revenue += rec_revenue
-                notes.append(comment)
-            else:
-                channels.add("direct")
-                direct_revenue += rec_revenue
-
-        boat_info = boat_lookup(boat) if boat else None
-        if len(channels) > 1:
-            sale_channel = "mixed"
-            if boat_info and revenue:
+        if is_activity_group:
+            # Real group event: every record is a separate paying attendee —
+            # sum their revenue and blend the channel/commission accordingly.
+            revenue = sum(_yclients_record_revenue(r) for r in recs)
+            channels = set()
+            agg_revenue = 0.0
+            direct_revenue = 0.0
+            notes = []
+            for r in recs:
+                comment = (r.get("comment") or "").strip()
+                rec_revenue = _yclients_record_revenue(r)
+                if comment:
+                    channels.add("aggregator")
+                    agg_revenue += rec_revenue
+                    notes.append(comment)
+                else:
+                    channels.add("direct")
+                    direct_revenue += rec_revenue
+            boat_info = boat_lookup(boat) if boat else None
+            if len(channels) > 1:
+                sale_channel = "mixed"
                 commission_pct = round(
                     (direct_revenue * boat_info["commission_direct"] +
-                     agg_revenue * boat_info["commission_aggregator"]) / revenue, 1)
+                     agg_revenue * boat_info["commission_aggregator"]) / revenue, 1
+                ) if boat_info and revenue else ""
+            elif channels == {"aggregator"}:
+                sale_channel = "aggregator"
+                commission_pct = boat_info["commission_aggregator"] if boat_info else ""
             else:
-                commission_pct = ""
-        elif channels == {"aggregator"}:
-            sale_channel = "aggregator"
-            commission_pct = boat_info["commission_aggregator"] if boat_info else ""
+                sale_channel = "direct"
+                commission_pct = boat_info["commission_direct"] if boat_info else ""
+            note = " / ".join(notes)
         else:
-            sale_channel = "direct"
-            commission_pct = boat_info["commission_direct"] if boat_info else ""
+            # Same physical trip split across several staff records (one real
+            # + one or more empty placeholders) — there is only ONE sale, so
+            # take the price and comment from whichever record actually
+            # carries it instead of summing everything.
+            primary = max(recs, key=_yclients_record_revenue)
+            revenue = _yclients_record_revenue(primary)
+            comment = (primary.get("comment") or "").strip()
+            boat_info = boat_lookup(boat) if boat else None
+            if comment:
+                sale_channel = "aggregator"
+                commission_pct = boat_info["commission_aggregator"] if boat_info else ""
+            else:
+                sale_channel = "direct"
+                commission_pct = boat_info["commission_direct"] if boat_info else ""
+            note = comment
 
         payload = {
             "boat": boat or "",
@@ -1040,13 +1087,16 @@ def build_import_candidates(records):
             "commission_pct": commission_pct,
             "fuel_cost": boat_info["fuel"] if boat_info else "",
             "mooring_cost": boat_info["mooring"] if boat_info else "",
-            "note": " / ".join(notes),
+            "note": note,
         }
         employees_label = ", ".join(i["employee"] for i in labor_items if i["employee"]) or "—"
-        summary = (
-            f"{trip_date} · {boat or 'катер не определён (нет совпадения по цвету)'} · "
-            f"{employees_label} · {revenue:.0f} ₽"
-        )
+        if boat:
+            boat_label = boat
+        elif raw_color_seen:
+            boat_label = f"катер не определён (цвет в Yclients: {raw_color_seen})"
+        else:
+            boat_label = "катер не определён (цвет не задан)"
+        summary = f"{trip_date} · {boat_label} · {employees_label} · {revenue:.0f} ₽"
         candidates.append({"yclients_ref": key, "summary": summary, "payload": payload})
     candidates.sort(key=lambda c: c["payload"]["trip_date"], reverse=True)
     return candidates
