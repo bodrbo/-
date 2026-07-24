@@ -17,6 +17,7 @@
     <nav class="main-nav">
       <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'payroll' }}">Зарплаты</a>
       <a href="{{ url_for('trips_index') }}" class="{{ 'active' if active_page == 'trips' }}">Рейсы и инвесторы</a>
+      <a href="{{ url_for('import_index') }}" class="{{ 'active' if active_page == 'import' }}">Импорт из Yclients</a>
     </nav>
     <div class="title-block">
       <span class="kicker">Учёт работ и оплаты</span>

@@ -8,6 +8,39 @@
 </head>
 <body>
 
+{% macro labor_row(item=None) %}
+<div class="labor-row">
+  <select name="employee[]" class="labor-employee" onchange="handleEmployeeChange(this)" required>
+    <option value="" disabled {{ 'selected' if not item or not item.employee }}>Сотрудник</option>
+    {% for name in employees_form %}
+    <option value="{{ name }}" {{ 'selected' if item and item.employee == name }}>{{ name }}</option>
+    {% endfor %}
+    <option value="{{ custom_value }}" {{ 'selected' if item and item.employee and item.employee not in employees_form }}>+ Другой (вручную)</option>
+  </select>
+  <input type="text" name="employee_custom[]" class="custom-input hidden labor-employee-custom"
+         placeholder="Имя и фамилия"
+         value="{{ item.employee if item and item.employee and item.employee not in employees_form else '' }}">
+
+  <select name="work_type[]" class="labor-worktype" onchange="handleWorkTypeChange(this)" required>
+    <option value="" disabled {{ 'selected' if not item or not item.work_type }}>Вид рейса / роль</option>
+    {% for wt in work_types %}
+    <option value="{{ wt.name }}" data-rate="{{ wt.rate }}" data-hours="{{ wt.hours }}"
+      {{ 'selected' if item and item.work_type == wt.name }}>{{ wt.name }}</option>
+    {% endfor %}
+    <option value="{{ custom_value }}" {{ 'selected' if item and item.work_type and item.work_type not in work_types|map(attribute='name')|list }}>+ Другое (вручную)</option>
+  </select>
+  <input type="text" name="work_type_custom[]" class="custom-input hidden labor-worktype-custom"
+         placeholder="Роль / описание"
+         value="{{ item.work_type if item and item.work_type and item.work_type not in work_types|map(attribute='name')|list else '' }}">
+
+  <input type="text" inputmode="decimal" name="quantity[]" class="labor-quantity" placeholder="Часы"
+         value="{{ item.quantity if item else '' }}" required>
+  <input type="text" inputmode="decimal" name="rate[]" class="labor-rate" placeholder="Ставка, ₽"
+         value="{{ item.rate if item else '' }}" required>
+  <button type="button" class="btn-delete" onclick="removeLaborRow(this)" title="Убрать сотрудника">✕</button>
+</div>
+{% endmacro %}
+
 <header class="topbar">
   <div class="topbar-inner">
     <div class="brand">
@@ -17,6 +50,7 @@
     <nav class="main-nav">
       <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'payroll' }}">Зарплаты</a>
       <a href="{{ url_for('trips_index') }}" class="{{ 'active' if active_page == 'trips' }}">Рейсы и инвесторы</a>
+      <a href="{{ url_for('import_index') }}" class="{{ 'active' if active_page == 'import' }}">Импорт из Yclients</a>
     </nav>
     <div class="title-block">
       <span class="kicker">Морские прогулки · Кронштадт</span>
@@ -37,8 +71,16 @@
   {% endif %}
 
   <section class="panel form-panel">
-    <h2>{{ 'Редактировать рейс' if edit_trip else 'Добавить рейс' }}</h2>
-    <form action="{{ url_for('edit_trip', trip_id=edit_trip.id) if edit_trip else url_for('add_trip') }}"
+    <h2>
+      {% if import_candidate %}Подтвердить рейс из Yclients
+      {% elif edit_trip %}Редактировать рейс
+      {% else %}Добавить рейс{% endif %}
+    </h2>
+    {% if import_note %}
+    <p class="hint import-note">Комментарий из Yclients (похоже на канал продажи): «{{ import_note }}»</p>
+    {% endif %}
+    <form action="{{ url_for('import_confirm', candidate_id=import_candidate.id) if import_candidate
+                    else (url_for('edit_trip', trip_id=edit_trip.id) if edit_trip else url_for('add_trip')) }}"
           method="post" class="entry-form" id="trip-form">
 
       <div class="field">
@@ -78,48 +120,19 @@
                value="{{ form_values.commission_pct if form_values else '' }}" required>
       </div>
 
-      <div class="field">
-        <label for="employee">Капитан / гид</label>
-        <select id="employee" name="employee" required onchange="toggleCustom('employee')">
-          <option value="" disabled {{ 'selected' if not form_values }}>Выберите сотрудника</option>
-          {% for name in employees_form %}
-          <option value="{{ name }}"
-            {{ 'selected' if form_values and form_values.employee == name }}>{{ name }}</option>
-          {% endfor %}
-          <option value="{{ custom_value }}"
-            {{ 'selected' if form_values and form_values.employee == custom_value }}>+ Другой (ввести вручную)</option>
-        </select>
-        <input type="text" id="employee_custom" name="employee_custom" class="custom-input hidden"
-               placeholder="Имя и фамилия"
-               value="{{ form_values.employee_custom if form_values else '' }}">
+      <div class="field field-wide">
+        <label>Сотрудники на рейсе (капитан, гид — можно добавить несколько)</label>
+        <div id="labor-container">
+          {% if labor_prefill %}
+            {% for item in labor_prefill %}{{ labor_row(item) }}{% endfor %}
+          {% else %}
+            {{ labor_row() }}
+          {% endif %}
+        </div>
+        <button type="button" class="btn-secondary" onclick="addLaborRow()">+ Добавить сотрудника</button>
       </div>
 
-      <div class="field">
-        <label for="work_type">Вид рейса</label>
-        <select id="work_type" name="work_type" required onchange="applyWorkType(this)">
-          <option value="" disabled {{ 'selected' if not form_values }}>Выберите вид рейса</option>
-          {% for wt in work_types %}
-          <option value="{{ wt.name }}" data-rate="{{ wt.rate }}" data-hours="{{ wt.hours }}"
-            {{ 'selected' if form_values and form_values.work_type == wt.name }}>{{ wt.name }}</option>
-          {% endfor %}
-          <option value="{{ custom_value }}"
-            {{ 'selected' if form_values and form_values.work_type == custom_value }}>+ Другое (ввести вручную)</option>
-        </select>
-        <input type="text" id="work_type_custom" name="work_type_custom" class="custom-input hidden"
-               placeholder="Описание рейса"
-               value="{{ form_values.work_type_custom if form_values else '' }}">
-      </div>
-
-      <div class="field field-narrow">
-        <label for="quantity">Часы</label>
-        <input type="text" inputmode="decimal" id="quantity" name="quantity" placeholder="1"
-               value="{{ form_values.quantity if form_values else '' }}" required>
-      </div>
-      <div class="field field-narrow">
-        <label for="rate">Ставка, ₽</label>
-        <input type="text" inputmode="decimal" id="rate" name="rate" placeholder="1100"
-               value="{{ form_values.rate if form_values else '' }}" required>
-      </div>
+      <template id="labor-row-template">{{ labor_row() }}</template>
 
       <div class="field field-narrow">
         <label for="revenue">Доход рейса, ₽</label>
@@ -154,9 +167,15 @@
       </div>
 
       <div class="field field-submit">
-        <button type="submit">{{ 'Сохранить изменения' if edit_trip else 'Добавить рейс' }}</button>
+        <button type="submit">
+          {% if import_candidate %}Подтвердить и создать рейс
+          {% elif edit_trip %}Сохранить изменения
+          {% else %}Добавить рейс{% endif %}
+        </button>
         {% if edit_trip %}
         <a href="{{ url_for('trips_index') }}" class="btn-cancel">Отмена</a>
+        {% elif import_candidate %}
+        <a href="{{ url_for('import_index') }}" class="btn-cancel">Отмена</a>
         {% endif %}
       </div>
     </form>
@@ -274,6 +293,7 @@
 function toggleCustom(fieldPrefix) {
   var select = document.getElementById(fieldPrefix);
   var custom = document.getElementById(fieldPrefix + '_custom');
+  if (!select || !custom) return;
   if (select.value === '{{ custom_value }}') {
     custom.classList.remove('hidden');
     custom.required = true;
@@ -283,13 +303,45 @@ function toggleCustom(fieldPrefix) {
   }
 }
 
-function applyWorkType(select) {
-  toggleCustom('work_type');
+function handleEmployeeChange(select) {
+  var row = select.closest('.labor-row');
+  var custom = row.querySelector('.labor-employee-custom');
+  if (select.value === '{{ custom_value }}') {
+    custom.classList.remove('hidden');
+    custom.required = true;
+  } else {
+    custom.classList.add('hidden');
+    custom.required = false;
+  }
+}
+
+function handleWorkTypeChange(select) {
+  var row = select.closest('.labor-row');
+  var custom = row.querySelector('.labor-worktype-custom');
+  if (select.value === '{{ custom_value }}') {
+    custom.classList.remove('hidden');
+    custom.required = true;
+  } else {
+    custom.classList.add('hidden');
+    custom.required = false;
+  }
   var opt = select.options[select.selectedIndex];
   var rate = opt.getAttribute('data-rate');
   var hours = opt.getAttribute('data-hours');
-  if (rate) document.getElementById('rate').value = rate;
-  if (hours) document.getElementById('quantity').value = hours;
+  if (rate) row.querySelector('.labor-rate').value = rate;
+  if (hours) row.querySelector('.labor-quantity').value = hours;
+}
+
+function addLaborRow() {
+  var container = document.getElementById('labor-container');
+  var template = document.getElementById('labor-row-template');
+  container.appendChild(template.content.cloneNode(true));
+}
+
+function removeLaborRow(btn) {
+  var rows = document.querySelectorAll('#labor-container .labor-row');
+  if (rows.length <= 1) return;
+  btn.closest('.labor-row').remove();
 }
 
 function applyBoat(select) {
@@ -324,8 +376,15 @@ function addExpenseRow() {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
-  toggleCustom('employee');
-  toggleCustom('work_type');
+  document.querySelectorAll('#labor-container .labor-employee').forEach(handleEmployeeChange);
+  document.querySelectorAll('#labor-container .labor-worktype').forEach(function (sel) {
+    var row = sel.closest('.labor-row');
+    var custom = row.querySelector('.labor-worktype-custom');
+    if (sel.value === '{{ custom_value }}') {
+      custom.classList.remove('hidden');
+      custom.required = true;
+    }
+  });
 });
 </script>
 

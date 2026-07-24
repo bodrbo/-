@@ -15,14 +15,37 @@
 """
 
 import os
+import json
 import sqlite3
 import datetime as dt
 
+import requests
 from flask import Flask, g, redirect, render_template, request, url_for
 
 app = Flask(__name__)
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workhours.db")
+
+# ---------------------------------------------------------------------
+# Yclients — импорт рейсов. Токены НЕ храним в коде (секреты) — задайте их
+# как переменные окружения на хостинге:
+#   YCLIENTS_PARTNER_TOKEN, YCLIENTS_USER_TOKEN, YCLIENTS_COMPANY_ID
+# Локально можно временно вписать значения прямо сюда для проверки.
+# ---------------------------------------------------------------------
+YCLIENTS_PARTNER_TOKEN = os.environ.get("YCLIENTS_PARTNER_TOKEN", "rtzn97gwz5t6ape37egg")
+YCLIENTS_USER_TOKEN = os.environ.get("YCLIENTS_USER_TOKEN", "7a61e523fd03f146601add9408f69696")
+YCLIENTS_COMPANY_ID = os.environ.get("YCLIENTS_COMPANY_ID", "979343")
+
+# Соответствие цвета записи/события в Yclients — катеру.
+# Цвет — единственный надёжный признак (есть и у одиночных записей, и у
+# групповых событий). Посмотреть код цвета конкретного катера можно в самой
+# записи в Yclients (или в ответе API — поле custom_color / color).
+# ЗАПОЛНИТЕ реальными цветами перед первым импортом.
+BOAT_COLORS = {
+    # "#ffffff": "Ларус",
+    # "#ffcc00": "Бодрый Второй",
+    # "#00aaff": "Бодрый Первый",
+}
 
 # ---------------------------------------------------------------------
 # СПРАВОЧНИКИ — отредактируйте под себя.
@@ -174,6 +197,34 @@ def init_db():
             trip_id INTEGER NOT NULL,
             description TEXT NOT NULL,
             amount REAL NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS trip_labor (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trip_id INTEGER NOT NULL,
+            entry_id INTEGER NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS yclients_imports (
+            yclients_ref TEXT PRIMARY KEY,
+            trip_id INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS import_candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            yclients_ref TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            created_at TEXT NOT NULL
         )
         """
     )
@@ -524,17 +575,59 @@ def _process_trip_form(form):
     except ValueError:
         trip_date = dt.date.today().isoformat()
 
-    employee = form.get("employee", "").strip()
-    if employee == CUSTOM_VALUE:
-        employee = form.get("employee_custom", "").strip()
-    work_type = form.get("work_type", "").strip()
-    if work_type == CUSTOM_VALUE:
-        work_type = form.get("work_type_custom", "").strip()
+    # --- Labor rows: one or more employees paid for this trip ---
+    employees_raw = form.getlist("employee[]")
+    employees_custom_raw = form.getlist("employee_custom[]")
+    work_types_raw = form.getlist("work_type[]")
+    work_types_custom_raw = form.getlist("work_type_custom[]")
+    quantities_raw = form.getlist("quantity[]")
+    rates_raw = form.getlist("rate[]")
 
-    if not employee:
-        errors.append("Укажите сотрудника (капитан/гид).")
-    if not work_type:
-        errors.append("Укажите вид рейса.")
+    def _get(lst, i):
+        return lst[i] if i < len(lst) else ""
+
+    labor_items = []
+    labor_cost = 0.0
+    for i in range(len(employees_raw)):
+        emp = employees_raw[i].strip()
+        if emp == CUSTOM_VALUE:
+            emp = _get(employees_custom_raw, i).strip()
+        wt = _get(work_types_raw, i).strip()
+        if wt == CUSTOM_VALUE:
+            wt = _get(work_types_custom_raw, i).strip()
+        q_raw = _get(quantities_raw, i).strip().replace(",", ".")
+        r_raw = _get(rates_raw, i).strip().replace(",", ".")
+
+        if not emp and not wt and not q_raw and not r_raw:
+            continue  # fully empty row — ignore silently
+
+        row_num = i + 1
+        if not emp:
+            errors.append(f"Сотрудник №{row_num}: не указано имя.")
+        if not wt:
+            errors.append(f"Сотрудник №{row_num}: не указан вид рейса.")
+
+        q = r = None
+        try:
+            q = float(q_raw)
+            if q < 0:
+                errors.append(f"Сотрудник №{row_num}: часы не могут быть отрицательными.")
+        except ValueError:
+            errors.append(f"Сотрудник №{row_num}: часы должны быть числом.")
+        try:
+            r = float(r_raw)
+            if r < 0:
+                errors.append(f"Сотрудник №{row_num}: ставка не может быть отрицательной.")
+        except ValueError:
+            errors.append(f"Сотрудник №{row_num}: ставка должна быть числом.")
+
+        if emp and wt and q is not None and r is not None:
+            amount = q * r
+            labor_items.append({"employee": emp, "work_type": wt, "quantity": q, "rate": r, "amount": amount})
+            labor_cost += amount
+
+    if not labor_items and not any("Сотрудник" in e for e in errors):
+        errors.append("Добавьте хотя бы одного сотрудника (капитан/гид) на рейс.")
 
     def parse_num(name, label):
         raw = form.get(name, "").strip().replace(",", ".")
@@ -547,8 +640,6 @@ def _process_trip_form(form):
             errors.append(f"«{label}» должно быть числом.")
             return None
 
-    rate = parse_num("rate", "Ставка")
-    quantity = parse_num("quantity", "Часы")
     revenue = parse_num("revenue", "Доход рейса")
     commission_pct = parse_num("commission_pct", "Комиссия (%)")
     fuel_cost = parse_num("fuel_cost", "Топливо")
@@ -581,7 +672,14 @@ def _process_trip_form(form):
     if errors:
         return errors, None
 
-    labor_cost = rate * quantity
+    # Trip-level "вид рейса" label for lists/summaries: the distinct work
+    # types among the labor rows, joined (usually just one).
+    distinct_work_types = []
+    for item in labor_items:
+        if item["work_type"] not in distinct_work_types:
+            distinct_work_types.append(item["work_type"])
+    work_type_label = " + ".join(distinct_work_types)
+
     commission_amount = revenue * commission_pct / 100
     direct_costs = labor_cost + fuel_cost + mooring_cost + extra_total
     remainder = revenue - commission_amount - direct_costs
@@ -589,8 +687,8 @@ def _process_trip_form(form):
     my_share = commission_amount + remainder / 2
 
     data = dict(
-        boat=boat, trip_date=trip_date, employee=employee, work_type=work_type,
-        rate=rate, quantity=quantity, labor_cost=labor_cost,
+        boat=boat, trip_date=trip_date, work_type=work_type_label,
+        labor_items=labor_items, labor_cost=labor_cost,
         revenue=revenue, sale_channel=sale_channel, commission_pct=commission_pct,
         commission_amount=commission_amount, fuel_cost=fuel_cost, mooring_cost=mooring_cost,
         extra_total=extra_total, expenses=expenses, remainder=remainder,
@@ -620,25 +718,32 @@ def add_trip():
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    cur = db.execute(
-        "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (data["employee"], data["work_type"], data["rate"], data["quantity"],
-         data["labor_cost"], data["trip_date"], now),
-    )
-    entry_id = cur.lastrowid
+
+    entry_ids = []
+    for item in data["labor_items"]:
+        cur = db.execute(
+            "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (item["employee"], item["work_type"], item["rate"], item["quantity"],
+             item["amount"], data["trip_date"], now),
+        )
+        entry_ids.append(cur.lastrowid)
 
     cur2 = db.execute(
         "INSERT INTO trips (boat, trip_date, work_type, entry_id, revenue, sale_channel, "
         "commission_pct, commission_amount, labor_cost, fuel_cost, mooring_cost, extra_total, "
         "remainder, investor_payout, my_share, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (data["boat"], data["trip_date"], data["work_type"], entry_id, data["revenue"],
-         data["sale_channel"], data["commission_pct"], data["commission_amount"],
+        (data["boat"], data["trip_date"], data["work_type"], entry_ids[0] if entry_ids else None,
+         data["revenue"], data["sale_channel"], data["commission_pct"], data["commission_amount"],
          data["labor_cost"], data["fuel_cost"], data["mooring_cost"], data["extra_total"],
          data["remainder"], data["investor_payout"], data["my_share"], now),
     )
     trip_id = cur2.lastrowid
+    for eid in entry_ids:
+        db.execute(
+            "INSERT INTO trip_labor (trip_id, entry_id) VALUES (?, ?)", (trip_id, eid)
+        )
     for desc, amt in data["expenses"]:
         db.execute(
             "INSERT INTO trip_expenses (trip_id, description, amount) VALUES (?, ?, ?)",
@@ -656,21 +761,30 @@ def edit_trip(trip_id):
         return redirect(url_for("trips_index"))
 
     if request.method == "GET":
-        entry = None
-        if trip["entry_id"]:
-            entry = db.execute(
-                "SELECT * FROM entries WHERE id = ?", (trip["entry_id"],)
-            ).fetchone()
+        labor_links = db.execute(
+            "SELECT entry_id FROM trip_labor WHERE trip_id = ?", (trip_id,)
+        ).fetchall()
+        entry_ids = [l["entry_id"] for l in labor_links]
+        if not entry_ids and trip["entry_id"]:
+            entry_ids = [trip["entry_id"]]  # legacy trips created before multi-employee support
+
+        labor_prefill = []
+        for eid in entry_ids:
+            e = db.execute("SELECT * FROM entries WHERE id = ?", (eid,)).fetchone()
+            if e:
+                labor_prefill.append({
+                    "employee": e["employee"], "work_type": e["work_type"],
+                    "quantity": e["quantity"], "rate": e["rate"],
+                })
+        if not labor_prefill:
+            labor_prefill = [{"employee": "", "work_type": "", "quantity": "", "rate": ""}]
+
         exps = db.execute(
             "SELECT * FROM trip_expenses WHERE trip_id = ?", (trip_id,)
         ).fetchall()
         form_values = {
             "boat": trip["boat"],
             "trip_date": trip["trip_date"],
-            "employee": entry["employee"] if entry else "",
-            "work_type": trip["work_type"],
-            "quantity": entry["quantity"] if entry else "",
-            "rate": entry["rate"] if entry else "",
             "revenue": trip["revenue"],
             "sale_channel": trip["sale_channel"],
             "commission_pct": trip["commission_pct"],
@@ -681,6 +795,7 @@ def edit_trip(trip_id):
         return render_template(
             "trips.html", **ctx, **_trips_common_kwargs(),
             edit_trip=trip, form_values=form_values,
+            labor_prefill=labor_prefill,
             expenses_prefill=[(e["description"], e["amount"]) for e in exps],
         )
 
@@ -692,29 +807,38 @@ def edit_trip(trip_id):
             edit_trip=trip, errors=errors, form_values=request.form,
         ), 400
 
+    # Remove all previously linked labor entries (legacy single entry_id too),
+    # then recreate fresh ones from the submitted rows — simplest way to keep
+    # everything in sync without trying to match rows by position.
+    labor_links = db.execute(
+        "SELECT entry_id FROM trip_labor WHERE trip_id = ?", (trip_id,)
+    ).fetchall()
+    old_entry_ids = {l["entry_id"] for l in labor_links}
     if trip["entry_id"]:
-        db.execute(
-            "UPDATE entries SET employee=?, work_type=?, rate=?, quantity=?, amount=?, work_date=? "
-            "WHERE id=?",
-            (data["employee"], data["work_type"], data["rate"], data["quantity"],
-             data["labor_cost"], data["trip_date"], trip["entry_id"]),
-        )
-        entry_id = trip["entry_id"]
-    else:
-        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        old_entry_ids.add(trip["entry_id"])
+    for eid in old_entry_ids:
+        db.execute("DELETE FROM entries WHERE id = ?", (eid,))
+    db.execute("DELETE FROM trip_labor WHERE trip_id = ?", (trip_id,))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    entry_ids = []
+    for item in data["labor_items"]:
         cur = db.execute(
             "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (data["employee"], data["work_type"], data["rate"], data["quantity"],
-             data["labor_cost"], data["trip_date"], now),
+            (item["employee"], item["work_type"], item["rate"], item["quantity"],
+             item["amount"], data["trip_date"], now),
         )
-        entry_id = cur.lastrowid
+        entry_ids.append(cur.lastrowid)
+    for eid in entry_ids:
+        db.execute("INSERT INTO trip_labor (trip_id, entry_id) VALUES (?, ?)", (trip_id, eid))
 
     db.execute(
         "UPDATE trips SET boat=?, trip_date=?, work_type=?, entry_id=?, revenue=?, sale_channel=?, "
         "commission_pct=?, commission_amount=?, labor_cost=?, fuel_cost=?, mooring_cost=?, "
         "extra_total=?, remainder=?, investor_payout=?, my_share=? WHERE id=?",
-        (data["boat"], data["trip_date"], data["work_type"], entry_id, data["revenue"],
+        (data["boat"], data["trip_date"], data["work_type"],
+         entry_ids[0] if entry_ids else None, data["revenue"],
          data["sale_channel"], data["commission_pct"], data["commission_amount"],
          data["labor_cost"], data["fuel_cost"], data["mooring_cost"], data["extra_total"],
          data["remainder"], data["investor_payout"], data["my_share"], trip_id),
@@ -734,12 +858,364 @@ def delete_trip(trip_id):
     db = get_db()
     trip = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
     if trip is not None:
-        db.execute("DELETE FROM trip_expenses WHERE trip_id = ?", (trip_id,))
+        labor_links = db.execute(
+            "SELECT entry_id FROM trip_labor WHERE trip_id = ?", (trip_id,)
+        ).fetchall()
+        entry_ids = {l["entry_id"] for l in labor_links}
         if trip["entry_id"]:
-            db.execute("DELETE FROM entries WHERE id = ?", (trip["entry_id"],))
+            entry_ids.add(trip["entry_id"])
+        for eid in entry_ids:
+            db.execute("DELETE FROM entries WHERE id = ?", (eid,))
+        db.execute("DELETE FROM trip_labor WHERE trip_id = ?", (trip_id,))
+        db.execute("DELETE FROM trip_expenses WHERE trip_id = ?", (trip_id,))
         db.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
         db.commit()
     return redirect(url_for("trips_index"))
+
+
+# =======================================================================
+# Импорт рейсов из Yclients
+# =======================================================================
+
+YCLIENTS_API_BASE = "https://api.yclients.com/api/v1"
+
+
+def yclients_configured():
+    return bool(YCLIENTS_PARTNER_TOKEN and YCLIENTS_USER_TOKEN and YCLIENTS_COMPANY_ID)
+
+
+def yclients_get_records(start_date, end_date):
+    """Fetch every record (booking) in the given date range, paginating as
+    needed. Returns a list of raw record dicts from the Yclients API."""
+    headers = {
+        "Accept": "application/vnd.yclients.v2+json",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {YCLIENTS_PARTNER_TOKEN}, User {YCLIENTS_USER_TOKEN}",
+    }
+    all_records = []
+    page = 1
+    while True:
+        resp = requests.get(
+            f"{YCLIENTS_API_BASE}/records/{YCLIENTS_COMPANY_ID}",
+            headers=headers,
+            params={"start_date": start_date, "end_date": end_date, "page": page, "count": 100},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        if not body.get("success"):
+            raise RuntimeError("Yclients API вернул success=false: " + json.dumps(body)[:300])
+        records = body.get("data") or []
+        all_records.extend(records)
+        meta = body.get("meta") or {}
+        total_count = meta.get("total_count", len(all_records))
+        if len(all_records) >= total_count or not records:
+            break
+        page += 1
+        if page > 50:  # safety valve
+            break
+    return all_records
+
+
+def _yclients_group_key(rec):
+    activity_id = rec.get("activity_id")
+    if activity_id:
+        return f"activity:{activity_id}"
+    return f"record:{rec.get('id')}"
+
+
+def _yclients_record_date(rec):
+    raw = rec.get("date") or (rec.get("datetime") or "")[:10]
+    try:
+        return dt.date.fromisoformat(raw[:10]).isoformat()
+    except ValueError:
+        return dt.date.today().isoformat()
+
+
+def _yclients_record_hours(rec):
+    seconds = rec.get("seance_length") or rec.get("length") or 0
+    if seconds:
+        return round(seconds / 3600, 2)
+    return None
+
+
+def build_import_candidates(records):
+    """Group raw Yclients records into trip candidates (one per individual
+    record, or one per group event via activity_id), guessing boat/channel/
+    commission from the color and comment fields."""
+    groups = {}
+    for rec in records:
+        if rec.get("deleted"):
+            continue
+        key = _yclients_group_key(rec)
+        groups.setdefault(key, []).append(rec)
+
+    candidates = []
+    for key, recs in groups.items():
+        trip_date = _yclients_record_date(recs[0])
+
+        # Boat: try every record's color until one matches a known boat.
+        boat = None
+        for r in recs:
+            color = (r.get("custom_color") or r.get("color") or "").lower()
+            for c, b in BOAT_COLORS.items():
+                if c.lower() == color:
+                    boat = b
+                    break
+            if boat:
+                break
+
+        # Labor rows: one per distinct staff member, hours from seance
+        # length when available, rate looked up from WORK_TYPES by service
+        # title (falls back to blank for manual entry).
+        labor_items = []
+        seen_staff = set()
+        for r in recs:
+            staff_name = (r.get("staff") or {}).get("name", "").strip()
+            services = r.get("services") or []
+            title = services[0]["title"] if services else ""
+            wt = next((w for w in WORK_TYPES if w["name"] == title), None)
+            hours = _yclients_record_hours(r) or (wt["hours"] if wt else "")
+            rate = wt["rate"] if wt else ""
+            dedup_key = (staff_name, title)
+            if dedup_key in seen_staff:
+                continue
+            seen_staff.add(dedup_key)
+            labor_items.append({
+                "employee": staff_name, "work_type": title,
+                "quantity": hours, "rate": rate,
+            })
+        if not labor_items:
+            labor_items = [{"employee": "", "work_type": "", "quantity": "", "rate": ""}]
+
+        # Revenue: sum of every service's cost across all records in the group.
+        revenue = 0.0
+        for r in recs:
+            for s in (r.get("services") or []):
+                revenue += float(s.get("cost") or 0)
+
+        # Sale channel: any non-empty comment marks that booking as sold via
+        # an aggregator (the name is whatever was written in the comment).
+        channels = set()
+        agg_revenue = 0.0
+        direct_revenue = 0.0
+        notes = []
+        for r in recs:
+            comment = (r.get("comment") or "").strip()
+            rec_revenue = sum(float(s.get("cost") or 0) for s in (r.get("services") or []))
+            if comment:
+                channels.add("aggregator")
+                agg_revenue += rec_revenue
+                notes.append(comment)
+            else:
+                channels.add("direct")
+                direct_revenue += rec_revenue
+
+        boat_info = boat_lookup(boat) if boat else None
+        if len(channels) > 1:
+            sale_channel = "mixed"
+            if boat_info and revenue:
+                commission_pct = round(
+                    (direct_revenue * boat_info["commission_direct"] +
+                     agg_revenue * boat_info["commission_aggregator"]) / revenue, 1)
+            else:
+                commission_pct = ""
+        elif channels == {"aggregator"}:
+            sale_channel = "aggregator"
+            commission_pct = boat_info["commission_aggregator"] if boat_info else ""
+        else:
+            sale_channel = "direct"
+            commission_pct = boat_info["commission_direct"] if boat_info else ""
+
+        payload = {
+            "boat": boat or "",
+            "trip_date": trip_date,
+            "labor_items": labor_items,
+            "revenue": revenue,
+            "sale_channel": sale_channel,
+            "commission_pct": commission_pct,
+            "fuel_cost": boat_info["fuel"] if boat_info else "",
+            "mooring_cost": boat_info["mooring"] if boat_info else "",
+            "note": " / ".join(notes),
+        }
+        employees_label = ", ".join(i["employee"] for i in labor_items if i["employee"]) or "—"
+        summary = (
+            f"{trip_date} · {boat or 'катер не определён (нет совпадения по цвету)'} · "
+            f"{employees_label} · {revenue:.0f} ₽"
+        )
+        candidates.append({"yclients_ref": key, "summary": summary, "payload": payload})
+    candidates.sort(key=lambda c: c["payload"]["trip_date"], reverse=True)
+    return candidates
+
+
+@app.route("/trips/import", methods=["GET"])
+def import_index():
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM import_candidates ORDER BY created_at DESC, id DESC"
+    ).fetchall()
+    today = dt.date.today()
+    week_ago = today - dt.timedelta(days=7)
+    return render_template(
+        "import.html",
+        candidates=rows,
+        configured=yclients_configured(),
+        default_start=week_ago.isoformat(),
+        default_end=today.isoformat(),
+        active_page="trips",
+        error=request.args.get("error"),
+    )
+
+
+@app.route("/trips/import/fetch", methods=["POST"])
+def import_fetch():
+    db = get_db()
+    if not yclients_configured():
+        return redirect(url_for(
+            "import_index",
+            error="Не настроены переменные окружения YCLIENTS_PARTNER_TOKEN / "
+                  "YCLIENTS_USER_TOKEN / YCLIENTS_COMPANY_ID.",
+        ))
+
+    start_date = request.form.get("start_date", "").strip()
+    end_date = request.form.get("end_date", "").strip()
+    try:
+        dt.date.fromisoformat(start_date)
+        dt.date.fromisoformat(end_date)
+    except ValueError:
+        return redirect(url_for("import_index", error="Некорректный период."))
+
+    try:
+        records = yclients_get_records(start_date, end_date)
+    except requests.RequestException as e:
+        return redirect(url_for("import_index", error=f"Ошибка соединения с Yclients: {e}"))
+    except (RuntimeError, ValueError) as e:
+        return redirect(url_for("import_index", error=str(e)))
+
+    already = {
+        row["yclients_ref"]
+        for row in db.execute("SELECT yclients_ref FROM yclients_imports").fetchall()
+    }
+    existing_candidates = {
+        row["yclients_ref"]
+        for row in db.execute("SELECT yclients_ref FROM import_candidates").fetchall()
+    }
+
+    candidates = build_import_candidates(records)
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    added = 0
+    for c in candidates:
+        if c["yclients_ref"] in already or c["yclients_ref"] in existing_candidates:
+            continue
+        db.execute(
+            "INSERT INTO import_candidates (yclients_ref, summary, payload, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (c["yclients_ref"], c["summary"], json.dumps(c["payload"], ensure_ascii=False), now),
+        )
+        added += 1
+    db.commit()
+    return redirect(url_for("import_index"))
+
+
+@app.route("/trips/import/review/<int:candidate_id>", methods=["GET"])
+def import_review(candidate_id):
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM import_candidates WHERE id = ?", (candidate_id,)
+    ).fetchone()
+    if row is None:
+        return redirect(url_for("import_index"))
+    payload = json.loads(row["payload"])
+
+    form_values = {
+        "boat": payload["boat"],
+        "trip_date": payload["trip_date"],
+        "revenue": payload["revenue"],
+        "sale_channel": payload["sale_channel"],
+        "commission_pct": payload["commission_pct"],
+        "fuel_cost": payload["fuel_cost"],
+        "mooring_cost": payload["mooring_cost"],
+    }
+    ctx = _trips_list_context(db)
+    return render_template(
+        "trips.html", **ctx, **_trips_common_kwargs(),
+        edit_trip=None, import_candidate=row, form_values=form_values,
+        labor_prefill=payload["labor_items"],
+        import_note=payload.get("note", ""),
+    )
+
+
+@app.route("/trips/import/confirm/<int:candidate_id>", methods=["POST"])
+def import_confirm(candidate_id):
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM import_candidates WHERE id = ?", (candidate_id,)
+    ).fetchone()
+    if row is None:
+        return redirect(url_for("import_index"))
+
+    errors, data = _process_trip_form(request.form)
+    if errors:
+        payload = json.loads(row["payload"])
+        ctx = _trips_list_context(db)
+        return render_template(
+            "trips.html", **ctx, **_trips_common_kwargs(),
+            edit_trip=None, import_candidate=row, errors=errors, form_values=request.form,
+            import_note=payload.get("note", ""),
+        ), 400
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    entry_ids = []
+    for item in data["labor_items"]:
+        cur = db.execute(
+            "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (item["employee"], item["work_type"], item["rate"], item["quantity"],
+             item["amount"], data["trip_date"], now),
+        )
+        entry_ids.append(cur.lastrowid)
+
+    cur2 = db.execute(
+        "INSERT INTO trips (boat, trip_date, work_type, entry_id, revenue, sale_channel, "
+        "commission_pct, commission_amount, labor_cost, fuel_cost, mooring_cost, extra_total, "
+        "remainder, investor_payout, my_share, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (data["boat"], data["trip_date"], data["work_type"], entry_ids[0] if entry_ids else None,
+         data["revenue"], data["sale_channel"], data["commission_pct"], data["commission_amount"],
+         data["labor_cost"], data["fuel_cost"], data["mooring_cost"], data["extra_total"],
+         data["remainder"], data["investor_payout"], data["my_share"], now),
+    )
+    trip_id = cur2.lastrowid
+    for eid in entry_ids:
+        db.execute("INSERT INTO trip_labor (trip_id, entry_id) VALUES (?, ?)", (trip_id, eid))
+    for desc, amt in data["expenses"]:
+        db.execute(
+            "INSERT INTO trip_expenses (trip_id, description, amount) VALUES (?, ?, ?)",
+            (trip_id, desc, amt),
+        )
+    db.execute(
+        "INSERT INTO yclients_imports (yclients_ref, trip_id) VALUES (?, ?)",
+        (row["yclients_ref"], trip_id),
+    )
+    db.execute("DELETE FROM import_candidates WHERE id = ?", (candidate_id,))
+    db.commit()
+    return redirect(url_for("import_index"))
+
+
+@app.route("/trips/import/skip/<int:candidate_id>", methods=["POST"])
+def import_skip(candidate_id):
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM import_candidates WHERE id = ?", (candidate_id,)
+    ).fetchone()
+    if row is not None:
+        db.execute(
+            "INSERT OR IGNORE INTO yclients_imports (yclients_ref, trip_id) VALUES (?, NULL)",
+            (row["yclients_ref"],),
+        )
+        db.execute("DELETE FROM import_candidates WHERE id = ?", (candidate_id,))
+        db.commit()
+    return redirect(url_for("import_index"))
 
 
 init_db()

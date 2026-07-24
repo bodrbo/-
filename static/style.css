@@ -181,7 +181,20 @@ input[type="text"]:focus, input[type="date"]:focus, select:focus {
 .expense-row input[type="text"]:first-child { flex: 2; }
 .expense-row input[type="text"]:nth-child(2) { flex: 1; }
 
+.labor-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.labor-row select.labor-employee,
+.labor-row select.labor-worktype { flex: 2 1 200px; }
+.labor-row input.labor-quantity,
+.labor-row input.labor-rate { flex: 1 1 100px; }
+.labor-row .custom-input { flex: 2 1 200px; margin-top: 0; width: auto; }
+
 .btn-secondary {
+  display: inline-block;
   font-family: inherit;
   font-size: 13px;
   font-weight: 600;
@@ -192,8 +205,26 @@ input[type="text"]:focus, input[type="date"]:focus, select:focus {
   border-radius: 6px;
   cursor: pointer;
   margin-top: 4px;
+  text-decoration: none;
+  white-space: nowrap;
 }
 .btn-secondary:hover { background: #e4d8bd; }
+
+button[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+.import-note {
+  background: #fff8e6;
+  border-left: 2px solid var(--gold);
+  padding: 8px 12px;
+  margin: -4px 0 16px 0;
+}
+
+code {
+  background: #efe6d2;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+}
 
 .btn-cancel {
   font-size: 13px;
