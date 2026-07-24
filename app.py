@@ -917,8 +917,14 @@ def yclients_get_records(start_date, end_date):
     return all_records
 
 
+def _normalize_color(value):
+    """Normalize a hex color for comparison: lowercase, no leading '#'
+    (Yclients returns colors without '#', so this avoids false mismatches)."""
+    return (value or "").strip().lower().lstrip("#")
+
+
 def _yclients_record_color(rec):
-    return (rec.get("custom_color") or rec.get("color") or "").strip().lower()
+    return _normalize_color(rec.get("custom_color") or rec.get("color"))
 
 
 def _yclients_record_datetime(rec):
@@ -1005,7 +1011,7 @@ def build_import_candidates(records):
             if color and not raw_color_seen:
                 raw_color_seen = color
             for c, b in BOAT_COLORS.items():
-                if c.lower() == color:
+                if _normalize_color(c) == color:
                     boat = b
                     break
             if boat:
