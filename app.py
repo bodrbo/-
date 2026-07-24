@@ -961,17 +961,34 @@ def _yclients_record_datetime(rec):
     return (rec.get("datetime") or rec.get("date") or "").strip()
 
 
+def _yclients_slot_datetime(rec):
+    """Normalized 'YYYY-MM-DDTHH:MM' for grouping purposes — deliberately
+    drops seconds/timezone-representation differences, since two records
+    for the very same physical trip should still match even if Yclients
+    formats their timestamps slightly differently (extra seconds, a
+    trailing .000000, etc.)."""
+    raw = _yclients_record_datetime(rec)
+    if not raw:
+        return ""
+    try:
+        parsed = dt.datetime.fromisoformat(raw)
+        return parsed.strftime("%Y-%m-%dT%H:%M")
+    except ValueError:
+        return raw[:16]  # best-effort fallback: date + "T" + HH:MM
+
+
 def _yclients_group_key(rec):
     """Group by Yclients' own activity_id when present (real group events).
-    Otherwise, group by color + exact start time: this is how a captain and
-    a guide working the same trip end up as two separate individual records
-    (one with the real client/price, one an empty placeholder for the second
-    staff member) — same boat color, same slot, no shared activity_id."""
+    Otherwise, group by color + start time rounded to the minute: this is
+    how a captain and a guide working the same trip end up as two separate
+    individual records (one with the real client/price, one an empty
+    placeholder for the second staff member) — same boat color, same slot,
+    no shared activity_id."""
     activity_id = rec.get("activity_id")
     if activity_id:
         return f"activity:{activity_id}"
     color = _yclients_record_color(rec)
-    when = _yclients_record_datetime(rec)
+    when = _yclients_slot_datetime(rec)
     if color and when:
         return f"slot:{color}:{when}"
     return f"record:{rec.get('id')}"
