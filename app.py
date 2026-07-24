@@ -880,14 +880,18 @@ def yclients_configured():
     return bool(YCLIENTS_PARTNER_TOKEN and YCLIENTS_USER_TOKEN and YCLIENTS_COMPANY_ID)
 
 
-def yclients_get_records(start_date, end_date):
-    """Fetch every record (booking) in the given date range, paginating as
-    needed. Returns a list of raw record dicts from the Yclients API."""
-    headers = {
+def _yclients_headers():
+    return {
         "Accept": "application/vnd.yclients.v2+json",
         "Content-Type": "application/json",
         "Authorization": f"Bearer {YCLIENTS_PARTNER_TOKEN}, User {YCLIENTS_USER_TOKEN}",
     }
+
+
+def yclients_get_records(start_date, end_date):
+    """Fetch every record (booking) in the given date range, paginating as
+    needed. Returns a list of raw record dicts from the Yclients API."""
+    headers = _yclients_headers()
     all_records = []
     page = 1
     while True:
@@ -915,6 +919,32 @@ def yclients_get_records(start_date, end_date):
         if page > 50:  # safety valve
             break
     return all_records
+
+
+def yclients_get_activity_colors(activity_ids):
+    """Group events (activities) carry their own color on the event object
+    itself, not on each individual record inside it — fetch each distinct
+    event once and return {activity_id: color}. Fetch failures for a single
+    event are skipped rather than aborting the whole import (that event's
+    boat will just stay unmatched for manual selection)."""
+    headers = _yclients_headers()
+    colors = {}
+    for activity_id in activity_ids:
+        try:
+            resp = requests.get(
+                f"{YCLIENTS_API_BASE}/activity/{YCLIENTS_COMPANY_ID}/{activity_id}",
+                headers=headers, timeout=20,
+            )
+            if not resp.ok:
+                continue
+            body = resp.json()
+            data = body.get("data") or {}
+            color = data.get("color")
+            if color:
+                colors[activity_id] = color
+        except requests.RequestException:
+            continue
+    return colors
 
 
 def _normalize_color(value):
@@ -976,11 +1006,13 @@ def _yclients_record_revenue(rec):
     return sum(float(s.get("cost") or 0) for s in (rec.get("services") or []))
 
 
-def build_import_candidates(records):
+def build_import_candidates(records, activity_colors=None):
     """Group raw Yclients records into trip candidates:
     - all bookings sharing an activity_id (a real group event with several
       independent attendees) become one trip, revenue summed across all of
-      them;
+      them; the boat is determined by the *group event's own* color (passed
+      in via activity_colors), since individual records inside it don't
+      carry a color of their own;
     - individual records with no activity_id but the same color + exact
       start time become one trip too (this is how two staff — e.g. captain
       and guide — are split across a "real" record and an empty placeholder
@@ -990,6 +1022,7 @@ def build_import_candidates(records):
     - anything else stays its own trip.
     Boat/channel/commission are guessed from the color and comment fields.
     """
+    activity_colors = activity_colors or {}
     groups = {}
     for rec in records:
         if rec.get("deleted"):
@@ -1003,19 +1036,33 @@ def build_import_candidates(records):
         trip_date = _yclients_record_date(recs[0])
         trip_time = _yclients_record_time(recs[0])
 
-        # Boat: try every record's color until one matches a known boat.
+        # Boat: for a real group event, the color lives on the event object
+        # itself (looked up by activity_id); for individual/slot-merged
+        # records, try each record's own color until one matches.
         boat = None
         raw_color_seen = ""
-        for r in recs:
-            color = _yclients_record_color(r)
-            if color and not raw_color_seen:
-                raw_color_seen = color
+        if is_activity_group:
+            activity_id_raw = key.split(":", 1)[1]
+            color_raw = activity_colors.get(activity_id_raw)
+            if color_raw is None and activity_id_raw.isdigit():
+                color_raw = activity_colors.get(int(activity_id_raw))
+            color = _normalize_color(color_raw)
+            raw_color_seen = color
             for c, b in BOAT_COLORS.items():
                 if _normalize_color(c) == color:
                     boat = b
                     break
-            if boat:
-                break
+        else:
+            for r in recs:
+                color = _yclients_record_color(r)
+                if color and not raw_color_seen:
+                    raw_color_seen = color
+                for c, b in BOAT_COLORS.items():
+                    if _normalize_color(c) == color:
+                        boat = b
+                        break
+                if boat:
+                    break
 
         # Labor rows: one per distinct staff member, hours from seance
         # length when available, rate looked up from WORK_TYPES by service
@@ -1172,6 +1219,12 @@ def import_fetch():
     except (RuntimeError, ValueError) as e:
         return redirect(url_for("import_index", error=str(e)))
 
+    activity_ids = {r["activity_id"] for r in records if r.get("activity_id")}
+    try:
+        activity_colors = yclients_get_activity_colors(activity_ids)
+    except requests.RequestException as e:
+        return redirect(url_for("import_index", error=f"Ошибка при запросе групповых событий: {e}"))
+
     already = {
         row["yclients_ref"]
         for row in db.execute("SELECT yclients_ref FROM yclients_imports").fetchall()
@@ -1181,7 +1234,7 @@ def import_fetch():
         for row in db.execute("SELECT yclients_ref FROM import_candidates").fetchall()
     }
 
-    candidates = build_import_candidates(records)
+    candidates = build_import_candidates(records, activity_colors)
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     added = 0
     for c in candidates:
