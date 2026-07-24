@@ -36,17 +36,11 @@ YCLIENTS_PARTNER_TOKEN = os.environ.get("YCLIENTS_PARTNER_TOKEN") or "rtzn97gwz5
 YCLIENTS_USER_TOKEN = os.environ.get("YCLIENTS_USER_TOKEN") or "7a61e523fd03f146601add9408f69696"
 YCLIENTS_COMPANY_ID = os.environ.get("YCLIENTS_COMPANY_ID") or "979343"
 
-# Соответствие цвета записи/события в Yclients — катеру. Жёстко заданы по
-# вашему описанию (Ларус — синий, Бодрый Второй — тёмно-фиолетовый, Бодрый
-# Первый — светло-зелёный). Точный HEX-код каждого цвета в вашем аккаунте
-# может отличаться от указанного здесь — ПРОВЕРЬТЕ при первом импорте: если
-# катер не определится автоматически, на странице проверки будет показан
-# настоящий код цвета этой записи ("цвет в Yclients: #xxxxxx") — скопируйте
-# его сюда вместо приблизительного значения.
+# Соответствие цвета записи/события в Yclients — катеру. Значения подтверждены.
 BOAT_COLORS = {
-    "#3d85c6": "Ларус",             # синий
-    "#674ea7": "Бодрый Второй",     # тёмно-фиолетовый
-    "#93c47d": "Бодрый Первый",     # светло-зелёный
+    "#03a9f4": "Ларус",             # синий
+    "#673ab7": "Бодрый Второй",     # тёмно-фиолетовый
+    "#8bc34a": "Бодрый Первый",     # светло-зелёный
 }
 
 # ---------------------------------------------------------------------
@@ -955,6 +949,16 @@ def _yclients_record_date(rec):
         return dt.date.today().isoformat()
 
 
+def _yclients_record_time(rec):
+    """Extract just the HH:MM start time from the record's datetime, for
+    display in the import candidates list."""
+    raw = rec.get("datetime") or ""
+    try:
+        return raw[11:16] if len(raw) >= 16 else ""
+    except (TypeError, IndexError):
+        return ""
+
+
 def _yclients_record_hours(rec):
     seconds = rec.get("seance_length") or rec.get("length") or 0
     if seconds:
@@ -991,6 +995,7 @@ def build_import_candidates(records):
     for key, recs in groups.items():
         is_activity_group = key.startswith("activity:")
         trip_date = _yclients_record_date(recs[0])
+        trip_time = _yclients_record_time(recs[0])
 
         # Boat: try every record's color until one matches a known boat.
         boat = None
@@ -1081,6 +1086,7 @@ def build_import_candidates(records):
         payload = {
             "boat": boat or "",
             "trip_date": trip_date,
+            "trip_time": trip_time,
             "labor_items": labor_items,
             "revenue": revenue,
             "sale_channel": sale_channel,
@@ -1096,9 +1102,10 @@ def build_import_candidates(records):
             boat_label = f"катер не определён (цвет в Yclients: {raw_color_seen})"
         else:
             boat_label = "катер не определён (цвет не задан)"
-        summary = f"{trip_date} · {boat_label} · {employees_label} · {revenue:.0f} ₽"
+        when_label = f"{trip_date} {trip_time}".strip() if trip_time else trip_date
+        summary = f"{when_label} · {boat_label} · {employees_label} · {revenue:.0f} ₽"
         candidates.append({"yclients_ref": key, "summary": summary, "payload": payload})
-    candidates.sort(key=lambda c: c["payload"]["trip_date"], reverse=True)
+    candidates.sort(key=lambda c: (c["payload"]["trip_date"], c["payload"]["trip_time"]), reverse=True)
     return candidates
 
 
