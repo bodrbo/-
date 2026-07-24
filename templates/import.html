@@ -68,7 +68,17 @@
   </section>
 
   <section class="panel">
-    <h2>Ожидают подтверждения ({{ candidates|length }})</h2>
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <h2 style="margin:0;">Ожидают подтверждения ({{ candidates|length }})</h2>
+      <form action="{{ url_for('import_merge') }}" method="post">
+        <button type="submit" class="btn-secondary">Объединить похожие (тот же катер, дата и время)</button>
+      </form>
+    </div>
+    {% if merged is not none %}
+    <p class="hint" style="margin-top:10px;">
+      {% if merged > 0 %}Объединено записей: {{ merged }}.{% else %}Совпадений для объединения не найдено.{% endif %}
+    </p>
+    {% endif %}
     {% if candidates %}
     <table class="records">
       <thead>

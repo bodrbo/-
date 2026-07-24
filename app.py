@@ -1179,6 +1179,73 @@ def build_import_candidates(records, activity_colors=None):
     return candidates
 
 
+def merge_pending_candidates(db):
+    """Second line of defence, independent of Yclients' own data: scan every
+    candidate currently waiting for confirmation and merge any that share
+    the same resolved boat + trip date + start time (minute precision) —
+    this is the same "one real record + one empty placeholder for the
+    second staff member" situation, just detected on our own already-parsed
+    data instead of relying on matching raw Yclients fields exactly.
+    Returns how many candidates were merged away."""
+    rows = db.execute(
+        "SELECT * FROM import_candidates ORDER BY id ASC"
+    ).fetchall()
+
+    groups = {}
+    for row in rows:
+        payload = json.loads(row["payload"])
+        boat = payload.get("boat") or ""
+        if not boat:
+            continue  # never auto-merge candidates with an unresolved boat
+        slot = (boat, payload.get("trip_date", ""), payload.get("trip_time", ""))
+        groups.setdefault(slot, []).append((row, payload))
+
+    merged_away = 0
+    for slot, items in groups.items():
+        if len(items) < 2:
+            continue
+
+        items.sort(key=lambda ip: ip[1].get("revenue") or 0, reverse=True)
+        keep_row, keep_payload = items[0]
+
+        labor_items = list(keep_payload.get("labor_items") or [])
+        seen = {(i.get("employee"), i.get("work_type")) for i in labor_items}
+        notes = [keep_payload.get("note", "")] if keep_payload.get("note") else []
+
+        for row, payload in items[1:]:
+            for item in (payload.get("labor_items") or []):
+                dedup_key = (item.get("employee"), item.get("work_type"))
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+                labor_items.append(item)
+            if payload.get("note"):
+                notes.append(payload["note"])
+            db.execute("DELETE FROM import_candidates WHERE id = ?", (row["id"],))
+            merged_away += 1
+
+        keep_payload["labor_items"] = labor_items or [
+            {"employee": "", "work_type": "", "quantity": "", "rate": ""}
+        ]
+        keep_payload["note"] = " / ".join(n for n in notes if n)
+
+        employees_label = ", ".join(
+            i["employee"] for i in keep_payload["labor_items"] if i.get("employee")
+        ) or "—"
+        boat, trip_date, trip_time = slot
+        when_label = f"{trip_date} {trip_time}".strip() if trip_time else trip_date
+        revenue = keep_payload.get("revenue") or 0
+        summary = f"{when_label} · {boat} · {employees_label} · {revenue:.0f} ₽"
+
+        db.execute(
+            "UPDATE import_candidates SET summary = ?, payload = ? WHERE id = ?",
+            (summary, json.dumps(keep_payload, ensure_ascii=False), keep_row["id"]),
+        )
+
+    db.commit()
+    return merged_away
+
+
 def _mask_token(value):
     if not value:
         return "(пусто)"
@@ -1203,6 +1270,7 @@ def import_index():
         default_end=today.isoformat(),
         active_page="trips",
         error=request.args.get("error"),
+        merged=request.args.get("merged", type=int),
         token_debug={
             "partner": _mask_token(YCLIENTS_PARTNER_TOKEN),
             "user": _mask_token(YCLIENTS_USER_TOKEN),
@@ -1264,7 +1332,18 @@ def import_fetch():
         )
         added += 1
     db.commit()
+    merge_pending_candidates(db)
     return redirect(url_for("import_index"))
+
+
+@app.route("/trips/import/merge", methods=["POST"])
+def import_merge():
+    """Manually re-run the same-boat/same-slot merge over whatever is
+    currently sitting in the queue (useful right now, on candidates from
+    earlier fetches, without waiting for a new one)."""
+    db = get_db()
+    merged = merge_pending_candidates(db)
+    return redirect(url_for("import_index", merged=merged))
 
 
 @app.route("/trips/import/review/<int:candidate_id>", methods=["GET"])
