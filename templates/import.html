@@ -40,6 +40,12 @@
   </div>
   {% endif %}
 
+  <p class="hint">
+    Сейчас загружено: Partner token — <code>{{ token_debug.partner }}</code>,
+    User token — <code>{{ token_debug.user }}</code>,
+    ID филиала — <code>{{ token_debug.company }}</code>.
+  </p>
+
   <section class="panel form-panel">
     <h2>Загрузить данные за период</h2>
     <form action="{{ url_for('import_fetch') }}" method="post" class="entry-form">

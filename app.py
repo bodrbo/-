@@ -32,9 +32,9 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workhours.db
 #   YCLIENTS_PARTNER_TOKEN, YCLIENTS_USER_TOKEN, YCLIENTS_COMPANY_ID
 # Локально можно временно вписать значения прямо сюда для проверки.
 # ---------------------------------------------------------------------
-YCLIENTS_PARTNER_TOKEN = os.environ.get("YCLIENTS_PARTNER_TOKEN", "rtzn97gwz5t6ape37egg")
-YCLIENTS_USER_TOKEN = os.environ.get("YCLIENTS_USER_TOKEN", "7a61e523fd03f146601add9408f69696")
-YCLIENTS_COMPANY_ID = os.environ.get("YCLIENTS_COMPANY_ID", "979343")
+YCLIENTS_PARTNER_TOKEN = os.environ.get("YCLIENTS_PARTNER_TOKEN") or "rtzn97gwz5t6ape37egg"
+YCLIENTS_USER_TOKEN = os.environ.get("YCLIENTS_USER_TOKEN") or "7a61e523fd03f146601add9408f69696"
+YCLIENTS_COMPANY_ID = os.environ.get("YCLIENTS_COMPANY_ID") or "979343"
 
 # Соответствие цвета записи/события в Yclients — катеру.
 # Цвет — единственный надёжный признак (есть и у одиночных записей, и у
@@ -901,7 +901,11 @@ def yclients_get_records(start_date, end_date):
             params={"start_date": start_date, "end_date": end_date, "page": page, "count": 100},
             timeout=20,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            raise RuntimeError(
+                f"Yclients вернул {resp.status_code} для {resp.url}. "
+                f"Ответ сервера: {resp.text[:500]}"
+            )
         body = resp.json()
         if not body.get("success"):
             raise RuntimeError("Yclients API вернул success=false: " + json.dumps(body)[:300])
@@ -1048,6 +1052,14 @@ def build_import_candidates(records):
     return candidates
 
 
+def _mask_token(value):
+    if not value:
+        return "(пусто)"
+    if len(value) <= 8:
+        return value[0] + "…" + value[-1]
+    return f"{value[:4]}…{value[-4:]} ({len(value)} симв.)"
+
+
 @app.route("/trips/import", methods=["GET"])
 def import_index():
     db = get_db()
@@ -1064,6 +1076,11 @@ def import_index():
         default_end=today.isoformat(),
         active_page="trips",
         error=request.args.get("error"),
+        token_debug={
+            "partner": _mask_token(YCLIENTS_PARTNER_TOKEN),
+            "user": _mask_token(YCLIENTS_USER_TOKEN),
+            "company": YCLIENTS_COMPANY_ID or "(пусто)",
+        },
     )
 
 
