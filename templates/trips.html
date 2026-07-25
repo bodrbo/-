@@ -83,87 +83,100 @@
                     else (url_for('edit_trip', trip_id=edit_trip.id) if edit_trip else url_for('add_trip')) }}"
           method="post" class="entry-form" id="trip-form">
 
-      <div class="field">
-        <label for="boat">Катер</label>
-        <select id="boat" name="boat" required onchange="applyBoat(this)">
-          <option value="" disabled {{ 'selected' if not form_values }}>Выберите катер</option>
-          {% for b in boats %}
-          <option value="{{ b.name }}"
-                  data-fuel="{{ b.fuel }}" data-mooring="{{ b.mooring }}"
-                  data-comm-direct="{{ b.commission_direct }}" data-comm-agg="{{ b.commission_aggregator }}"
-            {{ 'selected' if form_values and form_values.boat == b.name }}>
-            {{ b.name }} ({{ b.investor }})
-          </option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div class="field field-narrow">
-        <label for="trip_date">Дата рейса</label>
-        <input type="date" id="trip_date" name="trip_date"
-               value="{{ form_values.trip_date if form_values else today }}" required>
-      </div>
-
-      <div class="field">
-        <label for="sale_channel">Канал продажи</label>
-        <select id="sale_channel" name="sale_channel" onchange="applyChannelDefault()">
-          {% for c in sale_channels %}
-          <option value="{{ c.value }}"
-            {{ 'selected' if form_values and form_values.sale_channel == c.value }}>{{ c.label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div class="field field-narrow">
-        <label for="commission_pct">Комиссия, %</label>
-        <input type="text" inputmode="decimal" id="commission_pct" name="commission_pct"
-               value="{{ form_values.commission_pct if form_values else '' }}" required>
-      </div>
-
-      <div class="field field-wide">
-        <label>Сотрудники на рейсе (капитан, гид — можно добавить несколько)</label>
-        <div id="labor-container">
-          {% if labor_prefill %}
-            {% for item in labor_prefill %}{{ labor_row(item) }}{% endfor %}
-          {% else %}
-            {{ labor_row() }}
-          {% endif %}
-        </div>
-        <button type="button" class="btn-secondary" onclick="addLaborRow()">+ Добавить сотрудника</button>
-      </div>
-
-      <template id="labor-row-template">{{ labor_row() }}</template>
-
-      <div class="field field-narrow">
-        <label for="revenue">Доход рейса, ₽</label>
-        <input type="text" inputmode="decimal" id="revenue" name="revenue" placeholder="5000"
-               value="{{ form_values.revenue if form_values else '' }}" required>
-      </div>
-      <div class="field field-narrow">
-        <label for="fuel_cost">Топливо, ₽</label>
-        <input type="text" inputmode="decimal" id="fuel_cost" name="fuel_cost"
-               value="{{ form_values.fuel_cost if form_values else '' }}" required>
-      </div>
-      <div class="field field-narrow">
-        <label for="mooring_cost">Стоянка, ₽</label>
-        <input type="text" inputmode="decimal" id="mooring_cost" name="mooring_cost"
-               value="{{ form_values.mooring_cost if form_values else '' }}" required>
-      </div>
-
-      <div class="field field-wide">
-        <label>Дополнительные разовые расходы (необязательно)</label>
-        <div id="expenses-container">
-          {% if expenses_prefill %}
-            {% for desc, amt in expenses_prefill %}
-            <div class="expense-row">
-              <input type="text" name="expense_desc[]" value="{{ desc }}" placeholder="Например, ремонт">
-              <input type="text" name="expense_amount[]" value="{{ amt }}" placeholder="Сумма" inputmode="decimal">
-              <button type="button" class="btn-delete" onclick="this.parentElement.remove()">✕</button>
-            </div>
+      <div class="form-group">
+        <div class="form-group-label"><span class="n">1</span>Рейс</div>
+        <div class="field-row-inner">
+        <div class="field">
+          <label for="boat">Катер</label>
+          <select id="boat" name="boat" required onchange="applyBoat(this)">
+            <option value="" disabled {{ 'selected' if not form_values }}>Выберите катер</option>
+            {% for b in boats %}
+            <option value="{{ b.name }}"
+                    data-fuel="{{ b.fuel }}" data-mooring="{{ b.mooring }}"
+                    data-comm-direct="{{ b.commission_direct }}" data-comm-agg="{{ b.commission_aggregator }}"
+              {{ 'selected' if form_values and form_values.boat == b.name }}>
+              {{ b.name }} ({{ b.investor }})
+            </option>
             {% endfor %}
-          {% endif %}
+          </select>
         </div>
-        <button type="button" class="btn-secondary" onclick="addExpenseRow()">+ Добавить расход</button>
+
+        <div class="field field-narrow">
+          <label for="trip_date">Дата рейса</label>
+          <input type="date" id="trip_date" name="trip_date"
+                 value="{{ form_values.trip_date if form_values else today }}" required>
+        </div>
+
+        <div class="field">
+          <label for="sale_channel">Канал продажи</label>
+          <select id="sale_channel" name="sale_channel" onchange="applyChannelDefault()">
+            {% for c in sale_channels %}
+            <option value="{{ c.value }}"
+              {{ 'selected' if form_values and form_values.sale_channel == c.value }}>{{ c.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field field-narrow">
+          <label for="commission_pct">Комиссия, %</label>
+          <input type="text" inputmode="decimal" id="commission_pct" name="commission_pct"
+                 value="{{ form_values.commission_pct if form_values else '' }}" required>
+        </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <div class="form-group-label"><span class="n">2</span>Экипаж на рейсе</div>
+        <div class="field-wide">
+          <label>Капитан, гид — можно добавить несколько</label>
+          <div id="labor-container">
+            {% if labor_prefill %}
+              {% for item in labor_prefill %}{{ labor_row(item) }}{% endfor %}
+            {% else %}
+              {{ labor_row() }}
+            {% endif %}
+          </div>
+          <button type="button" class="btn-add" onclick="addLaborRow()">Добавить сотрудника</button>
+        </div>
+
+        <template id="labor-row-template">{{ labor_row() }}</template>
+      </div>
+
+      <div class="form-group">
+        <div class="form-group-label"><span class="n">3</span>Финансы рейса</div>
+        <div class="field-row-inner">
+        <div class="field field-narrow">
+          <label for="revenue">Доход рейса, ₽</label>
+          <input type="text" inputmode="decimal" id="revenue" name="revenue" placeholder="5000"
+                 value="{{ form_values.revenue if form_values else '' }}" required>
+        </div>
+        <div class="field field-narrow">
+          <label for="fuel_cost">Топливо, ₽</label>
+          <input type="text" inputmode="decimal" id="fuel_cost" name="fuel_cost"
+                 value="{{ form_values.fuel_cost if form_values else '' }}" required>
+        </div>
+        <div class="field field-narrow">
+          <label for="mooring_cost">Стоянка, ₽</label>
+          <input type="text" inputmode="decimal" id="mooring_cost" name="mooring_cost"
+                 value="{{ form_values.mooring_cost if form_values else '' }}" required>
+        </div>
+        </div>
+
+        <div class="field-wide" style="margin-top:14px;">
+          <label>Дополнительные разовые расходы (необязательно)</label>
+          <div id="expenses-container">
+            {% if expenses_prefill %}
+              {% for desc, amt in expenses_prefill %}
+              <div class="expense-row">
+                <input type="text" name="expense_desc[]" value="{{ desc }}" placeholder="Например, ремонт">
+                <input type="text" name="expense_amount[]" value="{{ amt }}" placeholder="Сумма" inputmode="decimal">
+                <button type="button" class="btn-delete" onclick="this.parentElement.remove()">✕</button>
+              </div>
+              {% endfor %}
+            {% endif %}
+          </div>
+          <button type="button" class="btn-add" onclick="addExpenseRow()">Добавить расход</button>
+        </div>
       </div>
 
       <div class="field field-submit">
