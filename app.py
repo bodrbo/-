@@ -52,6 +52,7 @@ YCLIENTS_COMPANY_ID = os.environ.get("YCLIENTS_COMPANY_ID") or "979343"
 # Соответствие цвета записи/события в Yclients — катеру. Значения подтверждены.
 BOAT_COLORS = {
     "#03a9f4": "Ларус",             # синий
+    "#2196f3": "Ларус",             # синий (второй встречающийся оттенок)
     "#673ab7": "Бодрый Второй",     # тёмно-фиолетовый
     "#8bc34a": "Бодрый Первый",     # светло-зелёный
 }
@@ -571,11 +572,6 @@ def _trips_list_context(db, selected_month=None, selected_boat="all"):
         import_configured=yclients_configured(),
         import_default_start=week_ago.isoformat(),
         import_default_end=today.isoformat(),
-        import_token_debug={
-            "partner": _mask_token(YCLIENTS_PARTNER_TOKEN),
-            "user": _mask_token(YCLIENTS_USER_TOKEN),
-            "company": YCLIENTS_COMPANY_ID or "(пусто)",
-        },
     )
 
 
@@ -1291,14 +1287,6 @@ def merge_pending_candidates(db):
     return merged_away
 
 
-def _mask_token(value):
-    if not value:
-        return "(пусто)"
-    if len(value) <= 8:
-        return value[0] + "…" + value[-1]
-    return f"{value[:4]}…{value[-4:]} ({len(value)} симв.)"
-
-
 @app.route("/trips/import", methods=["GET"])
 def import_index():
     """The import queue lives inside the trips page itself (as a collapsible
@@ -1311,7 +1299,6 @@ def import_index():
         "trips.html", **ctx, **_trips_common_kwargs(),
         edit_trip=None,
         import_error=request.args.get("error"),
-        import_merged=request.args.get("merged", type=int),
         open_import=True,
     )
 
@@ -1371,16 +1358,6 @@ def import_fetch():
     db.commit()
     merge_pending_candidates(db)
     return redirect(url_for("import_index"))
-
-
-@app.route("/trips/import/merge", methods=["POST"])
-def import_merge():
-    """Manually re-run the same-boat/same-slot merge over whatever is
-    currently sitting in the queue (useful right now, on candidates from
-    earlier fetches, without waiting for a new one)."""
-    db = get_db()
-    merged = merge_pending_candidates(db)
-    return redirect(url_for("import_index", merged=merged))
 
 
 @app.route("/trips/import/review/<int:candidate_id>", methods=["GET"])

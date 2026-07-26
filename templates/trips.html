@@ -248,27 +248,10 @@
             <button type="submit" {{ 'disabled' if not import_configured }}>Загрузить из Yclients</button>
           </div>
         </form>
-        <p class="hint">
-          Уже импортированные рейсы не загрузятся повторно. Каждую запись перед созданием рейса
-          можно проверить и поправить — ничего не создаётся автоматически без подтверждения.
-          Сейчас загружено: Partner token — <code>{{ import_token_debug.partner }}</code>,
-          User token — <code>{{ import_token_debug.user }}</code>,
-          ID филиала — <code>{{ import_token_debug.company }}</code>.
-        </p>
       </div>
 
       <div>
-        <div class="panel-head-row">
-          <h3>Ожидают подтверждения ({{ import_candidates|length }})</h3>
-          <form action="{{ url_for('import_merge') }}" method="post">
-            <button type="submit" class="btn-secondary">Объединить похожие (тот же катер, дата и время)</button>
-          </form>
-        </div>
-        {% if import_merged is defined and import_merged is not none %}
-        <p class="hint">
-          {% if import_merged > 0 %}Объединено записей: {{ import_merged }}.{% else %}Совпадений для объединения не найдено.{% endif %}
-        </p>
-        {% endif %}
+        <h3>Ожидают подтверждения ({{ import_candidates|length }})</h3>
         {% if import_candidates %}
         <div class="table-scroll">
           <table class="records">
