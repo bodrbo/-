@@ -376,6 +376,96 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .total-card-grand .k { color: var(--brass-strong); }
 .total-card-grand .v { color: #fbf3e2; }
 
+/* --- hero dashboard: grand total + per-boat investor split --- */
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.1fr) repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 22px;
+}
+@media (max-width: 920px) { .hero-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px) { .hero-grid { grid-template-columns: 1fr; } }
+
+.hero-card {
+  background: var(--ink);
+  color: var(--parchment);
+  border-radius: 10px;
+  padding: 22px 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: var(--shadow);
+}
+.hero-card .k {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--brass-strong);
+  font-weight: 700;
+}
+.hero-card .v {
+  font-family: 'PT Serif', Georgia, serif;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1;
+}
+.hero-card .d { font-size: 12.5px; color: #a7b6b0; }
+
+.boat-card {
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 18px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.boat-card .top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.boat-name {
+  font-family: 'PT Serif', Georgia, serif;
+  font-size: 16px;
+  font-weight: 700;
+}
+.boat-investor { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.boat-amount { text-align: right; }
+.boat-amount .v { font-size: 19px; font-weight: 700; }
+.boat-amount .k {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.split-bar {
+  display: flex;
+  height: 7px;
+  border-radius: 99px;
+  overflow: hidden;
+  background: var(--hairline-soft);
+}
+.split-bar span { height: 100%; }
+.split-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  font-size: 11px;
+  color: var(--muted);
+  margin: -8px 0 22px;
+}
+.split-legend i {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
 /* --- form grouping (used on the trip form) --- */
 .form-group {
   flex: 1 1 100%;
@@ -452,7 +542,42 @@ table.gloss td.term { font-weight: 700; color: var(--ink); font-variant-numeric:
 }
 .btn-delete:hover { background: var(--danger); color: #fff8f4; border-color: var(--danger); }
 
+/* --- unified icon buttons (table row actions) ---
+   ".row-actions" is added to the selector purely to out-specificity the
+   generic button[type="submit"] rule above for the delete <button>. */
+.row-actions .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  text-decoration: none;
+}
+.row-actions .icon-btn:hover { background: var(--ink); color: var(--parchment); border-color: var(--ink); }
+.row-actions .icon-btn.danger:hover { background: var(--danger); color: #fff8f4; border-color: var(--danger); }
+.row-actions .icon-btn svg { width: 13px; height: 13px; }
+
 .empty { color: var(--muted); font-style: italic; }
+
+/* --- empty state (with icon) --- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 34px 20px;
+  color: var(--muted);
+}
+.empty-state svg { width: 40px; height: 40px; color: var(--hairline); }
+.empty-state .t { font-family: 'PT Serif', Georgia, serif; font-size: 15px; color: var(--ink-soft); }
+.empty-state .s { font-size: 12.5px; max-width: 38ch; }
 
 .alert {
   background: #f6e2da;

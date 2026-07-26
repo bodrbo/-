@@ -221,18 +221,41 @@
     </form>
   </section>
 
-  <section class="totals-grid">
-    <div class="panel total-card total-card-grand">
+  <div class="hero-grid">
+    <div class="hero-card">
       <span class="k">Мой итог за период</span>
-      <span class="v">{{ "%.0f"|format(grand_my_share) }} ₽</span>
+      <span class="v tabular">{{ "%.0f"|format(grand_my_share) }} ₽</span>
+      <span class="d">Доход рейсов {{ "%.0f"|format(grand_revenue) }} ₽{% if by_investor %} · инвесторам {{ "%.0f"|format(by_investor.values()|sum(attribute='payout')) }} ₽{% endif %}</span>
     </div>
-    {% for investor, info in by_investor.items() %}
-    <div class="panel total-card">
-      <span class="k">{{ investor }}</span>
-      <span class="v">{{ "%.0f"|format(info.payout) }} ₽</span>
+    {% for boat_name, t in by_boat.items() %}
+    {% set investor = (boats|selectattr('name', 'equalto', boat_name)|map(attribute='investor')|first) or 'не указан' %}
+    {% set split_total = t.my_share + t.investor_payout %}
+    <div class="boat-card">
+      <div class="top">
+        <div>
+          <div class="boat-name">{{ boat_name }}</div>
+          <div class="boat-investor">Инвестор — {{ investor }}</div>
+        </div>
+        <div class="boat-amount">
+          <div class="v tabular">{{ "%.0f"|format(t.investor_payout) }} ₽</div>
+          <div class="k">инвестору</div>
+        </div>
+      </div>
+      <div class="split-bar" aria-hidden="true">
+        {% if split_total > 0 %}
+        <span style="width:{{ (t.my_share / split_total * 100)|round(1) }}%; background:var(--brass);"></span>
+        <span style="width:{{ (t.investor_payout / split_total * 100)|round(1) }}%; background:var(--ink-soft);"></span>
+        {% endif %}
+      </div>
     </div>
     {% endfor %}
-  </section>
+  </div>
+  {% if by_boat %}
+  <div class="split-legend">
+    <span><i style="background:var(--brass);"></i>Мне</span>
+    <span><i style="background:var(--ink-soft);"></i>Инвестору</span>
+  </div>
+  {% endif %}
 
   <section class="panel">
     <h2>Сводка по катерам за период</h2>
@@ -256,7 +279,13 @@
       {% endfor %}
     </table>
     {% else %}
-    <p class="empty">За выбранный период рейсов нет.</p>
+    <div class="empty-state">
+      <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 24l14 6 14-6M6 24V14l14-6 14 6v10M6 24l14-6 14 6"/>
+      </svg>
+      <div class="t">За выбранный период рейсов нет</div>
+      <div class="s">Добавьте рейс через форму выше или смените период/катер в фильтре.</div>
+    </div>
     {% endif %}
   </section>
 
@@ -285,10 +314,18 @@
           <td class="amount">{{ "%.0f"|format(t.investor_payout) }}</td>
           <td class="amount">{{ "%.0f"|format(t.my_share) }}</td>
           <td class="row-actions">
-            <a href="{{ url_for('edit_trip', trip_id=t.id) }}" class="btn-edit" title="Редактировать">✎</a>
+            <a href="{{ url_for('edit_trip', trip_id=t.id) }}" class="icon-btn" title="Редактировать">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M13.5 3.5l3 3L6 17H3v-3L13.5 3.5z"/>
+              </svg>
+            </a>
             <form action="{{ url_for('delete_trip', trip_id=t.id) }}" method="post"
                   onsubmit="return confirm('Удалить этот рейс? Связанная запись в зарплатах тоже удалится.');">
-              <button type="submit" class="btn-delete" title="Удалить">✕</button>
+              <button type="submit" class="icon-btn danger" title="Удалить">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
+                </svg>
+              </button>
             </form>
           </td>
         </tr>
@@ -296,7 +333,13 @@
       </tbody>
     </table>
     {% else %}
-    <p class="empty">За выбранный период записей нет.</p>
+    <div class="empty-state">
+      <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 24l14 6 14-6M6 24V14l14-6 14 6v10M6 24l14-6 14 6"/>
+      </svg>
+      <div class="t">За выбранный период записей нет</div>
+      <div class="s">Добавьте рейс через форму выше или смените период/катер в фильтре.</div>
+    </div>
     {% endif %}
   </section>
 
