@@ -33,6 +33,16 @@
   font-display: swap;
   src: url('fonts/pt-mono-400.woff2') format('woff2');
 }
+@font-face {
+  font-family: 'Bebas Neue';
+  font-style: normal;
+  /* Bebas Neue only ships one real weight; declaring the face as covering
+     400-700 stops the browser from synthesising a distorted faux-bold when
+     we ask for font-weight: 700 on the logo. */
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('fonts/bebas-neue-400.woff2') format('woff2');
+}
 
 :root {
   --ink: #0f2a35;
@@ -82,10 +92,10 @@ h1, h2, h3 { font-family: 'PT Serif', Georgia, serif; }
 
 .brand { display: flex; flex-direction: column; }
 .logo-text {
-  font-family: 'PT Serif', Georgia, serif;
+  font-family: 'Bebas Neue', 'PT Serif', Georgia, serif;
   font-weight: 700;
-  font-size: 28px;
-  letter-spacing: 0.01em;
+  font-size: 32px;
+  letter-spacing: 0.03em;
   line-height: 1;
   color: #fbf3e2;
 }
@@ -104,20 +114,41 @@ h1, h2, h3 { font-family: 'PT Serif', Georgia, serif; }
 
 .main-nav {
   display: flex;
-  gap: 4px;
-  align-items: center;
+  align-items: stretch;
+  gap: 0;
 }
 .main-nav a {
-  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
   font-weight: 700;
   color: #b9c4bf;
   text-decoration: none;
-  padding: 8px 14px;
-  border-radius: 7px;
-  transition: background 0.15s ease, color 0.15s ease;
+  padding: 7px 18px;
+  border-left: 1px solid rgba(255, 249, 236, 0.16);
+  border-right: 1px solid rgba(255, 249, 236, 0.16);
+  margin-right: -1px;
+  background: rgba(255, 255, 255, 0);
+  transition: background-color 0.28s ease, color 0.2s ease, border-color 0.28s ease;
 }
-.main-nav a:hover { background: rgba(255,255,255,0.08); color: #fff; }
-.main-nav a.active { background: var(--brass); color: var(--on-accent); }
+.main-nav a .nav-icon {
+  width: 18px;
+  height: 18px;
+  transition: transform 0.28s ease;
+}
+.main-nav a:hover {
+  background-color: rgba(255, 255, 255, 0.09);
+  color: #fff;
+  border-color: rgba(255, 249, 236, 0.3);
+}
+.main-nav a:hover .nav-icon { transform: translateY(-1px); }
+.main-nav a.active {
+  background-color: var(--brass);
+  color: var(--on-accent);
+  border-color: var(--brass);
+}
 .kicker {
   font-size: 11px;
   letter-spacing: 0.14em;
@@ -529,7 +560,9 @@ table.records td.muted { color: var(--muted); font-size: 12px; white-space: nowr
 table.records td.amount, table.gloss td.amount { font-weight: 700; color: var(--success); }
 table.gloss td.term { font-weight: 700; color: var(--ink); font-variant-numeric: normal; }
 
-.btn-delete {
+/* "button." (not just ".btn-delete") so this out-specifies the generic
+   button[type="submit"] rule above for delete buttons that submit a form. */
+button.btn-delete {
   background: none;
   border: 1px solid var(--hairline);
   color: var(--danger);
@@ -540,7 +573,7 @@ table.gloss td.term { font-weight: 700; color: var(--ink); font-variant-numeric:
   font-size: 13px;
   line-height: 1;
 }
-.btn-delete:hover { background: var(--danger); color: #fff8f4; border-color: var(--danger); }
+button.btn-delete:hover { background: var(--danger); color: #fff8f4; border-color: var(--danger); }
 
 /* --- unified icon buttons (table row actions) ---
    ".row-actions" is added to the selector purely to out-specificity the
@@ -575,9 +608,18 @@ table.gloss td.term { font-weight: 700; color: var(--ink); font-variant-numeric:
   padding: 34px 20px;
   color: var(--muted);
 }
-.empty-state svg { width: 40px; height: 40px; color: var(--hairline); }
 .empty-state .t { font-family: 'PT Serif', Georgia, serif; font-size: 15px; color: var(--ink-soft); }
 .empty-state .s { font-size: 12.5px; max-width: 38ch; }
+.empty-logo {
+  font-family: 'Bebas Neue', 'PT Serif', Georgia, serif;
+  font-weight: 700;
+  font-size: 34px;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  color: var(--ink);
+  opacity: 0.5;
+}
+.empty-logo .mark { color: var(--brass-strong); }
 
 .alert {
   background: #f6e2da;
@@ -589,6 +631,68 @@ table.gloss td.term { font-weight: 700; color: var(--ink); font-variant-numeric:
   font-size: 14px;
 }
 .alert ul { margin: 6px 0 0 0; padding-left: 20px; }
+
+.table-scroll { overflow-x: auto; }
+
+/* --- import (Yclients) section, collapsed into the trips page --- */
+.import-panel > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'PT Serif', Georgia, serif;
+  font-size: 18px;
+  color: var(--ink);
+}
+.import-panel > summary::-webkit-details-marker { display: none; }
+.import-panel > summary .chev {
+  margin-left: auto;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid var(--brass-strong);
+  border-bottom: 2px solid var(--brass-strong);
+  transform: rotate(-45deg);
+  transition: transform 0.2s ease;
+  flex: none;
+}
+.import-panel[open] > summary .chev { transform: rotate(45deg); }
+.import-panel .badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--brass);
+  color: var(--on-accent);
+  font-family: 'PT Sans', sans-serif;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.import-body {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--hairline-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.import-body h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.panel-head-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.panel-head-row h3 { margin: 0; }
 
 @media (max-width: 600px) {
   .entry-form { flex-direction: column; align-items: stretch; }

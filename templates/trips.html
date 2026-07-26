@@ -48,9 +48,21 @@
       <div class="logo-sub">Payroll system</div>
     </div>
     <nav class="main-nav">
-      <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'payroll' }}">Зарплаты</a>
-      <a href="{{ url_for('trips_index') }}" class="{{ 'active' if active_page == 'trips' }}">Рейсы и инвесторы</a>
-      <a href="{{ url_for('import_index') }}" class="{{ 'active' if active_page == 'import' }}">Импорт из Yclients</a>
+      <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'payroll' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.3" y="6" width="15.4" height="8" rx="1.8"/>
+          <circle cx="10" cy="10" r="2"/>
+          <path d="M4.6 8h.01M15.4 12h.01"/>
+        </svg>
+        <span class="nav-label">Зарплаты</span>
+      </a>
+      <a href="{{ url_for('trips_index') }}" class="{{ 'active' if active_page == 'trips' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="10" cy="3.8" r="1.6"/>
+          <path d="M10 5.6v10.6M6 8.4h8M4.2 11a5.8 5.8 0 0 0 11.6 0"/>
+        </svg>
+        <span class="nav-label">Рейсы и инвесторы</span>
+      </a>
     </nav>
     <div class="title-block">
       <span class="kicker">Морские прогулки · Кронштадт</span>
@@ -105,6 +117,12 @@
           <label for="trip_date">Дата рейса</label>
           <input type="date" id="trip_date" name="trip_date"
                  value="{{ form_values.trip_date if form_values else today }}" required>
+        </div>
+
+        <div class="field field-narrow">
+          <label for="trip_time">Время старта</label>
+          <input type="time" id="trip_time" name="trip_time"
+                 value="{{ form_values.trip_time if form_values else now_time }}" required>
         </div>
 
         <div class="field">
@@ -188,12 +206,105 @@
         {% if edit_trip %}
         <a href="{{ url_for('trips_index') }}" class="btn-cancel">Отмена</a>
         {% elif import_candidate %}
-        <a href="{{ url_for('import_index') }}" class="btn-cancel">Отмена</a>
+        <a href="{{ url_for('trips_index') }}" class="btn-cancel">Отмена</a>
         {% endif %}
       </div>
     </form>
     <p class="hint">Выбор катера подставит топливо/стоянку/комиссию, вид рейса — ставку и часы. Все значения можно поправить вручную перед сохранением.</p>
   </section>
+
+  <details class="panel import-panel"{{ ' open' if open_import }}>
+    <summary>
+      <span>Импорт рейсов из Yclients</span>
+      {% if import_candidates %}<span class="badge">{{ import_candidates|length }}</span>{% endif %}
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+
+    <div class="import-body">
+      {% if import_error %}
+      <div class="alert"><strong>Не удалось загрузить данные:</strong> {{ import_error }}</div>
+      {% endif %}
+
+      {% if not import_configured %}
+      <div class="alert">
+        <strong>Yclients не подключён.</strong> На хостинге нужно задать переменные окружения
+        <code>YCLIENTS_PARTNER_TOKEN</code>, <code>YCLIENTS_USER_TOKEN</code> и
+        <code>YCLIENTS_COMPANY_ID</code> (подробности — в README).
+      </div>
+      {% endif %}
+
+      <div>
+        <h3>Загрузить данные за период</h3>
+        <form action="{{ url_for('import_fetch') }}" method="post" class="entry-form">
+          <div class="field field-narrow">
+            <label for="import_start_date">С даты</label>
+            <input type="date" id="import_start_date" name="start_date" value="{{ import_default_start }}" required>
+          </div>
+          <div class="field field-narrow">
+            <label for="import_end_date">По дату</label>
+            <input type="date" id="import_end_date" name="end_date" value="{{ import_default_end }}" required>
+          </div>
+          <div class="field field-submit">
+            <button type="submit" {{ 'disabled' if not import_configured }}>Загрузить из Yclients</button>
+          </div>
+        </form>
+        <p class="hint">
+          Уже импортированные рейсы не загрузятся повторно. Каждую запись перед созданием рейса
+          можно проверить и поправить — ничего не создаётся автоматически без подтверждения.
+          Сейчас загружено: Partner token — <code>{{ import_token_debug.partner }}</code>,
+          User token — <code>{{ import_token_debug.user }}</code>,
+          ID филиала — <code>{{ import_token_debug.company }}</code>.
+        </p>
+      </div>
+
+      <div>
+        <div class="panel-head-row">
+          <h3>Ожидают подтверждения ({{ import_candidates|length }})</h3>
+          <form action="{{ url_for('import_merge') }}" method="post">
+            <button type="submit" class="btn-secondary">Объединить похожие (тот же катер, дата и время)</button>
+          </form>
+        </div>
+        {% if import_merged is defined and import_merged is not none %}
+        <p class="hint">
+          {% if import_merged > 0 %}Объединено записей: {{ import_merged }}.{% else %}Совпадений для объединения не найдено.{% endif %}
+        </p>
+        {% endif %}
+        {% if import_candidates %}
+        <div class="table-scroll">
+          <table class="records">
+            <thead>
+              <tr><th>Рейс (предварительно)</th><th></th></tr>
+            </thead>
+            <tbody>
+              {% for c in import_candidates %}
+              <tr>
+                <td>{{ c.summary }}</td>
+                <td class="row-actions">
+                  <a href="{{ url_for('import_review', candidate_id=c.id) }}" class="btn-secondary">Проверить и подтвердить</a>
+                  <form action="{{ url_for('import_skip', candidate_id=c.id) }}" method="post"
+                        onsubmit="return confirm('Пропустить эту запись без создания рейса? Она больше не появится при повторном импорте.');">
+                    <button type="submit" class="icon-btn danger" title="Пропустить">
+                      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M5 5l10 10M15 5L5 15"/>
+                      </svg>
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+          <div class="empty-logo"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
+          <div class="t">Нет записей, ожидающих подтверждения</div>
+          <div class="s">Загрузите период выше, чтобы найти новые рейсы.</div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </details>
 
   <section class="panel filter-panel">
     <h2>Период и катер</h2>
@@ -223,7 +334,7 @@
 
   <div class="hero-grid">
     <div class="hero-card">
-      <span class="k">Мой итог за период</span>
+      <span class="k">Итог судовладельца за период</span>
       <span class="v tabular">{{ "%.0f"|format(grand_my_share) }} ₽</span>
       <span class="d">Доход рейсов {{ "%.0f"|format(grand_revenue) }} ₽{% if by_investor %} · инвесторам {{ "%.0f"|format(by_investor.values()|sum(attribute='payout')) }} ₽{% endif %}</span>
     </div>
@@ -252,7 +363,7 @@
   </div>
   {% if by_boat %}
   <div class="split-legend">
-    <span><i style="background:var(--brass);"></i>Мне</span>
+    <span><i style="background:var(--brass);"></i>Судовладельцу</span>
     <span><i style="background:var(--ink-soft);"></i>Инвестору</span>
   </div>
   {% endif %}
@@ -263,7 +374,7 @@
     <table class="gloss">
       <tr>
         <th>Катер</th><th>Рейсов</th><th>Доход</th><th>Комиссия</th><th>Прямые расходы</th>
-        <th>Остаток</th><th>Инвестору</th><th>Мне</th>
+        <th>Остаток</th><th>Инвестору</th><th>Судовладельцу</th>
       </tr>
       {% for boat_name, t in by_boat.items() %}
       <tr>
@@ -280,9 +391,7 @@
     </table>
     {% else %}
     <div class="empty-state">
-      <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M6 24l14 6 14-6M6 24V14l14-6 14 6v10M6 24l14-6 14 6"/>
-      </svg>
+      <div class="empty-logo"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
       <div class="t">За выбранный период рейсов нет</div>
       <div class="s">Добавьте рейс через форму выше или смените период/катер в фильтре.</div>
     </div>
@@ -296,13 +405,13 @@
       <thead>
         <tr>
           <th>Дата</th><th>Катер</th><th>Вид рейса</th><th>Доход</th><th>Канал</th>
-          <th>Комиссия</th><th>Расходы</th><th>Инвестору</th><th>Мне</th><th></th>
+          <th>Комиссия</th><th>Расходы</th><th>Инвестору</th><th>Судовладельцу</th><th></th>
         </tr>
       </thead>
       <tbody>
         {% for t in trips %}
         <tr>
-          <td class="muted">{{ t.trip_date }}</td>
+          <td class="muted">{{ t.trip_date|ru_date }} · {{ t.trip_time or '00:00' }}</td>
           <td>{{ t.boat }}</td>
           <td>{{ t.work_type }}</td>
           <td>{{ "%.0f"|format(t.revenue) }}</td>
@@ -334,9 +443,7 @@
     </table>
     {% else %}
     <div class="empty-state">
-      <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M6 24l14 6 14-6M6 24V14l14-6 14 6v10M6 24l14-6 14 6"/>
-      </svg>
+      <div class="empty-logo"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
       <div class="t">За выбранный период записей нет</div>
       <div class="s">Добавьте рейс через форму выше или смените период/катер в фильтре.</div>
     </div>

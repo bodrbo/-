@@ -15,9 +15,21 @@
       <div class="logo-sub">Payroll system</div>
     </div>
     <nav class="main-nav">
-      <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'payroll' }}">Зарплаты</a>
-      <a href="{{ url_for('trips_index') }}" class="{{ 'active' if active_page == 'trips' }}">Рейсы и инвесторы</a>
-      <a href="{{ url_for('import_index') }}" class="{{ 'active' if active_page == 'import' }}">Импорт из Yclients</a>
+      <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'payroll' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.3" y="6" width="15.4" height="8" rx="1.8"/>
+          <circle cx="10" cy="10" r="2"/>
+          <path d="M4.6 8h.01M15.4 12h.01"/>
+        </svg>
+        <span class="nav-label">Зарплаты</span>
+      </a>
+      <a href="{{ url_for('trips_index') }}" class="{{ 'active' if active_page == 'trips' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="10" cy="3.8" r="1.6"/>
+          <path d="M10 5.6v10.6M6 8.4h8M4.2 11a5.8 5.8 0 0 0 11.6 0"/>
+        </svg>
+        <span class="nav-label">Рейсы и инвесторы</span>
+      </a>
     </nav>
     <div class="title-block">
       <span class="kicker">Учёт работ и оплаты</span>

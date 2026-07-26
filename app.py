@@ -26,6 +26,19 @@ app = Flask(__name__)
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workhours.db")
 
+
+def format_ru_date(iso_date):
+    """YYYY-MM-DD -> DD/MM/YYYY for display in trip tables."""
+    if not iso_date:
+        return ""
+    try:
+        return dt.date.fromisoformat(iso_date).strftime("%d/%m/%Y")
+    except ValueError:
+        return iso_date
+
+
+app.jinja_env.filters["ru_date"] = format_ru_date
+
 # ---------------------------------------------------------------------
 # Yclients — импорт рейсов. Токены НЕ храним в коде (секреты) — задайте их
 # как переменные окружения на хостинге:
@@ -186,6 +199,12 @@ def init_db():
         )
         """
     )
+    # Migration path for databases created before trip_time existed.
+    trip_cols = [row[1] for row in conn.execute("PRAGMA table_info(trips)").fetchall()]
+    if "trip_time" not in trip_cols:
+        conn.execute("ALTER TABLE trips ADD COLUMN trip_time TEXT")
+        conn.execute("UPDATE trips SET trip_time = '00:00' WHERE trip_time IS NULL")
+
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS trip_expenses (
@@ -532,6 +551,12 @@ def _trips_list_context(db, selected_month=None, selected_boat="all"):
 
     by_boat, by_investor, grand_my_share, grand_revenue = compute_trip_totals(trip_rows)
 
+    today = dt.date.today()
+    week_ago = today - dt.timedelta(days=7)
+    import_candidates = db.execute(
+        "SELECT * FROM import_candidates ORDER BY created_at DESC, id DESC"
+    ).fetchall()
+
     return dict(
         trips=trips_list,
         months=months,
@@ -542,6 +567,15 @@ def _trips_list_context(db, selected_month=None, selected_boat="all"):
         by_investor=by_investor,
         grand_my_share=grand_my_share,
         grand_revenue=grand_revenue,
+        import_candidates=import_candidates,
+        import_configured=yclients_configured(),
+        import_default_start=week_ago.isoformat(),
+        import_default_end=today.isoformat(),
+        import_token_debug={
+            "partner": _mask_token(YCLIENTS_PARTNER_TOKEN),
+            "user": _mask_token(YCLIENTS_USER_TOKEN),
+            "company": YCLIENTS_COMPANY_ID or "(пусто)",
+        },
     )
 
 
@@ -552,6 +586,7 @@ def _trips_common_kwargs():
         sale_channels=SALE_CHANNELS,
         custom_value=CUSTOM_VALUE,
         today=dt.date.today().isoformat(),
+        now_time=dt.datetime.now().strftime("%H:%M"),
         active_page="trips",
     )
 
@@ -570,6 +605,12 @@ def _process_trip_form(form):
         trip_date = dt.date.fromisoformat(trip_date_raw).isoformat()
     except ValueError:
         trip_date = dt.date.today().isoformat()
+
+    trip_time_raw = form.get("trip_time", "").strip()
+    try:
+        trip_time = dt.datetime.strptime(trip_time_raw, "%H:%M").strftime("%H:%M")
+    except ValueError:
+        trip_time = "00:00"
 
     # --- Labor rows: one or more employees paid for this trip ---
     employees_raw = form.getlist("employee[]")
@@ -683,7 +724,7 @@ def _process_trip_form(form):
     my_share = commission_amount + remainder / 2
 
     data = dict(
-        boat=boat, trip_date=trip_date, work_type=work_type_label,
+        boat=boat, trip_date=trip_date, trip_time=trip_time, work_type=work_type_label,
         labor_items=labor_items, labor_cost=labor_cost,
         revenue=revenue, sale_channel=sale_channel, commission_pct=commission_pct,
         commission_amount=commission_amount, fuel_cost=fuel_cost, mooring_cost=mooring_cost,
@@ -726,11 +767,12 @@ def add_trip():
         entry_ids.append(cur.lastrowid)
 
     cur2 = db.execute(
-        "INSERT INTO trips (boat, trip_date, work_type, entry_id, revenue, sale_channel, "
+        "INSERT INTO trips (boat, trip_date, trip_time, work_type, entry_id, revenue, sale_channel, "
         "commission_pct, commission_amount, labor_cost, fuel_cost, mooring_cost, extra_total, "
         "remainder, investor_payout, my_share, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (data["boat"], data["trip_date"], data["work_type"], entry_ids[0] if entry_ids else None,
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (data["boat"], data["trip_date"], data["trip_time"], data["work_type"],
+         entry_ids[0] if entry_ids else None,
          data["revenue"], data["sale_channel"], data["commission_pct"], data["commission_amount"],
          data["labor_cost"], data["fuel_cost"], data["mooring_cost"], data["extra_total"],
          data["remainder"], data["investor_payout"], data["my_share"], now),
@@ -781,6 +823,7 @@ def edit_trip(trip_id):
         form_values = {
             "boat": trip["boat"],
             "trip_date": trip["trip_date"],
+            "trip_time": trip["trip_time"] or "00:00",
             "revenue": trip["revenue"],
             "sale_channel": trip["sale_channel"],
             "commission_pct": trip["commission_pct"],
@@ -830,10 +873,10 @@ def edit_trip(trip_id):
         db.execute("INSERT INTO trip_labor (trip_id, entry_id) VALUES (?, ?)", (trip_id, eid))
 
     db.execute(
-        "UPDATE trips SET boat=?, trip_date=?, work_type=?, entry_id=?, revenue=?, sale_channel=?, "
-        "commission_pct=?, commission_amount=?, labor_cost=?, fuel_cost=?, mooring_cost=?, "
-        "extra_total=?, remainder=?, investor_payout=?, my_share=? WHERE id=?",
-        (data["boat"], data["trip_date"], data["work_type"],
+        "UPDATE trips SET boat=?, trip_date=?, trip_time=?, work_type=?, entry_id=?, revenue=?, "
+        "sale_channel=?, commission_pct=?, commission_amount=?, labor_cost=?, fuel_cost=?, "
+        "mooring_cost=?, extra_total=?, remainder=?, investor_payout=?, my_share=? WHERE id=?",
+        (data["boat"], data["trip_date"], data["trip_time"], data["work_type"],
          entry_ids[0] if entry_ids else None, data["revenue"],
          data["sale_channel"], data["commission_pct"], data["commission_amount"],
          data["labor_cost"], data["fuel_cost"], data["mooring_cost"], data["extra_total"],
@@ -1172,7 +1215,8 @@ def build_import_candidates(records, activity_colors=None):
             boat_label = f"катер не определён (цвет в Yclients: {raw_color_seen})"
         else:
             boat_label = "катер не определён (цвет не задан)"
-        when_label = f"{trip_date} {trip_time}".strip() if trip_time else trip_date
+        trip_date_label = format_ru_date(trip_date)
+        when_label = f"{trip_date_label} {trip_time}".strip() if trip_time else trip_date_label
         summary = f"{when_label} · {boat_label} · {employees_label} · {revenue:.0f} ₽"
         candidates.append({"yclients_ref": key, "summary": summary, "payload": payload})
     candidates.sort(key=lambda c: (c["payload"]["trip_date"], c["payload"]["trip_time"]), reverse=True)
@@ -1233,7 +1277,8 @@ def merge_pending_candidates(db):
             i["employee"] for i in keep_payload["labor_items"] if i.get("employee")
         ) or "—"
         boat, trip_date, trip_time = slot
-        when_label = f"{trip_date} {trip_time}".strip() if trip_time else trip_date
+        trip_date_label = format_ru_date(trip_date)
+        when_label = f"{trip_date_label} {trip_time}".strip() if trip_time else trip_date_label
         revenue = keep_payload.get("revenue") or 0
         summary = f"{when_label} · {boat} · {employees_label} · {revenue:.0f} ₽"
 
@@ -1256,26 +1301,18 @@ def _mask_token(value):
 
 @app.route("/trips/import", methods=["GET"])
 def import_index():
+    """The import queue lives inside the trips page itself (as a collapsible
+    section) — this route just renders that same page with the section
+    expanded, so links/redirects built around "go to the import screen"
+    still land somewhere sensible."""
     db = get_db()
-    rows = db.execute(
-        "SELECT * FROM import_candidates ORDER BY created_at DESC, id DESC"
-    ).fetchall()
-    today = dt.date.today()
-    week_ago = today - dt.timedelta(days=7)
+    ctx = _trips_list_context(db)
     return render_template(
-        "import.html",
-        candidates=rows,
-        configured=yclients_configured(),
-        default_start=week_ago.isoformat(),
-        default_end=today.isoformat(),
-        active_page="trips",
-        error=request.args.get("error"),
-        merged=request.args.get("merged", type=int),
-        token_debug={
-            "partner": _mask_token(YCLIENTS_PARTNER_TOKEN),
-            "user": _mask_token(YCLIENTS_USER_TOKEN),
-            "company": YCLIENTS_COMPANY_ID or "(пусто)",
-        },
+        "trips.html", **ctx, **_trips_common_kwargs(),
+        edit_trip=None,
+        import_error=request.args.get("error"),
+        import_merged=request.args.get("merged", type=int),
+        open_import=True,
     )
 
 
@@ -1359,6 +1396,7 @@ def import_review(candidate_id):
     form_values = {
         "boat": payload["boat"],
         "trip_date": payload["trip_date"],
+        "trip_time": payload.get("trip_time") or "00:00",
         "revenue": payload["revenue"],
         "sale_channel": payload["sale_channel"],
         "commission_pct": payload["commission_pct"],
@@ -1405,11 +1443,12 @@ def import_confirm(candidate_id):
         entry_ids.append(cur.lastrowid)
 
     cur2 = db.execute(
-        "INSERT INTO trips (boat, trip_date, work_type, entry_id, revenue, sale_channel, "
+        "INSERT INTO trips (boat, trip_date, trip_time, work_type, entry_id, revenue, sale_channel, "
         "commission_pct, commission_amount, labor_cost, fuel_cost, mooring_cost, extra_total, "
         "remainder, investor_payout, my_share, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (data["boat"], data["trip_date"], data["work_type"], entry_ids[0] if entry_ids else None,
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (data["boat"], data["trip_date"], data["trip_time"], data["work_type"],
+         entry_ids[0] if entry_ids else None,
          data["revenue"], data["sale_channel"], data["commission_pct"], data["commission_amount"],
          data["labor_cost"], data["fuel_cost"], data["mooring_cost"], data["extra_total"],
          data["remainder"], data["investor_payout"], data["my_share"], now),
