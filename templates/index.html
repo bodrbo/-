@@ -151,37 +151,39 @@
   <section class="panel">
     <h2>Записи за выбранный период</h2>
     {% if entries %}
-    <table class="records">
-      <thead>
-        <tr>
-          <th>Дата работы</th>
-          <th>Сотрудник</th>
-          <th>Вид работы</th>
-          <th>Часы / кол-во</th>
-          <th>Ставка, ₽</th>
-          <th>Сумма, ₽</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for e in entries %}
-        <tr>
-          <td class="muted">{{ e.work_date }}</td>
-          <td>{{ e.employee }}</td>
-          <td>{{ e.work_type }}</td>
-          <td>{{ e.quantity|float|round(2) }}</td>
-          <td>{{ e.rate|float|round(2) }}</td>
-          <td class="amount">{{ "%.0f"|format(e.amount) }}</td>
-          <td>
-            <form action="{{ url_for('delete_entry', entry_id=e.id) }}" method="post"
-                  onsubmit="return confirm('Удалить эту запись?');">
-              <button type="submit" class="btn-delete" title="Удалить">✕</button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th>Дата работы</th>
+            <th>Сотрудник</th>
+            <th>Вид работы</th>
+            <th>Часы / кол-во</th>
+            <th>Ставка, ₽</th>
+            <th>Сумма, ₽</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in entries %}
+          <tr>
+            <td class="muted">{{ e.work_date }}</td>
+            <td>{{ e.employee }}</td>
+            <td>{{ e.work_type }}</td>
+            <td>{{ e.quantity|float|round(2) }}</td>
+            <td>{{ e.rate|float|round(2) }}</td>
+            <td class="amount">{{ "%.0f"|format(e.amount) }}</td>
+            <td>
+              <form action="{{ url_for('delete_entry', entry_id=e.id) }}" method="post"
+                    onsubmit="return confirm('Удалить эту запись?');">
+                <button type="submit" class="btn-delete" title="Удалить">✕</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
     {% else %}
     <p class="empty">За выбранный период записей нет.</p>
     {% endif %}

@@ -255,11 +255,12 @@ input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, se
 
 .expense-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 8px;
 }
-.expense-row input[type="text"]:first-child { flex: 2; }
-.expense-row input[type="text"]:nth-child(2) { flex: 1; }
+.expense-row input[type="text"]:first-child { flex: 2; min-width: 0; }
+.expense-row input[type="text"]:nth-child(2) { flex: 1; min-width: 0; }
 
 .labor-row {
   display: flex;
@@ -268,10 +269,10 @@ input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, se
   flex-wrap: wrap;
 }
 .labor-row select.labor-employee,
-.labor-row select.labor-worktype { flex: 2 1 200px; }
+.labor-row select.labor-worktype { flex: 2 1 200px; min-width: 0; }
 .labor-row input.labor-quantity,
-.labor-row input.labor-rate { flex: 1 1 100px; }
-.labor-row .custom-input { flex: 2 1 200px; margin-top: 0; width: auto; }
+.labor-row input.labor-rate { flex: 1 1 100px; min-width: 0; }
+.labor-row .custom-input { flex: 2 1 200px; margin-top: 0; width: auto; min-width: 0; }
 
 .btn-secondary {
   display: inline-block;
@@ -687,8 +688,11 @@ button.btn-delete:hover { background: var(--danger); color: #fff8f4; border-colo
 }
 @media (max-width: 600px) {
   .entry-form { flex-direction: column; align-items: stretch; }
+  /* In row layout "flex: 1 1 220px" sizes width; once the form above
+     switches to a column direction that same basis would size HEIGHT
+     instead, stretching every field to ~220px tall. Reset to content size. */
+  .entry-form > .field,
+  .entry-form > .field-narrow { flex: none; width: 100%; }
   .field-submit button { width: 100%; }
-  table.records { font-size: 12px; }
-  table.records td.muted { display: none; }
-  table.records th:first-child { display: none; }
+  table.records, table.gloss { font-size: 12px; }
 }

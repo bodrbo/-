@@ -354,24 +354,26 @@
   <section class="panel">
     <h2>Сводка по катерам за период</h2>
     {% if by_boat %}
-    <table class="gloss">
-      <tr>
-        <th>Катер</th><th>Рейсов</th><th>Доход</th><th>Комиссия</th><th>Прямые расходы</th>
-        <th>Остаток</th><th>Инвестору</th><th>Судовладельцу</th>
-      </tr>
-      {% for boat_name, t in by_boat.items() %}
-      <tr>
-        <td class="term">{{ boat_name }}</td>
-        <td>{{ t.count }}</td>
-        <td>{{ "%.0f"|format(t.revenue) }}</td>
-        <td>{{ "%.0f"|format(t.commission) }}</td>
-        <td>{{ "%.0f"|format(t.labor + t.fuel + t.mooring + t.extra) }}</td>
-        <td>{{ "%.0f"|format(t.remainder) }}</td>
-        <td class="amount">{{ "%.0f"|format(t.investor_payout) }}</td>
-        <td class="amount">{{ "%.0f"|format(t.my_share) }}</td>
-      </tr>
-      {% endfor %}
-    </table>
+    <div class="table-scroll">
+      <table class="gloss">
+        <tr>
+          <th>Катер</th><th>Рейсов</th><th>Доход</th><th>Комиссия</th><th>Прямые расходы</th>
+          <th>Остаток</th><th>Инвестору</th><th>Судовладельцу</th>
+        </tr>
+        {% for boat_name, t in by_boat.items() %}
+        <tr>
+          <td class="term">{{ boat_name }}</td>
+          <td>{{ t.count }}</td>
+          <td>{{ "%.0f"|format(t.revenue) }}</td>
+          <td>{{ "%.0f"|format(t.commission) }}</td>
+          <td>{{ "%.0f"|format(t.labor + t.fuel + t.mooring + t.extra) }}</td>
+          <td>{{ "%.0f"|format(t.remainder) }}</td>
+          <td class="amount">{{ "%.0f"|format(t.investor_payout) }}</td>
+          <td class="amount">{{ "%.0f"|format(t.my_share) }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
     {% else %}
     <div class="empty-state">
       <div class="empty-logo"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
@@ -384,46 +386,48 @@
   <section class="panel">
     <h2>Все рейсы за период</h2>
     {% if trips %}
-    <table class="records">
-      <thead>
-        <tr>
-          <th>Дата</th><th>Катер</th><th>Вид рейса</th><th>Доход</th><th>Канал</th>
-          <th>Комиссия</th><th>Расходы</th><th>Инвестору</th><th>Судовладельцу</th><th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for t in trips %}
-        <tr>
-          <td class="muted">{{ t.trip_date|ru_date }} · {{ t.trip_time or '00:00' }}</td>
-          <td>{{ t.boat }}</td>
-          <td>{{ t.work_type }}</td>
-          <td>{{ "%.0f"|format(t.revenue) }}</td>
-          <td class="muted">{{ 'Напрямую' if t.sale_channel == 'direct' else ('Агрегатор' if t.sale_channel == 'aggregator' else 'Смешанно') }}</td>
-          <td>{{ "%.0f"|format(t.commission_amount) }} ({{ t.commission_pct|float|round(1) }}%)</td>
-          <td title="Гид/капитан: {{ "%.0f"|format(t.labor_cost) }} · Топливо: {{ "%.0f"|format(t.fuel_cost) }} · Стоянка: {{ "%.0f"|format(t.mooring_cost) }}{% if t.extra_total %} · Доп: {{ "%.0f"|format(t.extra_total) }}{% endif %}">
-            {{ "%.0f"|format(t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total) }}
-          </td>
-          <td class="amount">{{ "%.0f"|format(t.investor_payout) }}</td>
-          <td class="amount">{{ "%.0f"|format(t.my_share) }}</td>
-          <td class="row-actions">
-            <a href="{{ url_for('edit_trip', trip_id=t.id) }}" class="icon-btn" title="Редактировать">
-              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M13.5 3.5l3 3L6 17H3v-3L13.5 3.5z"/>
-              </svg>
-            </a>
-            <form action="{{ url_for('delete_trip', trip_id=t.id) }}" method="post"
-                  onsubmit="return confirm('Удалить этот рейс? Связанная запись в зарплатах тоже удалится.');">
-              <button type="submit" class="icon-btn danger" title="Удалить">
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th>Дата</th><th>Катер</th><th>Вид рейса</th><th>Доход</th><th>Канал</th>
+            <th>Комиссия</th><th>Расходы</th><th>Инвестору</th><th>Судовладельцу</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in trips %}
+          <tr>
+            <td class="muted">{{ t.trip_date|ru_date }} · {{ t.trip_time or '00:00' }}</td>
+            <td>{{ t.boat }}</td>
+            <td>{{ t.work_type }}</td>
+            <td>{{ "%.0f"|format(t.revenue) }}</td>
+            <td class="muted">{{ 'Напрямую' if t.sale_channel == 'direct' else ('Агрегатор' if t.sale_channel == 'aggregator' else 'Смешанно') }}</td>
+            <td>{{ "%.0f"|format(t.commission_amount) }} ({{ t.commission_pct|float|round(1) }}%)</td>
+            <td title="Гид/капитан: {{ "%.0f"|format(t.labor_cost) }} · Топливо: {{ "%.0f"|format(t.fuel_cost) }} · Стоянка: {{ "%.0f"|format(t.mooring_cost) }}{% if t.extra_total %} · Доп: {{ "%.0f"|format(t.extra_total) }}{% endif %}">
+              {{ "%.0f"|format(t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total) }}
+            </td>
+            <td class="amount">{{ "%.0f"|format(t.investor_payout) }}</td>
+            <td class="amount">{{ "%.0f"|format(t.my_share) }}</td>
+            <td class="row-actions">
+              <a href="{{ url_for('edit_trip', trip_id=t.id) }}" class="icon-btn" title="Редактировать">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
+                  <path d="M13.5 3.5l3 3L6 17H3v-3L13.5 3.5z"/>
                 </svg>
-              </button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+              </a>
+              <form action="{{ url_for('delete_trip', trip_id=t.id) }}" method="post"
+                    onsubmit="return confirm('Удалить этот рейс? Связанная запись в зарплатах тоже удалится.');">
+                <button type="submit" class="icon-btn danger" title="Удалить">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
+                  </svg>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
     {% else %}
     <div class="empty-state">
       <div class="empty-logo"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
