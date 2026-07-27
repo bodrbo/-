@@ -696,3 +696,51 @@ button.btn-delete:hover { background: var(--danger); color: #fff8f4; border-colo
   .field-submit button { width: 100%; }
   table.records, table.gloss { font-size: 12px; }
 }
+
+/* --- page loader: shown on first paint and on every navigation/submit --- */
+.page-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 42, 53, 0.6);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  opacity: 1;
+  transition: opacity 0.35s ease;
+}
+.page-loader.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+.page-loader .loader-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+.page-loader .wheel {
+  width: 76px;
+  height: 76px;
+  animation: bodrbo-wheel-spin 2.4s linear infinite;
+}
+.page-loader .wheel circle,
+.page-loader .wheel line {
+  vector-effect: non-scaling-stroke;
+}
+.page-loader .loader-label {
+  font-family: 'PT Serif', Georgia, serif;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #fbf3e2;
+}
+@keyframes bodrbo-wheel-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-loader .wheel { animation: none; }
+}

@@ -8,6 +8,33 @@
 </head>
 <body>
 
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="wheel" viewBox="0 0 100 100" fill="none" stroke="var(--brass)" stroke-width="4" stroke-linecap="round">
+      <circle cx="50" cy="50" r="38"/>
+      <circle cx="50" cy="50" r="14"/>
+      <circle cx="50" cy="50" r="3" fill="var(--brass)" stroke="none"/>
+      <line x1="64" y1="50" x2="95" y2="50"/>
+      <line x1="59.9" y1="59.9" x2="81.8" y2="81.8"/>
+      <line x1="50" y1="64" x2="50" y2="95"/>
+      <line x1="40.1" y1="59.9" x2="18.2" y2="81.8"/>
+      <line x1="36" y1="50" x2="5" y2="50"/>
+      <line x1="40.1" y1="40.1" x2="18.2" y2="18.2"/>
+      <line x1="50" y1="36" x2="50" y2="5"/>
+      <line x1="59.9" y1="40.1" x2="81.8" y2="18.2"/>
+      <circle cx="95" cy="50" r="3.2" fill="var(--brass)" stroke="none"/>
+      <circle cx="81.8" cy="81.8" r="3.2" fill="var(--brass)" stroke="none"/>
+      <circle cx="50" cy="95" r="3.2" fill="var(--brass)" stroke="none"/>
+      <circle cx="18.2" cy="81.8" r="3.2" fill="var(--brass)" stroke="none"/>
+      <circle cx="5" cy="50" r="3.2" fill="var(--brass)" stroke="none"/>
+      <circle cx="18.2" cy="18.2" r="3.2" fill="var(--brass)" stroke="none"/>
+      <circle cx="50" cy="5" r="3.2" fill="var(--brass)" stroke="none"/>
+      <circle cx="81.8" cy="18.2" r="3.2" fill="var(--brass)" stroke="none"/>
+    </svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
 {% macro labor_row(item=None) %}
 <div class="labor-row">
   <select name="employee[]" class="labor-employee" onchange="handleEmployeeChange(this)" required>
@@ -537,6 +564,7 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 });
 </script>
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
 
 </body>
 </html>
