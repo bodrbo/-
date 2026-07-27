@@ -1173,6 +1173,14 @@ def build_import_candidates(records, activity_colors=None):
         seen_staff = set()
         for r in recs:
             staff_name = (r.get("staff") or {}).get("name", "").strip()
+            if not staff_name:
+                # An empty placeholder record for a second staff slot that
+                # nobody was actually assigned to in Yclients — not a real
+                # crew member, so it shouldn't become a labor row with a
+                # blank name (that would fail validation on its own, and
+                # would also stop the solo-crew rate rule below from ever
+                # firing since it counts distinct labor rows).
+                continue
             services = r.get("services") or []
             service0 = services[0] if services else {}
             service_id = service0.get("id")
