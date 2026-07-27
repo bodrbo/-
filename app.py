@@ -1333,6 +1333,13 @@ def merge_pending_candidates(db):
         labor_items = list(keep_payload.get("labor_items") or [])
         seen = {(i.get("employee"), i.get("work_type")) for i in labor_items}
         notes = [keep_payload.get("note", "")] if keep_payload.get("note") else []
+        # Every yclients_ref that gets folded into this one needs to be
+        # remembered (see below) — otherwise, once this trip is imported,
+        # only the *kept* ref is marked as done. The merged-away one's raw
+        # Yclients record is still real and still there, so next fetch it
+        # comes back as a brand-new, now-partnerless candidate — this is
+        # exactly the "исчезнувший рейс" junk that kept resurfacing.
+        merged_refs = list(keep_payload.get("merged_refs") or [])
 
         for row, payload in items[1:]:
             for item in (payload.get("labor_items") or []):
@@ -1343,6 +1350,8 @@ def merge_pending_candidates(db):
                 labor_items.append(item)
             if payload.get("note"):
                 notes.append(payload["note"])
+            merged_refs.append(row["yclients_ref"])
+            merged_refs.extend(payload.get("merged_refs") or [])
             db.execute("DELETE FROM import_candidates WHERE id = ?", (row["id"],))
             merged_away += 1
 
@@ -1370,6 +1379,7 @@ def merge_pending_candidates(db):
             {"employee": "", "work_type": "", "quantity": "", "rate": ""}
         ]
         keep_payload["note"] = " / ".join(n for n in notes if n)
+        keep_payload["merged_refs"] = merged_refs
 
         employees_label = ", ".join(
             i["employee"] for i in keep_payload["labor_items"] if i.get("employee")
@@ -1501,6 +1511,20 @@ def import_review(candidate_id):
     )
 
 
+def _mark_yclients_refs_imported(db, refs, trip_id):
+    """Record every yclients_ref that fed into this trip — not just the one
+    candidate row that survived merging — as done. Candidates that get
+    merged into another one are deleted outright; if their own ref isn't
+    also marked here, the next fetch sees that same raw Yclients record as
+    brand new (its merge partner already became a real trip and won't be
+    recreated) and re-adds it as an orphaned, partner-less candidate."""
+    for ref in refs:
+        db.execute(
+            "INSERT OR IGNORE INTO yclients_imports (yclients_ref, trip_id) VALUES (?, ?)",
+            (ref, trip_id),
+        )
+
+
 def _insert_trip(db, data):
     """Write a validated trip (as returned by _process_trip_form) plus its
     labor entries and extra expenses. Returns the new trip id."""
@@ -1580,10 +1604,7 @@ def _try_auto_import_candidate(db, row):
         db.commit()
         return False
     trip_id = _insert_trip(db, data)
-    db.execute(
-        "INSERT INTO yclients_imports (yclients_ref, trip_id) VALUES (?, ?)",
-        (row["yclients_ref"], trip_id),
-    )
+    _mark_yclients_refs_imported(db, [row["yclients_ref"], *payload.get("merged_refs", [])], trip_id)
     db.execute("DELETE FROM import_candidates WHERE id = ?", (row["id"],))
     db.commit()
     return True
@@ -1598,9 +1619,9 @@ def import_confirm(candidate_id):
     if row is None:
         return redirect(url_for("import_index"))
 
+    payload = json.loads(row["payload"])
     errors, data = _process_trip_form(db, request.form)
     if errors:
-        payload = json.loads(row["payload"])
         ctx = _trips_list_context(db)
         return render_template(
             "trips.html", **ctx, **_trips_common_kwargs(),
@@ -1609,10 +1630,7 @@ def import_confirm(candidate_id):
         ), 400
 
     trip_id = _insert_trip(db, data)
-    db.execute(
-        "INSERT INTO yclients_imports (yclients_ref, trip_id) VALUES (?, ?)",
-        (row["yclients_ref"], trip_id),
-    )
+    _mark_yclients_refs_imported(db, [row["yclients_ref"], *payload.get("merged_refs", [])], trip_id)
     db.execute("DELETE FROM import_candidates WHERE id = ?", (candidate_id,))
     db.commit()
     return redirect(url_for("import_index"))
@@ -1625,9 +1643,9 @@ def import_skip(candidate_id):
         "SELECT * FROM import_candidates WHERE id = ?", (candidate_id,)
     ).fetchone()
     if row is not None:
-        db.execute(
-            "INSERT OR IGNORE INTO yclients_imports (yclients_ref, trip_id) VALUES (?, NULL)",
-            (row["yclients_ref"],),
+        payload = json.loads(row["payload"])
+        _mark_yclients_refs_imported(
+            db, [row["yclients_ref"], *payload.get("merged_refs", [])], None
         )
         db.execute("DELETE FROM import_candidates WHERE id = ?", (candidate_id,))
         db.commit()
