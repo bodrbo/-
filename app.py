@@ -95,9 +95,16 @@ WORK_TYPES = [
     {"name": "Индивидуальная аренда на 2.5 часа", "rate": 1100, "hours": 2.5},
 ]
 
-# Соответствие названий услуг в Yclients названиям "вид рейса" выше — так
-# ставка/часы при импорте подставляются автоматически. Слева — точное
-# название услуги в Yclients, справа — соответствующее имя из WORK_TYPES.
+# Соответствие ID услуги в Yclients названию "вид рейса" из WORK_TYPES выше —
+# так ставка/часы при импорте подставляются автоматически. ID надёжнее
+# названия (названия услуг иногда отличаются мелкими деталями — лишний
+# пробел, другая формулировка — а ID услуги в Yclients не меняется).
+YCLIENTS_SERVICE_ID_TO_WORK_TYPE = {
+    # 12345: "Малый тур",
+}
+
+# Резервное сопоставление по точному названию услуги — используется только
+# если ID услуги не нашёлся в словаре выше.
 YCLIENTS_SERVICE_TO_WORK_TYPE = {
     "Форты Кронштадта - малый тур": "Малый тур",
     "Форты и маяки Кронштадта - средний тур": "Средний тур",
@@ -1153,14 +1160,21 @@ def build_import_candidates(records, activity_colors=None):
 
         # Labor rows: one per distinct staff member, hours from seance
         # length when available, rate looked up from WORK_TYPES by service
-        # title (falls back to blank for manual entry).
+        # (matched by service ID first, then by exact title, falling back
+        # to the raw title for manual entry if neither is known yet).
         labor_items = []
         seen_staff = set()
         for r in recs:
             staff_name = (r.get("staff") or {}).get("name", "").strip()
             services = r.get("services") or []
-            title_raw = services[0]["title"] if services else ""
-            title = YCLIENTS_SERVICE_TO_WORK_TYPE.get(title_raw, title_raw)
+            service0 = services[0] if services else {}
+            service_id = service0.get("id")
+            title_raw = service0.get("title", "")
+            title = (
+                YCLIENTS_SERVICE_ID_TO_WORK_TYPE.get(service_id)
+                or YCLIENTS_SERVICE_TO_WORK_TYPE.get(title_raw)
+                or title_raw
+            )
             wt = next((w for w in WORK_TYPES if w["name"] == title), None)
             hours = _yclients_record_hours(r) or (wt["hours"] if wt else "")
             rate = wt["rate"] if wt else ""
