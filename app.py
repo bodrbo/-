@@ -59,6 +59,13 @@ BOAT_COLORS = {
     "#8bc34a": "Бодрый Первый",     # светло-зелёный
 }
 
+# Красная "запись-блокер": менеджер ставит её сотруднику вместо реального
+# рейса, когда его точно нельзя занимать в этот день (комментарий обычно
+# "не ставить в рейсы"). Это не рейс и не смена — такую запись нужно
+# полностью игнорировать: не создавать под неё карточку на подтверждение и
+# не считать её поводом для доплаты за смену.
+BLOCKED_SHIFT_COLOR = "f44336"
+
 # ---------------------------------------------------------------------
 # СПРАВОЧНИКИ — отредактируйте под себя.
 # ---------------------------------------------------------------------
@@ -1062,6 +1069,12 @@ def _yclients_record_color(rec):
     return _normalize_color(rec.get("custom_color") or rec.get("color"))
 
 
+def _yclients_record_is_blocker(rec):
+    """A manager's red "don't schedule this person" placeholder — not a
+    trip, and not a real shift for the minimum-rate top-up either."""
+    return _yclients_record_color(rec) == BLOCKED_SHIFT_COLOR
+
+
 def _yclients_record_datetime(rec):
     return (rec.get("datetime") or rec.get("date") or "").strip()
 
@@ -1185,6 +1198,11 @@ def build_import_candidates(records, activity_colors=None):
                         break
                 if boat:
                     break
+
+        if raw_color_seen == BLOCKED_SHIFT_COLOR:
+            # A manager's "не ставить в рейсы" marker, not a trip — skip it
+            # entirely rather than surfacing it as a candidate needing review.
+            continue
 
         # The booked service only ever lives on ONE record per trip — usually
         # whichever one carries the price (e.g. the captain's) — a second
@@ -1336,7 +1354,7 @@ def apply_minimum_shift_rate(db, records):
     """
     staffed_days = set()
     for r in records:
-        if r.get("deleted"):
+        if r.get("deleted") or _yclients_record_is_blocker(r):
             continue
         name = (r.get("staff") or {}).get("name", "").strip()
         if not name:
