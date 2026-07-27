@@ -96,6 +96,13 @@ WORK_TYPES = [
     {"name": "Индивидуальная аренда на 2.5 часа", "rate": 1100, "hours": 2.5},
 ]
 
+# Гарантированный минимум за смену: если сотрудник в этот день числится в
+# Yclients (есть хоть одна не удалённая запись с его именем), но его
+# фактический заработок за день по нашим записям меньше этой суммы —
+# добавляем доплату до неё. См. apply_minimum_shift_rate().
+MIN_SHIFT_RATE = 3000
+MIN_SHIFT_TOPUP_WORK_TYPE = "Доплата до минимальной ставки"
+
 # Соответствие ID услуги в Yclients названию "вид рейса" из WORK_TYPES выше —
 # так ставка/часы при импорте подставляются автоматически. ID надёжнее
 # названия (названия услуг иногда отличаются мелкими деталями — лишний
@@ -1315,6 +1322,67 @@ def build_import_candidates(records, activity_colors=None):
     return candidates
 
 
+def apply_minimum_shift_rate(db, records):
+    """Every crew member has a guaranteed minimum of MIN_SHIFT_RATE per
+    shift. "Staffed" comes straight from the raw Yclients records — any
+    non-deleted record with a staff name counts, regardless of whether it
+    ever turns into a confirmed trip — compared against what they actually
+    earned that day per our own `entries` (from any source: manual entry,
+    a confirmed trip, or an earlier top-up). Shortfalls get a top-up entry.
+
+    Self-correcting: run again after trips for that day change and an
+    existing top-up shrinks, grows, or disappears to match — it never just
+    accumulates. Returns how many top-up entries were added/changed/removed.
+    """
+    staffed_days = set()
+    for r in records:
+        if r.get("deleted"):
+            continue
+        name = (r.get("staff") or {}).get("name", "").strip()
+        if not name:
+            continue
+        staffed_days.add((name, _yclients_record_date(r)))
+
+    changed = 0
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    for employee, work_date in staffed_days:
+        earned = db.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS total FROM entries "
+            "WHERE employee = ? AND work_date = ? AND work_type != ?",
+            (employee, work_date, MIN_SHIFT_TOPUP_WORK_TYPE),
+        ).fetchone()["total"]
+        needed = round(MIN_SHIFT_RATE - earned, 2)
+
+        existing = db.execute(
+            "SELECT id, amount FROM entries WHERE employee = ? AND work_date = ? AND work_type = ?",
+            (employee, work_date, MIN_SHIFT_TOPUP_WORK_TYPE),
+        ).fetchone()
+
+        if needed <= 0:
+            if existing:
+                db.execute("DELETE FROM entries WHERE id = ?", (existing["id"],))
+                changed += 1
+            continue
+
+        if existing:
+            if abs(existing["amount"] - needed) > 0.01:
+                db.execute(
+                    "UPDATE entries SET rate = ?, amount = ? WHERE id = ?",
+                    (needed, needed, existing["id"]),
+                )
+                changed += 1
+        else:
+            db.execute(
+                "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (employee, MIN_SHIFT_TOPUP_WORK_TYPE, needed, 1, needed, work_date, now),
+            )
+            changed += 1
+
+    db.commit()
+    return changed
+
+
 def merge_pending_candidates(db):
     """Second line of defence, independent of Yclients' own data: scan every
     candidate currently waiting for confirmation and merge any that share
@@ -1492,6 +1560,11 @@ def import_fetch():
     pending = db.execute("SELECT * FROM import_candidates ORDER BY id ASC").fetchall()
     for row in pending:
         _try_auto_import_candidate(db, row)
+
+    # Must run after the auto-import loop above, once this fetch's trips are
+    # actually in `entries` — otherwise a shift would look short and get a
+    # top-up moments before its real trips land and cover it anyway.
+    apply_minimum_shift_rate(db, records)
 
     return redirect(url_for("import_index"))
 
