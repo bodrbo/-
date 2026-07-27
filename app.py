@@ -691,8 +691,10 @@ def add_manager_fee():
     # Оклад считается от количества дней в текущем календарном месяце —
     # расчёт делается "сейчас", по факту закрытия недели.
     days_in_month = calendar.monthrange(dt.date.today().year, dt.date.today().month)[1]
-    rate = (revenue_week * MANAGER_REVENUE_SHARE / 7) + (MANAGER_BASE_SALARY / days_in_month)
-    amount = rate * shifts
+    percent_part = revenue_week * MANAGER_REVENUE_SHARE / 7 * shifts
+    salary_part = MANAGER_BASE_SALARY / days_in_month * shifts
+    amount = percent_part + salary_part
+    rate = amount / shifts if shifts else 0.0
 
     db.execute(
         "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
