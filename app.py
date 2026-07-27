@@ -17,6 +17,7 @@
 import os
 import json
 import sqlite3
+import calendar
 import datetime as dt
 from concurrent.futures import ThreadPoolExecutor
 
@@ -84,6 +85,7 @@ EMPLOYEES = [
     "Юрий Мороз",
     "Игорь Севостьянов",
     "Алексей Чабанов",
+    "Андрей Краснюков",
 ]
 
 # Виды работ со стандартной ставкой и длительностью (в часах).
@@ -109,6 +111,13 @@ WORK_TYPES = [
 # добавляем доплату до неё. См. apply_minimum_shift_rate().
 MIN_SHIFT_RATE = 3000
 MIN_SHIFT_TOPUP_WORK_TYPE = "Доплата до минимальной ставки"
+
+# Гонорар менеджера по продажам за неделю = оклад за отработанные смены +
+# доля от общей выручки рейсов за эту неделю, тоже за отработанные смены:
+#   (выручка_за_неделю * MANAGER_REVENUE_SHARE / 7 + MANAGER_BASE_SALARY / дней_в_месяце) * смены
+MANAGER_REVENUE_SHARE = 0.03
+MANAGER_BASE_SALARY = 45000
+MANAGER_FEE_WORK_TYPE = "Гонорар менеджера по продажам"
 
 # Соответствие ID услуги в Yclients названию "вид рейса" из WORK_TYPES выше —
 # так ставка/часы при импорте подставляются автоматически. ID надёжнее
@@ -442,13 +451,14 @@ def compute_trip_totals(trips):
     return by_boat, by_investor, grand_my_share, grand_revenue
 
 
-@app.route("/")
-def index():
-    db = get_db()
-
+def _payroll_context(db, selected_week, selected_employee):
+    """Everything the Зарплаты page needs to render: the entries table,
+    per-employee/grand totals, which employees are already marked paid for
+    the selected week, and the week/employee filter options. Shared by the
+    main page and by both "add" routes' validation-error re-renders, so
+    they can't drift out of sync (the plain add_entry() error path once
+    rendered the totals cards without paid_employees at all)."""
     weeks, current_monday = build_week_options(db)
-    selected_week = request.args.get("week", current_monday.isoformat())
-    selected_employee = request.args.get("employee", "all")
 
     # Left-joined to the trip (if any) this entry came from, purely to show
     # its start time alongside the date — entries added by hand on this
@@ -499,8 +509,7 @@ def index():
         if row["employee"] not in known:
             known.append(row["employee"])
 
-    return render_template(
-        "index.html",
+    return dict(
         entries=entries,
         totals_by_employee=totals_by_employee,
         grand_total=grand_total,
@@ -509,6 +518,20 @@ def index():
         employees_filter=known,
         selected_employee=selected_employee,
         paid_employees=paid_employees,
+    )
+
+
+@app.route("/")
+def index():
+    db = get_db()
+    weeks, current_monday = build_week_options(db)
+    selected_week = request.args.get("week", current_monday.isoformat())
+    selected_employee = request.args.get("employee", "all")
+
+    ctx = _payroll_context(db, selected_week, selected_employee)
+    return render_template(
+        "index.html",
+        **ctx,
         employees_form=EMPLOYEES,
         work_types=WORK_TYPES,
         custom_value=CUSTOM_VALUE,
@@ -590,24 +613,10 @@ def add_entry():
 
     if errors:
         db = get_db()
-        weeks, current_monday = build_week_options(db)
-        entries = db.execute(
-            "SELECT * FROM entries ORDER BY work_date DESC, id DESC"
-        ).fetchall()
-        totals_by_employee, grand_total = compute_totals(entries)
-        known = list(EMPLOYEES)
-        for row in db.execute("SELECT DISTINCT employee FROM entries").fetchall():
-            if row["employee"] not in known:
-                known.append(row["employee"])
+        ctx = _payroll_context(db, "all", "all")
         return render_template(
             "index.html",
-            entries=entries,
-            totals_by_employee=totals_by_employee,
-            grand_total=grand_total,
-            weeks=weeks,
-            selected_week="all",
-            employees_filter=known,
-            selected_employee="all",
+            **ctx,
             employees_form=EMPLOYEES,
             work_types=WORK_TYPES,
             custom_value=CUSTOM_VALUE,
@@ -627,6 +636,72 @@ def add_entry():
     )
     db.commit()
     return redirect(url_for("index"))
+
+
+@app.route("/add_manager_fee", methods=["POST"])
+def add_manager_fee():
+    employee = request.form.get("manager_employee", "").strip()
+    if employee == CUSTOM_VALUE:
+        employee = request.form.get("manager_employee_custom", "").strip()
+
+    shifts_raw = request.form.get("shifts", "").strip().replace(",", ".")
+    week = request.form.get("week", "").strip()
+    employee_filter = request.form.get("employee_filter", "all")
+
+    errors = []
+    if not employee:
+        errors.append("Укажите сотрудника.")
+
+    monday = None
+    try:
+        monday = dt.date.fromisoformat(week)
+    except ValueError:
+        errors.append("Расчёт гонорара доступен только для одной конкретной недели — выберите её в фильтре выше.")
+
+    shifts = None
+    try:
+        shifts = float(shifts_raw)
+        if shifts < 0:
+            errors.append("Количество смен не может быть отрицательным.")
+    except ValueError:
+        errors.append("Количество смен должно быть числом.")
+
+    if errors:
+        db = get_db()
+        ctx = _payroll_context(db, week or "all", employee_filter)
+        return render_template(
+            "index.html",
+            **ctx,
+            employees_form=EMPLOYEES,
+            work_types=WORK_TYPES,
+            custom_value=CUSTOM_VALUE,
+            today=dt.date.today().isoformat(),
+            manager_errors=errors,
+            manager_form_values=request.form,
+            active_page="payroll",
+        ), 400
+
+    sunday = monday + dt.timedelta(days=6)
+    db = get_db()
+    revenue_week = db.execute(
+        "SELECT COALESCE(SUM(revenue), 0) AS total FROM trips WHERE trip_date BETWEEN ? AND ?",
+        (monday.isoformat(), sunday.isoformat()),
+    ).fetchone()["total"]
+
+    # Оклад считается от количества дней в текущем календарном месяце —
+    # расчёт делается "сейчас", по факту закрытия недели.
+    days_in_month = calendar.monthrange(dt.date.today().year, dt.date.today().month)[1]
+    rate = (revenue_week * MANAGER_REVENUE_SHARE / 7) + (MANAGER_BASE_SALARY / days_in_month)
+    amount = rate * shifts
+
+    db.execute(
+        "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (employee, MANAGER_FEE_WORK_TYPE, rate, shifts, amount, monday.isoformat(),
+         dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+    )
+    db.commit()
+    return redirect(url_for("index", week=monday.isoformat(), employee=employee_filter))
 
 
 @app.route("/delete/<int:entry_id>", methods=["POST"])

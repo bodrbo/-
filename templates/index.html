@@ -77,7 +77,7 @@
   {% endif %}
 
   <section class="panel form-panel">
-    <h2>Добавить запись</h2>
+    <h2>Рассчитать гонорар гида/капитана/тюнингмэна вручную</h2>
     <form action="{{ url_for('add_entry') }}" method="post" class="entry-form" id="entry-form">
 
       <div class="field">
@@ -133,6 +133,56 @@
       </div>
     </form>
     <p class="hint">Выбор вида работы подставит обычную ставку и часы — при необходимости их можно поправить перед сохранением.</p>
+  </section>
+
+  {% if manager_errors %}
+    <div class="alert">
+      <strong>Не удалось рассчитать гонорар:</strong>
+      <ul>
+        {% for err in manager_errors %}<li>{{ err }}</li>{% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <section class="panel form-panel">
+    <h2>Рассчитать гонорар менеджера по продажам</h2>
+    <form action="{{ url_for('add_manager_fee') }}" method="post" class="entry-form" id="manager-form">
+
+      <div class="field">
+        <label for="manager_employee">Сотрудник</label>
+        <select id="manager_employee" name="manager_employee" required
+                onchange="toggleCustom('manager_employee')">
+          <option value="" disabled {{ 'selected' if not manager_form_values }}>Выберите сотрудника</option>
+          {% for name in employees_form %}
+          <option value="{{ name }}"
+            {{ 'selected' if manager_form_values and manager_form_values.manager_employee == name }}>{{ name }}</option>
+          {% endfor %}
+          <option value="{{ custom_value }}"
+            {{ 'selected' if manager_form_values and manager_form_values.manager_employee == custom_value }}>+ Другой (ввести вручную)</option>
+        </select>
+        <input type="text" id="manager_employee_custom" name="manager_employee_custom" class="custom-input hidden"
+               placeholder="Имя и фамилия"
+               value="{{ manager_form_values.manager_employee_custom if manager_form_values else '' }}">
+      </div>
+
+      <div class="field field-narrow">
+        <label for="shifts">Отработано смен за неделю</label>
+        <input type="text" inputmode="decimal" id="shifts" name="shifts" placeholder="5"
+               value="{{ manager_form_values.shifts if manager_form_values else '' }}" required>
+      </div>
+
+      <input type="hidden" name="week" value="{{ selected_week }}">
+      <input type="hidden" name="employee_filter" value="{{ selected_employee }}">
+
+      <div class="field field-submit">
+        <button type="submit" {{ 'disabled' if selected_week == 'all' }}>Добавить</button>
+      </div>
+    </form>
+    {% if selected_week == 'all' %}
+    <p class="hint">Выберите конкретную неделю в фильтре ниже — гонорар считается за выручку и смены той недели.</p>
+    {% else %}
+    <p class="hint">Гонорар = (выручка рейсов за выбранную неделю × 3% ÷ 7 + оклад 45 000 ₽ ÷ дней в текущем месяце) × количество смен.</p>
+    {% endif %}
   </section>
 
   <section class="panel filter-panel">
