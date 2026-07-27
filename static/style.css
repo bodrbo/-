@@ -408,6 +408,94 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .total-card-grand .k { color: var(--brass-strong); }
 .total-card-grand .v { color: #fbf3e2; }
 
+/* --- clickable "mark as paid" employee cards --- */
+.total-card.payable {
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.total-card.payable:hover {
+  background: var(--paper-alt);
+  border-color: var(--brass);
+}
+.total-card.payable:active { transform: scale(0.99); }
+.total-card.payable:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+
+.total-card.paid {
+  background: rgba(47, 107, 79, 0.14);
+  border-color: rgba(47, 107, 79, 0.4);
+}
+.total-card.paid:hover { background: rgba(47, 107, 79, 0.2); }
+.total-card.paid .v { color: var(--success); }
+
+.paid-badge {
+  align-self: flex-start;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--success);
+  background: rgba(47, 107, 79, 0.16);
+  border-radius: 999px;
+  padding: 2px 9px;
+  margin-top: 2px;
+}
+
+/* --- confirm modal (payment) --- */
+.confirm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+.confirm-modal.open { visibility: visible; opacity: 1; }
+.confirm-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 42, 53, 0.55);
+}
+.confirm-modal-box {
+  position: relative;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 26px 28px 22px;
+  max-width: 320px;
+  width: calc(100% - 40px);
+  text-align: center;
+  transform: translateY(8px) scale(0.98);
+  transition: transform 0.2s ease;
+}
+.confirm-modal.open .confirm-modal-box { transform: translateY(0) scale(1); }
+.confirm-modal-text {
+  margin: 0 0 20px;
+  font-family: 'PT Serif', Georgia, serif;
+  font-size: 17px;
+  color: var(--ink);
+}
+.confirm-modal-actions { display: flex; justify-content: center; gap: 12px; }
+.confirm-modal-actions .btn-primary,
+.confirm-modal-actions .btn-secondary { margin-top: 0; }
+
+.btn-primary {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 10px 22px;
+  background: var(--brass);
+  color: var(--on-accent);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.btn-primary:hover { background: var(--brass-strong); }
+
 /* --- hero dashboard: grand total + per-boat investor split --- */
 .hero-grid {
   display: grid;

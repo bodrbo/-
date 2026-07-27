@@ -292,6 +292,17 @@ def init_db():
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee TEXT NOT NULL,
+            period_key TEXT NOT NULL,
+            paid_at TEXT NOT NULL,
+            UNIQUE(employee, period_key)
+        )
+        """
+    )
     conn.commit()
     conn.close()
 
@@ -470,6 +481,17 @@ def index():
 
     totals_by_employee, grand_total = compute_totals(entries)
 
+    # "Оплачено" only means anything for one concrete week at a time — an
+    # "Все периоды" total spans however many weeks, so there's no single
+    # period to mark paid.
+    paid_employees = set()
+    if selected_week != "all":
+        paid_employees = {
+            row["employee"] for row in db.execute(
+                "SELECT employee FROM payments WHERE period_key = ?", (selected_week,)
+            ).fetchall()
+        }
+
     # Employees for the filter dropdown: the configured list, plus any
     # employee names already used but not in the list (so nothing is hidden).
     known = list(EMPLOYEES)
@@ -486,12 +508,43 @@ def index():
         selected_week=selected_week,
         employees_filter=known,
         selected_employee=selected_employee,
+        paid_employees=paid_employees,
         employees_form=EMPLOYEES,
         work_types=WORK_TYPES,
         custom_value=CUSTOM_VALUE,
         today=dt.date.today().isoformat(),
         active_page="payroll",
     )
+
+
+@app.route("/pay", methods=["POST"])
+def mark_paid():
+    employee = request.form.get("employee", "").strip()
+    period_key = request.form.get("week", "").strip()
+    employee_filter = request.form.get("employee_filter", "all")
+    if employee and period_key:
+        db = get_db()
+        db.execute(
+            "INSERT OR IGNORE INTO payments (employee, period_key, paid_at) VALUES (?, ?, ?)",
+            (employee, period_key, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+        )
+        db.commit()
+    return redirect(url_for("index", week=period_key, employee=employee_filter))
+
+
+@app.route("/unpay", methods=["POST"])
+def unmark_paid():
+    employee = request.form.get("employee", "").strip()
+    period_key = request.form.get("week", "").strip()
+    employee_filter = request.form.get("employee_filter", "all")
+    if employee and period_key:
+        db = get_db()
+        db.execute(
+            "DELETE FROM payments WHERE employee = ? AND period_key = ?",
+            (employee, period_key),
+        )
+        db.commit()
+    return redirect(url_for("index", week=period_key, employee=employee_filter))
 
 
 @app.route("/add", methods=["POST"])

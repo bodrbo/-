@@ -168,12 +168,39 @@
       <span class="v">{{ "%.0f"|format(grand_total) }} ₽</span>
     </div>
     {% for employee, sum in totals_by_employee.items() %}
-    <div class="panel total-card">
+    {% set is_paid = employee in paid_employees %}
+    <div class="panel total-card{{ ' payable' if selected_week != 'all' }}{{ ' paid' if is_paid }}"
+         {% if selected_week != 'all' %}
+         data-pay-card
+         data-employee="{{ employee }}"
+         data-week="{{ selected_week }}"
+         data-paid="{{ 'true' if is_paid else 'false' }}"
+         role="button" tabindex="0"
+         {% endif %}>
       <span class="k">{{ employee }}</span>
       <span class="v">{{ "%.0f"|format(sum) }} ₽</span>
+      {% if is_paid %}<span class="paid-badge">Оплачено</span>{% endif %}
     </div>
     {% endfor %}
   </section>
+
+  {% if selected_week != 'all' %}
+  <div class="confirm-modal" id="payModal" aria-hidden="true">
+    <div class="confirm-modal-backdrop" data-modal-close></div>
+    <div class="confirm-modal-box" role="dialog" aria-modal="true" aria-labelledby="payModalText">
+      <p class="confirm-modal-text" id="payModalText">Произвести оплату?</p>
+      <div class="confirm-modal-actions">
+        <button type="button" class="btn-primary" id="payModalYes">Да</button>
+        <button type="button" class="btn-secondary" id="payModalNo">Нет</button>
+      </div>
+    </div>
+  </div>
+  <form id="payForm" method="post" hidden>
+    <input type="hidden" name="employee" id="payFormEmployee">
+    <input type="hidden" name="week" id="payFormWeek">
+    <input type="hidden" name="employee_filter" value="{{ selected_employee }}">
+  </form>
+  {% endif %}
 
   <section class="panel">
     <h2>Записи за выбранный период</h2>
@@ -246,6 +273,58 @@ document.addEventListener('DOMContentLoaded', function () {
   toggleCustom('employee');
   toggleCustom('work_type');
 });
+
+(function () {
+  var modal = document.getElementById('payModal');
+  if (!modal) return;
+
+  var modalText = document.getElementById('payModalText');
+  var yesBtn = document.getElementById('payModalYes');
+  var noBtn = document.getElementById('payModalNo');
+  var form = document.getElementById('payForm');
+  var formEmployee = document.getElementById('payFormEmployee');
+  var formWeek = document.getElementById('payFormWeek');
+  var pendingAction = null;
+
+  function openModal(action, card) {
+    pendingAction = action;
+    modalText.textContent = action === 'pay' ? 'Произвести оплату?' : 'Отменить отметку об оплате?';
+    formEmployee.value = card.dataset.employee;
+    formWeek.value = card.dataset.week;
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+    yesBtn.focus();
+  }
+
+  function closeModal() {
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+    pendingAction = null;
+  }
+
+  document.querySelectorAll('[data-pay-card]').forEach(function (card) {
+    card.addEventListener('click', function () {
+      openModal(card.dataset.paid === 'true' ? 'unpay' : 'pay', card);
+    });
+    card.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        card.click();
+      }
+    });
+  });
+
+  noBtn.addEventListener('click', closeModal);
+  modal.querySelector('[data-modal-close]').addEventListener('click', closeModal);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && modal.classList.contains('open')) closeModal();
+  });
+
+  yesBtn.addEventListener('click', function () {
+    form.action = pendingAction === 'pay' ? '{{ url_for("mark_paid") }}' : '{{ url_for("unmark_paid") }}';
+    form.submit();
+  });
+})();
 </script>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 
