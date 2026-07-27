@@ -1504,11 +1504,21 @@ def _try_auto_import_candidate(db, row):
     with no human confirmation step. Returns True and removes the candidate
     row on success; returns False and leaves the row in place (for manual
     review via the existing "Ожидают подтверждения" queue) if the payload
-    doesn't validate — most commonly an unresolved boat color."""
+    doesn't validate — most commonly an unresolved boat color or a Yclients
+    service name that isn't in YCLIENTS_SERVICE_TO_WORK_TYPE yet (missing
+    вид рейса means the hours/rate can't be filled in, which fails
+    validation same as an empty field would in the manual form)."""
     payload = json.loads(row["payload"])
     form = _payload_to_form(payload)
     errors, data = _process_trip_form(db, form)
     if errors:
+        base_summary = row["summary"].split(" ⚠ ", 1)[0]
+        reason = "; ".join(errors)
+        db.execute(
+            "UPDATE import_candidates SET summary = ? WHERE id = ?",
+            (f"{base_summary} ⚠ {reason}", row["id"]),
+        )
+        db.commit()
         return False
     trip_id = _insert_trip(db, data)
     db.execute(
