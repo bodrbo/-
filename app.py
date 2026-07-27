@@ -18,6 +18,7 @@ import os
 import json
 import sqlite3
 import datetime as dt
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 from flask import Flask, g, redirect, render_template, request, url_for
@@ -1010,24 +1011,37 @@ def yclients_get_activity_colors(activity_ids):
     itself, not on each individual record inside it — fetch each distinct
     event once and return {activity_id: color}. Fetch failures for a single
     event are skipped rather than aborting the whole import (that event's
-    boat will just stay unmatched for manual selection)."""
-    headers = _yclients_headers()
-    colors = {}
-    for activity_id in activity_ids:
+    boat will just stay unmatched for manual selection).
+
+    One request per activity, but they're all independent reads, so they go
+    out concurrently instead of one-by-one — with a week's worth of imports
+    easily touching 20-30 activities, this was the slowest part of the
+    whole import by far (a serial loop of one network round-trip each)."""
+    activity_ids = list(activity_ids)
+    if not activity_ids:
+        return {}
+
+    def fetch_one(activity_id):
         try:
-            resp = requests.get(
+            resp = session.get(
                 f"{YCLIENTS_API_BASE}/activity/{YCLIENTS_COMPANY_ID}/{activity_id}",
-                headers=headers, timeout=20,
+                timeout=20,
             )
             if not resp.ok:
-                continue
+                return activity_id, None
             body = resp.json()
             data = body.get("data") or {}
-            color = data.get("color")
-            if color:
-                colors[activity_id] = color
+            return activity_id, data.get("color")
         except requests.RequestException:
-            continue
+            return activity_id, None
+
+    colors = {}
+    with requests.Session() as session:
+        session.headers.update(_yclients_headers())
+        with ThreadPoolExecutor(max_workers=min(10, len(activity_ids))) as pool:
+            for activity_id, color in pool.map(fetch_one, activity_ids):
+                if color:
+                    colors[activity_id] = color
     return colors
 
 
