@@ -21,6 +21,7 @@ import datetime as dt
 
 import requests
 from flask import Flask, g, redirect, render_template, request, url_for
+from werkzeug.datastructures import MultiDict
 
 app = Flask(__name__)
 
@@ -89,6 +90,14 @@ WORK_TYPES = [
     {"name": "Средний тур гид/капитан", "rate": 1870, "hours": 1.5},  # длительность не была указана — взял по аналогии со "Средний тур"
     {"name": "Большой тур гид-капитан", "rate": 1870, "hours": 2.5},
 ]
+
+# Соответствие названий услуг в Yclients названиям "вид рейса" выше — так
+# ставка/часы при импорте подставляются автоматически. Слева — точное
+# название услуги в Yclients, справа — соответствующее имя из WORK_TYPES.
+# ЗАПОЛНИТЕ ЭТОТ СЛОВАРЬ под реальные названия услуг.
+YCLIENTS_SERVICE_TO_WORK_TYPE = {
+    # "Название услуги в Yclients": "Малый тур",
+}
 
 CUSTOM_VALUE = "__custom__"  # спец-значение для пункта "Другое..." в списках
 
@@ -587,7 +596,7 @@ def _trips_common_kwargs():
     )
 
 
-def _process_trip_form(form):
+def _process_trip_form(db, form, exclude_trip_id=None):
     """Validate a trip form submission and compute all derived amounts.
     Returns (errors, data). data is None if there are errors."""
     errors = []
@@ -705,6 +714,18 @@ def _process_trip_form(form):
     if errors:
         return errors, None
 
+    # "Стоянка" — суточный расход катера, а не расход конкретного рейса: если
+    # в этот день у этого катера уже есть рейс с оплаченной стоянкой, не
+    # дублируем её здесь.
+    if mooring_cost and boat and trip_date:
+        query = "SELECT 1 FROM trips WHERE boat = ? AND trip_date = ? AND mooring_cost > 0"
+        params = [boat, trip_date]
+        if exclude_trip_id is not None:
+            query += " AND id != ?"
+            params.append(exclude_trip_id)
+        if db.execute(query, params).fetchone() is not None:
+            mooring_cost = 0.0
+
     # Trip-level "вид рейса" label for lists/summaries: the distinct work
     # types among the labor rows, joined (usually just one).
     distinct_work_types = []
@@ -742,7 +763,7 @@ def trips_index():
 @app.route("/trips/add", methods=["POST"])
 def add_trip():
     db = get_db()
-    errors, data = _process_trip_form(request.form)
+    errors, data = _process_trip_form(db, request.form)
     if errors:
         ctx = _trips_list_context(db)
         return render_template(
@@ -834,7 +855,7 @@ def edit_trip(trip_id):
             expenses_prefill=[(e["description"], e["amount"]) for e in exps],
         )
 
-    errors, data = _process_trip_form(request.form)
+    errors, data = _process_trip_form(db, request.form, exclude_trip_id=trip_id)
     if errors:
         ctx = _trips_list_context(db)
         return render_template(
@@ -1128,7 +1149,8 @@ def build_import_candidates(records, activity_colors=None):
         for r in recs:
             staff_name = (r.get("staff") or {}).get("name", "").strip()
             services = r.get("services") or []
-            title = services[0]["title"] if services else ""
+            title_raw = services[0]["title"] if services else ""
+            title = YCLIENTS_SERVICE_TO_WORK_TYPE.get(title_raw, title_raw)
             wt = next((w for w in WORK_TYPES if w["name"] == title), None)
             hours = _yclients_record_hours(r) or (wt["hours"] if wt else "")
             rate = wt["rate"] if wt else ""
@@ -1191,6 +1213,17 @@ def build_import_candidates(records, activity_colors=None):
                 sale_channel = "direct"
                 commission_pct = boat_info["commission_direct"] if boat_info else ""
             note = comment
+
+        # Один человек на рейсе — по умолчанию считаем, что он выполнял и
+        # роль гида, и капитана (ставка 1870₽/ч). Исключение — только для
+        # одиночной ЗАПИСИ (не группового события), если в комментарии
+        # к ней явно указано «без экскурсии»: тогда это чисто капитанская
+        # ставка (1100₽/ч).
+        if len(labor_items) == 1:
+            if not is_activity_group and "без экскурсии" in note.lower():
+                labor_items[0]["rate"] = 1100
+            else:
+                labor_items[0]["rate"] = 1870
 
         payload = {
             "boat": boat or "",
@@ -1357,6 +1390,16 @@ def import_fetch():
         added += 1
     db.commit()
     merge_pending_candidates(db)
+    db.commit()
+
+    # Auto-confirm: candidates with a resolved boat and valid numbers go
+    # straight into the trip tables, no manual review needed. Anything that
+    # fails validation (most commonly an unresolved boat color) is left
+    # behind in the queue below for a human to sort out.
+    pending = db.execute("SELECT * FROM import_candidates ORDER BY id ASC").fetchall()
+    for row in pending:
+        _try_auto_import_candidate(db, row)
+
     return redirect(url_for("import_index"))
 
 
@@ -1389,25 +1432,9 @@ def import_review(candidate_id):
     )
 
 
-@app.route("/trips/import/confirm/<int:candidate_id>", methods=["POST"])
-def import_confirm(candidate_id):
-    db = get_db()
-    row = db.execute(
-        "SELECT * FROM import_candidates WHERE id = ?", (candidate_id,)
-    ).fetchone()
-    if row is None:
-        return redirect(url_for("import_index"))
-
-    errors, data = _process_trip_form(request.form)
-    if errors:
-        payload = json.loads(row["payload"])
-        ctx = _trips_list_context(db)
-        return render_template(
-            "trips.html", **ctx, **_trips_common_kwargs(),
-            edit_trip=None, import_candidate=row, errors=errors, form_values=request.form,
-            import_note=payload.get("note", ""),
-        ), 400
-
+def _insert_trip(db, data):
+    """Write a validated trip (as returned by _process_trip_form) plus its
+    labor entries and extra expenses. Returns the new trip id."""
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     entry_ids = []
     for item in data["labor_items"]:
@@ -1438,6 +1465,71 @@ def import_confirm(candidate_id):
             "INSERT INTO trip_expenses (trip_id, description, amount) VALUES (?, ?, ?)",
             (trip_id, desc, amt),
         )
+    return trip_id
+
+
+def _payload_to_form(payload):
+    """Turn a stored import-candidate payload back into a form-like
+    MultiDict so it can go through the same _process_trip_form validation
+    that the manual "Добавить рейс" form uses."""
+    form = MultiDict()
+    form["boat"] = payload.get("boat", "")
+    form["trip_date"] = payload.get("trip_date", "")
+    form["trip_time"] = payload.get("trip_time") or "00:00"
+    form["sale_channel"] = payload.get("sale_channel", "direct")
+    form["commission_pct"] = str(payload.get("commission_pct", ""))
+    form["revenue"] = str(payload.get("revenue", ""))
+    form["fuel_cost"] = str(payload.get("fuel_cost", ""))
+    form["mooring_cost"] = str(payload.get("mooring_cost", ""))
+    for item in payload.get("labor_items") or []:
+        form.add("employee[]", item.get("employee", ""))
+        form.add("work_type[]", item.get("work_type", ""))
+        form.add("quantity[]", str(item.get("quantity", "")))
+        form.add("rate[]", str(item.get("rate", "")))
+    return form
+
+
+def _try_auto_import_candidate(db, row):
+    """Attempt to turn one pending import candidate straight into a trip,
+    with no human confirmation step. Returns True and removes the candidate
+    row on success; returns False and leaves the row in place (for manual
+    review via the existing "Ожидают подтверждения" queue) if the payload
+    doesn't validate — most commonly an unresolved boat color."""
+    payload = json.loads(row["payload"])
+    form = _payload_to_form(payload)
+    errors, data = _process_trip_form(db, form)
+    if errors:
+        return False
+    trip_id = _insert_trip(db, data)
+    db.execute(
+        "INSERT INTO yclients_imports (yclients_ref, trip_id) VALUES (?, ?)",
+        (row["yclients_ref"], trip_id),
+    )
+    db.execute("DELETE FROM import_candidates WHERE id = ?", (row["id"],))
+    db.commit()
+    return True
+
+
+@app.route("/trips/import/confirm/<int:candidate_id>", methods=["POST"])
+def import_confirm(candidate_id):
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM import_candidates WHERE id = ?", (candidate_id,)
+    ).fetchone()
+    if row is None:
+        return redirect(url_for("import_index"))
+
+    errors, data = _process_trip_form(db, request.form)
+    if errors:
+        payload = json.loads(row["payload"])
+        ctx = _trips_list_context(db)
+        return render_template(
+            "trips.html", **ctx, **_trips_common_kwargs(),
+            edit_trip=None, import_candidate=row, errors=errors, form_values=request.form,
+            import_note=payload.get("note", ""),
+        ), 400
+
+    trip_id = _insert_trip(db, data)
     db.execute(
         "INSERT INTO yclients_imports (yclients_ref, trip_id) VALUES (?, ?)",
         (row["yclients_ref"], trip_id),
