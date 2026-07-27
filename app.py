@@ -1165,10 +1165,30 @@ def build_import_candidates(records, activity_colors=None):
                 if boat:
                     break
 
+        # The booked service only ever lives on ONE record per trip — usually
+        # whichever one carries the price (e.g. the captain's) — a second
+        # crew member's own record (e.g. the guide's) comes back from
+        # Yclients with an empty services list even though they're a real,
+        # named participant. So the service/вид рейса is resolved ONCE per
+        # trip from whichever record actually has it, then applied to every
+        # crew member — looking it up per-record would leave every other
+        # staff member's row without a вид рейса (and so without an hourly
+        # rate), which fails validation.
+        group_service = next(
+            (((r.get("services") or [None])[0]) for r in recs if r.get("services")), None
+        )
+        group_service_id = group_service.get("id") if group_service else None
+        group_title_raw = group_service.get("title", "") if group_service else ""
+        title = (
+            YCLIENTS_SERVICE_ID_TO_WORK_TYPE.get(group_service_id)
+            or YCLIENTS_SERVICE_TO_WORK_TYPE.get(group_title_raw)
+            or group_title_raw
+        )
+        wt = next((w for w in WORK_TYPES if w["name"] == title), None)
+
         # Labor rows: one per distinct staff member, hours from seance
-        # length when available, rate looked up from WORK_TYPES by service
-        # (matched by service ID first, then by exact title, falling back
-        # to the raw title for manual entry if neither is known yet).
+        # length when available (falls back to the matched вид рейса's
+        # default hours).
         labor_items = []
         seen_staff = set()
         for r in recs:
@@ -1181,16 +1201,6 @@ def build_import_candidates(records, activity_colors=None):
                 # would also stop the solo-crew rate rule below from ever
                 # firing since it counts distinct labor rows).
                 continue
-            services = r.get("services") or []
-            service0 = services[0] if services else {}
-            service_id = service0.get("id")
-            title_raw = service0.get("title", "")
-            title = (
-                YCLIENTS_SERVICE_ID_TO_WORK_TYPE.get(service_id)
-                or YCLIENTS_SERVICE_TO_WORK_TYPE.get(title_raw)
-                or title_raw
-            )
-            wt = next((w for w in WORK_TYPES if w["name"] == title), None)
             hours = _yclients_record_hours(r) or (wt["hours"] if wt else "")
             rate = wt["rate"] if wt else ""
             dedup_key = (staff_name, title)
@@ -1335,6 +1345,26 @@ def merge_pending_candidates(db):
                 notes.append(payload["note"])
             db.execute("DELETE FROM import_candidates WHERE id = ?", (row["id"],))
             merged_away += 1
+
+        if len(labor_items) > 1:
+            # Two crew members only ever surface as separate candidates
+            # (one via an "activity", one as a plain record — see
+            # _yclients_group_key), so each was built independently by
+            # build_import_candidates: the one with no service on its own
+            # Yclients record has an empty вид рейса/ставка, and the other
+            # may have had the *solo* combined guide+captain rate applied
+            # before we knew there was a second crew member. Now that
+            # they're merged into one real multi-person trip, reconcile
+            # both onto the same вид рейса and the normal (non-solo) rate.
+            ref_title = next((i.get("work_type") for i in labor_items if i.get("work_type")), "")
+            ref_wt = next((w for w in WORK_TYPES if w["name"] == ref_title), None) if ref_title else None
+            for item in labor_items:
+                if ref_title:
+                    item["work_type"] = ref_title
+                if ref_wt:
+                    item["rate"] = ref_wt["rate"]
+                    if not item.get("quantity"):
+                        item["quantity"] = ref_wt["hours"]
 
         keep_payload["labor_items"] = labor_items or [
             {"employee": "", "work_type": "", "quantity": "", "rate": ""}
