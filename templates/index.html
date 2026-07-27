@@ -194,7 +194,7 @@
         <tbody>
           {% for e in entries %}
           <tr>
-            <td class="muted">{{ e.work_date|ru_date }}</td>
+            <td class="muted">{{ e.work_date|ru_date }}{% if e.trip_time %} · {{ e.trip_time }}{% endif %}</td>
             <td>{{ e.employee }}</td>
             <td>{{ e.work_type }}</td>
             <td>{{ e.quantity|float|round(2) }}</td>

@@ -439,7 +439,16 @@ def index():
     selected_week = request.args.get("week", current_monday.isoformat())
     selected_employee = request.args.get("employee", "all")
 
-    query = "SELECT * FROM entries WHERE 1=1"
+    # Left-joined to the trip (if any) this entry came from, purely to show
+    # its start time alongside the date — entries added by hand on this
+    # page have no trip and so no time, which is fine (trip_time comes
+    # back NULL and the template just shows the date on its own).
+    query = (
+        "SELECT entries.*, trips.trip_time AS trip_time FROM entries "
+        "LEFT JOIN trip_labor ON trip_labor.entry_id = entries.id "
+        "LEFT JOIN trips ON trips.id = trip_labor.trip_id "
+        "WHERE 1=1"
+    )
     params = []
 
     if selected_week != "all":
@@ -449,14 +458,14 @@ def index():
             monday = current_monday
             selected_week = monday.isoformat()
         sunday = monday + dt.timedelta(days=6)
-        query += " AND work_date BETWEEN ? AND ?"
+        query += " AND entries.work_date BETWEEN ? AND ?"
         params += [monday.isoformat(), sunday.isoformat()]
 
     if selected_employee != "all":
-        query += " AND employee = ?"
+        query += " AND entries.employee = ?"
         params.append(selected_employee)
 
-    query += " ORDER BY work_date DESC, id DESC"
+    query += " ORDER BY entries.work_date DESC, entries.id DESC"
     entries = db.execute(query, params).fetchall()
 
     totals_by_employee, grand_total = compute_totals(entries)
