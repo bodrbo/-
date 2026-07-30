@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Личный кабинет инвестора</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100">
+      <g fill="var(--brass)">
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/>
+      </g>
+      <g fill="none" stroke="var(--brass)" stroke-width="2.6" stroke-linecap="round" opacity="0.85">
+        <path d="M55 15A24 24 0 0 1 62 22" transform="rotate(-6 50 50)"/>
+        <path d="M18 60A24 24 0 0 1 15 51" transform="rotate(4 50 50)"/>
+      </g>
+      <circle cx="50" cy="50" r="15" fill="none" stroke="var(--ink)" stroke-width="4"/>
+      <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
+    </svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="logo-text"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
+      <div class="logo-sub">Payroll system</div>
+    </div>
+    <div class="title-block">
+      <span class="kicker">Морские прогулки · Кронштадт</span>
+      <h1>Личный кабинет инвестора</h1>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="investor-bar">
+    <span class="investor-name">{{ investor_name }}{% if boats %} · {{ boats|join(', ') }}{% endif %}</span>
+    <form action="{{ url_for('investor_logout') }}" method="post">
+      <button type="submit" class="btn-secondary">Выйти</button>
+    </form>
+  </div>
+
+  <section class="panel filter-panel">
+    <h2>Период</h2>
+    <form action="{{ url_for('investor_dashboard') }}" method="get" class="filter-form">
+      <div class="field">
+        <label for="month">Месяц</label>
+        <select id="month" name="month" onchange="this.form.submit()">
+          <option value="all" {{ 'selected' if selected_month == 'all' }}>Все периоды</option>
+          {% for m in months %}
+          <option value="{{ m.key }}" {{ 'selected' if selected_month == m.key }}>
+            {{ m.label }}{{ ' (текущий)' if m.is_current }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </form>
+  </section>
+
+  <div class="hero-grid">
+    <div class="hero-card">
+      <span class="k">Выплата за период</span>
+      <span class="v tabular">{{ "%.0f"|format(grand_payout) }} ₽</span>
+      <span class="d">Доход рейсов {{ "%.0f"|format(grand_revenue) }} ₽</span>
+    </div>
+    {% for boat_name, t in by_boat.items() %}
+    <div class="boat-card">
+      <div class="top">
+        <div>
+          <div class="boat-name">{{ boat_name }}</div>
+          <div class="boat-investor">Рейсов за период: {{ t.count }}</div>
+        </div>
+        <div class="boat-amount">
+          <div class="v tabular">{{ "%.0f"|format(t.investor_payout) }} ₽</div>
+          <div class="k">выплата</div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <section class="panel">
+    <h2>Рейсы за период</h2>
+    {% if trips %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th>Дата</th>
+            {% if boats|length > 1 %}<th>Катер</th>{% endif %}
+            <th>Доход</th>
+            <th>Комиссия</th>
+            <th>Расходы</th>
+            <th>Остаток</th>
+            <th>Выплата</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in trips %}
+          <tr>
+            <td class="muted">{{ t.trip_date|ru_date }} · {{ t.trip_time or '00:00' }}</td>
+            {% if boats|length > 1 %}<td>{{ t.boat }}</td>{% endif %}
+            <td>{{ "%.0f"|format(t.revenue) }}</td>
+            <td>{{ "%.0f"|format(t.commission_amount) }} ({{ t.commission_pct|float|round(1) }}%)</td>
+            <td>{{ "%.0f"|format(t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total) }}</td>
+            <td>{{ "%.0f"|format(t.remainder) }}</td>
+            <td class="amount">{{ "%.0f"|format(t.investor_payout) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <div class="empty-logo"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
+      <div class="t">За выбранный период рейсов нет</div>
+      <div class="s">Смените месяц в фильтре выше.</div>
+    </div>
+    {% endif %}
+  </section>
+
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+
+</body>
+</html>

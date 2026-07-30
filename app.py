@@ -16,16 +16,25 @@
 
 import os
 import json
+import secrets
 import sqlite3
 import calendar
 import datetime as dt
+from functools import wraps
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
-from flask import Flask, g, redirect, render_template, request, url_for
+from flask import Flask, g, redirect, render_template, request, session, url_for
 from werkzeug.datastructures import MultiDict
+from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
+
+# Signs the investor-login session cookie. Set SECRET_KEY as a real
+# environment variable in production so sessions survive restarts/deploys —
+# without it, a fresh random key is generated each process start (safe,
+# just logs everyone out on every restart/redeploy).
+app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workhours.db")
 
@@ -181,6 +190,17 @@ BOATS = [
     },
 ]
 
+# Личный кабинет инвестора: (имя инвестора — должно совпадать с полем
+# "investor" в BOATS, логин, хеш пароля). Хеш добавляйте через
+# werkzeug.security.generate_password_hash(pwd, method="pbkdf2:sha256") —
+# сам пароль в коде никогда не хранится.
+INVESTOR_ACCOUNTS = [
+    ("Владимир Леонтьев", "Leontev",
+     "pbkdf2:sha256:1000000$0nolAXnkfdZY8xFb$2be552efa5b2ee9263f2ddbb2029e7f2dd8b21e69b53c071a3372fc1e5edfe14"),
+    ("Андрей Жаворонков", "andylark",
+     "pbkdf2:sha256:1000000$E9ffeVGhqp4SxAM7$d3439a20955fef86f35307fba7dbbd47fccfafb87935afd3753866e04f041a64"),
+]
+
 SALE_CHANNELS = [
     {"value": "direct", "label": "Напрямую"},
     {"value": "aggregator", "label": "Через агрегатора/агента"},
@@ -312,6 +332,29 @@ def init_db():
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS investors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            investor_name TEXT NOT NULL,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    # Seed the known investor accounts if they don't exist yet. Passwords
+    # only ever exist as pbkdf2 hashes here — nothing plaintext is stored in
+    # the repo. pbkdf2 (not the werkzeug default of scrypt) is used
+    # explicitly because some hosts' Python builds lack OpenSSL scrypt
+    # support in hashlib, which makes scrypt-hashed logins fail at runtime.
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    for investor_name, username, password_hash in INVESTOR_ACCOUNTS:
+        conn.execute(
+            "INSERT OR IGNORE INTO investors (investor_name, username, password_hash, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (investor_name, username, password_hash, now),
+        )
     conn.commit()
     conn.close()
 
@@ -1894,6 +1937,88 @@ def import_skip(candidate_id):
         db.execute("DELETE FROM import_candidates WHERE id = ?", (candidate_id,))
         db.commit()
     return redirect(url_for("import_index"))
+
+
+# ---------------------------------------------------------------------
+# Личный кабинет инвестора
+# ---------------------------------------------------------------------
+
+def investor_login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("investor_id"):
+            return redirect(url_for("investor_login"))
+        return view(*args, **kwargs)
+    return wrapped
+
+
+@app.route("/investor/login", methods=["GET", "POST"])
+def investor_login():
+    if request.method == "GET":
+        if session.get("investor_id"):
+            return redirect(url_for("investor_dashboard"))
+        return render_template("investor_login.html", error=None)
+
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "")
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM investors WHERE username = ?", (username,)
+    ).fetchone()
+    if row is None or not check_password_hash(row["password_hash"], password):
+        return render_template(
+            "investor_login.html", error="Неверный логин или пароль.",
+        ), 401
+
+    session.clear()
+    session["investor_id"] = row["id"]
+    session["investor_name"] = row["investor_name"]
+    return redirect(url_for("investor_dashboard"))
+
+
+@app.route("/investor/logout", methods=["POST"])
+def investor_logout():
+    session.clear()
+    return redirect(url_for("investor_login"))
+
+
+@app.route("/investor/")
+@investor_login_required
+def investor_dashboard():
+    db = get_db()
+    investor_name = session.get("investor_name")
+    investor_boats = [b["name"] for b in BOATS if b["investor"] == investor_name]
+
+    months, current_key = build_month_options(db)
+    selected_month = request.args.get("month", current_key)
+
+    trip_rows = []
+    if investor_boats:
+        query = (
+            "SELECT * FROM trips WHERE boat IN (%s)"
+            % ",".join("?" for _ in investor_boats)
+        )
+        params = list(investor_boats)
+        if selected_month != "all":
+            query += " AND substr(trip_date, 1, 7) = ?"
+            params.append(selected_month)
+        query += " ORDER BY trip_date DESC, id DESC"
+        trip_rows = db.execute(query, params).fetchall()
+
+    by_boat, _by_investor, _grand_my_share, grand_revenue = compute_trip_totals(trip_rows)
+    grand_payout = sum(b["investor_payout"] for b in by_boat.values())
+
+    return render_template(
+        "investor_dashboard.html",
+        investor_name=investor_name,
+        boats=investor_boats,
+        months=months,
+        selected_month=selected_month,
+        by_boat=by_boat,
+        trips=trip_rows,
+        grand_revenue=grand_revenue,
+        grand_payout=grand_payout,
+    )
 
 
 init_db()

@@ -211,7 +211,7 @@ label {
   color: var(--muted);
 }
 
-input[type="text"], input[type="date"], input[type="time"], select {
+input[type="text"], input[type="date"], input[type="time"], input[type="password"], select {
   font-family: inherit;
   font-size: 14px;
   padding: 10px 12px;
@@ -220,7 +220,7 @@ input[type="text"], input[type="date"], input[type="time"], select {
   background: var(--paper-alt);
   color: var(--ink);
 }
-input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, select:focus {
+input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, input[type="password"]:focus, select:focus {
   outline: 2px solid var(--brass);
   outline-offset: 1px;
   border-color: var(--brass);
@@ -831,3 +831,30 @@ button.btn-delete:hover { background: var(--danger); color: #fff8f4; border-colo
 @media (prefers-reduced-motion: reduce) {
   .page-loader .propeller { animation: none; }
 }
+
+/* --- investor login / dashboard --- */
+.login-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 130px);
+}
+.login-panel { width: 100%; max-width: 380px; }
+.login-form { flex-direction: column; align-items: stretch; }
+.login-form .field { flex: none; }
+
+.investor-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+.investor-bar .investor-name {
+  font-family: 'PT Serif', Georgia, serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.investor-bar form { margin: 0; }
