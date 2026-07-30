@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Личный кабинет сотрудника</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100">
+      <g fill="var(--brass)">
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/>
+      </g>
+      <g fill="none" stroke="var(--brass)" stroke-width="2.6" stroke-linecap="round" opacity="0.85">
+        <path d="M55 15A24 24 0 0 1 62 22" transform="rotate(-6 50 50)"/>
+        <path d="M18 60A24 24 0 0 1 15 51" transform="rotate(4 50 50)"/>
+      </g>
+      <circle cx="50" cy="50" r="15" fill="none" stroke="var(--ink)" stroke-width="4"/>
+      <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
+    </svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="logo-text"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
+      <div class="logo-sub">Payroll system</div>
+    </div>
+    <div class="title-block">
+      <span class="kicker">Морские прогулки · Кронштадт</span>
+      <h1>Личный кабинет сотрудника</h1>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="investor-bar">
+    <span class="investor-name">{{ employee_name }}</span>
+    <form action="{{ url_for('team_logout') }}" method="post">
+      <button type="submit" class="btn-secondary">Выйти</button>
+    </form>
+  </div>
+
+  <section class="panel filter-panel">
+    <h2>Период</h2>
+    <form action="{{ url_for('team_dashboard') }}" method="get" class="filter-form">
+      <div class="field">
+        <label for="week">Неделя</label>
+        <select id="week" name="week" onchange="this.form.submit()">
+          <option value="all" {{ 'selected' if selected_week == 'all' }}>Все периоды</option>
+          {% for w in weeks %}
+          <option value="{{ w.key }}" {{ 'selected' if selected_week == w.key }}>
+            {{ w.label }}{{ ' (текущая)' if w.is_current }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </form>
+  </section>
+
+  <div class="totals-grid">
+    <div class="panel total-card total-card-grand">
+      <span class="k">Заработано за период</span>
+      <span class="v">{{ "%.0f"|format(total) }} ₽</span>
+    </div>
+  </div>
+  {% if selected_week != 'all' %}
+  <p class="hint" style="margin:-14px 0 22px;">
+    Статус за эту неделю:
+    {% if is_paid %}<strong style="color:var(--success);">оплачено</strong>
+    {% else %}<strong style="color:var(--muted);">ожидает выплаты</strong>{% endif %}
+  </p>
+  {% endif %}
+
+  <section class="panel">
+    <h2>Записи за период</h2>
+    {% if entries %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th>Вид работы</th>
+            <th>Часы / кол-во</th>
+            <th>Ставка, ₽</th>
+            <th>Сумма, ₽</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in entries %}
+          <tr>
+            <td class="muted">{{ e.work_date|ru_date }}{% if e.trip_time %} · {{ e.trip_time }}{% endif %}</td>
+            <td>{{ e.work_type }}</td>
+            <td>{{ e.quantity|float|round(2) }}</td>
+            <td>{{ e.rate|float|round(2) }}</td>
+            <td class="amount">{{ "%.0f"|format(e.amount) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <div class="empty-logo"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
+      <div class="t">За выбранный период записей нет</div>
+      <div class="s">Смените период в фильтре выше.</div>
+    </div>
+    {% endif %}
+  </section>
+
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+
+</body>
+</html>

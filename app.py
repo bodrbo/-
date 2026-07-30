@@ -201,6 +201,14 @@ INVESTOR_ACCOUNTS = [
      "pbkdf2:sha256:1000000$E9ffeVGhqp4SxAM7$d3439a20955fef86f35307fba7dbbd47fccfafb87935afd3753866e04f041a64"),
 ]
 
+# Личный кабинет члена команды: (имя — должно совпадать с EMPLOYEES и с
+# полем employee в entries, логин, хеш пароля). Хеш добавляйте через
+# werkzeug.security.generate_password_hash(pwd, method="pbkdf2:sha256") —
+# сам пароль в коде никогда не хранится. Добавляйте сюда новых сотрудников
+# по мере необходимости — при следующем запуске аккаунт создастся сам.
+TEAM_ACCOUNTS = [
+]
+
 SALE_CHANNELS = [
     {"value": "direct", "label": "Напрямую"},
     {"value": "aggregator", "label": "Через агрегатора/агента"},
@@ -343,10 +351,21 @@ def init_db():
         )
         """
     )
-    # Seed the known investor accounts if they don't exist yet. Passwords
-    # only ever exist as pbkdf2 hashes here — nothing plaintext is stored in
-    # the repo. pbkdf2 (not the werkzeug default of scrypt) is used
-    # explicitly because some hosts' Python builds lack OpenSSL scrypt
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS team_accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_name TEXT NOT NULL,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    # Seed the known investor/team accounts if they don't exist yet.
+    # Passwords only ever exist as pbkdf2 hashes here — nothing plaintext is
+    # stored in the repo. pbkdf2 (not the werkzeug default of scrypt) is
+    # used explicitly because some hosts' Python builds lack OpenSSL scrypt
     # support in hashlib, which makes scrypt-hashed logins fail at runtime.
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     for investor_name, username, password_hash in INVESTOR_ACCOUNTS:
@@ -354,6 +373,12 @@ def init_db():
             "INSERT OR IGNORE INTO investors (investor_name, username, password_hash, created_at) "
             "VALUES (?, ?, ?, ?)",
             (investor_name, username, password_hash, now),
+        )
+    for employee_name, username, password_hash in TEAM_ACCOUNTS:
+        conn.execute(
+            "INSERT OR IGNORE INTO team_accounts (employee_name, username, password_hash, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (employee_name, username, password_hash, now),
         )
     conn.commit()
     conn.close()
@@ -2023,6 +2048,102 @@ def investor_dashboard():
         trips=trip_rows,
         grand_revenue=grand_revenue,
         grand_payout=grand_payout,
+    )
+
+
+# ---------------------------------------------------------------------
+# Личный кабинет члена команды
+# ---------------------------------------------------------------------
+
+def team_login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("team_id"):
+            return redirect(url_for("team_login"))
+        return view(*args, **kwargs)
+    return wrapped
+
+
+@app.route("/team/login", methods=["GET", "POST"])
+def team_login():
+    if request.method == "GET":
+        if session.get("team_id"):
+            return redirect(url_for("team_dashboard"))
+        return render_template("team_login.html", error=None)
+
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "")
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM team_accounts WHERE username = ?", (username,)
+    ).fetchone()
+    if row is None or not check_password_hash(row["password_hash"], password):
+        return render_template(
+            "team_login.html", error="Неверный логин или пароль.",
+        ), 401
+
+    session.clear()
+    session["team_id"] = row["id"]
+    session["team_employee_name"] = row["employee_name"]
+    return redirect(url_for("team_dashboard"))
+
+
+@app.route("/team/logout", methods=["POST"])
+def team_logout():
+    session.clear()
+    return redirect(url_for("team_login"))
+
+
+@app.route("/team/")
+@team_login_required
+def team_dashboard():
+    db = get_db()
+    employee_name = session.get("team_employee_name")
+
+    weeks, current_monday = build_week_options(db)
+    selected_week = request.args.get("week", current_monday.isoformat())
+
+    # Same trip_time left-join as the admin Зарплаты page, scoped to just
+    # this one employee — they only ever see their own entries.
+    query = (
+        "SELECT entries.*, trips.trip_time AS trip_time FROM entries "
+        "LEFT JOIN trip_labor ON trip_labor.entry_id = entries.id "
+        "LEFT JOIN trips ON trips.id = trip_labor.trip_id "
+        "WHERE entries.employee = ?"
+    )
+    params = [employee_name]
+
+    if selected_week != "all":
+        try:
+            monday = dt.date.fromisoformat(selected_week)
+        except ValueError:
+            monday = current_monday
+            selected_week = monday.isoformat()
+        sunday = monday + dt.timedelta(days=6)
+        query += " AND entries.work_date BETWEEN ? AND ?"
+        params += [monday.isoformat(), sunday.isoformat()]
+
+    query += " ORDER BY entries.work_date DESC, entries.id DESC"
+    entries = db.execute(query, params).fetchall()
+    total = sum(e["amount"] for e in entries)
+
+    # "Оплачено" only means anything for one concrete week, same as on the
+    # admin side — no single period to check it against under "Все периоды".
+    is_paid = False
+    if selected_week != "all":
+        is_paid = db.execute(
+            "SELECT 1 FROM payments WHERE employee = ? AND period_key = ?",
+            (employee_name, selected_week),
+        ).fetchone() is not None
+
+    return render_template(
+        "team_dashboard.html",
+        employee_name=employee_name,
+        weeks=weeks,
+        selected_week=selected_week,
+        entries=entries,
+        total=total,
+        is_paid=is_paid,
     )
 
 

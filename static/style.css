@@ -868,8 +868,11 @@ button.btn-delete:hover { background: var(--danger); color: #fff8f4; border-colo
 }
 .home-cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(230px, 300px));
+  grid-template-columns: repeat(3, minmax(220px, 280px));
   gap: 26px;
+}
+@media (max-width: 900px) {
+  .home-cards { grid-template-columns: repeat(2, minmax(220px, 280px)); max-width: 620px; }
 }
 @media (max-width: 620px) {
   .home-cards { grid-template-columns: 1fr; max-width: 320px; }
