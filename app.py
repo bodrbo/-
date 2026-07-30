@@ -565,6 +565,11 @@ def _payroll_context(db, selected_week, selected_employee):
 
 
 @app.route("/")
+def home():
+    return render_template("home.html")
+
+
+@app.route("/admin")
 def index():
     db = get_db()
     weeks, current_monday = build_week_options(db)
