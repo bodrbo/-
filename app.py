@@ -207,6 +207,18 @@ INVESTOR_ACCOUNTS = [
 # сам пароль в коде никогда не хранится. Добавляйте сюда новых сотрудников
 # по мере необходимости — при следующем запуске аккаунт создастся сам.
 TEAM_ACCOUNTS = [
+    ("Эльмира Бектаева", "bektaeva",
+     "pbkdf2:sha256:1000000$ay2t4C4cbVLgpxPe$0c719274a55b4bd8936b23d4ccca4d1d8d92cf0f80b46334a264be20c5026144"),
+    ("Дмитрий Тарусов", "tarusov",
+     "pbkdf2:sha256:1000000$pPTznAeRUPyMKilS$89098918c857a400223e1d79142898ae3cd27bf014f72de90bdff5df8771ab53"),
+    ("Платон Жмаев", "pzhmaev",
+     "pbkdf2:sha256:1000000$dXaypGJ5lPTU12i5$f1ee256e1241f9582e4f64a6691803ad6d3375073eb2b06ac34c40300f565427"),
+    ("Кирилл Бурнасов", "burnasov",
+     "pbkdf2:sha256:1000000$bzS80DXwJpYbM2I9$e98576219d2b66dd0c6c755debea8c5c694c48ff789be5e4b689bdf7bf372e8e"),
+    ("Андрей Жаворонков", "andylark",
+     "pbkdf2:sha256:1000000$SISeExEgbIkK4mHV$39df88e3c4dd43c33ac6a7f6616505bb7c8dbef392862c3664607862cc33b5c4"),
+    ("Марина Кащенко", "Kashenko",
+     "pbkdf2:sha256:1000000$Jn5CnA4kS1II0z13$ee1913ce0b9ebf6d831d5c4b20e9fe1fe83dc86a952964a111c3ce2a176a069f"),
 ]
 
 SALE_CHANNELS = [
