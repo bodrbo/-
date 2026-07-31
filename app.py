@@ -1694,6 +1694,19 @@ def yookassa_configured():
     return bool(YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY)
 
 
+# TEMPORARY — remove once the Beget .env-loading issue is diagnosed and
+# fixed. Deliberately leaks no secret values, only booleans/paths, so it's
+# safe to leave reachable while debugging.
+@app.route("/debug/env-check")
+def debug_env_check():
+    return {
+        "yookassa_configured": yookassa_configured(),
+        "shop_id_set": bool(YOOKASSA_SHOP_ID),
+        "secret_key_set": bool(YOOKASSA_SECRET_KEY),
+        "dotenv_debug": app.config.get("DOTENV_DEBUG"),
+    }
+
+
 def _yookassa_request(method, path, json_body=None, idempotence_key=None):
     headers = {}
     if idempotence_key:
