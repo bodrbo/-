@@ -195,6 +195,11 @@
 
   <section class="panel">
     <h2>Оплата через ЮKassa</h2>
+    {% if yookassa_error %}
+    <div class="alert">
+      <strong>Не удалось создать платёж в ЮKassa:</strong> {{ yookassa_error }}
+    </div>
+    {% endif %}
     {% if not yookassa_configured %}
     <div class="alert">
       <strong>ЮKassa не подключена.</strong> На хостинге нужно задать переменные окружения

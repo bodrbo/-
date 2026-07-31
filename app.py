@@ -1530,6 +1530,7 @@ def edit_tuning_order(order_id):
             payments=payments, paid_amount=paid_amount, remaining=remaining,
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
             yookassa_payments=yookassa_payments, yookassa_configured=yookassa_configured(),
+            yookassa_error=session.pop("yookassa_error", None),
         )
 
     errors, data = _process_tuning_form(request.form)
@@ -1544,6 +1545,7 @@ def edit_tuning_order(order_id):
             payments=payments, paid_amount=paid_amount, remaining=remaining,
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
             yookassa_payments=yookassa_payments, yookassa_configured=yookassa_configured(),
+            yookassa_error=None,
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -1771,8 +1773,8 @@ def create_yookassa_payment(order_id):
              remote["confirmation"]["confirmation_url"], now, now),
         )
         db.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        session["yookassa_error"] = str(e)
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
