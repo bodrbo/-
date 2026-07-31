@@ -60,6 +60,9 @@
       <span class="kicker">Морские прогулки · Кронштадт</span>
       <h1>Тюнинг-центр</h1>
     </div>
+    <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout">
+      <button type="submit">Выйти</button>
+    </form>
   </div>
 </header>
 

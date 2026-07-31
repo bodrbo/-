@@ -112,6 +112,21 @@ h1, h2, h3 { font-family: 'PT Serif', Georgia, serif; }
 
 .title-block { text-align: right; }
 
+.topbar-logout { margin: 0; }
+.topbar-logout button {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 14px;
+  background: transparent;
+  color: var(--parchment);
+  border: 1px solid rgba(237, 226, 201, 0.35);
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.topbar-logout button:hover { background: rgba(237, 226, 201, 0.12); }
+
 .main-nav {
   display: flex;
   align-items: stretch;

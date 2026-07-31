@@ -210,6 +210,14 @@ BOATS = [
 # "investor" в BOATS, логин, хеш пароля). Хеш добавляйте через
 # werkzeug.security.generate_password_hash(pwd, method="pbkdf2:sha256") —
 # сам пароль в коде никогда не хранится.
+# Вход в панель администратора: (имя, логин, хеш пароля). Один общий
+# аккаунт — но формат такой же, как у инвесторов/команды ниже, так что при
+# желании легко добавить второй именной вход.
+ADMIN_ACCOUNTS = [
+    ("Администратор", "admin",
+     "pbkdf2:sha256:1000000$rzeinrjoYYtmGECi$204836b2c0cc8cc1fb3e7f2433aef25b443def35f6df44cf0e10caeecdf567e3"),
+]
+
 INVESTOR_ACCOUNTS = [
     ("Владимир Леонтьев", "Leontev",
      "pbkdf2:sha256:1000000$0nolAXnkfdZY8xFb$2be552efa5b2ee9263f2ddbb2029e7f2dd8b21e69b53c071a3372fc1e5edfe14"),
@@ -500,6 +508,17 @@ def init_db():
         )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS admin_accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            admin_name TEXT NOT NULL,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS investors (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             investor_name TEXT NOT NULL,
@@ -526,6 +545,12 @@ def init_db():
     # used explicitly because some hosts' Python builds lack OpenSSL scrypt
     # support in hashlib, which makes scrypt-hashed logins fail at runtime.
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    for admin_name, username, password_hash in ADMIN_ACCOUNTS:
+        conn.execute(
+            "INSERT OR IGNORE INTO admin_accounts (admin_name, username, password_hash, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (admin_name, username, password_hash, now),
+        )
     for investor_name, username, password_hash in INVESTOR_ACCOUNTS:
         conn.execute(
             "INSERT OR IGNORE INTO investors (investor_name, username, password_hash, created_at) "
@@ -752,7 +777,47 @@ def home():
     return render_template("home.html")
 
 
+def admin_login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("admin_id"):
+            return redirect(url_for("admin_login"))
+        return view(*args, **kwargs)
+    return wrapped
+
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    if request.method == "GET":
+        if session.get("admin_id"):
+            return redirect(url_for("index"))
+        return render_template("admin_login.html", error=None)
+
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "")
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM admin_accounts WHERE username = ?", (username,)
+    ).fetchone()
+    if row is None or not check_password_hash(row["password_hash"], password):
+        return render_template(
+            "admin_login.html", error="Неверный логин или пароль.",
+        ), 401
+
+    session.clear()
+    session["admin_id"] = row["id"]
+    session["admin_name"] = row["admin_name"]
+    return redirect(url_for("index"))
+
+
+@app.route("/admin/logout", methods=["POST"])
+def admin_logout():
+    session.clear()
+    return redirect(url_for("admin_login"))
+
+
 @app.route("/admin")
+@admin_login_required
 def index():
     db = get_db()
     weeks, current_monday = build_week_options(db)
@@ -772,6 +837,7 @@ def index():
 
 
 @app.route("/pay", methods=["POST"])
+@admin_login_required
 def mark_paid():
     employee = request.form.get("employee", "").strip()
     period_key = request.form.get("week", "").strip()
@@ -787,6 +853,7 @@ def mark_paid():
 
 
 @app.route("/unpay", methods=["POST"])
+@admin_login_required
 def unmark_paid():
     employee = request.form.get("employee", "").strip()
     period_key = request.form.get("week", "").strip()
@@ -802,6 +869,7 @@ def unmark_paid():
 
 
 @app.route("/add", methods=["POST"])
+@admin_login_required
 def add_entry():
     employee = request.form.get("employee", "").strip()
     if employee == CUSTOM_VALUE:
@@ -870,6 +938,7 @@ def add_entry():
 
 
 @app.route("/add_manager_fee", methods=["POST"])
+@admin_login_required
 def add_manager_fee():
     employee = request.form.get("manager_employee", "").strip()
     if employee == CUSTOM_VALUE:
@@ -938,6 +1007,7 @@ def add_manager_fee():
 
 
 @app.route("/delete/<int:entry_id>", methods=["POST"])
+@admin_login_required
 def delete_entry(entry_id):
     db = get_db()
     db.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
@@ -1161,6 +1231,7 @@ def _process_trip_form(db, form, exclude_trip_id=None):
 
 
 @app.route("/trips")
+@admin_login_required
 def trips_index():
     db = get_db()
     selected_month = request.args.get("month")
@@ -1170,6 +1241,7 @@ def trips_index():
 
 
 @app.route("/trips/add", methods=["POST"])
+@admin_login_required
 def add_trip():
     db = get_db()
     errors, data = _process_trip_form(db, request.form)
@@ -1218,6 +1290,7 @@ def add_trip():
 
 
 @app.route("/trips/edit/<int:trip_id>", methods=["GET", "POST"])
+@admin_login_required
 def edit_trip(trip_id):
     db = get_db()
     trip = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
@@ -1319,6 +1392,7 @@ def edit_trip(trip_id):
 
 
 @app.route("/trips/delete/<int:trip_id>", methods=["POST"])
+@admin_login_required
 def delete_trip(trip_id):
     db = get_db()
     trip = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
@@ -1458,6 +1532,7 @@ def _order_payment_totals(db, order_id, total):
 
 
 @app.route("/tuning")
+@admin_login_required
 def tuning_index():
     db = get_db()
     orders = db.execute(
@@ -1473,6 +1548,7 @@ def tuning_index():
 
 
 @app.route("/tuning/add", methods=["GET", "POST"])
+@admin_login_required
 def add_tuning_order():
     if request.method == "GET":
         return render_template(
@@ -1510,6 +1586,7 @@ def add_tuning_order():
 
 
 @app.route("/tuning/edit/<int:order_id>", methods=["GET", "POST"])
+@admin_login_required
 def edit_tuning_order(order_id):
     db = get_db()
     order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
@@ -1582,6 +1659,7 @@ def edit_tuning_order(order_id):
 
 
 @app.route("/tuning/delete/<int:order_id>", methods=["POST"])
+@admin_login_required
 def delete_tuning_order(order_id):
     db = get_db()
     db.execute("DELETE FROM tuning_order_items WHERE order_id = ?", (order_id,))
@@ -1592,6 +1670,7 @@ def delete_tuning_order(order_id):
 
 
 @app.route("/tuning/<int:order_id>/status", methods=["POST"])
+@admin_login_required
 def set_tuning_order_status(order_id):
     db = get_db()
     order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
@@ -1605,6 +1684,7 @@ def set_tuning_order_status(order_id):
 
 
 @app.route("/tuning/<int:order_id>/item/<int:item_id>/status", methods=["POST"])
+@admin_login_required
 def set_tuning_item_status(order_id, item_id):
     db = get_db()
     status = request.form.get("status", "").strip()
@@ -1618,6 +1698,7 @@ def set_tuning_item_status(order_id, item_id):
 
 
 @app.route("/tuning/<int:order_id>/pay", methods=["POST"])
+@admin_login_required
 def add_tuning_payment(order_id):
     db = get_db()
     order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
@@ -1640,6 +1721,7 @@ def add_tuning_payment(order_id):
 
 
 @app.route("/tuning/<int:order_id>/pay/<int:payment_id>/delete", methods=["POST"])
+@admin_login_required
 def delete_tuning_payment(order_id, payment_id):
     db = get_db()
     db.execute("DELETE FROM tuning_payments WHERE id = ? AND order_id = ?", (payment_id, order_id))
@@ -1754,6 +1836,7 @@ def _sync_yookassa_payment(db, record, remote=None):
 
 
 @app.route("/tuning/<int:order_id>/yookassa/create", methods=["POST"])
+@admin_login_required
 def create_yookassa_payment(order_id):
     db = get_db()
     order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
@@ -1809,6 +1892,7 @@ def create_yookassa_payment(order_id):
 
 
 @app.route("/tuning/<int:order_id>/yookassa/<int:payment_id>/check", methods=["POST"])
+@admin_login_required
 def check_yookassa_payment(order_id, payment_id):
     db = get_db()
     record = db.execute(
@@ -2376,6 +2460,7 @@ def merge_pending_candidates(db):
 
 
 @app.route("/trips/import", methods=["GET"])
+@admin_login_required
 def import_index():
     """The import queue lives inside the trips page itself (as a collapsible
     section) — this route just renders that same page with the section
@@ -2392,6 +2477,7 @@ def import_index():
 
 
 @app.route("/trips/import/fetch", methods=["POST"])
+@admin_login_required
 def import_fetch():
     db = get_db()
     if not yclients_configured():
@@ -2464,6 +2550,7 @@ def import_fetch():
 
 
 @app.route("/trips/import/review/<int:candidate_id>", methods=["GET"])
+@admin_login_required
 def import_review(candidate_id):
     db = get_db()
     row = db.execute(
@@ -2592,6 +2679,7 @@ def _try_auto_import_candidate(db, row):
 
 
 @app.route("/trips/import/confirm/<int:candidate_id>", methods=["POST"])
+@admin_login_required
 def import_confirm(candidate_id):
     db = get_db()
     row = db.execute(
@@ -2618,6 +2706,7 @@ def import_confirm(candidate_id):
 
 
 @app.route("/trips/import/skip/<int:candidate_id>", methods=["POST"])
+@admin_login_required
 def import_skip(candidate_id):
     db = get_db()
     row = db.execute(
