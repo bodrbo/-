@@ -61,6 +61,17 @@ YCLIENTS_PARTNER_TOKEN = os.environ.get("YCLIENTS_PARTNER_TOKEN") or "rtzn97gwz5
 YCLIENTS_USER_TOKEN = os.environ.get("YCLIENTS_USER_TOKEN") or "7a61e523fd03f146601add9408f69696"
 YCLIENTS_COMPANY_ID = os.environ.get("YCLIENTS_COMPANY_ID") or "979343"
 
+# ---------------------------------------------------------------------
+# ЮKassa — приём онлайн-оплаты по заказам тюнинг-центра. В отличие от
+# Yclients-токенов выше, здесь НЕТ запасного значения в коде — это платёжные
+# реквизиты, и в публичном репозитории им не место. Задайте на хостинге:
+#   YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
+# Без них раздел оплаты в интерфейсе просто не активируется.
+# ---------------------------------------------------------------------
+YOOKASSA_SHOP_ID = os.environ.get("YOOKASSA_SHOP_ID")
+YOOKASSA_SECRET_KEY = os.environ.get("YOOKASSA_SECRET_KEY")
+YOOKASSA_API_BASE = "https://api.yookassa.ru/v3"
+
 # Соответствие цвета записи/события в Yclients — катеру. Значения подтверждены.
 BOAT_COLORS = {
     "#03a9f4": "Ларус",             # синий
@@ -262,6 +273,20 @@ def work_status_label(value):
 app.jinja_env.filters["order_status_label"] = order_status_label
 app.jinja_env.filters["work_status_label"] = work_status_label
 
+YOOKASSA_STATUS_LABELS = {
+    "pending": "Ожидает оплаты",
+    "waiting_for_capture": "Обрабатывается",
+    "succeeded": "Оплачено",
+    "canceled": "Отменён",
+}
+
+
+def yookassa_status_label(value):
+    return YOOKASSA_STATUS_LABELS.get(value, value)
+
+
+app.jinja_env.filters["yookassa_status_label"] = yookassa_status_label
+
 MONTHS_GEN = [
     "января", "февраля", "марта", "апреля", "мая", "июня",
     "июля", "августа", "сентября", "октября", "ноября", "декабря",
@@ -425,6 +450,21 @@ def init_db():
             amount REAL NOT NULL,
             paid_at TEXT NOT NULL,
             created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tuning_yookassa_payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            yookassa_payment_id TEXT NOT NULL UNIQUE,
+            amount REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            confirmation_url TEXT NOT NULL,
+            tuning_payment_id INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
         )
         """
     )
@@ -1476,6 +1516,9 @@ def edit_tuning_order(order_id):
             "SELECT * FROM tuning_order_items WHERE order_id = ? ORDER BY id", (order_id,)
         ).fetchall()
         payments, paid_amount, remaining = _order_payment_totals(db, order_id, order["total"])
+        yookassa_payments = db.execute(
+            "SELECT * FROM tuning_yookassa_payments WHERE order_id = ? ORDER BY id DESC", (order_id,)
+        ).fetchall()
         form_values = {
             "client_name": order["client_name"], "boat_model": order["boat_model"],
             "sale_channel": order["sale_channel"], "phone": order["phone"],
@@ -1486,16 +1529,21 @@ def edit_tuning_order(order_id):
             items_prefill=items, sale_channels=SALE_CHANNELS, active_page="tuning",
             payments=payments, paid_amount=paid_amount, remaining=remaining,
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
+            yookassa_payments=yookassa_payments, yookassa_configured=yookassa_configured(),
         )
 
     errors, data = _process_tuning_form(request.form)
     if errors:
         payments, paid_amount, remaining = _order_payment_totals(db, order_id, order["total"])
+        yookassa_payments = db.execute(
+            "SELECT * FROM tuning_yookassa_payments WHERE order_id = ? ORDER BY id DESC", (order_id,)
+        ).fetchall()
         return render_template(
             "tuning_form.html", edit_order=order, errors=errors, form_values=request.form,
             items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning",
             payments=payments, paid_amount=paid_amount, remaining=remaining,
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
+            yookassa_payments=yookassa_payments, yookassa_configured=yookassa_configured(),
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -1621,10 +1669,147 @@ def client_dashboard(token):
         remaining_total += remaining
 
     grand_total = sum(o["total"] for o in order_rows)
+
+    # Attach each order's most recent unpaid ЮKassa payment link, if any,
+    # so the client can pay online straight from their cabinet.
+    for order in orders:
+        pending = db.execute(
+            "SELECT * FROM tuning_yookassa_payments WHERE order_id = ? AND status != 'succeeded' "
+            "ORDER BY id DESC LIMIT 1",
+            (order["id"],),
+        ).fetchone()
+        order["yookassa_pending"] = pending
+
     return render_template(
         "client_dashboard.html", client=client, orders=orders, grand_total=grand_total,
         paid_total=paid_total, remaining_total=remaining_total,
     )
+
+
+# =======================================================================
+# ЮKassa — оплата заказов тюнинг-центра
+# =======================================================================
+
+def yookassa_configured():
+    return bool(YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY)
+
+
+def _yookassa_request(method, path, json_body=None, idempotence_key=None):
+    headers = {}
+    if idempotence_key:
+        headers["Idempotence-Key"] = idempotence_key
+    resp = requests.request(
+        method, f"{YOOKASSA_API_BASE}{path}",
+        auth=(YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY),
+        json=json_body, headers=headers, timeout=15,
+    )
+    if not resp.ok:
+        raise RuntimeError(f"ЮKassa вернула {resp.status_code}: {resp.text[:500]}")
+    return resp.json()
+
+
+def _sync_yookassa_payment(db, record, remote=None):
+    """Refresh a stored ЮKassa payment's status from the API (or from an
+    already-fetched `remote` dict) and, the first time it turns succeeded,
+    record it in the same tuning_payments ledger admin-entered payments use
+    — so paid/remaining totals everywhere stay correct without special-casing
+    online payments."""
+    if remote is None:
+        remote = _yookassa_request("GET", f"/payments/{record['yookassa_payment_id']}")
+    status = remote.get("status", record["status"])
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "UPDATE tuning_yookassa_payments SET status = ?, updated_at = ? WHERE id = ?",
+        (status, now, record["id"]),
+    )
+    if status == "succeeded" and not record["tuning_payment_id"]:
+        cur = db.execute(
+            "INSERT INTO tuning_payments (order_id, amount, paid_at, created_at) VALUES (?, ?, ?, ?)",
+            (record["order_id"], record["amount"], now, now),
+        )
+        db.execute(
+            "UPDATE tuning_yookassa_payments SET tuning_payment_id = ? WHERE id = ?",
+            (cur.lastrowid, record["id"]),
+        )
+    db.commit()
+    return status
+
+
+@app.route("/tuning/<int:order_id>/yookassa/create", methods=["POST"])
+def create_yookassa_payment(order_id):
+    db = get_db()
+    order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None or not yookassa_configured():
+        return redirect(url_for("tuning_index"))
+
+    _, _, remaining = _order_payment_totals(db, order_id, order["total"])
+    if remaining <= 0:
+        return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+    client = db.execute("SELECT * FROM clients WHERE id = ?", (order["client_id"],)).fetchone()
+    return_url = (
+        url_for("client_dashboard", token=client["token"], _external=True)
+        if client else url_for("home", _external=True)
+    )
+
+    body = {
+        "amount": {"value": f"{remaining:.2f}", "currency": "RUB"},
+        "capture": True,
+        "description": f"Заказ №{order_id} — {order['client_name']}"[:128],
+        "confirmation": {"type": "redirect", "return_url": return_url},
+        "metadata": {"tuning_order_id": str(order_id)},
+    }
+    try:
+        remote = _yookassa_request(
+            "POST", "/payments", json_body=body, idempotence_key=secrets.token_hex(16)
+        )
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        db.execute(
+            "INSERT INTO tuning_yookassa_payments (order_id, yookassa_payment_id, amount, status, "
+            "confirmation_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (order_id, remote["id"], remaining, remote.get("status", "pending"),
+             remote["confirmation"]["confirmation_url"], now, now),
+        )
+        db.commit()
+    except Exception:
+        pass
+    return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
+@app.route("/tuning/<int:order_id>/yookassa/<int:payment_id>/check", methods=["POST"])
+def check_yookassa_payment(order_id, payment_id):
+    db = get_db()
+    record = db.execute(
+        "SELECT * FROM tuning_yookassa_payments WHERE id = ? AND order_id = ?",
+        (payment_id, order_id),
+    ).fetchone()
+    if record is not None:
+        try:
+            _sync_yookassa_payment(db, record)
+        except Exception:
+            pass
+    return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
+@app.route("/yookassa/webhook", methods=["POST"])
+def yookassa_webhook():
+    # No auth — ЮKassa calls this directly. We never trust the notification
+    # body for the actual status: we re-fetch the payment from the API by
+    # its id before recording anything, per ЮKassa's own recommendation.
+    try:
+        payload = request.get_json(force=True, silent=True) or {}
+        payment_id = (payload.get("object") or {}).get("id")
+        if payment_id:
+            db = get_db()
+            record = db.execute(
+                "SELECT * FROM tuning_yookassa_payments WHERE yookassa_payment_id = ?",
+                (payment_id,),
+            ).fetchone()
+            if record is not None:
+                _sync_yookassa_payment(db, record)
+    except Exception:
+        pass
+    return "", 200
 
 
 # =======================================================================

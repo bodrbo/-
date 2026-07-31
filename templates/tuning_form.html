@@ -192,6 +192,49 @@
     <p class="hint">Платежей пока нет.</p>
     {% endif %}
   </section>
+
+  <section class="panel">
+    <h2>Оплата через ЮKassa</h2>
+    {% if not yookassa_configured %}
+    <div class="alert">
+      <strong>ЮKassa не подключена.</strong> На хостинге нужно задать переменные окружения
+      <code>YOOKASSA_SHOP_ID</code> и <code>YOOKASSA_SECRET_KEY</code>.
+    </div>
+    {% else %}
+      {% if remaining > 0 %}
+      <form action="{{ url_for('create_yookassa_payment', order_id=edit_order.id) }}" method="post">
+        <button type="submit">Выставить счёт на {{ "%.0f"|format(remaining) }} ₽</button>
+      </form>
+      {% else %}
+      <p class="hint">Заказ полностью оплачен — выставлять новый счёт не нужно.</p>
+      {% endif %}
+    {% endif %}
+
+    {% if yookassa_payments %}
+    <div class="table-scroll" style="margin-top:16px;">
+      <table class="records">
+        <thead><tr><th>Дата</th><th>Сумма</th><th>Статус</th><th></th></tr></thead>
+        <tbody>
+          {% for yp in yookassa_payments %}
+          <tr>
+            <td class="muted">{{ yp.created_at[:10]|ru_date }}</td>
+            <td class="amount">{{ "%.0f"|format(yp.amount) }}</td>
+            <td><span class="status-badge status-{{ yp.status }}">{{ yp.status|yookassa_status_label }}</span></td>
+            <td class="row-actions">
+              {% if yp.status not in ('succeeded', 'canceled') %}
+              <a href="{{ yp.confirmation_url }}" target="_blank" rel="noopener" class="btn-secondary">Ссылка на оплату</a>
+              <form action="{{ url_for('check_yookassa_payment', order_id=edit_order.id, payment_id=yp.id) }}" method="post">
+                <button type="submit" class="btn-secondary">Проверить оплату</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </section>
   {% endif %}
 
   <section class="panel form-panel">

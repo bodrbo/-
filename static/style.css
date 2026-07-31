@@ -256,7 +256,10 @@ input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, in
 .status-badge.status-in_progress { background: rgba(138, 95, 34, 0.16); color: var(--brass-strong); }
 .status-badge.status-qc { background: rgba(41, 76, 86, 0.14); color: var(--ink-soft); }
 .status-badge.status-done { background: rgba(47, 107, 79, 0.16); color: var(--success); }
-.status-badge.status-cancelled { background: rgba(179, 64, 44, 0.14); color: var(--danger); }
+.status-badge.status-cancelled,
+.status-badge.status-canceled { background: rgba(179, 64, 44, 0.14); color: var(--danger); }
+.status-badge.status-waiting_for_capture { background: rgba(138, 95, 34, 0.16); color: var(--brass-strong); }
+.status-badge.status-succeeded { background: rgba(47, 107, 79, 0.16); color: var(--success); }
 
 .status-select-form { display: inline-block; margin: 0; }
 .status-select-form select {
@@ -425,6 +428,24 @@ button[type="submit"] {
 }
 button[type="submit"]:hover { background: var(--brass-strong); }
 button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); outline-offset: 2px; }
+
+.btn-pay {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 11px 24px;
+  background: var(--brass);
+  color: var(--on-accent);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+.btn-pay:hover { background: var(--brass-strong); }
 
 /* --- totals / dashboard cards --- */
 .totals-grid {

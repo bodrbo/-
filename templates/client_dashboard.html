@@ -112,6 +112,11 @@
             Скидка {{ o.discount_pct|float|round(1) }}% · Оплачено {{ "%.0f"|format(o.paid_amount) }} ₽ ·
             К доплате {{ "%.0f"|format(o.remaining) }} ₽
           </p>
+          {% if o.yookassa_pending and o.remaining > 0 %}
+          <a href="{{ o.yookassa_pending.confirmation_url }}" target="_blank" rel="noopener" class="btn-pay" style="margin-top:6px;">
+            Оплатить онлайн {{ "%.0f"|format(o.yookassa_pending.amount) }} ₽
+          </a>
+          {% endif %}
         </div>
       </details>
       {% endfor %}
