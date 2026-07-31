@@ -1,30 +1,39 @@
+/* Open Sans replaces PT Serif/PT Sans — matches bodrbo.ru's own typeface,
+   and drops the serif headings in favor of one clean sans-serif family
+   throughout. Split into cyrillic/latin files (the variable source Google
+   serves now covers both 400 and 700 in the same file per script) so the
+   browser only fetches the glyphs this mostly-Russian UI actually uses. */
 @font-face {
-  font-family: 'PT Serif';
+  font-family: 'Open Sans';
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url('fonts/pt-serif-400.woff2') format('woff2');
+  src: url('fonts/open-sans-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 @font-face {
-  font-family: 'PT Serif';
+  font-family: 'Open Sans';
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url('fonts/pt-serif-700.woff2') format('woff2');
+  src: url('fonts/open-sans-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 @font-face {
-  font-family: 'PT Sans';
+  font-family: 'Open Sans';
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url('fonts/pt-sans-400.woff2') format('woff2');
+  src: url('fonts/open-sans-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
-  font-family: 'PT Sans';
+  font-family: 'Open Sans';
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url('fonts/pt-sans-700.woff2') format('woff2');
+  src: url('fonts/open-sans-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
   font-family: 'PT Mono';
@@ -70,13 +79,13 @@
 
 body {
   margin: 0;
-  font-family: 'PT Sans', -apple-system, sans-serif;
+  font-family: 'Open Sans', -apple-system, sans-serif;
   background: var(--parchment);
   color: var(--ink);
   line-height: 1.5;
 }
 
-h1, h2, h3 { font-family: 'PT Serif', Georgia, serif; }
+h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
 
 .tabular { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
 
@@ -473,7 +482,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   letter-spacing: 0.06em;
 }
 .total-card .v {
-  font-family: 'PT Sans', -apple-system, sans-serif;
+  font-family: 'Open Sans', -apple-system, sans-serif;
   font-size: 24px;
   font-weight: 700;
   color: var(--ink);
@@ -552,7 +561,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .confirm-modal.open .confirm-modal-box { transform: translateY(0) scale(1); }
 .confirm-modal-text {
   margin: 0 0 20px;
-  font-family: 'PT Serif', Georgia, serif;
+  font-family: 'Open Sans', -apple-system, sans-serif;
   font-size: 17px;
   color: var(--ink);
 }
@@ -602,7 +611,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   font-weight: 700;
 }
 .hero-card .v {
-  font-family: 'PT Sans', -apple-system, sans-serif;
+  font-family: 'Open Sans', -apple-system, sans-serif;
   font-size: 32px;
   font-weight: 700;
   line-height: 1;
@@ -625,7 +634,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   gap: 8px;
 }
 .boat-name {
-  font-family: 'PT Serif', Georgia, serif;
+  font-family: 'Open Sans', -apple-system, sans-serif;
   font-size: 16px;
   font-weight: 700;
 }
@@ -789,10 +798,10 @@ table.records tr.row-pending:hover td { background: rgba(212, 141, 74, 0.2); }
   padding: 34px 20px;
   color: var(--muted);
 }
-.empty-state .t { font-family: 'PT Serif', Georgia, serif; font-size: 15px; color: var(--ink-soft); }
+.empty-state .t { font-family: 'Open Sans', -apple-system, sans-serif; font-size: 15px; color: var(--ink-soft); }
 .empty-state .s { font-size: 12.5px; max-width: 38ch; }
 .empty-logo {
-  font-family: 'Bebas Neue', 'PT Serif', Georgia, serif;
+  font-family: 'Bebas Neue', 'Open Sans', -apple-system, sans-serif;
   font-weight: 700;
   font-size: 34px;
   letter-spacing: 0.03em;
@@ -822,7 +831,7 @@ table.records tr.row-pending:hover td { background: rgba(212, 141, 74, 0.2); }
   display: flex;
   align-items: center;
   gap: 10px;
-  font-family: 'PT Serif', Georgia, serif;
+  font-family: 'Open Sans', -apple-system, sans-serif;
   font-size: 18px;
   color: var(--ink);
 }
@@ -848,7 +857,7 @@ table.records tr.row-pending:hover td { background: rgba(212, 141, 74, 0.2); }
   border-radius: 999px;
   background: var(--brass);
   color: var(--on-accent);
-  font-family: 'PT Sans', sans-serif;
+  font-family: 'Open Sans', sans-serif;
   font-size: 11.5px;
   font-weight: 700;
 }
@@ -890,13 +899,13 @@ table.records tr.row-pending:hover td { background: rgba(212, 141, 74, 0.2); }
 }
 .order-card[open] > summary .chev { transform: rotate(45deg); }
 .order-card .oc-num {
-  font-family: 'PT Serif', Georgia, serif;
+  font-family: 'Open Sans', -apple-system, sans-serif;
   font-weight: 700;
   color: var(--ink);
 }
 .order-card .oc-date, .order-card .oc-boat { color: var(--muted); font-size: 13.5px; }
 .order-card .oc-total {
-  font-family: 'PT Sans', -apple-system, sans-serif;
+  font-family: 'Open Sans', -apple-system, sans-serif;
   font-weight: 700;
   color: var(--ink);
 }
@@ -963,7 +972,7 @@ table.records tr.row-pending:hover td { background: rgba(212, 141, 74, 0.2); }
   vector-effect: non-scaling-stroke;
 }
 .page-loader .loader-label {
-  font-family: 'PT Serif', Georgia, serif;
+  font-family: 'Open Sans', -apple-system, sans-serif;
   font-size: 12.5px;
   font-weight: 700;
   letter-spacing: 0.1em;
@@ -997,7 +1006,7 @@ table.records tr.row-pending:hover td { background: rgba(212, 141, 74, 0.2); }
   margin-bottom: 22px;
 }
 .investor-bar .investor-name {
-  font-family: 'PT Serif', Georgia, serif;
+  font-family: 'Open Sans', -apple-system, sans-serif;
   font-size: 16px;
   font-weight: 700;
   color: var(--ink);
@@ -1062,7 +1071,7 @@ table.records tr.row-pending:hover td { background: rgba(212, 141, 74, 0.2); }
 }
 .home-card-icon svg { width: 32px; height: 32px; }
 .home-card-title {
-  font-family: 'PT Serif', Georgia, serif;
+  font-family: 'Open Sans', -apple-system, sans-serif;
   font-size: 19px;
   font-weight: 700;
   color: var(--ink);
