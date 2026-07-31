@@ -227,6 +227,41 @@ SALE_CHANNELS = [
     {"value": "mixed", "label": "Смешанно / другое (укажу комиссию сам)"},
 ]
 
+ORDER_STATUSES = [
+    {"value": "estimate", "label": "Предварительный расчёт"},
+    {"value": "in_progress", "label": "В работе"},
+    {"value": "qc", "label": "Проходит независимый контроль качества"},
+    {"value": "done", "label": "Выполнен"},
+    {"value": "cancelled", "label": "Отменён"},
+]
+DEFAULT_ORDER_STATUS = "estimate"
+
+WORK_STATUSES = [
+    {"value": "pending", "label": "На согласовании"},
+    {"value": "approved", "label": "Согласовано"},
+    {"value": "in_progress", "label": "В работе"},
+    {"value": "done", "label": "Выполнено"},
+]
+DEFAULT_WORK_STATUS = "pending"
+
+
+def order_status_label(value):
+    for s in ORDER_STATUSES:
+        if s["value"] == value:
+            return s["label"]
+    return value
+
+
+def work_status_label(value):
+    for s in WORK_STATUSES:
+        if s["value"] == value:
+            return s["label"]
+    return value
+
+
+app.jinja_env.filters["order_status_label"] = order_status_label
+app.jinja_env.filters["work_status_label"] = work_status_label
+
 MONTHS_GEN = [
     "января", "февраля", "марта", "апреля", "мая", "июня",
     "июля", "августа", "сентября", "октября", "ноября", "декабря",
@@ -363,6 +398,7 @@ def init_db():
             discount_pct REAL NOT NULL DEFAULT 0,
             subtotal REAL NOT NULL,
             total REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'estimate',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
@@ -376,7 +412,8 @@ def init_db():
             work_name TEXT NOT NULL,
             cost_price REAL NOT NULL,
             multiplier REAL NOT NULL,
-            price REAL NOT NULL
+            price REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending'
         )
         """
     )
@@ -403,10 +440,19 @@ def init_db():
         )
         """
     )
-    # Migration path for tuning_orders created before client_id existed.
+    # Migration path for tuning_orders created before client_id/status existed.
     tuning_cols = [row[1] for row in conn.execute("PRAGMA table_info(tuning_orders)").fetchall()]
     if "client_id" not in tuning_cols:
         conn.execute("ALTER TABLE tuning_orders ADD COLUMN client_id INTEGER")
+    if "status" not in tuning_cols:
+        conn.execute(
+            "ALTER TABLE tuning_orders ADD COLUMN status TEXT NOT NULL DEFAULT 'estimate'"
+        )
+    item_cols = [row[1] for row in conn.execute("PRAGMA table_info(tuning_order_items)").fetchall()]
+    if "status" not in item_cols:
+        conn.execute(
+            "ALTER TABLE tuning_order_items ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS investors (
@@ -1401,17 +1447,18 @@ def add_tuning_order():
     client_id = _get_or_create_client(db, data["phone"], data["client_name"], data["boat_model"])
     cur = db.execute(
         "INSERT INTO tuning_orders (client_id, client_name, boat_model, sale_channel, phone, "
-        "discount_pct, subtotal, total, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "discount_pct, subtotal, total, status, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (client_id, data["client_name"], data["boat_model"], data["sale_channel"], data["phone"],
-         data["discount_pct"], data["subtotal"], data["total"], now, now),
+         data["discount_pct"], data["subtotal"], data["total"], DEFAULT_ORDER_STATUS, now, now),
     )
     order_id = cur.lastrowid
     for item in data["items"]:
         db.execute(
-            "INSERT INTO tuning_order_items (order_id, work_name, cost_price, multiplier, price) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (order_id, item["work_name"], item["cost_price"], item["multiplier"], item["price"]),
+            "INSERT INTO tuning_order_items (order_id, work_name, cost_price, multiplier, price, status) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (order_id, item["work_name"], item["cost_price"], item["multiplier"], item["price"],
+             DEFAULT_WORK_STATUS),
         )
     db.commit()
     return redirect(url_for("tuning_index"))
@@ -1438,6 +1485,7 @@ def edit_tuning_order(order_id):
             "tuning_form.html", edit_order=order, errors=None, form_values=form_values,
             items_prefill=items, sale_channels=SALE_CHANNELS, active_page="tuning",
             payments=payments, paid_amount=paid_amount, remaining=remaining,
+            order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
         )
 
     errors, data = _process_tuning_form(request.form)
@@ -1447,6 +1495,7 @@ def edit_tuning_order(order_id):
             "tuning_form.html", edit_order=order, errors=errors, form_values=request.form,
             items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning",
             payments=payments, paid_amount=paid_amount, remaining=remaining,
+            order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -1457,12 +1506,21 @@ def edit_tuning_order(order_id):
         (client_id, data["client_name"], data["boat_model"], data["sale_channel"], data["phone"],
          data["discount_pct"], data["subtotal"], data["total"], now, order_id),
     )
+    # Preserve each surviving work row's status by position — the form
+    # resubmits every row on every save (even ones untouched here), so a
+    # plain delete+recreate would silently reset progress on every edit.
+    old_statuses = [
+        r["status"] for r in db.execute(
+            "SELECT status FROM tuning_order_items WHERE order_id = ? ORDER BY id", (order_id,)
+        ).fetchall()
+    ]
     db.execute("DELETE FROM tuning_order_items WHERE order_id = ?", (order_id,))
-    for item in data["items"]:
+    for i, item in enumerate(data["items"]):
+        status = old_statuses[i] if i < len(old_statuses) else DEFAULT_WORK_STATUS
         db.execute(
-            "INSERT INTO tuning_order_items (order_id, work_name, cost_price, multiplier, price) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (order_id, item["work_name"], item["cost_price"], item["multiplier"], item["price"]),
+            "INSERT INTO tuning_order_items (order_id, work_name, cost_price, multiplier, price, status) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (order_id, item["work_name"], item["cost_price"], item["multiplier"], item["price"], status),
         )
     db.commit()
     return redirect(url_for("tuning_index"))
@@ -1476,6 +1534,32 @@ def delete_tuning_order(order_id):
     db.execute("DELETE FROM tuning_orders WHERE id = ?", (order_id,))
     db.commit()
     return redirect(url_for("tuning_index"))
+
+
+@app.route("/tuning/<int:order_id>/status", methods=["POST"])
+def set_tuning_order_status(order_id):
+    db = get_db()
+    order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None:
+        return redirect(url_for("tuning_index"))
+    status = request.form.get("status", "").strip()
+    if status in [s["value"] for s in ORDER_STATUSES]:
+        db.execute("UPDATE tuning_orders SET status = ? WHERE id = ?", (status, order_id))
+        db.commit()
+    return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
+@app.route("/tuning/<int:order_id>/item/<int:item_id>/status", methods=["POST"])
+def set_tuning_item_status(order_id, item_id):
+    db = get_db()
+    status = request.form.get("status", "").strip()
+    if status in [s["value"] for s in WORK_STATUSES]:
+        db.execute(
+            "UPDATE tuning_order_items SET status = ? WHERE id = ? AND order_id = ?",
+            (status, item_id, order_id),
+        )
+        db.commit()
+    return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
 @app.route("/tuning/<int:order_id>/pay", methods=["POST"])
@@ -1525,7 +1609,7 @@ def client_dashboard(token):
     for o in order_rows:
         _, paid_amount, remaining = _order_payment_totals(db, o["id"], o["total"])
         items = db.execute(
-            "SELECT work_name, price FROM tuning_order_items WHERE order_id = ? ORDER BY id",
+            "SELECT work_name, price, status FROM tuning_order_items WHERE order_id = ? ORDER BY id",
             (o["id"],),
         ).fetchall()
         order = dict(o)

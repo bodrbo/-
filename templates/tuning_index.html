@@ -94,6 +94,7 @@
             <th>Телефон</th>
             <th>Скидка</th>
             <th>Итог</th>
+            <th>Статус</th>
             <th></th>
           </tr>
         </thead>
@@ -114,6 +115,7 @@
             <td class="muted">{{ o.phone }}</td>
             <td>{{ o.discount_pct|float|round(1) }}%</td>
             <td class="amount">{{ "%.0f"|format(o.total) }}</td>
+            <td><span class="status-badge status-{{ o.status }}">{{ o.status|order_status_label }}</span></td>
             <td class="row-actions">
               <a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="icon-btn" title="Редактировать">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">

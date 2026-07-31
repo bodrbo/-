@@ -88,6 +88,19 @@
   {% endif %}
 
   {% if edit_order %}
+  <div class="panel" style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+    <h2 style="margin:0;">Статус заказа</h2>
+    <span class="status-badge status-{{ edit_order.status }}">{{ edit_order.status|order_status_label }}</span>
+    <form action="{{ url_for('set_tuning_order_status', order_id=edit_order.id) }}" method="post"
+          class="status-select-form" style="margin-left:auto;">
+      <select name="status" onchange="this.form.submit()">
+        {% for s in order_statuses %}
+        <option value="{{ s.value }}" {{ 'selected' if edit_order.status == s.value }}>{{ s.label }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+
   <div class="hero-grid">
     <div class="hero-card">
       <span class="k">К доплате</span>
@@ -105,6 +118,37 @@
     <span><i style="background:var(--success);"></i>Оплачено — {{ "%.0f"|format(paid_amount) }} ₽</span>
     <span><i style="background:var(--ink-soft);"></i>Не оплачено — {{ "%.0f"|format(remaining) }} ₽</span>
   </div>
+
+  <section class="panel">
+    <h2>Статусы работ</h2>
+    {% if items_prefill %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead><tr><th>Работа</th><th>Цена, ₽</th><th>Статус</th></tr></thead>
+        <tbody>
+          {% for item in items_prefill %}
+          <tr>
+            <td>{{ item.work_name }}</td>
+            <td class="amount">{{ "%.0f"|format(item.price) }}</td>
+            <td>
+              <form action="{{ url_for('set_tuning_item_status', order_id=edit_order.id, item_id=item.id) }}"
+                    method="post" class="status-select-form">
+                <select name="status" onchange="this.form.submit()">
+                  {% for s in work_statuses %}
+                  <option value="{{ s.value }}" {{ 'selected' if item.status == s.value }}>{{ s.label }}</option>
+                  {% endfor %}
+                </select>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint">Сначала добавьте и сохраните работы ниже.</p>
+    {% endif %}
+  </section>
 
   <section class="panel">
     <h2>Платежи по заказу</h2>
