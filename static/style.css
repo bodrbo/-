@@ -595,6 +595,10 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   color: var(--muted);
   margin: -8px 0 22px;
 }
+/* When the legend directly follows its own split-bar (no tall card
+   in between to absorb the negative margin), give it normal spacing
+   instead so it doesn't render on top of the bar. */
+.split-bar + .split-legend { margin-top: 10px; }
 .split-legend i {
   display: inline-block;
   width: 7px;

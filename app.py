@@ -382,6 +382,17 @@ def init_db():
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS tuning_payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            paid_at TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS clients (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             client_name TEXT NOT NULL,
@@ -1345,6 +1356,16 @@ def _get_or_create_client(db, phone, client_name, boat_model):
     return cur.lastrowid
 
 
+def _order_payment_totals(db, order_id, total):
+    payments = db.execute(
+        "SELECT * FROM tuning_payments WHERE order_id = ? ORDER BY paid_at DESC, id DESC",
+        (order_id,),
+    ).fetchall()
+    paid_amount = sum(p["amount"] for p in payments)
+    remaining = max(0.0, total - paid_amount)
+    return payments, paid_amount, remaining
+
+
 @app.route("/tuning")
 def tuning_index():
     db = get_db()
@@ -1407,6 +1428,7 @@ def edit_tuning_order(order_id):
         items = db.execute(
             "SELECT * FROM tuning_order_items WHERE order_id = ? ORDER BY id", (order_id,)
         ).fetchall()
+        payments, paid_amount, remaining = _order_payment_totals(db, order_id, order["total"])
         form_values = {
             "client_name": order["client_name"], "boat_model": order["boat_model"],
             "sale_channel": order["sale_channel"], "phone": order["phone"],
@@ -1415,13 +1437,16 @@ def edit_tuning_order(order_id):
         return render_template(
             "tuning_form.html", edit_order=order, errors=None, form_values=form_values,
             items_prefill=items, sale_channels=SALE_CHANNELS, active_page="tuning",
+            payments=payments, paid_amount=paid_amount, remaining=remaining,
         )
 
     errors, data = _process_tuning_form(request.form)
     if errors:
+        payments, paid_amount, remaining = _order_payment_totals(db, order_id, order["total"])
         return render_template(
             "tuning_form.html", edit_order=order, errors=errors, form_values=request.form,
             items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning",
+            payments=payments, paid_amount=paid_amount, remaining=remaining,
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -1447,9 +1472,40 @@ def edit_tuning_order(order_id):
 def delete_tuning_order(order_id):
     db = get_db()
     db.execute("DELETE FROM tuning_order_items WHERE order_id = ?", (order_id,))
+    db.execute("DELETE FROM tuning_payments WHERE order_id = ?", (order_id,))
     db.execute("DELETE FROM tuning_orders WHERE id = ?", (order_id,))
     db.commit()
     return redirect(url_for("tuning_index"))
+
+
+@app.route("/tuning/<int:order_id>/pay", methods=["POST"])
+def add_tuning_payment(order_id):
+    db = get_db()
+    order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None:
+        return redirect(url_for("tuning_index"))
+
+    amount_raw = request.form.get("amount", "").strip().replace(",", ".")
+    try:
+        amount = float(amount_raw)
+    except ValueError:
+        amount = None
+    if amount is not None and amount > 0:
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        db.execute(
+            "INSERT INTO tuning_payments (order_id, amount, paid_at, created_at) VALUES (?, ?, ?, ?)",
+            (order_id, amount, now, now),
+        )
+        db.commit()
+    return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
+@app.route("/tuning/<int:order_id>/pay/<int:payment_id>/delete", methods=["POST"])
+def delete_tuning_payment(order_id, payment_id):
+    db = get_db()
+    db.execute("DELETE FROM tuning_payments WHERE id = ? AND order_id = ?", (payment_id, order_id))
+    db.commit()
+    return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
 @app.route("/client/<token>")
@@ -1458,13 +1514,27 @@ def client_dashboard(token):
     client = db.execute("SELECT * FROM clients WHERE token = ?", (token,)).fetchone()
     if client is None:
         return redirect(url_for("home"))
-    orders = db.execute(
+    order_rows = db.execute(
         "SELECT * FROM tuning_orders WHERE client_id = ? ORDER BY created_at DESC, id DESC",
         (client["id"],),
     ).fetchall()
-    grand_total = sum(o["total"] for o in orders)
+
+    orders = []
+    paid_total = 0.0
+    remaining_total = 0.0
+    for o in order_rows:
+        _, paid_amount, remaining = _order_payment_totals(db, o["id"], o["total"])
+        order = dict(o)
+        order["paid_amount"] = paid_amount
+        order["remaining"] = remaining
+        orders.append(order)
+        paid_total += paid_amount
+        remaining_total += remaining
+
+    grand_total = sum(o["total"] for o in order_rows)
     return render_template(
         "client_dashboard.html", client=client, orders=orders, grand_total=grand_total,
+        paid_total=paid_total, remaining_total=remaining_total,
     )
 
 

@@ -87,6 +87,69 @@
     </div>
   {% endif %}
 
+  {% if edit_order %}
+  <div class="hero-grid">
+    <div class="hero-card">
+      <span class="k">К доплате</span>
+      <span class="v tabular">{{ "%.0f"|format(remaining) }} ₽</span>
+      <span class="d">Итог заказа {{ "%.0f"|format(edit_order.total) }} ₽</span>
+    </div>
+  </div>
+  <div class="split-bar" aria-hidden="true">
+    {% if edit_order.total > 0 %}
+    <span style="width:{{ (paid_amount / edit_order.total * 100)|round(1) }}%; background:var(--success);"></span>
+    <span style="width:{{ (remaining / edit_order.total * 100)|round(1) }}%; background:var(--ink-soft);"></span>
+    {% endif %}
+  </div>
+  <div class="split-legend">
+    <span><i style="background:var(--success);"></i>Оплачено — {{ "%.0f"|format(paid_amount) }} ₽</span>
+    <span><i style="background:var(--ink-soft);"></i>Не оплачено — {{ "%.0f"|format(remaining) }} ₽</span>
+  </div>
+
+  <section class="panel">
+    <h2>Платежи по заказу</h2>
+    <form action="{{ url_for('add_tuning_payment', order_id=edit_order.id) }}" method="post" class="entry-form">
+      <div class="field field-narrow">
+        <label for="amount">Сумма платежа, ₽</label>
+        <input type="text" inputmode="decimal" id="amount" name="amount" required>
+      </div>
+      <div class="field field-submit">
+        <button type="submit">Записать платёж</button>
+      </div>
+    </form>
+
+    {% if payments %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr><th>Дата</th><th>Сумма</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for p in payments %}
+          <tr>
+            <td class="muted">{{ p.paid_at[:10]|ru_date }}</td>
+            <td class="amount">{{ "%.0f"|format(p.amount) }}</td>
+            <td class="row-actions">
+              <form action="{{ url_for('delete_tuning_payment', order_id=edit_order.id, payment_id=p.id) }}" method="post"
+                    onsubmit="return confirm('Удалить этот платёж?');">
+                <button type="submit" class="icon-btn danger" title="Удалить">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 5l10 10M15 5L5 15"/>
+                  </svg>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint">Платежей пока нет.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
   <section class="panel form-panel">
     <h2>{{ 'Редактировать заказ' if edit_order else 'Новый заказ в тюнинг-центр' }}</h2>
     <form action="{{ url_for('edit_tuning_order', order_id=edit_order.id) if edit_order else url_for('add_tuning_order') }}"

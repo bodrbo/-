@@ -55,9 +55,17 @@
       <span class="k">Заказов</span>
       <span class="v">{{ orders|length }}</span>
     </div>
-    <div class="panel total-card total-card-grand">
+    <div class="panel total-card">
       <span class="k">Сумма по заказам</span>
       <span class="v">{{ "%.0f"|format(grand_total) }} ₽</span>
+    </div>
+    <div class="panel total-card">
+      <span class="k">Оплачено</span>
+      <span class="v" style="color:var(--success);">{{ "%.0f"|format(paid_total) }} ₽</span>
+    </div>
+    <div class="panel total-card total-card-grand">
+      <span class="k">Осталось доплатить</span>
+      <span class="v">{{ "%.0f"|format(remaining_total) }} ₽</span>
     </div>
   </div>
 
@@ -73,6 +81,8 @@
             <th>Лодка</th>
             <th>Скидка</th>
             <th>Итог</th>
+            <th>Оплачено</th>
+            <th>К доплате</th>
           </tr>
         </thead>
         <tbody>
@@ -83,6 +93,8 @@
             <td>{{ o.boat_model }}</td>
             <td>{{ o.discount_pct|float|round(1) }}%</td>
             <td class="amount">{{ "%.0f"|format(o.total) }}</td>
+            <td class="muted">{{ "%.0f"|format(o.paid_amount) }}</td>
+            <td class="amount">{{ "%.0f"|format(o.remaining) }}</td>
           </tr>
           {% endfor %}
         </tbody>
