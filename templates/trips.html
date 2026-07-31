@@ -63,8 +63,7 @@
 <header class="topbar">
   <div class="topbar-inner">
     <div class="brand">
-      <div class="logo-text"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
-      <div class="logo-sub">Payroll system</div>
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo">
     </div>
     <nav class="main-nav">
       <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'payroll' }}">
@@ -90,7 +89,6 @@
       </a>
     </nav>
     <div class="title-block">
-      <span class="kicker">Морские прогулки · Кронштадт</span>
       <h1>Рейсы и выплаты инвесторам</h1>
     </div>
     <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout">
