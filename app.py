@@ -72,6 +72,11 @@ YOOKASSA_SHOP_ID = os.environ.get("YOOKASSA_SHOP_ID")
 YOOKASSA_SECRET_KEY = os.environ.get("YOOKASSA_SECRET_KEY")
 YOOKASSA_API_BASE = "https://api.yookassa.ru/v3"
 
+# Магазин использует "Чеки от ЮKassa" — фискальный чек обязателен на каждый
+# платёж. Ставка НДС 5% (код 7) подтверждена владельцем бизнеса — это ставка
+# для АУСН/УСН по последней налоговой реформе.
+YOOKASSA_RECEIPT_VAT_CODE = 7
+
 # Соответствие цвета записи/события в Yclients — катеру. Значения подтверждены.
 BOAT_COLORS = {
     "#03a9f4": "Ларус",             # синий
@@ -1696,6 +1701,17 @@ def yookassa_configured():
     return bool(YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY)
 
 
+def _normalize_ru_phone(phone):
+    """ЮKassa требует номер в формате ITU-T E.164 (только цифры, например
+    79000000000) — а в заказах телефон вводится в свободной форме."""
+    digits = "".join(c for c in phone if c.isdigit())
+    if len(digits) == 11 and digits[0] in "78":
+        digits = "7" + digits[1:]
+    elif len(digits) == 10:
+        digits = "7" + digits
+    return digits
+
+
 def _yookassa_request(method, path, json_body=None, idempotence_key=None):
     headers = {}
     if idempotence_key:
@@ -1760,6 +1776,20 @@ def create_yookassa_payment(order_id):
         "description": f"Заказ №{order_id} — {order['client_name']}"[:128],
         "confirmation": {"type": "redirect", "return_url": return_url},
         "metadata": {"tuning_order_id": str(order_id)},
+        "receipt": {
+            "customer": {"phone": _normalize_ru_phone(order["phone"])},
+            "items": [
+                {
+                    "description": f"Оплата заказа №{order_id} в тюнинг-центре"[:128],
+                    "quantity": 1,
+                    "amount": {"value": f"{remaining:.2f}", "currency": "RUB"},
+                    "vat_code": YOOKASSA_RECEIPT_VAT_CODE,
+                    "measure": "piece",
+                    "payment_subject": "service",
+                    "payment_mode": "full_payment",
+                }
+            ],
+        },
     }
     try:
         remote = _yookassa_request(
