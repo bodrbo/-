@@ -1524,9 +1524,14 @@ def client_dashboard(token):
     remaining_total = 0.0
     for o in order_rows:
         _, paid_amount, remaining = _order_payment_totals(db, o["id"], o["total"])
+        items = db.execute(
+            "SELECT work_name, price FROM tuning_order_items WHERE order_id = ? ORDER BY id",
+            (o["id"],),
+        ).fetchall()
         order = dict(o)
         order["paid_amount"] = paid_amount
         order["remaining"] = remaining
+        order["work_items"] = items
         orders.append(order)
         paid_total += paid_amount
         remaining_total += remaining

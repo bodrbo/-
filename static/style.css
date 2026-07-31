@@ -796,6 +796,59 @@ button.btn-delete:hover { background: var(--danger); color: #fff8f4; border-colo
   font-weight: 700;
   color: var(--ink);
 }
+
+.order-card-list { display: flex; flex-direction: column; gap: 14px; }
+.order-card { margin-bottom: 0; }
+.order-card > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+}
+.order-card > summary::-webkit-details-marker { display: none; }
+.order-card > summary .chev {
+  margin-left: auto;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid var(--brass-strong);
+  border-bottom: 2px solid var(--brass-strong);
+  transform: rotate(-45deg);
+  transition: transform 0.2s ease;
+  flex: none;
+}
+.order-card[open] > summary .chev { transform: rotate(45deg); }
+.order-card .oc-num {
+  font-family: 'PT Serif', Georgia, serif;
+  font-weight: 700;
+  color: var(--ink);
+}
+.order-card .oc-date, .order-card .oc-boat { color: var(--muted); font-size: 13.5px; }
+.order-card .oc-total {
+  font-family: 'PT Serif', Georgia, serif;
+  font-weight: 700;
+  color: var(--ink);
+}
+.order-card .oc-status {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--brass-strong);
+}
+.order-card .oc-status.paid { color: var(--success); }
+.order-card-body {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline-soft);
+}
+.order-card-body h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
 @media (max-width: 600px) {
   .entry-form { flex-direction: column; align-items: stretch; }
   /* In row layout "flex: 1 1 220px" sizes width; once the form above

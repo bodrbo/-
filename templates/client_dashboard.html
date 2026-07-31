@@ -72,33 +72,47 @@
   <section class="panel">
     <h2>Ваши заказы</h2>
     {% if orders %}
-    <div class="table-scroll">
-      <table class="records">
-        <thead>
-          <tr>
-            <th>№</th>
-            <th>Дата</th>
-            <th>Лодка</th>
-            <th>Скидка</th>
-            <th>Итог</th>
-            <th>Оплачено</th>
-            <th>К доплате</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for o in orders %}
-          <tr>
-            <td class="term">№{{ o.id }}</td>
-            <td class="muted">{{ o.created_at[:10]|ru_date }}</td>
-            <td>{{ o.boat_model }}</td>
-            <td>{{ o.discount_pct|float|round(1) }}%</td>
-            <td class="amount">{{ "%.0f"|format(o.total) }}</td>
-            <td class="muted">{{ "%.0f"|format(o.paid_amount) }}</td>
-            <td class="amount">{{ "%.0f"|format(o.remaining) }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div class="order-card-list">
+      {% for o in orders %}
+      <details class="panel order-card">
+        <summary>
+          <span class="oc-num">№{{ o.id }}</span>
+          <span class="oc-date">{{ o.created_at[:10]|ru_date }}</span>
+          <span class="oc-boat">{{ o.boat_model }}</span>
+          <span class="oc-total">{{ "%.0f"|format(o.total) }} ₽</span>
+          {% if o.remaining <= 0 %}
+          <span class="oc-status paid">Оплачено</span>
+          {% else %}
+          <span class="oc-status">К доплате {{ "%.0f"|format(o.remaining) }} ₽</span>
+          {% endif %}
+          <span class="chev" aria-hidden="true"></span>
+        </summary>
+        <div class="order-card-body">
+          <h3>Работы по заказу</h3>
+          {% if o.work_items %}
+          <div class="table-scroll">
+            <table class="records">
+              <thead><tr><th>Работа</th><th>Цена, ₽</th></tr></thead>
+              <tbody>
+                {% for item in o.work_items %}
+                <tr>
+                  <td>{{ item.work_name }}</td>
+                  <td class="amount">{{ "%.0f"|format(item.price) }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <p class="hint">Работы не указаны.</p>
+          {% endif %}
+          <p class="hint" style="margin-top:14px;">
+            Скидка {{ o.discount_pct|float|round(1) }}% · Оплачено {{ "%.0f"|format(o.paid_amount) }} ₽ ·
+            К доплате {{ "%.0f"|format(o.remaining) }} ₽
+          </p>
+        </div>
+      </details>
+      {% endfor %}
     </div>
     {% else %}
     <div class="empty-state">
