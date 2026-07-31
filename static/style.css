@@ -485,7 +485,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   letter-spacing: 0.06em;
 }
 .total-card .v {
-  font-family: 'PT Serif', Georgia, serif;
+  font-family: 'PT Sans', -apple-system, sans-serif;
   font-size: 24px;
   font-weight: 700;
   color: var(--ink);
@@ -614,7 +614,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   font-weight: 700;
 }
 .hero-card .v {
-  font-family: 'PT Serif', Georgia, serif;
+  font-family: 'PT Sans', -apple-system, sans-serif;
   font-size: 32px;
   font-weight: 700;
   line-height: 1;
@@ -719,7 +719,12 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 /* --- table --- */
 table.records, table.gloss {
   width: 100%;
-  border-collapse: collapse;
+  /* "separate" instead of "collapse": with rows of very uneven height
+     (long wrapped work names next to a single-line status <select>),
+     collapsed borders round to fractional pixel positions and can render
+     as broken/missing lines between rows in some browsers. */
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 13.5px;
 }
 table.records th, table.gloss th {
@@ -735,7 +740,7 @@ table.records th, table.gloss th {
 table.records td, table.gloss td {
   padding: 10px 10px;
   border-bottom: 1px solid var(--hairline-soft);
-  vertical-align: middle;
+  vertical-align: top;
   font-variant-numeric: tabular-nums;
 }
 table.records tr:hover td, table.gloss tr:hover td { background: var(--paper-alt); }
@@ -903,7 +908,7 @@ table.records tr.row-pending:hover td { background: rgba(212, 141, 74, 0.2); }
 }
 .order-card .oc-date, .order-card .oc-boat { color: var(--muted); font-size: 13.5px; }
 .order-card .oc-total {
-  font-family: 'PT Serif', Georgia, serif;
+  font-family: 'PT Sans', -apple-system, sans-serif;
   font-weight: 700;
   color: var(--ink);
 }
