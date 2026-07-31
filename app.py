@@ -382,6 +382,22 @@ def init_db():
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS clients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_name TEXT NOT NULL,
+            boat_model TEXT NOT NULL,
+            phone TEXT NOT NULL UNIQUE,
+            token TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    # Migration path for tuning_orders created before client_id existed.
+    tuning_cols = [row[1] for row in conn.execute("PRAGMA table_info(tuning_orders)").fetchall()]
+    if "client_id" not in tuning_cols:
+        conn.execute("ALTER TABLE tuning_orders ADD COLUMN client_id INTEGER")
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS investors (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             investor_name TEXT NOT NULL,
@@ -1309,11 +1325,33 @@ def _process_tuning_form(form):
     return errors, data
 
 
+def _get_or_create_client(db, phone, client_name, boat_model):
+    """Find the client cabinet for this phone number, refreshing their name
+    and boat, or create one with a fresh unique link if none exists yet."""
+    row = db.execute("SELECT id FROM clients WHERE phone = ?", (phone,)).fetchone()
+    if row:
+        db.execute(
+            "UPDATE clients SET client_name = ?, boat_model = ? WHERE id = ?",
+            (client_name, boat_model, row["id"]),
+        )
+        return row["id"]
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    token = secrets.token_urlsafe(16)
+    cur = db.execute(
+        "INSERT INTO clients (client_name, boat_model, phone, token, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (client_name, boat_model, phone, token, now),
+    )
+    return cur.lastrowid
+
+
 @app.route("/tuning")
 def tuning_index():
     db = get_db()
     orders = db.execute(
-        "SELECT * FROM tuning_orders ORDER BY created_at DESC, id DESC"
+        "SELECT o.*, c.token AS client_token FROM tuning_orders o "
+        "LEFT JOIN clients c ON c.id = o.client_id "
+        "ORDER BY o.created_at DESC, o.id DESC"
     ).fetchall()
     grand_total = sum(o["total"] for o in orders)
     return render_template(
@@ -1339,10 +1377,12 @@ def add_tuning_order():
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    client_id = _get_or_create_client(db, data["phone"], data["client_name"], data["boat_model"])
     cur = db.execute(
-        "INSERT INTO tuning_orders (client_name, boat_model, sale_channel, phone, discount_pct, "
-        "subtotal, total, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (data["client_name"], data["boat_model"], data["sale_channel"], data["phone"],
+        "INSERT INTO tuning_orders (client_id, client_name, boat_model, sale_channel, phone, "
+        "discount_pct, subtotal, total, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (client_id, data["client_name"], data["boat_model"], data["sale_channel"], data["phone"],
          data["discount_pct"], data["subtotal"], data["total"], now, now),
     )
     order_id = cur.lastrowid
@@ -1385,10 +1425,11 @@ def edit_tuning_order(order_id):
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    client_id = _get_or_create_client(db, data["phone"], data["client_name"], data["boat_model"])
     db.execute(
-        "UPDATE tuning_orders SET client_name=?, boat_model=?, sale_channel=?, phone=?, "
+        "UPDATE tuning_orders SET client_id=?, client_name=?, boat_model=?, sale_channel=?, phone=?, "
         "discount_pct=?, subtotal=?, total=?, updated_at=? WHERE id=?",
-        (data["client_name"], data["boat_model"], data["sale_channel"], data["phone"],
+        (client_id, data["client_name"], data["boat_model"], data["sale_channel"], data["phone"],
          data["discount_pct"], data["subtotal"], data["total"], now, order_id),
     )
     db.execute("DELETE FROM tuning_order_items WHERE order_id = ?", (order_id,))
@@ -1409,6 +1450,22 @@ def delete_tuning_order(order_id):
     db.execute("DELETE FROM tuning_orders WHERE id = ?", (order_id,))
     db.commit()
     return redirect(url_for("tuning_index"))
+
+
+@app.route("/client/<token>")
+def client_dashboard(token):
+    db = get_db()
+    client = db.execute("SELECT * FROM clients WHERE token = ?", (token,)).fetchone()
+    if client is None:
+        return redirect(url_for("home"))
+    orders = db.execute(
+        "SELECT * FROM tuning_orders WHERE client_id = ? ORDER BY created_at DESC, id DESC",
+        (client["id"],),
+    ).fetchall()
+    grand_total = sum(o["total"] for o in orders)
+    return render_template(
+        "client_dashboard.html", client=client, orders=orders, grand_total=grand_total,
+    )
 
 
 # =======================================================================

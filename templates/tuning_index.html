@@ -86,6 +86,7 @@
       <table class="records">
         <thead>
           <tr>
+            <th>№</th>
             <th>Дата</th>
             <th>Клиент</th>
             <th>Лодка</th>
@@ -99,8 +100,15 @@
         <tbody>
           {% for o in orders %}
           <tr>
+            <td><a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="term">№{{ o.id }}</a></td>
             <td class="muted">{{ o.created_at[:10]|ru_date }}</td>
-            <td><a href="{{ url_for('edit_tuning_order', order_id=o.id) }}">{{ o.client_name }}</a></td>
+            <td>
+              {% if o.client_token %}
+              <a href="{{ url_for('client_dashboard', token=o.client_token) }}">{{ o.client_name }}</a>
+              {% else %}
+              {{ o.client_name }}
+              {% endif %}
+            </td>
             <td>{{ o.boat_model }}</td>
             <td class="muted">{{ 'Напрямую' if o.sale_channel == 'direct' else ('Агрегатор' if o.sale_channel == 'aggregator' else 'Смешанно') }}</td>
             <td class="muted">{{ o.phone }}</td>
