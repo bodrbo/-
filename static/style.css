@@ -45,21 +45,25 @@
 }
 
 :root {
+  /* Palette rethought to match bodrbo.ru: cool blue accent + light
+     blue-gray/white surfaces instead of the old brass/parchment warm
+     scheme. Variable names kept as-is (--brass etc.) since they're used
+     in ~40 places across this file and templates — only the values
+     changed, so nothing downstream needed touching. */
   --ink: #0f2a35;
   --ink-soft: #294c56;
-  --parchment: #ede2c9;
-  --paper: #faf6ea;
-  --paper-alt: #f1e7cf;
-  --brass: #a9752a;
-  --brass-strong: #8a5f22;
-  --on-accent: #fff9ec;
+  --parchment: #eef2f8;
+  --paper: #ffffff;
+  --paper-alt: #eef4fa;
+  --brass: #3498db;
+  --brass-strong: #2e86c1;
+  --on-accent: #ffffff;
   --danger: #b3402c;
   --success: #2f6b4f;
-  --muted: #7d735f;
-  --hairline: #ddceac;
-  --hairline-soft: #e8dcbc;
+  --muted: #62707f;
+  --hairline: #d7e3ee;
+  --hairline-soft: #e4edf5;
   --shadow: 0 1px 2px rgba(15, 42, 53, .07), 0 10px 28px -16px rgba(15, 42, 53, .28);
-  --topbar-sky: #d8ecf6;
 }
 
 * { box-sizing: border-box; }
@@ -77,8 +81,8 @@ h1, h2, h3 { font-family: 'PT Serif', Georgia, serif; }
 .tabular { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
 
 .topbar {
-  background: var(--topbar-sky);
-  color: var(--ink);
+  background: var(--brass);
+  color: #ffffff;
   padding: 24px 20px 22px;
 }
 .topbar-inner {
@@ -103,13 +107,13 @@ h1, h2, h3 { font-family: 'PT Serif', Georgia, serif; }
   font-weight: 700;
   padding: 8px 14px;
   background: transparent;
-  color: var(--ink);
-  border: 1px solid rgba(15, 42, 53, 0.28);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.45);
   border-radius: 8px;
   cursor: pointer;
   white-space: nowrap;
 }
-.topbar-logout button:hover { background: rgba(15, 42, 53, 0.08); }
+.topbar-logout button:hover { background: rgba(255, 255, 255, 0.16); }
 
 .main-nav {
   display: flex;
@@ -123,11 +127,11 @@ h1, h2, h3 { font-family: 'PT Serif', Georgia, serif; }
   gap: 5px;
   font-size: 12.5px;
   font-weight: 700;
-  color: var(--ink-soft);
+  color: rgba(255, 255, 255, 0.8);
   text-decoration: none;
   padding: 7px 18px;
-  border-left: 1px solid rgba(15, 42, 53, 0.14);
-  border-right: 1px solid rgba(15, 42, 53, 0.14);
+  border-left: 1px solid rgba(255, 255, 255, 0.25);
+  border-right: 1px solid rgba(255, 255, 255, 0.25);
   margin-right: -1px;
   background: rgba(255, 255, 255, 0);
   transition: background-color 0.28s ease, color 0.2s ease, border-color 0.28s ease;
@@ -138,28 +142,28 @@ h1, h2, h3 { font-family: 'PT Serif', Georgia, serif; }
   transition: transform 0.28s ease;
 }
 .main-nav a:hover {
-  background-color: rgba(15, 42, 53, 0.08);
-  color: var(--ink);
-  border-color: rgba(15, 42, 53, 0.24);
+  background-color: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.4);
 }
 .main-nav a:hover .nav-icon { transform: translateY(-1px); }
 .main-nav a.active {
-  background-color: var(--brass);
-  color: var(--on-accent);
-  border-color: var(--brass);
+  background-color: var(--brass-strong);
+  color: #ffffff;
+  border-color: var(--brass-strong);
 }
 .kicker {
   font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--brass-strong);
+  color: rgba(255, 255, 255, 0.85);
   font-weight: 700;
 }
 .topbar h1 {
   font-size: 21px;
   font-weight: 700;
   margin: 5px 0 0 0;
-  color: var(--ink);
+  color: #ffffff;
 }
 
 @media (max-width: 560px) {
@@ -250,14 +254,14 @@ input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, in
   white-space: nowrap;
 }
 .status-badge.status-estimate,
-.status-badge.status-pending { background: rgba(125, 115, 95, 0.14); color: var(--muted); }
+.status-badge.status-pending { background: rgba(98, 112, 127, 0.14); color: var(--muted); }
 .status-badge.status-approved,
-.status-badge.status-in_progress { background: rgba(138, 95, 34, 0.16); color: var(--brass-strong); }
+.status-badge.status-in_progress { background: rgba(46, 134, 193, 0.16); color: var(--brass-strong); }
 .status-badge.status-qc { background: rgba(41, 76, 86, 0.14); color: var(--ink-soft); }
 .status-badge.status-done { background: rgba(47, 107, 79, 0.16); color: var(--success); }
 .status-badge.status-cancelled,
 .status-badge.status-canceled { background: rgba(179, 64, 44, 0.14); color: var(--danger); }
-.status-badge.status-waiting_for_capture { background: rgba(138, 95, 34, 0.16); color: var(--brass-strong); }
+.status-badge.status-waiting_for_capture { background: rgba(46, 134, 193, 0.16); color: var(--brass-strong); }
 .status-badge.status-succeeded { background: rgba(47, 107, 79, 0.16); color: var(--success); }
 
 .status-select-form { display: inline-block; margin: 0; }
@@ -480,7 +484,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   border-color: var(--ink);
 }
 .total-card-grand .k { color: var(--brass-strong); }
-.total-card-grand .v { color: #fbf3e2; }
+.total-card-grand .v { color: #eaf4fc; }
 
 /* --- clickable "mark as paid" employee cards --- */
 .total-card.payable {
@@ -964,7 +968,7 @@ table.records tr.row-pending:hover td { background: rgba(212, 141, 74, 0.2); }
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #fbf3e2;
+  color: #eaf4fc;
 }
 @keyframes bodrbo-propeller-spin {
   to { transform: rotate(360deg); }
