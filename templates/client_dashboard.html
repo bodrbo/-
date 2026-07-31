@@ -93,13 +93,24 @@
           {% if o.work_items %}
           <div class="table-scroll">
             <table class="records">
-              <thead><tr><th>Работа</th><th>Цена, ₽</th><th>Статус</th></tr></thead>
+              <thead><tr><th>Работа</th><th>Цена, ₽</th><th>Статус</th><th></th></tr></thead>
               <tbody>
                 {% for item in o.work_items %}
-                <tr>
+                <tr class="{{ 'row-pending' if item.status == 'pending' }}">
                   <td>{{ item.work_name }}</td>
                   <td class="amount">{{ "%.0f"|format(item.price) }}</td>
                   <td><span class="status-badge status-{{ item.status }}">{{ item.status|work_status_label }}</span></td>
+                  <td class="row-actions">
+                    {% if item.status == 'pending' %}
+                    <form action="{{ url_for('client_approve_item', token=client.token, item_id=item.id) }}" method="post">
+                      <button type="submit" class="icon-btn approve" title="Согласовать работу">
+                        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M4 10.5l4 4 8-9"/>
+                        </svg>
+                      </button>
+                    </form>
+                    {% endif %}
+                  </td>
                 </tr>
                 {% endfor %}
               </tbody>

@@ -1746,7 +1746,7 @@ def client_dashboard(token):
     for o in order_rows:
         _, paid_amount, remaining = _order_payment_totals(db, o["id"], o["total"])
         items = db.execute(
-            "SELECT work_name, price, status FROM tuning_order_items WHERE order_id = ? ORDER BY id",
+            "SELECT id, work_name, price, status FROM tuning_order_items WHERE order_id = ? ORDER BY id",
             (o["id"],),
         ).fetchall()
         order = dict(o)
@@ -1773,6 +1773,24 @@ def client_dashboard(token):
         "client_dashboard.html", client=client, orders=orders, grand_total=grand_total,
         paid_total=paid_total, remaining_total=remaining_total,
     )
+
+
+@app.route("/client/<token>/item/<int:item_id>/approve", methods=["POST"])
+def client_approve_item(token, item_id):
+    db = get_db()
+    client = db.execute("SELECT * FROM clients WHERE token = ?", (token,)).fetchone()
+    if client is None:
+        return redirect(url_for("home"))
+    item = db.execute(
+        "SELECT toi.id, toi.status FROM tuning_order_items toi "
+        "JOIN tuning_orders o ON o.id = toi.order_id "
+        "WHERE toi.id = ? AND o.client_id = ?",
+        (item_id, client["id"]),
+    ).fetchone()
+    if item is not None and item["status"] == "pending":
+        db.execute("UPDATE tuning_order_items SET status = 'approved' WHERE id = ?", (item_id,))
+        db.commit()
+    return redirect(url_for("client_dashboard", token=token))
 
 
 # =======================================================================

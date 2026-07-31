@@ -777,7 +777,12 @@ button.btn-delete:hover { background: var(--danger); color: #fff8f4; border-colo
 }
 .row-actions .icon-btn:hover { background: var(--ink); color: var(--parchment); border-color: var(--ink); }
 .row-actions .icon-btn.danger:hover { background: var(--danger); color: #fff8f4; border-color: var(--danger); }
+.row-actions .icon-btn.approve:hover { background: var(--success); color: #fff8f4; border-color: var(--success); }
 .row-actions .icon-btn svg { width: 13px; height: 13px; }
+
+/* Работа "на согласовании" у клиента — подсветим строку, чтобы бросалась в глаза. */
+table.records tr.row-pending td { background: rgba(212, 141, 74, 0.14); }
+table.records tr.row-pending:hover td { background: rgba(212, 141, 74, 0.2); }
 
 .empty { color: var(--muted); font-style: italic; }
 
