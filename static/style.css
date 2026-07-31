@@ -204,6 +204,10 @@ h1, h2, h3 { font-family: 'PT Serif', Georgia, serif; }
 }
 .field-narrow { flex: 1 1 130px; }
 .field-submit { flex: 0 0 auto; }
+/* For a lone narrow field sharing a row with only a fixed-width submit
+   button (nothing else to flex against), flex-grow:1 stretches it to
+   fill the whole row instead of staying input-sized. */
+.field-fixed { flex: 0 1 220px; }
 
 label {
   font-size: 12px;

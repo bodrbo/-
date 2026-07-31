@@ -153,7 +153,7 @@
   <section class="panel">
     <h2>Платежи по заказу</h2>
     <form action="{{ url_for('add_tuning_payment', order_id=edit_order.id) }}" method="post" class="entry-form">
-      <div class="field field-narrow">
+      <div class="field field-narrow field-fixed">
         <label for="amount">Сумма платежа, ₽</label>
         <input type="text" inputmode="decimal" id="amount" name="amount" required>
       </div>
