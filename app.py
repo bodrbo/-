@@ -1694,27 +1694,6 @@ def yookassa_configured():
     return bool(YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY)
 
 
-# TEMPORARY — remove once the Beget .env-loading issue is diagnosed and
-# fixed. Deliberately leaks no secret values, only booleans/paths, so it's
-# safe to leave reachable while debugging.
-@app.route("/debug/env-check")
-def debug_env_check():
-    app_file_dir = os.path.dirname(os.path.abspath(__file__))
-    cwd = os.getcwd()
-    return {
-        "yookassa_configured": yookassa_configured(),
-        "shop_id_set_at_import": bool(YOOKASSA_SHOP_ID),
-        "secret_key_set_at_import": bool(YOOKASSA_SECRET_KEY),
-        "shop_id_in_os_environ_now": bool(os.environ.get("YOOKASSA_SHOP_ID")),
-        "dotenv_debug": app.config.get("DOTENV_DEBUG"),
-        "app_py_file": os.path.abspath(__file__),
-        "app_py_dir": app_file_dir,
-        "app_py_dir_has_dotenv": os.path.exists(os.path.join(app_file_dir, ".env")),
-        "cwd": cwd,
-        "cwd_has_dotenv": os.path.exists(os.path.join(cwd, ".env")),
-    }
-
-
 def _yookassa_request(method, path, json_body=None, idempotence_key=None):
     headers = {}
     if idempotence_key:
