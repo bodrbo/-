@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Тюнинг-центр</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100">
+      <g fill="var(--brass)">
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/>
+      </g>
+      <g fill="none" stroke="var(--brass)" stroke-width="2.6" stroke-linecap="round" opacity="0.85">
+        <path d="M55 15A24 24 0 0 1 62 22" transform="rotate(-6 50 50)"/>
+        <path d="M18 60A24 24 0 0 1 15 51" transform="rotate(4 50 50)"/>
+      </g>
+      <circle cx="50" cy="50" r="15" fill="none" stroke="var(--ink)" stroke-width="4"/>
+      <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
+    </svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+{% macro work_row(item=None) %}
+<div class="work-row">
+  <input type="text" name="work_name[]" placeholder="Название работы" class="work-name"
+         value="{{ item.work_name if item else '' }}">
+  <input type="text" inputmode="decimal" name="cost_price[]" placeholder="Себестоимость, ₽" class="work-cost"
+         value="{{ item.cost_price if item else '' }}" oninput="updateWorkRow(this)">
+  <input type="text" inputmode="decimal" name="multiplier[]" placeholder="Коэффициент" class="work-multiplier"
+         value="{{ item.multiplier if item else '' }}" oninput="updateWorkRow(this)">
+  <span class="work-price" data-value="{{ item.price if item else 0 }}">{{ "%.0f"|format(item.price) if item else 0 }} ₽</span>
+  <button type="button" class="btn-delete" onclick="removeWorkRow(this)" title="Убрать работу">✕</button>
+</div>
+{% endmacro %}
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="logo-text"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
+      <div class="logo-sub">Payroll system</div>
+    </div>
+    <nav class="main-nav">
+      <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'payroll' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.3" y="6" width="15.4" height="8" rx="1.8"/>
+          <circle cx="10" cy="10" r="2"/>
+          <path d="M4.6 8h.01M15.4 12h.01"/>
+        </svg>
+        <span class="nav-label">Зарплаты</span>
+      </a>
+      <a href="{{ url_for('trips_index') }}" class="{{ 'active' if active_page == 'trips' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="10" cy="3.8" r="1.6"/>
+          <path d="M10 5.6v10.6M6 8.4h8M4.2 11a5.8 5.8 0 0 0 11.6 0"/>
+        </svg>
+        <span class="nav-label">Рейсы и инвесторы</span>
+      </a>
+      <a href="{{ url_for('tuning_index') }}" class="{{ 'active' if active_page == 'tuning' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14.7 3.3a4 4 0 0 1-5.1 5.4L4.4 13.9a1.6 1.6 0 0 0 2.3 2.3l5.2-5.2a4 4 0 0 0 5.4-5.1l-2.6 2.6-1.9-.4-.4-1.9 2.6-2.6z"/>
+        </svg>
+        <span class="nav-label">Тюнинг-центр</span>
+      </a>
+    </nav>
+    <div class="title-block">
+      <span class="kicker">Морские прогулки · Кронштадт</span>
+      <h1>{{ 'Редактировать заказ' if edit_order else 'Новый заказ' }}</h1>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  {% if errors %}
+    <div class="alert">
+      <strong>Не удалось сохранить заказ:</strong>
+      <ul>
+        {% for err in errors %}<li>{{ err }}</li>{% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <section class="panel form-panel">
+    <h2>{{ 'Редактировать заказ' if edit_order else 'Новый заказ в тюнинг-центр' }}</h2>
+    <form action="{{ url_for('edit_tuning_order', order_id=edit_order.id) if edit_order else url_for('add_tuning_order') }}"
+          method="post" class="entry-form" id="tuning-form">
+
+      <div class="form-group">
+        <div class="form-group-label"><span class="n">1</span>Клиент</div>
+        <div class="field-row-inner">
+        <div class="field">
+          <label for="client_name">ФИО клиента</label>
+          <input type="text" id="client_name" name="client_name"
+                 value="{{ form_values.client_name if form_values else '' }}" required>
+        </div>
+        <div class="field">
+          <label for="boat_model">Модель лодки</label>
+          <input type="text" id="boat_model" name="boat_model"
+                 value="{{ form_values.boat_model if form_values else '' }}" required>
+        </div>
+        <div class="field field-narrow">
+          <label for="phone">Телефон</label>
+          <input type="text" id="phone" name="phone" inputmode="tel"
+                 value="{{ form_values.phone if form_values else '' }}" required>
+        </div>
+        <div class="field">
+          <label for="sale_channel">Канал продажи</label>
+          <select id="sale_channel" name="sale_channel">
+            {% for c in sale_channels %}
+            <option value="{{ c.value }}"
+              {{ 'selected' if form_values and form_values.sale_channel == c.value }}>{{ c.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <div class="form-group-label"><span class="n">2</span>Работы</div>
+        <div class="field-wide">
+          <div id="work-container">
+            {% if items_prefill %}
+              {% for item in items_prefill %}{{ work_row(item) }}{% endfor %}
+            {% else %}
+              {{ work_row() }}
+            {% endif %}
+          </div>
+          <button type="button" class="btn-add" onclick="addWorkRow()">Добавить работу</button>
+        </div>
+
+        <template id="work-row-template">{{ work_row() }}</template>
+      </div>
+
+      <div class="form-group">
+        <div class="form-group-label"><span class="n">3</span>Скидка и итог</div>
+        <div class="field-row-inner">
+        <div class="field field-narrow">
+          <label for="discount_pct">Скидка, %</label>
+          <input type="text" inputmode="decimal" id="discount_pct" name="discount_pct"
+                 value="{{ form_values.discount_pct if form_values else 0 }}" oninput="updateOrderTotal()">
+        </div>
+        </div>
+
+        <div class="totals-grid" style="margin-top:16px;">
+          <div class="panel total-card">
+            <span class="k">Сумма работ</span>
+            <span class="v" id="order-subtotal">0 ₽</span>
+          </div>
+          <div class="panel total-card">
+            <span class="k">Скидка</span>
+            <span class="v" id="order-discount-amount">0 ₽</span>
+          </div>
+          <div class="panel total-card total-card-grand">
+            <span class="k">Итого к оплате</span>
+            <span class="v" id="order-total">0 ₽</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="field field-submit">
+        <button type="submit">{{ 'Сохранить изменения' if edit_order else 'Создать заказ' }}</button>
+        <a href="{{ url_for('tuning_index') }}" class="btn-cancel">Отмена</a>
+      </div>
+    </form>
+  </section>
+
+</main>
+
+<script>
+function updateWorkRow(input) {
+  var row = input.closest('.work-row');
+  var cost = parseFloat((row.querySelector('.work-cost').value || '').replace(',', '.')) || 0;
+  var mult = parseFloat((row.querySelector('.work-multiplier').value || '').replace(',', '.')) || 0;
+  var price = cost * mult;
+  var span = row.querySelector('.work-price');
+  span.setAttribute('data-value', price);
+  span.textContent = Math.round(price).toLocaleString('ru-RU') + ' ₽';
+  updateOrderTotal();
+}
+
+function addWorkRow() {
+  var container = document.getElementById('work-container');
+  var template = document.getElementById('work-row-template');
+  container.appendChild(template.content.cloneNode(true));
+}
+
+function removeWorkRow(btn) {
+  var rows = document.querySelectorAll('#work-container .work-row');
+  if (rows.length <= 1) return;
+  btn.closest('.work-row').remove();
+  updateOrderTotal();
+}
+
+function updateOrderTotal() {
+  var subtotal = 0;
+  document.querySelectorAll('#work-container .work-price').forEach(function (span) {
+    subtotal += parseFloat(span.getAttribute('data-value')) || 0;
+  });
+  var discountInput = document.getElementById('discount_pct');
+  var discountPct = parseFloat((discountInput.value || '0').replace(',', '.')) || 0;
+  var discountAmount = subtotal * discountPct / 100;
+  var total = subtotal - discountAmount;
+  document.getElementById('order-subtotal').textContent = Math.round(subtotal).toLocaleString('ru-RU') + ' ₽';
+  document.getElementById('order-discount-amount').textContent = Math.round(discountAmount).toLocaleString('ru-RU') + ' ₽';
+  document.getElementById('order-total').textContent = Math.round(total).toLocaleString('ru-RU') + ' ₽';
+}
+
+document.addEventListener('DOMContentLoaded', updateOrderTotal);
+</script>
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+
+</body>
+</html>

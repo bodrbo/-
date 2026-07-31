@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Тюнинг-центр</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100">
+      <g fill="var(--brass)">
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/>
+      </g>
+      <g fill="none" stroke="var(--brass)" stroke-width="2.6" stroke-linecap="round" opacity="0.85">
+        <path d="M55 15A24 24 0 0 1 62 22" transform="rotate(-6 50 50)"/>
+        <path d="M18 60A24 24 0 0 1 15 51" transform="rotate(4 50 50)"/>
+      </g>
+      <circle cx="50" cy="50" r="15" fill="none" stroke="var(--ink)" stroke-width="4"/>
+      <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
+    </svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="logo-text"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
+      <div class="logo-sub">Payroll system</div>
+    </div>
+    <nav class="main-nav">
+      <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'payroll' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.3" y="6" width="15.4" height="8" rx="1.8"/>
+          <circle cx="10" cy="10" r="2"/>
+          <path d="M4.6 8h.01M15.4 12h.01"/>
+        </svg>
+        <span class="nav-label">Зарплаты</span>
+      </a>
+      <a href="{{ url_for('trips_index') }}" class="{{ 'active' if active_page == 'trips' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="10" cy="3.8" r="1.6"/>
+          <path d="M10 5.6v10.6M6 8.4h8M4.2 11a5.8 5.8 0 0 0 11.6 0"/>
+        </svg>
+        <span class="nav-label">Рейсы и инвесторы</span>
+      </a>
+      <a href="{{ url_for('tuning_index') }}" class="{{ 'active' if active_page == 'tuning' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14.7 3.3a4 4 0 0 1-5.1 5.4L4.4 13.9a1.6 1.6 0 0 0 2.3 2.3l5.2-5.2a4 4 0 0 0 5.4-5.1l-2.6 2.6-1.9-.4-.4-1.9 2.6-2.6z"/>
+        </svg>
+        <span class="nav-label">Тюнинг-центр</span>
+      </a>
+    </nav>
+    <div class="title-block">
+      <span class="kicker">Морские прогулки · Кронштадт</span>
+      <h1>Тюнинг-центр</h1>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="totals-grid">
+    <div class="panel total-card total-card-grand">
+      <span class="k">Заказов всего</span>
+      <span class="v">{{ orders|length }}</span>
+    </div>
+    <div class="panel total-card total-card-grand">
+      <span class="k">Сумма по всем заказам</span>
+      <span class="v">{{ "%.0f"|format(grand_total) }} ₽</span>
+    </div>
+  </div>
+
+  <section class="panel">
+    <h2>
+      Заказы
+      <a href="{{ url_for('add_tuning_order') }}" class="btn-add" style="float:right; margin-top:-2px;">Добавить заказ</a>
+    </h2>
+    {% if orders %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th>Клиент</th>
+            <th>Лодка</th>
+            <th>Канал</th>
+            <th>Телефон</th>
+            <th>Скидка</th>
+            <th>Итог</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for o in orders %}
+          <tr>
+            <td class="muted">{{ o.created_at[:10]|ru_date }}</td>
+            <td><a href="{{ url_for('edit_tuning_order', order_id=o.id) }}">{{ o.client_name }}</a></td>
+            <td>{{ o.boat_model }}</td>
+            <td class="muted">{{ 'Напрямую' if o.sale_channel == 'direct' else ('Агрегатор' if o.sale_channel == 'aggregator' else 'Смешанно') }}</td>
+            <td class="muted">{{ o.phone }}</td>
+            <td>{{ o.discount_pct|float|round(1) }}%</td>
+            <td class="amount">{{ "%.0f"|format(o.total) }}</td>
+            <td class="row-actions">
+              <a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="icon-btn" title="Редактировать">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M13.5 3.5l3 3L6 17H3v-3L13.5 3.5z"/>
+                </svg>
+              </a>
+              <form action="{{ url_for('delete_tuning_order', order_id=o.id) }}" method="post"
+                    onsubmit="return confirm('Удалить этот заказ?');">
+                <button type="submit" class="icon-btn danger" title="Удалить">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
+                  </svg>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <div class="empty-logo"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
+      <div class="t">Заказов пока нет</div>
+      <div class="s">Добавьте первый заказ кнопкой выше.</div>
+    </div>
+    {% endif %}
+  </section>
+
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+
+</body>
+</html>

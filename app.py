@@ -354,6 +354,34 @@ def init_db():
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS tuning_orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_name TEXT NOT NULL,
+            boat_model TEXT NOT NULL,
+            sale_channel TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            discount_pct REAL NOT NULL DEFAULT 0,
+            subtotal REAL NOT NULL,
+            total REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tuning_order_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            work_name TEXT NOT NULL,
+            cost_price REAL NOT NULL,
+            multiplier REAL NOT NULL,
+            price REAL NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS investors (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             investor_name TEXT NOT NULL,
@@ -1190,6 +1218,197 @@ def delete_trip(trip_id):
         db.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
         db.commit()
     return redirect(url_for("trips_index"))
+
+
+# =======================================================================
+# Тюнинг-центр
+# =======================================================================
+
+def _process_tuning_form(form):
+    """Validate a tuning-center order form and compute derived amounts.
+    Returns (errors, data). data is None if there are errors."""
+    errors = []
+
+    client_name = form.get("client_name", "").strip()
+    boat_model = form.get("boat_model", "").strip()
+    phone = form.get("phone", "").strip()
+    sale_channel = form.get("sale_channel", "direct").strip()
+    if sale_channel not in [c["value"] for c in SALE_CHANNELS]:
+        sale_channel = "direct"
+
+    if not client_name:
+        errors.append("Укажите ФИО клиента.")
+    if not boat_model:
+        errors.append("Укажите модель лодки.")
+    if not phone:
+        errors.append("Укажите номер телефона.")
+
+    discount_raw = form.get("discount_pct", "").strip().replace(",", ".")
+    discount_pct = 0.0
+    if discount_raw:
+        try:
+            discount_pct = float(discount_raw)
+            if not (0 <= discount_pct <= 100):
+                errors.append("Скидка должна быть от 0 до 100%.")
+        except ValueError:
+            errors.append("Скидка должна быть числом.")
+
+    names = form.getlist("work_name[]")
+    costs = form.getlist("cost_price[]")
+    mults = form.getlist("multiplier[]")
+
+    def _get(lst, i):
+        return lst[i] if i < len(lst) else ""
+
+    items = []
+    subtotal = 0.0
+    for i in range(len(names)):
+        name = names[i].strip()
+        cost_raw = _get(costs, i).strip().replace(",", ".")
+        mult_raw = _get(mults, i).strip().replace(",", ".")
+        if not name and not cost_raw and not mult_raw:
+            continue  # полностью пустая строка — пропускаем
+
+        row_num = i + 1
+        if not name:
+            errors.append(f"Работа №{row_num}: не указано название.")
+
+        cost = mult = None
+        try:
+            cost = float(cost_raw)
+            if cost < 0:
+                errors.append(f"Работа №{row_num}: себестоимость не может быть отрицательной.")
+        except ValueError:
+            errors.append(f"Работа №{row_num}: себестоимость должна быть числом.")
+        try:
+            mult = float(mult_raw)
+            if mult < 0:
+                errors.append(f"Работа №{row_num}: коэффициент не может быть отрицательным.")
+        except ValueError:
+            errors.append(f"Работа №{row_num}: коэффициент должен быть числом.")
+
+        if name and cost is not None and mult is not None:
+            price = cost * mult
+            items.append({"work_name": name, "cost_price": cost, "multiplier": mult, "price": price})
+            subtotal += price
+
+    if not items and not any("Работа" in e for e in errors):
+        errors.append("Добавьте хотя бы одну работу.")
+
+    if errors:
+        return errors, None
+
+    discount_amount = subtotal * discount_pct / 100
+    total = subtotal - discount_amount
+
+    data = dict(
+        client_name=client_name, boat_model=boat_model, phone=phone,
+        sale_channel=sale_channel, discount_pct=discount_pct,
+        items=items, subtotal=subtotal, discount_amount=discount_amount, total=total,
+    )
+    return errors, data
+
+
+@app.route("/tuning")
+def tuning_index():
+    db = get_db()
+    orders = db.execute(
+        "SELECT * FROM tuning_orders ORDER BY created_at DESC, id DESC"
+    ).fetchall()
+    grand_total = sum(o["total"] for o in orders)
+    return render_template(
+        "tuning_index.html", orders=orders, grand_total=grand_total,
+        active_page="tuning",
+    )
+
+
+@app.route("/tuning/add", methods=["GET", "POST"])
+def add_tuning_order():
+    if request.method == "GET":
+        return render_template(
+            "tuning_form.html", edit_order=None, errors=None, form_values=None,
+            items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning",
+        )
+
+    db = get_db()
+    errors, data = _process_tuning_form(request.form)
+    if errors:
+        return render_template(
+            "tuning_form.html", edit_order=None, errors=errors, form_values=request.form,
+            items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning",
+        ), 400
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    cur = db.execute(
+        "INSERT INTO tuning_orders (client_name, boat_model, sale_channel, phone, discount_pct, "
+        "subtotal, total, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (data["client_name"], data["boat_model"], data["sale_channel"], data["phone"],
+         data["discount_pct"], data["subtotal"], data["total"], now, now),
+    )
+    order_id = cur.lastrowid
+    for item in data["items"]:
+        db.execute(
+            "INSERT INTO tuning_order_items (order_id, work_name, cost_price, multiplier, price) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (order_id, item["work_name"], item["cost_price"], item["multiplier"], item["price"]),
+        )
+    db.commit()
+    return redirect(url_for("tuning_index"))
+
+
+@app.route("/tuning/edit/<int:order_id>", methods=["GET", "POST"])
+def edit_tuning_order(order_id):
+    db = get_db()
+    order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None:
+        return redirect(url_for("tuning_index"))
+
+    if request.method == "GET":
+        items = db.execute(
+            "SELECT * FROM tuning_order_items WHERE order_id = ? ORDER BY id", (order_id,)
+        ).fetchall()
+        form_values = {
+            "client_name": order["client_name"], "boat_model": order["boat_model"],
+            "sale_channel": order["sale_channel"], "phone": order["phone"],
+            "discount_pct": order["discount_pct"],
+        }
+        return render_template(
+            "tuning_form.html", edit_order=order, errors=None, form_values=form_values,
+            items_prefill=items, sale_channels=SALE_CHANNELS, active_page="tuning",
+        )
+
+    errors, data = _process_tuning_form(request.form)
+    if errors:
+        return render_template(
+            "tuning_form.html", edit_order=order, errors=errors, form_values=request.form,
+            items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning",
+        ), 400
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "UPDATE tuning_orders SET client_name=?, boat_model=?, sale_channel=?, phone=?, "
+        "discount_pct=?, subtotal=?, total=?, updated_at=? WHERE id=?",
+        (data["client_name"], data["boat_model"], data["sale_channel"], data["phone"],
+         data["discount_pct"], data["subtotal"], data["total"], now, order_id),
+    )
+    db.execute("DELETE FROM tuning_order_items WHERE order_id = ?", (order_id,))
+    for item in data["items"]:
+        db.execute(
+            "INSERT INTO tuning_order_items (order_id, work_name, cost_price, multiplier, price) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (order_id, item["work_name"], item["cost_price"], item["multiplier"], item["price"]),
+        )
+    db.commit()
+    return redirect(url_for("tuning_index"))
+
+
+@app.route("/tuning/delete/<int:order_id>", methods=["POST"])
+def delete_tuning_order(order_id):
+    db = get_db()
+    db.execute("DELETE FROM tuning_order_items WHERE order_id = ?", (order_id,))
+    db.execute("DELETE FROM tuning_orders WHERE id = ?", (order_id,))
+    db.commit()
+    return redirect(url_for("tuning_index"))
 
 
 # =======================================================================
