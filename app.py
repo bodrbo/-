@@ -24,7 +24,7 @@ from functools import wraps
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
-from flask import Flask, g, redirect, render_template, request, session, url_for
+from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.datastructures import MultiDict
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -509,6 +509,20 @@ def init_db():
         CREATE TABLE IF NOT EXISTS hull_diagnostic_sheets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             boat_name TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS hull_diagnostic_defects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sheet_id INTEGER NOT NULL,
+            view TEXT NOT NULL,
+            x_pct REAL NOT NULL,
+            y_pct REAL NOT NULL,
+            defect_type TEXT NOT NULL,
+            defect_size TEXT NOT NULL,
             created_at TEXT NOT NULL
         )
         """
@@ -1593,6 +1607,76 @@ def add_hull_diagnostic_sheet():
         )
         db.commit()
     return redirect(url_for("tuning_diagnostics"))
+
+
+HULL_VIEWS = ("bottom", "left", "right", "top")
+
+
+@app.route("/tuning/diagnostics/hull/<int:sheet_id>")
+@admin_login_required
+def hull_diagnostic_sheet(sheet_id):
+    db = get_db()
+    sheet = db.execute(
+        "SELECT * FROM hull_diagnostic_sheets WHERE id = ?", (sheet_id,)
+    ).fetchone()
+    if sheet is None:
+        return redirect(url_for("tuning_diagnostics"))
+
+    defects = db.execute(
+        "SELECT * FROM hull_diagnostic_defects WHERE sheet_id = ? ORDER BY id", (sheet_id,)
+    ).fetchall()
+    defects_by_view = {v: [] for v in HULL_VIEWS}
+    for d in defects:
+        if d["view"] in defects_by_view:
+            defects_by_view[d["view"]].append(d)
+
+    return render_template(
+        "hull_diagnostic_sheet.html", sheet=sheet, defects_by_view=defects_by_view,
+        active_page="tuning", sub_page="diagnostics", diag_page="hull",
+    )
+
+
+@app.route("/tuning/diagnostics/hull/<int:sheet_id>/defect/add", methods=["POST"])
+@admin_login_required
+def add_hull_diagnostic_defect(sheet_id):
+    db = get_db()
+    sheet = db.execute(
+        "SELECT id FROM hull_diagnostic_sheets WHERE id = ?", (sheet_id,)
+    ).fetchone()
+    if sheet is None:
+        return jsonify({"error": "Лист не найден."}), 404
+
+    view = request.form.get("view", "").strip()
+    if view not in HULL_VIEWS:
+        return jsonify({"error": "Неизвестный вид схемы."}), 400
+
+    try:
+        x_pct = float(request.form.get("x_pct", ""))
+        y_pct = float(request.form.get("y_pct", ""))
+    except ValueError:
+        return jsonify({"error": "Некорректные координаты."}), 400
+    x_pct = min(100.0, max(0.0, x_pct))
+    y_pct = min(100.0, max(0.0, y_pct))
+
+    defect_type = request.form.get("defect_type", "").strip()
+    defect_size = request.form.get("defect_size", "").strip()
+    if not defect_type:
+        return jsonify({"error": "Укажите тип дефекта."}), 400
+    if not defect_size:
+        return jsonify({"error": "Укажите размер дефекта."}), 400
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    cur = db.execute(
+        "INSERT INTO hull_diagnostic_defects "
+        "(sheet_id, view, x_pct, y_pct, defect_type, defect_size, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (sheet_id, view, x_pct, y_pct, defect_type, defect_size, now),
+    )
+    db.commit()
+    return jsonify({
+        "id": cur.lastrowid, "view": view, "x_pct": x_pct, "y_pct": y_pct,
+        "defect_type": defect_type, "defect_size": defect_size,
+    })
 
 
 @app.route("/tuning/add", methods=["GET", "POST"])

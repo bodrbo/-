@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ sheet.boat_name }} — диагностический лист</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100">
+      <g fill="var(--brass)">
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/>
+      </g>
+      <g fill="none" stroke="var(--brass)" stroke-width="2.6" stroke-linecap="round" opacity="0.85">
+        <path d="M55 15A24 24 0 0 1 62 22" transform="rotate(-6 50 50)"/>
+        <path d="M18 60A24 24 0 0 1 15 51" transform="rotate(4 50 50)"/>
+      </g>
+      <circle cx="50" cy="50" r="15" fill="none" stroke="var(--ink)" stroke-width="4"/>
+      <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
+    </svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo">
+    </div>
+    <nav class="main-nav">
+      <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'payroll' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.3" y="6" width="15.4" height="8" rx="1.8"/>
+          <circle cx="10" cy="10" r="2"/>
+          <path d="M4.6 8h.01M15.4 12h.01"/>
+        </svg>
+        <span class="nav-label">Зарплаты</span>
+      </a>
+      <a href="{{ url_for('trips_index') }}" class="{{ 'active' if active_page == 'trips' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="10" cy="3.8" r="1.6"/>
+          <path d="M10 5.6v10.6M6 8.4h8M4.2 11a5.8 5.8 0 0 0 11.6 0"/>
+        </svg>
+        <span class="nav-label">Рейсы и инвесторы</span>
+      </a>
+      <a href="{{ url_for('tuning_index') }}" class="{{ 'active' if active_page == 'tuning' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14.7 3.3a4 4 0 0 1-5.1 5.4L4.4 13.9a1.6 1.6 0 0 0 2.3 2.3l5.2-5.2a4 4 0 0 0 5.4-5.1l-2.6 2.6-1.9-.4-.4-1.9 2.6-2.6z"/>
+        </svg>
+        <span class="nav-label">Тюнинг-центр</span>
+      </a>
+    </nav>
+    <div class="title-block">
+      <h1>{{ sheet.boat_name }} — диагностический лист</h1>
+    </div>
+    <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout">
+      <button type="submit">Выйти</button>
+    </form>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <nav class="sub-tabs">
+    <a href="{{ url_for('tuning_index') }}" class="{{ 'active' if sub_page == 'orders' }}">Заказы</a>
+    <a href="{{ url_for('tuning_diagnostics') }}" class="{{ 'active' if sub_page == 'diagnostics' }}">Диагностика лодок</a>
+  </nav>
+
+  <nav class="sub-tabs sub-tabs-nested">
+    <a href="{{ url_for('tuning_diagnostics') }}" class="{{ 'active' if diag_page == 'hull' }}">Корпусная диагностика</a>
+  </nav>
+
+  <a href="{{ url_for('tuning_diagnostics') }}" class="term" style="display:inline-block; margin-bottom:14px;">← Ко всем листам</a>
+
+  <section class="panel">
+    <p class="hint" style="margin:0 0 18px;">Кликните по схеме в месте дефекта, чтобы отметить точку и заполнить анкету.</p>
+    <div class="hull-grid">
+
+      <div class="hull-view">
+        <h3>Днище</h3>
+        <div class="hull-canvas" onclick="onHullCanvasClick(event, 'bottom')">
+          <svg viewBox="0 0 300 120" preserveAspectRatio="none">
+            <path class="hull-outline" d="M20,60 C20,35 70,18 150,18 C230,18 275,35 292,60 C275,85 230,102 150,102 C70,102 20,85 20,60 Z"/>
+            <line class="hull-detail" x1="24" y1="60" x2="288" y2="60" stroke-dasharray="4 4"/>
+          </svg>
+          {% for d in defects_by_view.bottom %}
+          <div class="hull-point active" style="left:{{ d.x_pct }}%; top:{{ d.y_pct }}%;" onclick="event.stopPropagation()">
+            <div class="hull-point-tip">{{ d.defect_type }} · {{ d.defect_size }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="hull-view">
+        <h3>Палуба</h3>
+        <div class="hull-canvas" onclick="onHullCanvasClick(event, 'top')">
+          <svg viewBox="0 0 300 120" preserveAspectRatio="none">
+            <path class="hull-outline" d="M20,60 C20,35 70,18 150,18 C230,18 275,35 292,60 C275,85 230,102 150,102 C70,102 20,85 20,60 Z"/>
+            <rect class="hull-detail-fill" x="163" y="38" width="46" height="44" rx="8"/>
+            <path class="hull-detail" d="M163,50 C148,45 128,45 113,50"/>
+            <circle class="hull-detail" cx="78" cy="45" r="6"/>
+            <circle class="hull-detail" cx="78" cy="75" r="6"/>
+          </svg>
+          {% for d in defects_by_view.top %}
+          <div class="hull-point active" style="left:{{ d.x_pct }}%; top:{{ d.y_pct }}%;" onclick="event.stopPropagation()">
+            <div class="hull-point-tip">{{ d.defect_type }} · {{ d.defect_size }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="hull-view">
+        <h3>Левый борт</h3>
+        <div class="hull-canvas" onclick="onHullCanvasClick(event, 'left')">
+          <svg viewBox="0 0 300 120" preserveAspectRatio="none">
+            <path class="hull-outline" d="M18,40 C90,14 210,14 272,42 L293,60 L270,82 C205,102 90,100 28,88 C14,78 12,55 18,40 Z"/>
+            <rect class="hull-detail-fill" x="183" y="10" width="10" height="32" rx="2"/>
+            <rect class="hull-detail-fill" x="8" y="72" width="20" height="26" rx="3"/>
+          </svg>
+          {% for d in defects_by_view.left %}
+          <div class="hull-point active" style="left:{{ d.x_pct }}%; top:{{ d.y_pct }}%;" onclick="event.stopPropagation()">
+            <div class="hull-point-tip">{{ d.defect_type }} · {{ d.defect_size }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="hull-view">
+        <h3>Правый борт</h3>
+        <div class="hull-canvas hull-canvas-mirror" onclick="onHullCanvasClick(event, 'right')">
+          <svg viewBox="0 0 300 120" preserveAspectRatio="none">
+            <path class="hull-outline" d="M18,40 C90,14 210,14 272,42 L293,60 L270,82 C205,102 90,100 28,88 C14,78 12,55 18,40 Z"/>
+            <rect class="hull-detail-fill" x="183" y="10" width="10" height="32" rx="2"/>
+            <rect class="hull-detail-fill" x="8" y="72" width="20" height="26" rx="3"/>
+          </svg>
+          {% for d in defects_by_view.right %}
+          <div class="hull-point active" style="left:{{ d.x_pct }}%; top:{{ d.y_pct }}%;" onclick="event.stopPropagation()">
+            <div class="hull-point-tip">{{ d.defect_type }} · {{ d.defect_size }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<div class="modal-overlay hidden" id="defect-modal">
+  <div class="modal-box">
+    <h3>Новый дефект</h3>
+    <div class="field" style="margin-bottom:14px;">
+      <label for="defect-type-select">Тип дефекта</label>
+      <select id="defect-type-select" onchange="onDefectTypeChange()">
+        <option value="">Выберите тип…</option>
+        <option value="Паутинка">Паутинка</option>
+        <option value="Скол">Скол</option>
+        <option value="Царапина">Царапина</option>
+        <option value="__custom__">Свой вариант…</option>
+      </select>
+      <input type="text" id="defect-type-custom" class="custom-input hidden" placeholder="Укажите тип дефекта">
+    </div>
+    <div class="field">
+      <label for="defect-size-input">Размер дефекта</label>
+      <input type="text" id="defect-size-input" placeholder="Например, 3 см">
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" onclick="closeDefectModal()">Отмена</button>
+      <button type="button" onclick="saveDefect()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+  var ADD_DEFECT_URL = "{{ url_for('add_hull_diagnostic_defect', sheet_id=sheet.id) }}";
+  var currentClick = null;
+
+  function onHullCanvasClick(e, view) {
+    var canvas = e.currentTarget;
+    var rect = canvas.getBoundingClientRect();
+    var xPct = (e.clientX - rect.left) / rect.width * 100;
+    var yPct = (e.clientY - rect.top) / rect.height * 100;
+    xPct = Math.max(0, Math.min(100, xPct));
+    yPct = Math.max(0, Math.min(100, yPct));
+
+    var marker = document.createElement("div");
+    marker.className = "hull-point pending";
+    marker.style.left = xPct + "%";
+    marker.style.top = yPct + "%";
+    canvas.appendChild(marker);
+
+    currentClick = { view: view, xPct: xPct, yPct: yPct, marker: marker };
+
+    document.getElementById("defect-type-select").value = "";
+    document.getElementById("defect-type-custom").value = "";
+    document.getElementById("defect-type-custom").classList.add("hidden");
+    document.getElementById("defect-size-input").value = "";
+    document.getElementById("defect-modal").classList.remove("hidden");
+  }
+
+  function onDefectTypeChange() {
+    var select = document.getElementById("defect-type-select");
+    var custom = document.getElementById("defect-type-custom");
+    if (select.value === "__custom__") {
+      custom.classList.remove("hidden");
+      custom.focus();
+    } else {
+      custom.classList.add("hidden");
+    }
+  }
+
+  function closeDefectModal() {
+    document.getElementById("defect-modal").classList.add("hidden");
+    if (currentClick && currentClick.marker) {
+      currentClick.marker.remove();
+    }
+    currentClick = null;
+  }
+
+  function saveDefect() {
+    if (!currentClick) return;
+    var select = document.getElementById("defect-type-select");
+    var custom = document.getElementById("defect-type-custom");
+    var sizeInput = document.getElementById("defect-size-input");
+
+    var defectType = select.value === "__custom__" ? custom.value.trim() : select.value;
+    var defectSize = sizeInput.value.trim();
+
+    if (!defectType) { alert("Выберите или укажите тип дефекта."); return; }
+    if (!defectSize) { alert("Укажите размер дефекта."); return; }
+
+    var formData = new FormData();
+    formData.append("view", currentClick.view);
+    formData.append("x_pct", currentClick.xPct);
+    formData.append("y_pct", currentClick.yPct);
+    formData.append("defect_type", defectType);
+    formData.append("defect_size", defectSize);
+
+    fetch(ADD_DEFECT_URL, { method: "POST", body: formData })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.error) { alert(data.error); return; }
+        var marker = currentClick.marker;
+        marker.className = "hull-point active";
+        marker.setAttribute("onclick", "event.stopPropagation()");
+        var tip = document.createElement("div");
+        tip.className = "hull-point-tip";
+        tip.textContent = data.defect_type + " · " + data.defect_size;
+        marker.appendChild(tip);
+        document.getElementById("defect-modal").classList.add("hidden");
+        currentClick = null;
+      })
+      .catch(function () {
+        alert("Не удалось сохранить дефект. Попробуйте ещё раз.");
+      });
+  }
+</script>
+
+</body>
+</html>

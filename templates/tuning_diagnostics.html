@@ -81,9 +81,9 @@
         <span>Новый диагностический лист</span>
       </div>
       {% for sheet in sheets %}
-      <div class="diag-card">
+      <a class="diag-card" href="{{ url_for('hull_diagnostic_sheet', sheet_id=sheet.id) }}">
         <span>{{ sheet.boat_name }} — диагностический лист</span>
-      </div>
+      </a>
       {% endfor %}
     </div>
   </section>
