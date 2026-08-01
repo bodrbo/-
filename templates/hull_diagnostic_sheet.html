@@ -86,7 +86,6 @@
         <div class="hull-canvas" onclick="onHullCanvasClick(event, 'bottom')">
           <svg viewBox="0 0 300 120" preserveAspectRatio="none">
             <path class="hull-outline" d="M26,32 C70,12 170,14 292,60 C170,106 70,108 26,88 Z"/>
-            <line class="hull-detail" x1="30" y1="60" x2="286" y2="60" stroke-dasharray="4 4"/>
           </svg>
           {% for d in defects_by_view.bottom %}
           <div class="hull-point active" style="left:{{ d.x_pct }}%; top:{{ d.y_pct }}%;" onclick="event.stopPropagation()">
@@ -101,10 +100,6 @@
         <div class="hull-canvas" onclick="onHullCanvasClick(event, 'top')">
           <svg viewBox="0 0 300 120" preserveAspectRatio="none">
             <path class="hull-outline" d="M26,32 C70,12 170,14 292,60 C170,106 70,108 26,88 Z"/>
-            <rect class="hull-detail-fill" x="163" y="38" width="46" height="44" rx="8"/>
-            <path class="hull-detail" d="M163,50 C148,45 128,45 113,50"/>
-            <circle class="hull-detail" cx="78" cy="45" r="6"/>
-            <circle class="hull-detail" cx="78" cy="75" r="6"/>
           </svg>
           {% for d in defects_by_view.top %}
           <div class="hull-point active" style="left:{{ d.x_pct }}%; top:{{ d.y_pct }}%;" onclick="event.stopPropagation()">
@@ -116,12 +111,9 @@
 
       <div class="hull-view">
         <h3>Левый борт</h3>
-        <div class="hull-canvas" onclick="onHullCanvasClick(event, 'left')">
+        <div class="hull-canvas hull-canvas-mirror" onclick="onHullCanvasClick(event, 'left')">
           <svg viewBox="0 0 300 120" preserveAspectRatio="none">
-            <path class="hull-outline" d="M30,55 L30,90 C120,96 230,88 270,80 C285,76 292,70 292,62 C293,48 287,32 275,25 C190,10 90,20 30,55 Z"/>
-            <line class="hull-detail" x1="26" y1="72" x2="296" y2="72" stroke-dasharray="4 4"/>
-            <rect class="hull-detail-fill" x="196" y="8" width="9" height="24" rx="2"/>
-            <rect class="hull-detail-fill" x="10" y="78" width="18" height="20" rx="3"/>
+            <path class="hull-outline" d="M30,35 L255,40 C275,43 288,50 292,58 C287,66 272,72 245,76 L60,80 L30,80 Z"/>
           </svg>
           {% for d in defects_by_view.left %}
           <div class="hull-point active" style="left:{{ d.x_pct }}%; top:{{ d.y_pct }}%;" onclick="event.stopPropagation()">
@@ -133,12 +125,9 @@
 
       <div class="hull-view">
         <h3>Правый борт</h3>
-        <div class="hull-canvas hull-canvas-mirror" onclick="onHullCanvasClick(event, 'right')">
+        <div class="hull-canvas" onclick="onHullCanvasClick(event, 'right')">
           <svg viewBox="0 0 300 120" preserveAspectRatio="none">
-            <path class="hull-outline" d="M30,55 L30,90 C120,96 230,88 270,80 C285,76 292,70 292,62 C293,48 287,32 275,25 C190,10 90,20 30,55 Z"/>
-            <line class="hull-detail" x1="26" y1="72" x2="296" y2="72" stroke-dasharray="4 4"/>
-            <rect class="hull-detail-fill" x="196" y="8" width="9" height="24" rx="2"/>
-            <rect class="hull-detail-fill" x="10" y="78" width="18" height="20" rx="3"/>
+            <path class="hull-outline" d="M30,35 L255,40 C275,43 288,50 292,58 C287,66 272,72 245,76 L60,80 L30,80 Z"/>
           </svg>
           {% for d in defects_by_view.right %}
           <div class="hull-point active" style="left:{{ d.x_pct }}%; top:{{ d.y_pct }}%;" onclick="event.stopPropagation()">
