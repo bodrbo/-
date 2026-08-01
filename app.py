@@ -1861,8 +1861,13 @@ def create_yookassa_payment(order_id):
     if order is None or not yookassa_configured():
         return redirect(url_for("tuning_index"))
 
-    _, _, remaining = _order_payment_totals(db, order_id, order["total"])
-    if remaining <= 0:
+    amount_raw = request.form.get("amount", "").strip().replace(",", ".")
+    try:
+        amount = round(float(amount_raw), 2)
+    except ValueError:
+        amount = None
+    if amount is None or amount <= 0:
+        session["yookassa_error"] = "Укажите сумму счёта — больше нуля."
         return redirect(url_for("edit_tuning_order", order_id=order_id))
 
     client = db.execute("SELECT * FROM clients WHERE id = ?", (order["client_id"],)).fetchone()
@@ -1872,7 +1877,7 @@ def create_yookassa_payment(order_id):
     )
 
     body = {
-        "amount": {"value": f"{remaining:.2f}", "currency": "RUB"},
+        "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
         "capture": True,
         "description": f"Заказ №{order_id} — {order['client_name']}"[:128],
         "confirmation": {"type": "redirect", "return_url": return_url},
@@ -1883,7 +1888,7 @@ def create_yookassa_payment(order_id):
                 {
                     "description": f"Оплата заказа №{order_id} в тюнинг-центре"[:128],
                     "quantity": 1,
-                    "amount": {"value": f"{remaining:.2f}", "currency": "RUB"},
+                    "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
                     "vat_code": YOOKASSA_RECEIPT_VAT_CODE,
                     "measure": "piece",
                     "payment_subject": "service",
@@ -1900,7 +1905,7 @@ def create_yookassa_payment(order_id):
         db.execute(
             "INSERT INTO tuning_yookassa_payments (order_id, yookassa_payment_id, amount, status, "
             "confirmation_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (order_id, remote["id"], remaining, remote.get("status", "pending"),
+            (order_id, remote["id"], amount, remote.get("status", "pending"),
              remote["confirmation"]["confirmation_url"], now, now),
         )
         db.commit()

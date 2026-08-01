@@ -207,12 +207,26 @@
       <code>YOOKASSA_SHOP_ID</code> и <code>YOOKASSA_SECRET_KEY</code>.
     </div>
     {% else %}
-      {% if remaining > 0 %}
-      <form action="{{ url_for('create_yookassa_payment', order_id=edit_order.id) }}" method="post">
-        <button type="submit">Выставить счёт на {{ "%.0f"|format(remaining) }} ₽</button>
+      <form action="{{ url_for('create_yookassa_payment', order_id=edit_order.id) }}" method="post" class="entry-form">
+        <div class="field field-narrow field-fixed">
+          <label for="yookassa_amount">Сумма счёта, ₽</label>
+          <input type="text" inputmode="decimal" id="yookassa_amount" name="amount"
+                 value="{{ '%.0f'|format(remaining) }}" required>
+        </div>
+        <div class="field field-submit" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('yookassa_amount').value = '{{ '%.2f'|format(edit_order.total * 0.7) }}'">
+            70% от заказа
+          </button>
+          <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('yookassa_amount').value = '{{ '%.2f'|format(edit_order.total) }}'">
+            100% от заказа
+          </button>
+          <button type="submit">Выставить счёт</button>
+        </div>
       </form>
-      {% else %}
-      <p class="hint">Заказ полностью оплачен — выставлять новый счёт не нужно.</p>
+      {% if remaining <= 0 %}
+      <p class="hint" style="margin-top:10px;">По текущим данным заказ уже полностью оплачен — новый счёт всё равно можно выставить вручную, если нужно.</p>
       {% endif %}
     {% endif %}
 
