@@ -165,6 +165,31 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
   color: #ffffff;
   border-color: var(--brass-strong);
 }
+.sub-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 22px 0 18px;
+}
+.sub-tabs a {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 9px 18px;
+  border-radius: 999px;
+  border: 1.5px solid var(--hairline);
+  background: var(--paper);
+  color: var(--ink-soft);
+  text-decoration: none;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.sub-tabs a:hover { border-color: var(--brass); color: var(--ink); }
+.sub-tabs a.active {
+  background: var(--brass);
+  border-color: var(--brass);
+  color: #ffffff;
+}
 .kicker {
   font-size: 11px;
   letter-spacing: 0.14em;

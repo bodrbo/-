@@ -1554,7 +1554,15 @@ def tuning_index():
     grand_total = sum(o["total"] for o in orders)
     return render_template(
         "tuning_index.html", orders=orders, grand_total=grand_total,
-        active_page="tuning",
+        active_page="tuning", sub_page="orders",
+    )
+
+
+@app.route("/tuning/diagnostics")
+@admin_login_required
+def tuning_diagnostics():
+    return render_template(
+        "tuning_diagnostics.html", active_page="tuning", sub_page="diagnostics",
     )
 
 
@@ -1564,7 +1572,7 @@ def add_tuning_order():
     if request.method == "GET":
         return render_template(
             "tuning_form.html", edit_order=None, errors=None, form_values=None,
-            items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning",
+            items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
         )
 
     db = get_db()
@@ -1572,7 +1580,7 @@ def add_tuning_order():
     if errors:
         return render_template(
             "tuning_form.html", edit_order=None, errors=errors, form_values=request.form,
-            items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning",
+            items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -1619,7 +1627,7 @@ def edit_tuning_order(order_id):
         }
         return render_template(
             "tuning_form.html", edit_order=order, errors=None, form_values=form_values,
-            items_prefill=items, sale_channels=SALE_CHANNELS, active_page="tuning",
+            items_prefill=items, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
             payments=payments, paid_amount=paid_amount, remaining=remaining,
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
             yookassa_payments=yookassa_payments, yookassa_configured=yookassa_configured(),
@@ -1634,7 +1642,7 @@ def edit_tuning_order(order_id):
         ).fetchall()
         return render_template(
             "tuning_form.html", edit_order=order, errors=errors, form_values=request.form,
-            items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning",
+            items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
             payments=payments, paid_amount=paid_amount, remaining=remaining,
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
             yookassa_payments=yookassa_payments, yookassa_configured=yookassa_configured(),

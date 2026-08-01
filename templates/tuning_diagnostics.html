@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Тюнинг-центр</title>
+<title>Диагностика лодок</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -56,7 +56,7 @@
       </a>
     </nav>
     <div class="title-block">
-      <h1>Тюнинг-центр</h1>
+      <h1>Диагностика лодок</h1>
     </div>
     <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout">
       <button type="submit">Выйти</button>
@@ -71,84 +71,12 @@
     <a href="{{ url_for('tuning_diagnostics') }}" class="{{ 'active' if sub_page == 'diagnostics' }}">Диагностика лодок</a>
   </nav>
 
-  <div class="totals-grid">
-    <div class="panel total-card total-card-grand">
-      <span class="k">Заказов всего</span>
-      <span class="v">{{ orders|length }}</span>
-    </div>
-    <div class="panel total-card total-card-grand">
-      <span class="k">Сумма по всем заказам</span>
-      <span class="v">{{ grand_total|money }} ₽</span>
-    </div>
-  </div>
-
   <section class="panel">
-    <h2>
-      Заказы
-      <a href="{{ url_for('add_tuning_order') }}" class="btn-add" style="float:right; margin-top:-2px;">Добавить заказ</a>
-    </h2>
-    {% if orders %}
-    <div class="table-scroll">
-      <table class="records">
-        <thead>
-          <tr>
-            <th>№</th>
-            <th>Дата</th>
-            <th>Клиент</th>
-            <th>Лодка</th>
-            <th>Канал</th>
-            <th>Телефон</th>
-            <th>Скидка</th>
-            <th>Итог</th>
-            <th>Статус</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for o in orders %}
-          <tr>
-            <td><a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="term">№{{ o.id }}</a></td>
-            <td class="muted">{{ o.created_at[:10]|ru_date }}</td>
-            <td>
-              {% if o.client_token %}
-              <a href="{{ url_for('client_dashboard', token=o.client_token) }}">{{ o.client_name }}</a>
-              {% else %}
-              {{ o.client_name }}
-              {% endif %}
-            </td>
-            <td>{{ o.boat_model }}</td>
-            <td class="muted">{{ 'Напрямую' if o.sale_channel == 'direct' else ('Агрегатор' if o.sale_channel == 'aggregator' else 'Смешанно') }}</td>
-            <td class="muted">{{ o.phone }}</td>
-            <td>{{ o.discount_pct|float|round(1) }}%</td>
-            <td class="amount">{{ o.total|money }}</td>
-            <td><span class="status-badge status-{{ o.status }}">{{ o.status|order_status_label }}</span></td>
-            <td class="row-actions">
-              <a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="icon-btn" title="Редактировать">
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M13.5 3.5l3 3L6 17H3v-3L13.5 3.5z"/>
-                </svg>
-              </a>
-              <form action="{{ url_for('delete_tuning_order', order_id=o.id) }}" method="post"
-                    onsubmit="return confirm('Удалить этот заказ?');">
-                <button type="submit" class="icon-btn danger" title="Удалить">
-                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
-                  </svg>
-                </button>
-              </form>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">Заказов пока нет</div>
-      <div class="s">Добавьте первый заказ кнопкой выше.</div>
+      <div class="t">Раздел в разработке</div>
+      <div class="s">Здесь появится диагностика лодок.</div>
     </div>
-    {% endif %}
   </section>
 
 </main>
