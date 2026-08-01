@@ -30,7 +30,7 @@
 <header class="topbar">
   <div class="topbar-inner">
     <div class="brand">
-      <img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo brand-logo-large">
     </div>
     <div class="title-block">
       <h1>Личный кабинет клиента</h1>
@@ -132,7 +132,7 @@
     </div>
     {% else %}
     <div class="empty-state">
-      <div class="empty-logo"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
+      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
       <div class="t">Заказов пока нет</div>
       <div class="s">Здесь появятся ваши заказы из тюнинг-центра.</div>
     </div>

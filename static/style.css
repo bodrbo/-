@@ -106,6 +106,10 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
 
 .brand { display: flex; align-items: center; }
 .brand-logo { display: block; height: 52px; width: auto; }
+/* The client cabinet is the one page a person can land on with zero prior
+   context (a bare link, no login) — give the brand a bit more presence
+   there than in the internal admin/investor/team screens. */
+.brand-logo-large { height: 68px; }
 
 .title-block { text-align: right; }
 
@@ -254,6 +258,7 @@ input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, in
 .status-badge {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   padding: 3px 10px;
   border-radius: 999px;
   font-size: 10.5px;
@@ -262,16 +267,48 @@ input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, in
   letter-spacing: 0.03em;
   white-space: nowrap;
 }
+.status-badge::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  flex: none;
+  background-repeat: no-repeat;
+  background-size: contain;
+}
 .status-badge.status-estimate,
 .status-badge.status-pending { background: rgba(98, 112, 127, 0.14); color: var(--muted); }
-.status-badge.status-approved,
+.status-badge.status-estimate::before,
+.status-badge.status-pending::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2362707f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='M8 4.8V8l2.4 1.4'/%3E%3C/svg%3E");
+}
+.status-badge.status-approved { background: rgba(46, 134, 193, 0.16); color: var(--brass-strong); }
+.status-badge.status-approved::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232e86c1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5'/%3E%3C/svg%3E");
+}
 .status-badge.status-in_progress { background: rgba(46, 134, 193, 0.16); color: var(--brass-strong); }
+.status-badge.status-in_progress::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232e86c1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='M8 2a6 6 0 0 1 6 6'/%3E%3C/svg%3E");
+}
 .status-badge.status-qc { background: rgba(41, 76, 86, 0.14); color: var(--ink-soft); }
-.status-badge.status-done { background: rgba(47, 107, 79, 0.16); color: var(--success); }
+.status-badge.status-qc::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23294c56' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='7' cy='7' r='4.2'/%3E%3Cpath d='M10.2 10.2L13.5 13.5'/%3E%3C/svg%3E");
+}
+.status-badge.status-done,
+.status-badge.status-succeeded { background: rgba(47, 107, 79, 0.16); color: var(--success); }
+.status-badge.status-done::before,
+.status-badge.status-succeeded::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232f6b4f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5'/%3E%3C/svg%3E");
+}
 .status-badge.status-cancelled,
 .status-badge.status-canceled { background: rgba(179, 64, 44, 0.14); color: var(--danger); }
+.status-badge.status-cancelled::before,
+.status-badge.status-canceled::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23b3402c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 4l8 8M12 4l-8 8'/%3E%3C/svg%3E");
+}
 .status-badge.status-waiting_for_capture { background: rgba(46, 134, 193, 0.16); color: var(--brass-strong); }
-.status-badge.status-succeeded { background: rgba(47, 107, 79, 0.16); color: var(--success); }
+.status-badge.status-waiting_for_capture::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232e86c1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='M8 4.8V8l2.4 1.4'/%3E%3C/svg%3E");
+}
 
 .status-select-form { display: inline-block; margin: 0; }
 .status-select-form select {
@@ -343,22 +380,25 @@ input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, in
   color: var(--ink);
 }
 
+/* Dashed border reads as "secondary/optional action" throughout the site
+   (matches .btn-add) — a stitched-canvas cue rather than a generic outline
+   button, used consistently instead of ad hoc solid-border variants. */
 .btn-secondary {
   display: inline-block;
   font-family: inherit;
   font-size: 13px;
   font-weight: 700;
   padding: 9px 16px;
-  background: var(--paper-alt);
+  background: transparent;
   color: var(--ink);
-  border: 1px solid var(--hairline);
+  border: 1.5px dashed var(--hairline);
   border-radius: 8px;
   cursor: pointer;
   margin-top: 4px;
   text-decoration: none;
   white-space: nowrap;
 }
-.btn-secondary:hover { background: var(--hairline-soft); border-color: var(--brass); }
+.btn-secondary:hover { background: var(--paper-alt); border-color: var(--brass); }
 
 .btn-add {
   display: inline-flex;
@@ -801,15 +841,10 @@ table.records tr.row-pending:hover td { background: rgba(212, 141, 74, 0.2); }
 .empty-state .t { font-family: 'Open Sans', -apple-system, sans-serif; font-size: 15px; color: var(--ink-soft); }
 .empty-state .s { font-size: 12.5px; max-width: 38ch; }
 .empty-logo {
-  font-family: 'Bebas Neue', 'Open Sans', -apple-system, sans-serif;
-  font-weight: 700;
-  font-size: 34px;
-  letter-spacing: 0.03em;
-  line-height: 1;
-  color: var(--ink);
-  opacity: 0.5;
+  width: 108px;
+  height: auto;
+  opacity: 0.28;
 }
-.empty-logo .mark { color: var(--brass-strong); }
 
 .alert {
   background: #f6e2da;

@@ -306,7 +306,7 @@
         </div>
         {% else %}
         <div class="empty-state">
-          <div class="empty-logo"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
+          <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
           <div class="t">Нет записей, ожидающих подтверждения</div>
           <div class="s">Загрузите период выше, чтобы найти новые рейсы.</div>
         </div>
@@ -402,7 +402,7 @@
     </div>
     {% else %}
     <div class="empty-state">
-      <div class="empty-logo"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
+      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
       <div class="t">За выбранный период рейсов нет</div>
       <div class="s">Добавьте рейс через форму выше или смените период/катер в фильтре.</div>
     </div>
@@ -456,7 +456,7 @@
     </div>
     {% else %}
     <div class="empty-state">
-      <div class="empty-logo"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
+      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
       <div class="t">За выбранный период записей нет</div>
       <div class="s">Добавьте рейс через форму выше или смените период/катер в фильтре.</div>
     </div>

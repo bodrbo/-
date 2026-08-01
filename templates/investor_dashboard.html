@@ -119,7 +119,7 @@
     </div>
     {% else %}
     <div class="empty-state">
-      <div class="empty-logo"><span class="mark">B</span>ODR<span class="mark">B</span>O</div>
+      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
       <div class="t">За выбранный период рейсов нет</div>
       <div class="s">Смените месяц в фильтре выше.</div>
     </div>
