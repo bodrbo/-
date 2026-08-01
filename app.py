@@ -504,6 +504,15 @@ def init_db():
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS hull_diagnostic_sheets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            boat_name TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
     # Migration path for tuning_orders created before client_id/status existed.
     tuning_cols = [row[1] for row in conn.execute("PRAGMA table_info(tuning_orders)").fetchall()]
     if "client_id" not in tuning_cols:
@@ -1561,10 +1570,29 @@ def tuning_index():
 @app.route("/tuning/diagnostics/hull")
 @admin_login_required
 def tuning_diagnostics():
+    db = get_db()
+    sheets = db.execute(
+        "SELECT * FROM hull_diagnostic_sheets ORDER BY id DESC"
+    ).fetchall()
     return render_template(
         "tuning_diagnostics.html", active_page="tuning", sub_page="diagnostics",
-        diag_page="hull",
+        diag_page="hull", sheets=sheets,
     )
+
+
+@app.route("/tuning/diagnostics/hull/add", methods=["POST"])
+@admin_login_required
+def add_hull_diagnostic_sheet():
+    boat_name = request.form.get("boat_name", "").strip()
+    if boat_name:
+        db = get_db()
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        db.execute(
+            "INSERT INTO hull_diagnostic_sheets (boat_name, created_at) VALUES (?, ?)",
+            (boat_name, now),
+        )
+        db.commit()
+    return redirect(url_for("tuning_diagnostics"))
 
 
 @app.route("/tuning/add", methods=["GET", "POST"])

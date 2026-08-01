@@ -76,16 +76,33 @@
   </nav>
 
   <section class="panel">
-    <div class="empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">Раздел в разработке</div>
-      <div class="s">Здесь появится корпусная диагностика.</div>
+    <div class="diag-grid">
+      <div class="diag-card diag-card-add" onclick="addHullDiagnosticSheet()">
+        <span>Новый диагностический лист</span>
+      </div>
+      {% for sheet in sheets %}
+      <div class="diag-card">
+        <span>{{ sheet.boat_name }} — диагностический лист</span>
+      </div>
+      {% endfor %}
     </div>
   </section>
+
+  <form id="hull-add-form" action="{{ url_for('add_hull_diagnostic_sheet') }}" method="post" class="hidden">
+    <input type="hidden" id="hull-add-boat-name" name="boat_name">
+  </form>
 
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+  function addHullDiagnosticSheet() {
+    var boatName = prompt("Введите название лодки:");
+    if (!boatName || !boatName.trim()) return;
+    document.getElementById("hull-add-boat-name").value = boatName.trim();
+    document.getElementById("hull-add-form").submit();
+  }
+</script>
 
 </body>
 </html>

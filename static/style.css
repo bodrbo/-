@@ -207,6 +207,38 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
   border-color: var(--hairline);
   color: var(--brass-strong);
 }
+.diag-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 18px;
+}
+.diag-card {
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px;
+  border-radius: 22px;
+  border: 1.5px solid var(--hairline);
+  background: var(--paper-alt);
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.diag-card-add {
+  border: 2.5px dashed var(--hairline);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, background-color 0.2s ease;
+}
+.diag-card-add:hover {
+  border-color: var(--brass);
+  color: var(--brass-strong);
+  background: var(--paper-alt);
+}
 .kicker {
   font-size: 11px;
   letter-spacing: 0.14em;
