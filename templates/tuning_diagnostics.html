@@ -71,11 +71,15 @@
     <a href="{{ url_for('tuning_diagnostics') }}" class="{{ 'active' if sub_page == 'diagnostics' }}">Диагностика лодок</a>
   </nav>
 
+  <nav class="sub-tabs sub-tabs-nested">
+    <a href="{{ url_for('tuning_diagnostics') }}" class="{{ 'active' if diag_page == 'hull' }}">Корпусная диагностика</a>
+  </nav>
+
   <section class="panel">
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
       <div class="t">Раздел в разработке</div>
-      <div class="s">Здесь появится диагностика лодок.</div>
+      <div class="s">Здесь появится корпусная диагностика.</div>
     </div>
   </section>
 

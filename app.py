@@ -1558,11 +1558,12 @@ def tuning_index():
     )
 
 
-@app.route("/tuning/diagnostics")
+@app.route("/tuning/diagnostics/hull")
 @admin_login_required
 def tuning_diagnostics():
     return render_template(
         "tuning_diagnostics.html", active_page="tuning", sub_page="diagnostics",
+        diag_page="hull",
     )
 
 

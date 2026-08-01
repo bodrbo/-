@@ -190,6 +190,23 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
   border-color: var(--brass);
   color: #ffffff;
 }
+.sub-tabs.sub-tabs-nested {
+  margin-top: -8px;
+  gap: 6px;
+}
+.sub-tabs.sub-tabs-nested a {
+  font-size: 12px;
+  padding: 6px 14px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+.sub-tabs.sub-tabs-nested a:hover { border-color: var(--hairline); color: var(--ink); }
+.sub-tabs.sub-tabs-nested a.active {
+  background: var(--paper-alt);
+  border-color: var(--hairline);
+  color: var(--brass-strong);
+}
 .kicker {
   font-size: 11px;
   letter-spacing: 0.14em;
