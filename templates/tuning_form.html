@@ -35,7 +35,7 @@
          value="{{ item.cost_price if item else '' }}" oninput="updateWorkRow(this)">
   <input type="text" inputmode="decimal" name="multiplier[]" placeholder="Коэффициент" class="work-multiplier"
          value="{{ item.multiplier if item else '' }}" oninput="updateWorkRow(this)">
-  <span class="work-price" data-value="{{ item.price if item else 0 }}">{{ "%.0f"|format(item.price) if item else 0 }} ₽</span>
+  <span class="work-price" data-value="{{ item.price if item else 0 }}">{{ item.price|money if item else 0 }} ₽</span>
   <button type="button" class="btn-delete" onclick="removeWorkRow(this)" title="Убрать работу">✕</button>
 </div>
 {% endmacro %}
@@ -105,8 +105,8 @@
   <div class="hero-grid">
     <div class="hero-card">
       <span class="k">К доплате</span>
-      <span class="v tabular">{{ "%.0f"|format(remaining) }} ₽</span>
-      <span class="d">Итог заказа {{ "%.0f"|format(edit_order.total) }} ₽</span>
+      <span class="v tabular">{{ remaining|money }} ₽</span>
+      <span class="d">Итог заказа {{ edit_order.total|money }} ₽</span>
     </div>
   </div>
   <div class="split-bar" aria-hidden="true">
@@ -116,8 +116,8 @@
     {% endif %}
   </div>
   <div class="split-legend">
-    <span><i style="background:var(--success);"></i>Оплачено — {{ "%.0f"|format(paid_amount) }} ₽</span>
-    <span><i style="background:var(--ink-soft);"></i>Не оплачено — {{ "%.0f"|format(remaining) }} ₽</span>
+    <span><i style="background:var(--success);"></i>Оплачено — {{ paid_amount|money }} ₽</span>
+    <span><i style="background:var(--ink-soft);"></i>Не оплачено — {{ remaining|money }} ₽</span>
   </div>
 
   <section class="panel">
@@ -130,7 +130,7 @@
           {% for item in items_prefill %}
           <tr>
             <td>{{ item.work_name }}</td>
-            <td class="amount">{{ "%.0f"|format(item.price) }}</td>
+            <td class="amount">{{ item.price|money }}</td>
             <td>
               <form action="{{ url_for('set_tuning_item_status', order_id=edit_order.id, item_id=item.id) }}"
                     method="post" class="status-select-form">
@@ -173,7 +173,7 @@
           {% for p in payments %}
           <tr>
             <td class="muted">{{ p.paid_at[:10]|ru_date }}</td>
-            <td class="amount">{{ "%.0f"|format(p.amount) }}</td>
+            <td class="amount">{{ p.amount|money }}</td>
             <td class="row-actions">
               <form action="{{ url_for('delete_tuning_payment', order_id=edit_order.id, payment_id=p.id) }}" method="post"
                     onsubmit="return confirm('Удалить этот платёж?');">
@@ -238,7 +238,7 @@
           {% for yp in yookassa_payments %}
           <tr>
             <td class="muted">{{ yp.created_at[:10]|ru_date }}</td>
-            <td class="amount">{{ "%.0f"|format(yp.amount) }}</td>
+            <td class="amount">{{ yp.amount|money }}</td>
             <td><span class="status-badge status-{{ yp.status }}">{{ yp.status|yookassa_status_label }}</span></td>
             <td class="row-actions">
               {% if yp.status not in ('succeeded', 'canceled') %}

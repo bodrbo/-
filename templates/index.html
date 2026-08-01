@@ -215,7 +215,7 @@
   <section class="totals-grid">
     <div class="panel total-card total-card-grand">
       <span class="k">Сумма за период</span>
-      <span class="v">{{ "%.0f"|format(grand_total) }} ₽</span>
+      <span class="v">{{ grand_total|money }} ₽</span>
     </div>
     {% for employee, sum in totals_by_employee.items() %}
     {% set is_paid = employee in paid_employees %}
@@ -228,7 +228,7 @@
          role="button" tabindex="0"
          {% endif %}>
       <span class="k">{{ employee }}</span>
-      <span class="v">{{ "%.0f"|format(sum) }} ₽</span>
+      <span class="v">{{ sum|money }} ₽</span>
       {% if is_paid %}<span class="paid-badge">Оплачено</span>{% endif %}
     </div>
     {% endfor %}
@@ -276,7 +276,7 @@
             <td>{{ e.work_type }}</td>
             <td>{{ e.quantity|float|round(2) }}</td>
             <td>{{ e.rate|float|round(2) }}</td>
-            <td class="amount">{{ "%.0f"|format(e.amount) }}</td>
+            <td class="amount">{{ e.amount|money }}</td>
             <td>
               <form action="{{ url_for('delete_entry', entry_id=e.id) }}" method="post"
                     onsubmit="return confirm('Удалить эту запись?');">

@@ -49,7 +49,18 @@ def format_ru_date(iso_date):
         return iso_date
 
 
+def format_money(value, decimals=0):
+    """Format a number with a thin space as the thousands separator."""
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return value
+    formatted = f"{value:,.{decimals}f}"
+    return formatted.replace(",", " ")
+
+
 app.jinja_env.filters["ru_date"] = format_ru_date
+app.jinja_env.filters["money"] = format_money
 
 # ---------------------------------------------------------------------
 # Yclients — импорт рейсов. Токены НЕ храним в коде (секреты) — задайте их
@@ -2317,7 +2328,7 @@ def build_import_candidates(records, activity_colors=None):
             boat_label = "катер не определён (цвет не задан)"
         trip_date_label = format_ru_date(trip_date)
         when_label = f"{trip_date_label} {trip_time}".strip() if trip_time else trip_date_label
-        summary = f"{when_label} · {boat_label} · {employees_label} · {revenue:.0f} ₽"
+        summary = f"{when_label} · {boat_label} · {employees_label} · {format_money(revenue)} ₽"
         candidates.append({"yclients_ref": key, "summary": summary, "payload": payload})
     candidates.sort(key=lambda c: (c["payload"]["trip_date"], c["payload"]["trip_time"]), reverse=True)
     return candidates
@@ -2471,7 +2482,7 @@ def merge_pending_candidates(db):
         trip_date_label = format_ru_date(trip_date)
         when_label = f"{trip_date_label} {trip_time}".strip() if trip_time else trip_date_label
         revenue = keep_payload.get("revenue") or 0
-        summary = f"{when_label} · {boat} · {employees_label} · {revenue:.0f} ₽"
+        summary = f"{when_label} · {boat} · {employees_label} · {format_money(revenue)} ₽"
 
         db.execute(
             "UPDATE import_candidates SET summary = ?, payload = ? WHERE id = ?",

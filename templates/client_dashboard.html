@@ -55,15 +55,15 @@
     </div>
     <div class="panel total-card">
       <span class="k">Сумма по заказам</span>
-      <span class="v">{{ "%.0f"|format(grand_total) }} ₽</span>
+      <span class="v">{{ grand_total|money }} ₽</span>
     </div>
     <div class="panel total-card">
       <span class="k">Оплачено</span>
-      <span class="v" style="color:var(--success);">{{ "%.0f"|format(paid_total) }} ₽</span>
+      <span class="v" style="color:var(--success);">{{ paid_total|money }} ₽</span>
     </div>
     <div class="panel total-card total-card-grand">
       <span class="k">Осталось доплатить</span>
-      <span class="v">{{ "%.0f"|format(remaining_total) }} ₽</span>
+      <span class="v">{{ remaining_total|money }} ₽</span>
     </div>
   </div>
 
@@ -78,11 +78,11 @@
           <span class="oc-date">{{ o.created_at[:10]|ru_date }}</span>
           <span class="oc-boat">{{ o.boat_model }}</span>
           <span class="status-badge status-{{ o.status }}">{{ o.status|order_status_label }}</span>
-          <span class="oc-total">{{ "%.0f"|format(o.total) }} ₽</span>
+          <span class="oc-total">{{ o.total|money }} ₽</span>
           {% if o.remaining <= 0 %}
           <span class="oc-status paid">Оплачено</span>
           {% else %}
-          <span class="oc-status">К доплате {{ "%.0f"|format(o.remaining) }} ₽</span>
+          <span class="oc-status">К доплате {{ o.remaining|money }} ₽</span>
           {% endif %}
           <span class="chev" aria-hidden="true"></span>
         </summary>
@@ -96,7 +96,7 @@
                 {% for item in o.work_items %}
                 <tr class="{{ 'row-pending' if item.status == 'pending' }}">
                   <td>{{ item.work_name }}</td>
-                  <td class="amount">{{ "%.0f"|format(item.price) }}</td>
+                  <td class="amount">{{ item.price|money }}</td>
                   <td><span class="status-badge status-{{ item.status }}">{{ item.status|work_status_label }}</span></td>
                   <td class="row-actions">
                     {% if item.status == 'pending' %}
@@ -118,12 +118,12 @@
           <p class="hint">Работы не указаны.</p>
           {% endif %}
           <p class="hint" style="margin-top:14px;">
-            Скидка {{ o.discount_pct|float|round(1) }}% · Оплачено {{ "%.0f"|format(o.paid_amount) }} ₽ ·
-            К доплате {{ "%.0f"|format(o.remaining) }} ₽
+            Скидка {{ o.discount_pct|float|round(1) }}% · Оплачено {{ o.paid_amount|money }} ₽ ·
+            К доплате {{ o.remaining|money }} ₽
           </p>
           {% if o.yookassa_pending and o.remaining > 0 %}
           <a href="{{ o.yookassa_pending.confirmation_url }}" target="_blank" rel="noopener" class="btn-pay" style="margin-top:6px;">
-            Оплатить онлайн {{ "%.0f"|format(o.yookassa_pending.amount) }} ₽
+            Оплатить онлайн {{ o.yookassa_pending.amount|money }} ₽
           </a>
           {% endif %}
         </div>

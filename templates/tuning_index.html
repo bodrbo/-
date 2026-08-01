@@ -73,7 +73,7 @@
     </div>
     <div class="panel total-card total-card-grand">
       <span class="k">Сумма по всем заказам</span>
-      <span class="v">{{ "%.0f"|format(grand_total) }} ₽</span>
+      <span class="v">{{ grand_total|money }} ₽</span>
     </div>
   </div>
 
@@ -115,7 +115,7 @@
             <td class="muted">{{ 'Напрямую' if o.sale_channel == 'direct' else ('Агрегатор' if o.sale_channel == 'aggregator' else 'Смешанно') }}</td>
             <td class="muted">{{ o.phone }}</td>
             <td>{{ o.discount_pct|float|round(1) }}%</td>
-            <td class="amount">{{ "%.0f"|format(o.total) }}</td>
+            <td class="amount">{{ o.total|money }}</td>
             <td><span class="status-badge status-{{ o.status }}">{{ o.status|order_status_label }}</span></td>
             <td class="row-actions">
               <a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="icon-btn" title="Редактировать">

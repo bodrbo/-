@@ -344,8 +344,8 @@
   <div class="hero-grid">
     <div class="hero-card">
       <span class="k">Итог судовладельца за период</span>
-      <span class="v tabular">{{ "%.0f"|format(grand_my_share) }} ₽</span>
-      <span class="d">Доход рейсов {{ "%.0f"|format(grand_revenue) }} ₽{% if by_investor %} · инвесторам {{ "%.0f"|format(by_investor.values()|sum(attribute='payout')) }} ₽{% endif %}</span>
+      <span class="v tabular">{{ grand_my_share|money }} ₽</span>
+      <span class="d">Доход рейсов {{ grand_revenue|money }} ₽{% if by_investor %} · инвесторам {{ by_investor.values()|sum(attribute='payout')|money }} ₽{% endif %}</span>
     </div>
     {% for boat_name, t in by_boat.items() %}
     {% set investor = (boats|selectattr('name', 'equalto', boat_name)|map(attribute='investor')|first) or 'не указан' %}
@@ -357,7 +357,7 @@
           <div class="boat-investor">Инвестор — {{ investor }}</div>
         </div>
         <div class="boat-amount">
-          <div class="v tabular">{{ "%.0f"|format(t.investor_payout) }} ₽</div>
+          <div class="v tabular">{{ t.investor_payout|money }} ₽</div>
           <div class="k">инвестору</div>
         </div>
       </div>
@@ -390,12 +390,12 @@
         <tr>
           <td class="term">{{ boat_name }}</td>
           <td>{{ t.count }}</td>
-          <td>{{ "%.0f"|format(t.revenue) }}</td>
-          <td>{{ "%.0f"|format(t.commission) }}</td>
-          <td>{{ "%.0f"|format(t.labor + t.fuel + t.mooring + t.extra) }}</td>
-          <td>{{ "%.0f"|format(t.remainder) }}</td>
-          <td class="amount">{{ "%.0f"|format(t.investor_payout) }}</td>
-          <td class="amount">{{ "%.0f"|format(t.my_share) }}</td>
+          <td>{{ t.revenue|money }}</td>
+          <td>{{ t.commission|money }}</td>
+          <td>{{ t.labor + t.fuel + t.mooring + t.extra|money }}</td>
+          <td>{{ t.remainder|money }}</td>
+          <td class="amount">{{ t.investor_payout|money }}</td>
+          <td class="amount">{{ t.my_share|money }}</td>
         </tr>
         {% endfor %}
       </table>
@@ -426,14 +426,14 @@
             <td class="muted">{{ t.trip_date|ru_date }} · {{ t.trip_time or '00:00' }}</td>
             <td>{{ t.boat }}</td>
             <td>{{ t.work_type }}</td>
-            <td>{{ "%.0f"|format(t.revenue) }}</td>
+            <td>{{ t.revenue|money }}</td>
             <td class="muted">{{ 'Напрямую' if t.sale_channel == 'direct' else ('Агрегатор' if t.sale_channel == 'aggregator' else 'Смешанно') }}</td>
-            <td>{{ "%.0f"|format(t.commission_amount) }} ({{ t.commission_pct|float|round(1) }}%)</td>
-            <td title="Гид/капитан: {{ "%.0f"|format(t.labor_cost) }} · Топливо: {{ "%.0f"|format(t.fuel_cost) }} · Стоянка: {{ "%.0f"|format(t.mooring_cost) }}{% if t.extra_total %} · Доп: {{ "%.0f"|format(t.extra_total) }}{% endif %}">
-              {{ "%.0f"|format(t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total) }}
+            <td>{{ t.commission_amount|money }} ({{ t.commission_pct|float|round(1) }}%)</td>
+            <td title="Гид/капитан: {{ t.labor_cost|money }} · Топливо: {{ t.fuel_cost|money }} · Стоянка: {{ t.mooring_cost|money }}{% if t.extra_total %} · Доп: {{ t.extra_total|money }}{% endif %}">
+              {{ t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total|money }}
             </td>
-            <td class="amount">{{ "%.0f"|format(t.investor_payout) }}</td>
-            <td class="amount">{{ "%.0f"|format(t.my_share) }}</td>
+            <td class="amount">{{ t.investor_payout|money }}</td>
+            <td class="amount">{{ t.my_share|money }}</td>
             <td class="row-actions">
               <a href="{{ url_for('edit_trip', trip_id=t.id) }}" class="icon-btn" title="Редактировать">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">

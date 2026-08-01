@@ -67,8 +67,8 @@
   <div class="hero-grid">
     <div class="hero-card">
       <span class="k">Выплата за период</span>
-      <span class="v tabular">{{ "%.0f"|format(grand_payout) }} ₽</span>
-      <span class="d">Доход рейсов {{ "%.0f"|format(grand_revenue) }} ₽</span>
+      <span class="v tabular">{{ grand_payout|money }} ₽</span>
+      <span class="d">Доход рейсов {{ grand_revenue|money }} ₽</span>
     </div>
     {% for boat_name, t in by_boat.items() %}
     <div class="boat-card">
@@ -78,7 +78,7 @@
           <div class="boat-investor">Рейсов за период: {{ t.count }}</div>
         </div>
         <div class="boat-amount">
-          <div class="v tabular">{{ "%.0f"|format(t.investor_payout) }} ₽</div>
+          <div class="v tabular">{{ t.investor_payout|money }} ₽</div>
           <div class="k">выплата</div>
         </div>
       </div>
@@ -107,11 +107,11 @@
           <tr>
             <td class="muted">{{ t.trip_date|ru_date }} · {{ t.trip_time or '00:00' }}</td>
             {% if boats|length > 1 %}<td>{{ t.boat }}</td>{% endif %}
-            <td>{{ "%.0f"|format(t.revenue) }}</td>
-            <td>{{ "%.0f"|format(t.commission_amount) }} ({{ t.commission_pct|float|round(1) }}%)</td>
-            <td>{{ "%.0f"|format(t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total) }}</td>
-            <td>{{ "%.0f"|format(t.remainder) }}</td>
-            <td class="amount">{{ "%.0f"|format(t.investor_payout) }}</td>
+            <td>{{ t.revenue|money }}</td>
+            <td>{{ t.commission_amount|money }} ({{ t.commission_pct|float|round(1) }}%)</td>
+            <td>{{ t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total|money }}</td>
+            <td>{{ t.remainder|money }}</td>
+            <td class="amount">{{ t.investor_payout|money }}</td>
           </tr>
           {% endfor %}
         </tbody>
