@@ -28,14 +28,11 @@ from flask import Flask, g, jsonify, redirect, render_template, request, session
 from werkzeug.datastructures import MultiDict
 from werkzeug.security import check_password_hash, generate_password_hash
 from io import BytesIO
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import HRFlowable, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+# reportlab (PDF generation for "Акт выполненных работ") is imported lazily,
+# inside _build_act_pdf() — it's an extra dependency on top of the site's
+# core requirements, and a missing/broken install of it must not take the
+# whole app down. If it's unavailable, only that one route fails.
 
 app = Flask(__name__)
 
@@ -1645,6 +1642,9 @@ _ACT_FONTS_REGISTERED = False
 
 
 def _register_act_fonts():
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
     global _ACT_FONTS_REGISTERED
     if _ACT_FONTS_REGISTERED:
         return
@@ -1659,6 +1659,15 @@ COMPANY_ADDRESS = "197762, Россия, г Санкт-Петербург, г К
 
 
 def _build_act_pdf(order, items):
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        HRFlowable, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+    )
+
     _register_act_fonts()
     buf = BytesIO()
     doc = SimpleDocTemplate(
@@ -1764,7 +1773,15 @@ def tuning_order_act_pdf(order_id):
         "SELECT * FROM tuning_order_items WHERE order_id = ? AND status = 'done' ORDER BY id",
         (order_id,),
     ).fetchall()
-    pdf_bytes = _build_act_pdf(order, items)
+    try:
+        pdf_bytes = _build_act_pdf(order, items)
+    except ImportError:
+        return (
+            "Формирование PDF временно недоступно: на сервере не установлена "
+            "библиотека reportlab. Установите зависимости из requirements.txt "
+            "и перезапустите приложение.",
+            503,
+        )
     response = app.response_class(pdf_bytes, mimetype="application/pdf")
     response.headers["Content-Disposition"] = f'inline; filename="Akt-{order_id}.pdf"'
     return response
