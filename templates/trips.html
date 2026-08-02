@@ -392,7 +392,7 @@
           <td>{{ t.count }}</td>
           <td>{{ t.revenue|money }}</td>
           <td>{{ t.commission|money }}</td>
-          <td>{{ t.labor + t.fuel + t.mooring + t.extra|money }}</td>
+          <td>{{ (t.labor + t.fuel + t.mooring + t.extra)|money }}</td>
           <td>{{ t.remainder|money }}</td>
           <td class="amount">{{ t.investor_payout|money }}</td>
           <td class="amount">{{ t.my_share|money }}</td>
@@ -430,7 +430,7 @@
             <td class="muted">{{ 'Напрямую' if t.sale_channel == 'direct' else ('Агрегатор' if t.sale_channel == 'aggregator' else 'Смешанно') }}</td>
             <td>{{ t.commission_amount|money }} ({{ t.commission_pct|float|round(1) }}%)</td>
             <td title="Гид/капитан: {{ t.labor_cost|money }} · Топливо: {{ t.fuel_cost|money }} · Стоянка: {{ t.mooring_cost|money }}{% if t.extra_total %} · Доп: {{ t.extra_total|money }}{% endif %}">
-              {{ t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total|money }}
+              {{ (t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total)|money }}
             </td>
             <td class="amount">{{ t.investor_payout|money }}</td>
             <td class="amount">{{ t.my_share|money }}</td>

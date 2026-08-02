@@ -109,7 +109,7 @@
             {% if boats|length > 1 %}<td>{{ t.boat }}</td>{% endif %}
             <td>{{ t.revenue|money }}</td>
             <td>{{ t.commission_amount|money }} ({{ t.commission_pct|float|round(1) }}%)</td>
-            <td>{{ t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total|money }}</td>
+            <td>{{ (t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total)|money }}</td>
             <td>{{ t.remainder|money }}</td>
             <td class="amount">{{ t.investor_payout|money }}</td>
           </tr>
