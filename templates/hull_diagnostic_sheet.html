@@ -140,6 +140,47 @@
     </div>
   </section>
 
+  <section class="panel">
+    <h2>Дефекты</h2>
+    {% if defects %}
+    <div class="table-scroll">
+      <table class="records" id="defects-table">
+        <thead>
+          <tr>
+            <th>Вид</th>
+            <th>Тип дефекта</th>
+            <th>Размер</th>
+            <th>Отмечен</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in defects %}
+          <tr>
+            <td>{{ d.view|hull_view_label }}</td>
+            <td>{{ d.defect_type }}</td>
+            <td>{{ d.defect_size }}</td>
+            <td class="muted">{{ d.created_at[:10]|ru_date }}</td>
+            <td class="row-actions">
+              <form action="{{ url_for('delete_hull_diagnostic_defect', sheet_id=sheet.id, defect_id=d.id) }}" method="post"
+                    onsubmit="return confirm('Удалить этот дефект?');">
+                <button type="submit" class="icon-btn danger" title="Удалить">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
+                  </svg>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint">Дефектов пока не отмечено — кликните по схеме выше.</p>
+    {% endif %}
+  </section>
+
 </main>
 
 <div class="modal-overlay hidden" id="defect-modal">
@@ -237,15 +278,7 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (data.error) { alert(data.error); return; }
-        var marker = currentClick.marker;
-        marker.className = "hull-point active";
-        marker.setAttribute("onclick", "event.stopPropagation()");
-        var tip = document.createElement("div");
-        tip.className = "hull-point-tip";
-        tip.textContent = data.defect_type + " · " + data.defect_size;
-        marker.appendChild(tip);
-        document.getElementById("defect-modal").classList.add("hidden");
-        currentClick = null;
+        window.location.reload();
       })
       .catch(function () {
         alert("Не удалось сохранить дефект. Попробуйте ещё раз.");

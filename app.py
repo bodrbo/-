@@ -1610,6 +1610,10 @@ def add_hull_diagnostic_sheet():
 
 
 HULL_VIEWS = ("bottom", "left", "right", "top")
+HULL_VIEW_LABELS = {
+    "bottom": "Днище", "top": "Палуба", "left": "Левый борт", "right": "Правый борт",
+}
+app.jinja_env.filters["hull_view_label"] = lambda v: HULL_VIEW_LABELS.get(v, v)
 
 
 @app.route("/tuning/diagnostics/hull/<int:sheet_id>")
@@ -1632,7 +1636,7 @@ def hull_diagnostic_sheet(sheet_id):
 
     return render_template(
         "hull_diagnostic_sheet.html", sheet=sheet, defects_by_view=defects_by_view,
-        active_page="tuning", sub_page="diagnostics", diag_page="hull",
+        defects=defects, active_page="tuning", sub_page="diagnostics", diag_page="hull",
     )
 
 
@@ -1677,6 +1681,18 @@ def add_hull_diagnostic_defect(sheet_id):
         "id": cur.lastrowid, "view": view, "x_pct": x_pct, "y_pct": y_pct,
         "defect_type": defect_type, "defect_size": defect_size,
     })
+
+
+@app.route("/tuning/diagnostics/hull/<int:sheet_id>/defect/<int:defect_id>/delete", methods=["POST"])
+@admin_login_required
+def delete_hull_diagnostic_defect(sheet_id, defect_id):
+    db = get_db()
+    db.execute(
+        "DELETE FROM hull_diagnostic_defects WHERE id = ? AND sheet_id = ?",
+        (defect_id, sheet_id),
+    )
+    db.commit()
+    return redirect(url_for("hull_diagnostic_sheet", sheet_id=sheet_id))
 
 
 @app.route("/tuning/add", methods=["GET", "POST"])
