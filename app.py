@@ -27,6 +27,15 @@ import requests
 from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.datastructures import MultiDict
 from werkzeug.security import check_password_hash, generate_password_hash
+from io import BytesIO
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import HRFlowable, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 app = Flask(__name__)
 
@@ -1566,6 +1575,199 @@ def _order_payment_totals(db, order_id, total):
     paid_amount = sum(p["amount"] for p in payments)
     remaining = max(0.0, total - paid_amount)
     return payments, paid_amount, remaining
+
+
+# ---------------------------------------------------------------------
+# Акт выполненных работ (PDF)
+# ---------------------------------------------------------------------
+
+_ONES_M = ["", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять"]
+_ONES_F = ["", "одна", "две", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять"]
+_TEENS = ["десять", "одиннадцать", "двенадцать", "тринадцать", "четырнадцать", "пятнадцать",
+          "шестнадцать", "семнадцать", "восемнадцать", "девятнадцать"]
+_TENS = ["", "", "двадцать", "тридцать", "сорок", "пятьдесят", "шестьдесят", "семьдесят",
+         "восемьдесят", "девяносто"]
+_HUNDREDS = ["", "сто", "двести", "триста", "четыреста", "пятьсот", "шестьсот", "семьсот",
+             "восемьсот", "девятьсот"]
+
+
+def _plural_ru(n, forms):
+    """forms = (для 1, для 2-4, для 5+/11-14) e.g. ('рубль', 'рубля', 'рублей')."""
+    n = abs(int(n))
+    if 11 <= n % 100 <= 14:
+        return forms[2]
+    if n % 10 == 1:
+        return forms[0]
+    if 2 <= n % 10 <= 4:
+        return forms[1]
+    return forms[2]
+
+
+def _three_digits_ru(n, feminine=False):
+    words = []
+    hundreds, rest = divmod(n, 100)
+    if hundreds:
+        words.append(_HUNDREDS[hundreds])
+    if 10 <= rest < 20:
+        words.append(_TEENS[rest - 10])
+    else:
+        tens, ones = divmod(rest, 10)
+        if tens:
+            words.append(_TENS[tens])
+        if ones:
+            words.append((_ONES_F if feminine else _ONES_M)[ones])
+    return words
+
+
+def _rubles_to_words(amount):
+    """1234.5 -> 'Одна тысяча двести тридцать четыре рубля 50 копеек'."""
+    amount = round(float(amount), 2)
+    rub = int(amount)
+    kop = int(round((amount - rub) * 100))
+
+    thousands, rest = divmod(rub, 1000)
+    words = []
+    if thousands:
+        words += _three_digits_ru(thousands, feminine=True)
+        words.append(_plural_ru(thousands, ("тысяча", "тысячи", "тысяч")))
+    if rest or not words:
+        words += _three_digits_ru(rest, feminine=False)
+    if not words:
+        words.append("ноль")
+    words.append(_plural_ru(rub, ("рубль", "рубля", "рублей")))
+
+    sentence = " ".join(words)
+    sentence = sentence[0].upper() + sentence[1:]
+    return f"{sentence} {kop:02d} {_plural_ru(kop, ('копейка', 'копейки', 'копеек'))}"
+
+
+_ACT_FONTS_REGISTERED = False
+
+
+def _register_act_fonts():
+    global _ACT_FONTS_REGISTERED
+    if _ACT_FONTS_REGISTERED:
+        return
+    fonts_dir = os.path.join(app.static_folder, "fonts")
+    pdfmetrics.registerFont(TTFont("OpenSans", os.path.join(fonts_dir, "open-sans-400.ttf")))
+    pdfmetrics.registerFont(TTFont("OpenSans-Bold", os.path.join(fonts_dir, "open-sans-700.ttf")))
+    _ACT_FONTS_REGISTERED = True
+
+
+COMPANY_NAME = 'ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "БОДРЫЙ БОЦМАН"'
+COMPANY_ADDRESS = "197762, Россия, г Санкт-Петербург, г Кронштадт, ул Мануильского, 20 литера а, 2"
+
+
+def _build_act_pdf(order, items):
+    _register_act_fonts()
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=20 * mm, rightMargin=20 * mm, topMargin=18 * mm, bottomMargin=18 * mm,
+    )
+
+    style_company = ParagraphStyle("company", fontName="OpenSans-Bold", fontSize=10.5, leading=14)
+    style_address = ParagraphStyle("address", fontName="OpenSans-Bold", fontSize=10.5, leading=14,
+                                    spaceBefore=2, spaceAfter=16)
+    style_title = ParagraphStyle("title", fontName="OpenSans-Bold", fontSize=22, leading=26,
+                                  alignment=TA_CENTER, spaceAfter=6)
+    style_subtitle = ParagraphStyle("subtitle", fontName="OpenSans-Bold", fontSize=14, leading=18,
+                                     alignment=TA_CENTER, spaceAfter=22)
+    style_client = ParagraphStyle("client", fontName="OpenSans", fontSize=10.5, leading=14)
+    style_cell = ParagraphStyle("cell", fontName="OpenSans", fontSize=9.5, leading=12.5)
+    style_bold = ParagraphStyle("bold", fontName="OpenSans-Bold", fontSize=10.5, leading=15,
+                                 spaceAfter=4)
+
+    try:
+        order_date = dt.date.fromisoformat(order["created_at"][:10]).strftime("%d.%m.%Y")
+    except ValueError:
+        order_date = order["created_at"][:10]
+
+    flow = []
+    logo_path = os.path.join(app.static_folder, "logo-act.png")
+    logo_w = 130
+    flow.append(Image(logo_path, width=logo_w, height=logo_w * 230 / 836))
+    flow.append(Spacer(1, 12))
+    flow.append(Paragraph(f"<u>{COMPANY_NAME}</u>", style_company))
+    flow.append(Paragraph(COMPANY_ADDRESS, style_address))
+    flow.append(Paragraph("Акт выполненных работ", style_title))
+    flow.append(Paragraph(f"По заказу № {order['id']} от {order_date}", style_subtitle))
+
+    flow.append(Paragraph(f"Заказчик {order['client_name']} ({order['boat_model']})", style_client))
+    flow.append(HRFlowable(width="100%", thickness=0.6, color=colors.black,
+                            spaceBefore=2, spaceAfter=18))
+
+    table_data = [["№", "Наименование товара", "Цена", "Кол-во", "Ед. изм.", "Сумма"]]
+    total_sum = 0.0
+    for i, item in enumerate(items, start=1):
+        price_str = f"{item['price']:.2f}".replace(".", ",")
+        table_data.append([
+            str(i), Paragraph(item["work_name"], style_cell),
+            price_str, "1", "шт", price_str,
+        ])
+        total_sum += item["price"]
+    table_data.append([
+        "", "", "", f"{len(items):.2f}".replace(".", ","), "Итого:",
+        f"{total_sum:.2f}".replace(".", ","),
+    ])
+
+    col_widths = [12 * mm, 76 * mm, 24 * mm, 18 * mm, 18 * mm, 22 * mm]
+    tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
+    tbl.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), "OpenSans"),
+        ("FONTNAME", (0, 0), (-1, 0), "OpenSans-Bold"),
+        ("FONTNAME", (0, -1), (-1, -1), "OpenSans-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+        ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+        ("ALIGN", (2, 0), (-1, 0), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    flow.append(tbl)
+    flow.append(Spacer(1, 22))
+
+    flow.append(Paragraph(
+        f"Итого выполнено работ на сумму: {_rubles_to_words(total_sum)}", style_bold,
+    ))
+    flow.append(Spacer(1, 14))
+    flow.append(Paragraph("Работы выполнено качественно и в срок и полностью оплачены", style_bold))
+    flow.append(Paragraph("Стороны претензий друг к другу не имеют", style_bold))
+    flow.append(Spacer(1, 46))
+
+    sig_table = Table(
+        [["Заказчик " + "_" * 28, "Исполнитель" + "_" * 24]],
+        colWidths=[85 * mm, 85 * mm],
+    )
+    sig_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), "OpenSans-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 10.5),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    flow.append(sig_table)
+
+    doc.build(flow)
+    return buf.getvalue()
+
+
+@app.route("/tuning/<int:order_id>/act.pdf")
+@admin_login_required
+def tuning_order_act_pdf(order_id):
+    db = get_db()
+    order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None:
+        return redirect(url_for("tuning_index"))
+    items = db.execute(
+        "SELECT * FROM tuning_order_items WHERE order_id = ? AND status = 'done' ORDER BY id",
+        (order_id,),
+    ).fetchall()
+    pdf_bytes = _build_act_pdf(order, items)
+    response = app.response_class(pdf_bytes, mimetype="application/pdf")
+    response.headers["Content-Disposition"] = f'inline; filename="Akt-{order_id}.pdf"'
+    return response
 
 
 @app.route("/tuning")
