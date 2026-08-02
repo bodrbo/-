@@ -126,38 +126,59 @@
   </div>
 
   <section class="panel">
-    <h2>Диагностика корпуса</h2>
+    <h2>Документы</h2>
+
     {% if hull_sheets %}
-    {% for hs in hull_sheets %}
-    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; {% if not loop.last %}margin-bottom:10px;{% endif %}">
-      <a href="{{ url_for('hull_diagnostic_sheet', sheet_id=hs.id) }}" class="term">{{ hs.boat_name }} — диагностический лист →</a>
-      <form action="{{ url_for('unlink_hull_sheet', order_id=edit_order.id, sheet_id=hs.id) }}" method="post"
-            onsubmit="return confirm('Отвязать этот лист от заказа?');" style="margin-left:auto;">
-        <button type="submit" class="btn-secondary">Отвязать</button>
-      </form>
-    </div>
-    {% endfor %}
-    {% else %}
-    <p class="hint" style="margin-top:0;">К заказу пока не привязан ни один диагностический лист.</p>
-    <div class="entry-form">
-      {% if available_hull_sheets %}
-      <form action="{{ url_for('link_hull_sheet', order_id=edit_order.id) }}" method="post" style="display:flex; gap:10px; align-items:end; flex-wrap:wrap;">
-        <div class="field field-narrow">
-          <label for="hull_sheet_id">Привязать существующий лист</label>
-          <select id="hull_sheet_id" name="sheet_id">
-            {% for hs in available_hull_sheets %}
-            <option value="{{ hs.id }}">{{ hs.boat_name }}</option>
-            {% endfor %}
-          </select>
+    <div class="doc-list">
+      {% for hs in hull_sheets %}
+      <div class="doc-item">
+        <a href="{{ url_for('hull_diagnostic_sheet', sheet_id=hs.id) }}" class="doc-link">
+          <svg class="doc-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 2.5h6.5l3.5 3.5V17a1 1 0 01-1 1H5a1 1 0 01-1-1V3.5a1 1 0 011-1z"/>
+            <path d="M11.5 2.5v3.5H15"/>
+          </svg>
+          {{ hs.boat_name }} — диагностический лист
+        </a>
+        <div class="row-actions">
+          <form action="{{ url_for('unlink_hull_sheet', order_id=edit_order.id, sheet_id=hs.id) }}" method="post"
+                onsubmit="return confirm('Отвязать этот документ от заказа?');">
+            <button type="submit" class="icon-btn danger" title="Отвязать">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
+              </svg>
+            </button>
+          </form>
         </div>
-        <button type="submit" class="btn-secondary">Привязать</button>
-      </form>
-      {% endif %}
-      <form action="{{ url_for('create_and_link_hull_sheet', order_id=edit_order.id) }}" method="post">
-        <button type="submit">Создать новый лист</button>
-      </form>
+      </div>
+      {% endfor %}
     </div>
+    {% else %}
+    <p class="hint" style="margin-top:0;">К заказу пока не привязано ни одного документа.</p>
     {% endif %}
+
+    <details class="doc-add">
+      <summary class="btn-add">Добавить документ</summary>
+      <div class="doc-type-list">
+        <details class="doc-type">
+          <summary>Диагностический лист корпуса</summary>
+          <div class="doc-type-body">
+            {% if available_hull_sheets %}
+            <form action="{{ url_for('link_hull_sheet', order_id=edit_order.id) }}" method="post" class="doc-type-row">
+              <select name="sheet_id">
+                {% for hs in available_hull_sheets %}
+                <option value="{{ hs.id }}">{{ hs.boat_name }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="btn-secondary">Привязать существующий</button>
+            </form>
+            {% endif %}
+            <form action="{{ url_for('create_and_link_hull_sheet', order_id=edit_order.id) }}" method="post">
+              <button type="submit" class="btn-secondary">Создать новый</button>
+            </form>
+          </div>
+        </details>
+      </div>
+    </details>
   </section>
 
   <section class="panel">
