@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ sheet.boat_name }} — диагностический лист</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100">
+      <g fill="var(--brass)">
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/>
+      </g>
+      <g fill="none" stroke="var(--brass)" stroke-width="2.6" stroke-linecap="round" opacity="0.85">
+        <path d="M55 15A24 24 0 0 1 62 22" transform="rotate(-6 50 50)"/>
+        <path d="M18 60A24 24 0 0 1 15 51" transform="rotate(4 50 50)"/>
+      </g>
+      <circle cx="50" cy="50" r="15" fill="none" stroke="var(--ink)" stroke-width="4"/>
+      <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
+    </svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo brand-logo-large">
+    </div>
+    <div class="title-block">
+      <h1>{{ sheet.boat_name }} — диагностический лист</h1>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <a href="{{ url_for('client_dashboard', token=token) }}" class="term" style="display:inline-block; margin-bottom:14px;">← В личный кабинет</a>
+
+  <section class="panel">
+    <div class="hull-grid">
+
+      <div class="hull-view">
+        <h3>Днище</h3>
+        <div class="hull-canvas">
+          <svg viewBox="0 0 300 120" preserveAspectRatio="none">
+            <path class="hull-outline" d="M26,32 C70,12 170,14 292,60 C170,106 70,108 26,88 Z"/>
+          </svg>
+          {% for d in defects_by_view.bottom %}
+          <div class="hull-point active" style="left:{{ d.x_pct }}%; top:{{ d.y_pct }}%;">
+            <div class="hull-point-tip">{{ d.defect_type }} · {{ d.defect_size }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="hull-view">
+        <h3>Палуба</h3>
+        <div class="hull-canvas">
+          <svg viewBox="0 0 300 120" preserveAspectRatio="none">
+            <path class="hull-outline" d="M26,32 C70,12 170,14 292,60 C170,106 70,108 26,88 Z"/>
+          </svg>
+          {% for d in defects_by_view.top %}
+          <div class="hull-point active" style="left:{{ d.x_pct }}%; top:{{ d.y_pct }}%;">
+            <div class="hull-point-tip">{{ d.defect_type }} · {{ d.defect_size }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="hull-view">
+        <h3>Левый борт</h3>
+        <div class="hull-canvas hull-canvas-mirror">
+          <svg viewBox="0 0 300 120" preserveAspectRatio="none">
+            <path class="hull-outline" d="M30,35 L255,40 C275,43 288,50 292,58 C287,66 272,72 245,76 L60,80 L30,80 Z"/>
+          </svg>
+          {% for d in defects_by_view.left %}
+          <div class="hull-point active" style="left:{{ d.x_pct }}%; top:{{ d.y_pct }}%;">
+            <div class="hull-point-tip">{{ d.defect_type }} · {{ d.defect_size }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="hull-view">
+        <h3>Правый борт</h3>
+        <div class="hull-canvas">
+          <svg viewBox="0 0 300 120" preserveAspectRatio="none">
+            <path class="hull-outline" d="M30,35 L255,40 C275,43 288,50 292,58 C287,66 272,72 245,76 L60,80 L30,80 Z"/>
+          </svg>
+          {% for d in defects_by_view.right %}
+          <div class="hull-point active" style="left:{{ d.x_pct }}%; top:{{ d.y_pct }}%;">
+            <div class="hull-point-tip">{{ d.defect_type }} · {{ d.defect_size }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Дефекты</h2>
+    {% if defects %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th>Вид</th>
+            <th>Тип дефекта</th>
+            <th>Размер</th>
+            <th>Отмечен</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in defects %}
+          <tr>
+            <td>{{ d.view|hull_view_label }}</td>
+            <td>{{ d.defect_type }}</td>
+            <td>{{ d.defect_size }}</td>
+            <td class="muted">{{ d.created_at[:10]|ru_date }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint">Дефектов пока не отмечено.</p>
+    {% endif %}
+  </section>
+
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+
+</body>
+</html>

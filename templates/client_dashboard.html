@@ -126,6 +126,11 @@
             Оплатить онлайн {{ o.yookassa_pending.amount|money }} ₽
           </a>
           {% endif %}
+          {% for hs in o.hull_sheets %}
+          <a href="{{ url_for('client_hull_diagnostic_sheet', token=client.token, sheet_id=hs.id) }}" class="term" style="display:inline-block; margin-top:10px;">
+            Диагностическая карта корпуса →
+          </a>
+          {% endfor %}
         </div>
       </details>
       {% endfor %}

@@ -513,6 +513,9 @@ def init_db():
         )
         """
     )
+    sheet_cols = [row[1] for row in conn.execute("PRAGMA table_info(hull_diagnostic_sheets)").fetchall()]
+    if "tuning_order_id" not in sheet_cols:
+        conn.execute("ALTER TABLE hull_diagnostic_sheets ADD COLUMN tuning_order_id INTEGER")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS hull_diagnostic_defects (
@@ -1695,6 +1698,48 @@ def delete_hull_diagnostic_defect(sheet_id, defect_id):
     return redirect(url_for("hull_diagnostic_sheet", sheet_id=sheet_id))
 
 
+@app.route("/tuning/edit/<int:order_id>/hull-sheet/create", methods=["POST"])
+@admin_login_required
+def create_and_link_hull_sheet(order_id):
+    db = get_db()
+    order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None:
+        return redirect(url_for("tuning_index"))
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    cur = db.execute(
+        "INSERT INTO hull_diagnostic_sheets (boat_name, created_at, tuning_order_id) VALUES (?, ?, ?)",
+        (order["boat_model"], now, order_id),
+    )
+    db.commit()
+    return redirect(url_for("hull_diagnostic_sheet", sheet_id=cur.lastrowid))
+
+
+@app.route("/tuning/edit/<int:order_id>/hull-sheet/link", methods=["POST"])
+@admin_login_required
+def link_hull_sheet(order_id):
+    db = get_db()
+    sheet_id = request.form.get("sheet_id", "").strip()
+    if sheet_id.isdigit():
+        db.execute(
+            "UPDATE hull_diagnostic_sheets SET tuning_order_id = ? WHERE id = ? AND tuning_order_id IS NULL",
+            (order_id, int(sheet_id)),
+        )
+        db.commit()
+    return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
+@app.route("/tuning/edit/<int:order_id>/hull-sheet/<int:sheet_id>/unlink", methods=["POST"])
+@admin_login_required
+def unlink_hull_sheet(order_id, sheet_id):
+    db = get_db()
+    db.execute(
+        "UPDATE hull_diagnostic_sheets SET tuning_order_id = NULL WHERE id = ? AND tuning_order_id = ?",
+        (sheet_id, order_id),
+    )
+    db.commit()
+    return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
 @app.route("/tuning/add", methods=["GET", "POST"])
 @admin_login_required
 def add_tuning_order():
@@ -1754,6 +1799,12 @@ def edit_tuning_order(order_id):
             "sale_channel": order["sale_channel"], "phone": order["phone"],
             "discount_pct": order["discount_pct"],
         }
+        hull_sheets = db.execute(
+            "SELECT * FROM hull_diagnostic_sheets WHERE tuning_order_id = ? ORDER BY id", (order_id,)
+        ).fetchall()
+        available_hull_sheets = db.execute(
+            "SELECT * FROM hull_diagnostic_sheets WHERE tuning_order_id IS NULL ORDER BY boat_name"
+        ).fetchall()
         return render_template(
             "tuning_form.html", edit_order=order, errors=None, form_values=form_values,
             items_prefill=items, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
@@ -1761,6 +1812,7 @@ def edit_tuning_order(order_id):
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
             yookassa_payments=yookassa_payments, yookassa_configured=yookassa_configured(),
             yookassa_error=session.pop("yookassa_error", None),
+            hull_sheets=hull_sheets, available_hull_sheets=available_hull_sheets,
         )
 
     errors, data = _process_tuning_form(request.form)
@@ -1769,6 +1821,12 @@ def edit_tuning_order(order_id):
         yookassa_payments = db.execute(
             "SELECT * FROM tuning_yookassa_payments WHERE order_id = ? ORDER BY id DESC", (order_id,)
         ).fetchall()
+        hull_sheets = db.execute(
+            "SELECT * FROM hull_diagnostic_sheets WHERE tuning_order_id = ? ORDER BY id", (order_id,)
+        ).fetchall()
+        available_hull_sheets = db.execute(
+            "SELECT * FROM hull_diagnostic_sheets WHERE tuning_order_id IS NULL ORDER BY boat_name"
+        ).fetchall()
         return render_template(
             "tuning_form.html", edit_order=order, errors=errors, form_values=request.form,
             items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
@@ -1776,6 +1834,7 @@ def edit_tuning_order(order_id):
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
             yookassa_payments=yookassa_payments, yookassa_configured=yookassa_configured(),
             yookassa_error=None,
+            hull_sheets=hull_sheets, available_hull_sheets=available_hull_sheets,
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -1901,6 +1960,9 @@ def client_dashboard(token):
         order["paid_amount"] = paid_amount
         order["remaining"] = remaining
         order["work_items"] = items
+        order["hull_sheets"] = db.execute(
+            "SELECT * FROM hull_diagnostic_sheets WHERE tuning_order_id = ? ORDER BY id", (o["id"],)
+        ).fetchall()
         orders.append(order)
         paid_total += paid_amount
         remaining_total += remaining
@@ -1939,6 +2001,35 @@ def client_approve_item(token, item_id):
         db.execute("UPDATE tuning_order_items SET status = 'approved' WHERE id = ?", (item_id,))
         db.commit()
     return redirect(url_for("client_dashboard", token=token))
+
+
+@app.route("/client/<token>/hull-sheet/<int:sheet_id>")
+def client_hull_diagnostic_sheet(token, sheet_id):
+    db = get_db()
+    client = db.execute("SELECT * FROM clients WHERE token = ?", (token,)).fetchone()
+    if client is None:
+        return redirect(url_for("home"))
+    sheet = db.execute(
+        "SELECT s.* FROM hull_diagnostic_sheets s "
+        "JOIN tuning_orders o ON o.id = s.tuning_order_id "
+        "WHERE s.id = ? AND o.client_id = ?",
+        (sheet_id, client["id"]),
+    ).fetchone()
+    if sheet is None:
+        return redirect(url_for("client_dashboard", token=token))
+
+    defects = db.execute(
+        "SELECT * FROM hull_diagnostic_defects WHERE sheet_id = ? ORDER BY id", (sheet_id,)
+    ).fetchall()
+    defects_by_view = {v: [] for v in HULL_VIEWS}
+    for d in defects:
+        if d["view"] in defects_by_view:
+            defects_by_view[d["view"]].append(d)
+
+    return render_template(
+        "hull_diagnostic_sheet_client.html", sheet=sheet, defects_by_view=defects_by_view,
+        defects=defects, token=token,
+    )
 
 
 # =======================================================================
