@@ -1470,6 +1470,7 @@ def add_trip_expense():
     expense_date = request.form.get("expense_date", "").strip()
     description = request.form.get("description", "").strip()
     amount_raw = request.form.get("amount", "").strip().replace(",", ".")
+    employee = request.form.get("employee", "").strip()
 
     errors = []
     if boat not in [b["name"] for b in BOATS]:
@@ -1489,6 +1490,8 @@ def add_trip_expense():
     except ValueError:
         amount = None
         errors.append("Сумма расхода должна быть числом.")
+    if employee and employee not in EMPLOYEES:
+        errors.append("Неизвестный сотрудник.")
 
     if errors:
         session["trip_expense_error"] = " ".join(errors)
@@ -1496,15 +1499,30 @@ def add_trip_expense():
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     remainder = -amount
-    db.execute(
+
+    entry_id = None
+    if employee:
+        cur = db.execute(
+            "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (employee, description, amount, 1, amount, expense_date, now),
+        )
+        entry_id = cur.lastrowid
+
+    cur2 = db.execute(
         "INSERT INTO trips (boat, trip_date, trip_time, work_type, entry_id, revenue, sale_channel, "
         "commission_pct, commission_amount, labor_cost, fuel_cost, mooring_cost, extra_total, "
         "remainder, investor_payout, my_share, created_at, is_expense) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (boat, expense_date, "00:00", description, None, 0.0, "direct",
+        (boat, expense_date, "00:00", description, entry_id, 0.0, "direct",
          0.0, 0.0, 0.0, 0.0, 0.0, amount,
          remainder, remainder / 2, remainder / 2, now, 1),
     )
+    if entry_id is not None:
+        db.execute(
+            "INSERT INTO trip_labor (trip_id, entry_id) VALUES (?, ?)",
+            (cur2.lastrowid, entry_id),
+        )
     db.commit()
     return redirect(url_for("trips_index"))
 

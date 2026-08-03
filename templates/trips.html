@@ -343,12 +343,22 @@
           <label for="expense_amount">Сумма, ₽</label>
           <input type="text" inputmode="decimal" id="expense_amount" name="amount" required>
         </div>
+        <div class="field field-narrow">
+          <label for="expense_employee">Сотрудник (если это работа)</label>
+          <select id="expense_employee" name="employee">
+            <option value="">Не указан</option>
+            {% for name in employees_form %}
+            <option value="{{ name }}">{{ name }}</option>
+            {% endfor %}
+          </select>
+        </div>
         <div class="field field-submit">
           <button type="submit">Добавить расход</button>
         </div>
       </form>
       <p class="hint" style="margin-top:10px;">
         Расход делится пополам между инвестором и судовладельцем — так же, как остаток по рейсам.
+        Если выбрать сотрудника, та же сумма отдельно попадёт ему в зарплату.
       </p>
     </details>
   </section>
