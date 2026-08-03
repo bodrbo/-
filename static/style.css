@@ -456,6 +456,7 @@ a.diag-card:hover { border-color: var(--brass); box-shadow: var(--shadow); }
   flex-direction: column;
   gap: 6px;
   flex: 1 1 220px;
+  min-width: 0;
 }
 .field-narrow { flex: 1 1 130px; }
 .field-submit { flex: 0 0 auto; }
@@ -478,6 +479,14 @@ input[type="text"], input[type="date"], input[type="time"], input[type="password
   border-radius: 7px;
   background: var(--paper-alt);
   color: var(--ink);
+  box-sizing: border-box;
+}
+.field select {
+  width: 100%;
+  min-width: 0;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
 }
 input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, input[type="password"]:focus, select:focus {
   outline: 2px solid var(--brass);
