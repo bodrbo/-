@@ -262,6 +262,8 @@ TEAM_ACCOUNTS = [
      "pbkdf2:sha256:1000000$Jn5CnA4kS1II0z13$ee1913ce0b9ebf6d831d5c4b20e9fe1fe83dc86a952964a111c3ce2a176a069f"),
     ("Арсений Коннов", "konnov",
      "pbkdf2:sha256:1000000$K1cAmlBOoffmz5Yh$7264379b419cfdb8200d6ef478eea14f70d5861090841c94899fade88477388d"),
+    ("Даниил Галецкий", "galetz",
+     "pbkdf2:sha256:1000000$3oeteJt4OyqvMxkD$7b9bc3114c928b31a98f038a0990412e163b8cc5ebfd42b6fa6995a5d73d3e05"),
 ]
 
 SALE_CHANNELS = [
