@@ -41,7 +41,14 @@
 <main class="wrap">
 
   <div class="investor-bar">
-    <span class="investor-name">{{ employee_name }}</span>
+    <div class="employee-id">
+      {% if avatar_url %}
+      <img src="{{ avatar_url }}" alt="" class="employee-avatar">
+      {% else %}
+      <span class="employee-avatar employee-avatar-placeholder">{{ employee_name[0] }}</span>
+      {% endif %}
+      <span class="investor-name">{{ employee_name }}</span>
+    </div>
     <form action="{{ url_for('team_logout') }}" method="post">
       <button type="submit" class="btn-secondary">Выйти</button>
     </form>

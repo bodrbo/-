@@ -55,6 +55,21 @@ def format_ru_date(iso_date):
         return iso_date
 
 
+AVATAR_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+
+
+def find_avatar_url(username):
+    """Look for static/avatars/<username>.<ext> and return its static URL,
+    or None if nobody's uploaded a photo for this person yet."""
+    if not username:
+        return None
+    avatars_dir = os.path.join(app.static_folder, "avatars")
+    for ext in AVATAR_EXTENSIONS:
+        if os.path.exists(os.path.join(avatars_dir, username + ext)):
+            return url_for("static", filename=f"avatars/{username}{ext}")
+    return None
+
+
 def format_money(value, decimals=0):
     """Format a number with a thin space as the thousands separator."""
     try:
@@ -3393,6 +3408,7 @@ def team_login():
     session.clear()
     session["team_id"] = row["id"]
     session["team_employee_name"] = row["employee_name"]
+    session["team_username"] = row["username"]
     return redirect(url_for("team_dashboard"))
 
 
@@ -3452,6 +3468,7 @@ def team_dashboard():
         entries=entries,
         total=total,
         is_paid=is_paid,
+        avatar_url=find_avatar_url(session.get("team_username")),
     )
 
 

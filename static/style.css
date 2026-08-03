@@ -1289,8 +1289,38 @@ table.records tr.row-expense td.amount { color: var(--danger); }
   font-size: 16px;
   font-weight: 700;
   color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .investor-bar form { margin: 0; }
+
+.employee-id {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.employee-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  flex: none;
+  object-fit: cover;
+  border: 2px solid var(--paper);
+  box-shadow: var(--shadow);
+}
+.employee-avatar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brass);
+  color: var(--on-accent);
+  font-family: 'Open Sans', -apple-system, sans-serif;
+  font-weight: 700;
+  font-size: 17px;
+  text-transform: uppercase;
+}
 
 /* --- home screen: pick a cabinet --- */
 .home-wrap {
