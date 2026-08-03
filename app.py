@@ -3674,22 +3674,25 @@ def _tbank_normalize_operation(op):
     operation_id = _tbank_pick(op, "operationId", "id", "documentNumber", "trxId", "uid")
     date_val = _tbank_pick(op, "dateTime", "date", "operationDate", "authorizationDate")
 
-    amount_raw = op.get("amount")
+    amount_raw = _tbank_pick(op, "rubleAmount", "operationAmount", "accountAmount", "amount")
     if isinstance(amount_raw, dict):
         amount = _tbank_pick(amount_raw, "value", "amount")
-        currency = amount_raw.get("currency") or "RUB"
     else:
-        amount = amount_raw if amount_raw is not None else _tbank_pick(op, "value")
-        currency = _tbank_pick(op, "currency") or "RUB"
+        amount = amount_raw
     try:
         amount = abs(float(amount)) if amount is not None else 0.0
     except (TypeError, ValueError):
         amount = 0.0
 
-    type_raw = str(_tbank_pick(op, "type", "direction", "operationType") or "").lower()
+    type_raw = str(
+        _tbank_pick(op, "typeOfOperation", "type", "direction", "operationType") or ""
+    ).lower()
     direction = "out" if type_raw in ("debit", "out", "expense", "outcome", "withdrawal") else "in"
 
-    counterparty = op.get("counterparty") or op.get("payer") or op.get("recipient") or {}
+    counterparty = (
+        op.get("counterParty") or op.get("counterparty")
+        or op.get("payer") or op.get("recipient") or op.get("receiver") or {}
+    )
     if not isinstance(counterparty, dict):
         counterparty = {}
     counterparty_name = _tbank_pick(
@@ -3706,7 +3709,7 @@ def _tbank_normalize_operation(op):
         "direction": direction,
         "counterparty_name": counterparty_name,
         "counterparty_inn": counterparty_inn,
-        "purpose": _tbank_pick(op, "paymentPurpose", "purpose", "description", "comment"),
+        "purpose": _tbank_pick(op, "payPurpose", "paymentPurpose", "purpose", "description", "comment"),
         "category": _tbank_pick(op, "category", "categoryCode"),
         "status": _tbank_pick(op, "status", "operationStatus"),
     }
@@ -3757,6 +3760,7 @@ def analytics_fetch():
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     added = 0
+    updated = 0
     skipped_no_id = 0
     for op in raw_operations:
         data = _tbank_normalize_operation(op)
@@ -3767,6 +3771,20 @@ def analytics_fetch():
             "SELECT 1 FROM bank_transactions WHERE operation_id = ?", (data["operation_id"],)
         ).fetchone()
         if existing:
+            # Re-parse from this fresh fetch even for rows we already have —
+            # if _tbank_normalize_operation's field-name guesses get fixed
+            # later, previously-imported rows should self-heal on the next
+            # fetch instead of staying wrong until someone deletes them.
+            db.execute(
+                "UPDATE bank_transactions SET operation_date=?, amount=?, direction=?, "
+                "counterparty_name=?, counterparty_inn=?, purpose=?, category=?, status=?, "
+                "raw_json=? WHERE operation_id=?",
+                (data["operation_date"], data["amount"], data["direction"],
+                 data["counterparty_name"], data["counterparty_inn"], data["purpose"],
+                 data["category"], data["status"], json.dumps(op, ensure_ascii=False),
+                 data["operation_id"]),
+            )
+            updated += 1
             continue
         db.execute(
             "INSERT INTO bank_transactions (operation_id, account_number, operation_date, amount, "
@@ -3781,7 +3799,8 @@ def analytics_fetch():
     db.commit()
 
     session["tbank_fetch_result"] = (
-        f"Получено операций: {len(raw_operations)}. Новых добавлено: {added}."
+        f"Получено операций: {len(raw_operations)}. Новых добавлено: {added}. "
+        f"Обновлено: {updated}."
         + (f" Без ID (пропущено): {skipped_no_id}." if skipped_no_id else "")
     )
     return redirect(url_for("analytics_index"))
