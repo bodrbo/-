@@ -3177,6 +3177,27 @@ def import_fetch():
     }
 
     candidates = build_import_candidates(records, activity_colors)
+
+    # A pending candidate's yclients_ref is built from its color + time (see
+    # _yclients_group_key) — so fixing a wrongly-set color on Yclients' side
+    # for a record that's already sitting in the queue produces a *new* ref
+    # on the next fetch, not an update to the old one. Without this, the
+    # corrected trip imports fine under its new ref while the stale old
+    # ref/candidate lingers forever, unresolved, right alongside it. Prune
+    # any queued candidate whose trip falls inside the period we just
+    # re-fetched but whose ref didn't come back at all this time — Yclients'
+    # current data no longer produces it, so it's stale. (If this was a
+    # fluke — Yclients briefly omitted a still-valid record — the next
+    # fetch just re-adds it; nothing is lost for good.)
+    fetched_refs = {c["yclients_ref"] for c in candidates}
+    for row in db.execute("SELECT id, yclients_ref, payload FROM import_candidates").fetchall():
+        if row["yclients_ref"] in fetched_refs:
+            continue
+        trip_date = json.loads(row["payload"]).get("trip_date", "")
+        if start_date <= trip_date <= end_date:
+            db.execute("DELETE FROM import_candidates WHERE id = ?", (row["id"],))
+    db.commit()
+
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     added = 0
     for c in candidates:
