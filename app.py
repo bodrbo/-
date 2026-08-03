@@ -109,6 +109,21 @@ YOOKASSA_API_BASE = "https://api.yookassa.ru/v3"
 # для АУСН/УСН по последней налоговой реформе.
 YOOKASSA_RECEIPT_VAT_CODE = 7
 
+# ---------------------------------------------------------------------
+# Т-Банк — выгрузка выписки по расчётному счёту (раздел «Аналитика»).
+# Как и с ЮKassa, это банковские реквизиты — никакого запасного значения в
+# коде, только переменные окружения на хостинге:
+#   TBANK_API_TOKEN, TBANK_ACCOUNT_NUMBER
+# Без них раздел «Аналитика» просто покажет, что подключение не настроено.
+# ---------------------------------------------------------------------
+TBANK_API_TOKEN = os.environ.get("TBANK_API_TOKEN")
+TBANK_ACCOUNT_NUMBER = os.environ.get("TBANK_ACCOUNT_NUMBER")
+TBANK_API_BASE = "https://business.tbank.ru/openapi/api"
+
+
+def tbank_configured():
+    return bool(TBANK_API_TOKEN and TBANK_ACCOUNT_NUMBER)
+
 # Соответствие цвета записи/события в Yclients — катеру. Значения подтверждены.
 BOAT_COLORS = {
     "#03a9f4": "Ларус",             # синий
@@ -553,6 +568,25 @@ def init_db():
             y_pct REAL NOT NULL,
             defect_type TEXT NOT NULL,
             defect_size TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS bank_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operation_id TEXT NOT NULL UNIQUE,
+            account_number TEXT NOT NULL,
+            operation_date TEXT NOT NULL,
+            amount REAL NOT NULL,
+            direction TEXT NOT NULL,
+            counterparty_name TEXT,
+            counterparty_inn TEXT,
+            purpose TEXT,
+            category TEXT,
+            status TEXT,
+            raw_json TEXT,
             created_at TEXT NOT NULL
         )
         """
@@ -3579,6 +3613,24 @@ def team_dashboard():
         total=total,
         is_paid=is_paid,
         avatar_url=find_avatar_url(session.get("team_username")),
+    )
+
+
+# ---------------------------------------------------------------------
+# Аналитика — финансовая аналитика по бизнесу. Первый шаг: выписка по
+# расчётному счёту из Т-Банка (см. TBANK_API_TOKEN/TBANK_ACCOUNT_NUMBER
+# выше). Пока подключение не настроено, раздел просто показывает заглушку.
+# ---------------------------------------------------------------------
+@app.route("/analytics")
+@admin_login_required
+def analytics_index():
+    db = get_db()
+    transactions = db.execute(
+        "SELECT * FROM bank_transactions ORDER BY operation_date DESC, id DESC LIMIT 200"
+    ).fetchall()
+    return render_template(
+        "analytics.html", active_page="analytics", sub_page="transactions",
+        transactions=transactions, tbank_configured=tbank_configured(),
     )
 
 
