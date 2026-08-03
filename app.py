@@ -402,6 +402,8 @@ def init_db():
             "UPDATE entries SET work_date = substr(created_at, 1, 10) "
             "WHERE work_date IS NULL"
         )
+    if "project_id" not in cols:
+        conn.execute("ALTER TABLE entries ADD COLUMN project_id INTEGER")
 
     conn.execute(
         """
@@ -888,6 +890,8 @@ def _payroll_context(db, selected_week, selected_employee):
         if row["employee"] not in known:
             known.append(row["employee"])
 
+    projects = db.execute("SELECT * FROM projects ORDER BY created_at DESC, id DESC").fetchall()
+
     return dict(
         entries=entries,
         totals_by_employee=totals_by_employee,
@@ -897,6 +901,7 @@ def _payroll_context(db, selected_week, selected_employee):
         employees_filter=known,
         selected_employee=selected_employee,
         paid_employees=paid_employees,
+        projects=projects,
     )
 
 
@@ -1010,6 +1015,8 @@ def add_entry():
     rate_raw = request.form.get("rate", "").strip().replace(",", ".")
     quantity_raw = request.form.get("quantity", "").strip().replace(",", ".")
     work_date_raw = request.form.get("work_date", "").strip()
+    project_id_raw = request.form.get("project_id", "").strip()
+    project_id = int(project_id_raw) if project_id_raw.isdigit() else None
 
     errors = []
     if not employee:
@@ -1056,10 +1063,10 @@ def add_entry():
     amount = rate * quantity
     db = get_db()
     db.execute(
-        "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at, project_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (employee, work_type, rate, quantity, amount, work_date,
-         dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+         dt.datetime.now().strftime("%Y-%m-%d %H:%M"), project_id),
     )
     db.commit()
     return redirect(url_for("index"))
@@ -3849,7 +3856,12 @@ def _project_totals(db, project_id):
         "FROM bank_transactions WHERE project_id = ?",
         (project_id,),
     ).fetchone()
-    income, expense = row["income"], row["expense"]
+    entries_expense = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) AS expense FROM entries WHERE project_id = ?",
+        (project_id,),
+    ).fetchone()["expense"]
+    income = row["income"]
+    expense = row["expense"] + entries_expense
     return income, expense, income - expense
 
 
@@ -3881,7 +3893,13 @@ def analytics_projects():
         "FROM bank_transactions WHERE project_id IS NOT NULL AND substr(operation_date, 1, 7) = ?",
         (month_prefix,),
     ).fetchone()
-    month_income, month_expense = month_row["income"], month_row["expense"]
+    month_entries_expense = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) AS expense FROM entries "
+        "WHERE project_id IS NOT NULL AND substr(work_date, 1, 7) = ?",
+        (month_prefix,),
+    ).fetchone()["expense"]
+    month_income = month_row["income"]
+    month_expense = month_row["expense"] + month_entries_expense
 
     return render_template(
         "analytics_projects.html", active_page="analytics", sub_page="projects",
@@ -3906,6 +3924,10 @@ def project_detail(project_id):
         "SELECT * FROM bank_transactions WHERE project_id IS NULL "
         "ORDER BY operation_date DESC, id DESC LIMIT 300"
     ).fetchall()
+    work_entries = db.execute(
+        "SELECT * FROM entries WHERE project_id = ? ORDER BY work_date DESC, id DESC",
+        (project_id,),
+    ).fetchall()
     income, expense, profit = _project_totals(db, project_id)
     order = None
     if project["tuning_order_id"]:
@@ -3915,7 +3937,7 @@ def project_detail(project_id):
     return render_template(
         "project_detail.html", active_page="analytics", sub_page="projects",
         project=project, order=order, transactions=transactions, unattached=unattached,
-        income=income, expense=expense, profit=profit,
+        work_entries=work_entries, income=income, expense=expense, profit=profit,
     )
 
 

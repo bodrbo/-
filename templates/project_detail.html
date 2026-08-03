@@ -156,6 +156,36 @@
   </section>
 
   <section class="panel">
+    <h2>Работы, отнесённые на расходы</h2>
+    {% if work_entries %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th>Сотрудник</th>
+            <th>Вид работы</th>
+            <th>Сумма</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in work_entries %}
+          <tr>
+            <td class="muted">{{ e.work_date|ru_date }}</td>
+            <td>{{ e.employee }}</td>
+            <td>{{ e.work_type }}</td>
+            <td class="amount">{{ e.amount|money }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint">К проекту пока не привязано ни одной работы. Привязать работу можно при её добавлении в разделе «Зарплаты».</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
     <h2>Привязать транзакцию</h2>
     {% if unattached %}
     <form action="{{ url_for('set_transaction_project') }}" method="post" class="entry-form">

@@ -135,11 +135,20 @@
         <input type="date" id="work_date" name="work_date"
                value="{{ form_values.work_date if form_values else today }}" required>
       </div>
+      <div class="field">
+        <label for="project_id">Проект</label>
+        <select id="project_id" name="project_id">
+          <option value="" {{ 'selected' if not form_values or not form_values.project_id }}>— без проекта —</option>
+          {% for p in projects %}
+          <option value="{{ p.id }}" {{ 'selected' if form_values and form_values.project_id == p.id|string }}>{{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
       <div class="field field-submit">
         <button type="submit">Добавить</button>
       </div>
     </form>
-    <p class="hint">Выбор вида работы подставит обычную ставку и часы — при необходимости их можно поправить перед сохранением.</p>
+    <p class="hint">Выбор вида работы подставит обычную ставку и часы — при необходимости их можно поправить перед сохранением. Если привязать работу к проекту, её сумма попадёт в расходы этого проекта.</p>
   </section>
 
   {% if manager_errors %}
