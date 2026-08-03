@@ -3751,7 +3751,7 @@ def analytics_index():
     transactions = db.execute(
         "SELECT * FROM bank_transactions ORDER BY operation_date DESC, id DESC LIMIT 200"
     ).fetchall()
-    projects = db.execute("SELECT * FROM projects ORDER BY tuning_order_id DESC").fetchall()
+    projects = db.execute("SELECT * FROM projects ORDER BY created_at DESC, id DESC").fetchall()
     today = dt.date.today()
     week_ago = today - dt.timedelta(days=7)
     return render_template(
@@ -3856,7 +3856,7 @@ def analytics_projects():
         "SELECT projects.*, tuning_orders.client_name AS client_name, "
         "tuning_orders.boat_model AS boat_model "
         "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
-        "ORDER BY projects.tuning_order_id DESC"
+        "ORDER BY projects.created_at DESC, projects.id DESC"
     ).fetchall()
     projects = []
     for p in rows:
