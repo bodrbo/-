@@ -356,6 +356,11 @@ MONTHS_GEN = [
     "июля", "августа", "сентября", "октября", "ноября", "декабря",
 ]
 
+MONTHS_NOM = [
+    "январь", "февраль", "март", "апрель", "май", "июнь",
+    "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
+]
+
 
 def get_db():
     if "db" not in g:
@@ -3866,9 +3871,23 @@ def analytics_projects():
             "client_name": p["client_name"], "boat_model": p["boat_model"],
             "income": income, "expense": expense, "profit": profit,
         })
+
+    now = dt.datetime.now()
+    month_prefix = now.strftime("%Y-%m")
+    month_row = db.execute(
+        "SELECT "
+        "COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE 0 END), 0) AS income, "
+        "COALESCE(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END), 0) AS expense "
+        "FROM bank_transactions WHERE project_id IS NOT NULL AND substr(operation_date, 1, 7) = ?",
+        (month_prefix,),
+    ).fetchone()
+    month_income, month_expense = month_row["income"], month_row["expense"]
+
     return render_template(
         "analytics_projects.html", active_page="analytics", sub_page="projects",
-        projects=projects,
+        projects=projects, month_name=MONTHS_NOM[now.month - 1], month_year=now.year,
+        month_income=month_income, month_expense=month_expense,
+        month_profit=month_income - month_expense,
     )
 
 

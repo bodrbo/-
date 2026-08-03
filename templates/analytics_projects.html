@@ -78,6 +78,21 @@
     <a href="{{ url_for('analytics_projects') }}" class="{{ 'active' if sub_page == 'projects' }}">Проекты</a>
   </nav>
 
+  <div class="totals-grid">
+    <div class="panel total-card">
+      <span class="k">Выручка за {{ month_name }} {{ month_year }}</span>
+      <span class="v" style="color:var(--success);">{{ month_income|money }} ₽</span>
+    </div>
+    <div class="panel total-card">
+      <span class="k">Расходы за {{ month_name }} {{ month_year }}</span>
+      <span class="v">{{ month_expense|money }} ₽</span>
+    </div>
+    <div class="panel total-card total-card-grand">
+      <span class="k">Прибыль за {{ month_name }} {{ month_year }}</span>
+      <span class="v" style="{{ 'color:var(--danger);' if month_profit < 0 }}">{{ month_profit|money }} ₽</span>
+    </div>
+  </div>
+
   <section class="panel">
     <h2>Проекты</h2>
     <p class="hint" style="margin-top:0;">
