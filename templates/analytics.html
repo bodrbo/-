@@ -85,6 +85,32 @@
   </div>
   {% endif %}
 
+  {% if fetch_error %}
+  <div class="alert"><strong>Не удалось загрузить выписку:</strong> {{ fetch_error }}</div>
+  {% endif %}
+  {% if fetch_result %}
+  <div class="import-note hint">{{ fetch_result }}</div>
+  {% endif %}
+
+  {% if tbank_configured %}
+  <section class="panel">
+    <h2>Загрузить выписку из Т-Банка</h2>
+    <form action="{{ url_for('analytics_fetch') }}" method="post" class="entry-form">
+      <div class="field field-narrow">
+        <label for="start_date">С даты</label>
+        <input type="date" id="start_date" name="start_date" value="{{ fetch_default_start }}" required>
+      </div>
+      <div class="field field-narrow">
+        <label for="end_date">По дату</label>
+        <input type="date" id="end_date" name="end_date" value="{{ fetch_default_end }}" required>
+      </div>
+      <div class="field field-submit">
+        <button type="submit">Загрузить из Т-Банка</button>
+      </div>
+    </form>
+  </section>
+  {% endif %}
+
   <section class="panel">
     <h2>Транзакции по счёту</h2>
     {% if transactions %}

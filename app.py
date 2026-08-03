@@ -3621,6 +3621,97 @@ def team_dashboard():
 # расчётному счёту из Т-Банка (см. TBANK_API_TOKEN/TBANK_ACCOUNT_NUMBER
 # выше). Пока подключение не настроено, раздел просто показывает заглушку.
 # ---------------------------------------------------------------------
+def _tbank_request(path, params):
+    resp = requests.get(
+        f"{TBANK_API_BASE}{path}",
+        headers={"Authorization": f"Bearer {TBANK_API_TOKEN}"},
+        params=params,
+        timeout=30,
+    )
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Т-Банк вернул ошибку {resp.status_code}: {resp.text[:500]}")
+    return resp.json()
+
+
+def _tbank_fetch_operations(start_date, end_date):
+    """Fetch every operation for [start_date, end_date] (YYYY-MM-DD strings),
+    following cursor-based pagination. Returns the raw operation dicts —
+    field names aren't fully documented (JS-rendered API docs), so parsing
+    happens separately in _tbank_normalize_operation, defensively."""
+    operations = []
+    cursor = None
+    params_base = {
+        "accountNumber": TBANK_ACCOUNT_NUMBER,
+        "from": f"{start_date}T00:00:00Z",
+        "to": f"{end_date}T23:59:59Z",
+        "limit": 1000,
+    }
+    while True:
+        params = dict(params_base)
+        if cursor:
+            params["cursor"] = cursor
+        data = _tbank_request("/v1/statement", params)
+        batch = data.get("operations") or data.get("Operations") or []
+        operations.extend(batch)
+        cursor = data.get("nextCursor") or data.get("NextCursor")
+        if not cursor or not batch:
+            break
+    return operations
+
+
+def _tbank_pick(op, *keys):
+    for k in keys:
+        v = op.get(k)
+        if v not in (None, ""):
+            return v
+    return None
+
+
+def _tbank_normalize_operation(op):
+    """Best-effort mapping from a raw T-Bank operation dict to our row shape.
+    The full raw dict is always kept in raw_json regardless of how well this
+    guesses field names, so nothing is lost if a name below is wrong."""
+    operation_id = _tbank_pick(op, "operationId", "id", "documentNumber", "trxId", "uid")
+    date_val = _tbank_pick(op, "dateTime", "date", "operationDate", "authorizationDate")
+
+    amount_raw = op.get("amount")
+    if isinstance(amount_raw, dict):
+        amount = _tbank_pick(amount_raw, "value", "amount")
+        currency = amount_raw.get("currency") or "RUB"
+    else:
+        amount = amount_raw if amount_raw is not None else _tbank_pick(op, "value")
+        currency = _tbank_pick(op, "currency") or "RUB"
+    try:
+        amount = abs(float(amount)) if amount is not None else 0.0
+    except (TypeError, ValueError):
+        amount = 0.0
+
+    type_raw = str(_tbank_pick(op, "type", "direction", "operationType") or "").lower()
+    direction = "out" if type_raw in ("debit", "out", "expense", "outcome", "withdrawal") else "in"
+
+    counterparty = op.get("counterparty") or op.get("payer") or op.get("recipient") or {}
+    if not isinstance(counterparty, dict):
+        counterparty = {}
+    counterparty_name = _tbank_pick(
+        op, "counterpartyName", "payerName", "recipientName"
+    ) or counterparty.get("name")
+    counterparty_inn = _tbank_pick(
+        op, "counterpartyInn", "payerInn", "recipientInn"
+    ) or counterparty.get("inn")
+
+    return {
+        "operation_id": str(operation_id) if operation_id else None,
+        "operation_date": str(date_val) if date_val else "",
+        "amount": amount,
+        "direction": direction,
+        "counterparty_name": counterparty_name,
+        "counterparty_inn": counterparty_inn,
+        "purpose": _tbank_pick(op, "paymentPurpose", "purpose", "description", "comment"),
+        "category": _tbank_pick(op, "category", "categoryCode"),
+        "status": _tbank_pick(op, "status", "operationStatus"),
+    }
+
+
 @app.route("/analytics")
 @admin_login_required
 def analytics_index():
@@ -3628,10 +3719,72 @@ def analytics_index():
     transactions = db.execute(
         "SELECT * FROM bank_transactions ORDER BY operation_date DESC, id DESC LIMIT 200"
     ).fetchall()
+    today = dt.date.today()
+    week_ago = today - dt.timedelta(days=7)
     return render_template(
         "analytics.html", active_page="analytics", sub_page="transactions",
         transactions=transactions, tbank_configured=tbank_configured(),
+        fetch_default_start=week_ago.isoformat(), fetch_default_end=today.isoformat(),
+        fetch_error=session.pop("tbank_fetch_error", None),
+        fetch_result=session.pop("tbank_fetch_result", None),
     )
+
+
+@app.route("/analytics/fetch", methods=["POST"])
+@admin_login_required
+def analytics_fetch():
+    if not tbank_configured():
+        return redirect(url_for("analytics_index"))
+
+    start_date = request.form.get("start_date", "").strip()
+    end_date = request.form.get("end_date", "").strip()
+    try:
+        dt.date.fromisoformat(start_date)
+        dt.date.fromisoformat(end_date)
+    except ValueError:
+        session["tbank_fetch_error"] = "Некорректный период."
+        return redirect(url_for("analytics_index"))
+
+    db = get_db()
+    try:
+        raw_operations = _tbank_fetch_operations(start_date, end_date)
+    except requests.RequestException as e:
+        session["tbank_fetch_error"] = f"Ошибка соединения с Т-Банком: {e}"
+        return redirect(url_for("analytics_index"))
+    except RuntimeError as e:
+        session["tbank_fetch_error"] = str(e)
+        return redirect(url_for("analytics_index"))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    added = 0
+    skipped_no_id = 0
+    for op in raw_operations:
+        data = _tbank_normalize_operation(op)
+        if not data["operation_id"]:
+            skipped_no_id += 1
+            continue
+        existing = db.execute(
+            "SELECT 1 FROM bank_transactions WHERE operation_id = ?", (data["operation_id"],)
+        ).fetchone()
+        if existing:
+            continue
+        db.execute(
+            "INSERT INTO bank_transactions (operation_id, account_number, operation_date, amount, "
+            "direction, counterparty_name, counterparty_inn, purpose, category, status, raw_json, "
+            "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (data["operation_id"], TBANK_ACCOUNT_NUMBER, data["operation_date"], data["amount"],
+             data["direction"], data["counterparty_name"], data["counterparty_inn"],
+             data["purpose"], data["category"], data["status"],
+             json.dumps(op, ensure_ascii=False), now),
+        )
+        added += 1
+    db.commit()
+
+    session["tbank_fetch_result"] = (
+        f"Получено операций: {len(raw_operations)}. Новых добавлено: {added}."
+        + (f" Без ID (пропущено): {skipped_no_id}." if skipped_no_id else "")
+    )
+    return redirect(url_for("analytics_index"))
 
 
 init_db()
