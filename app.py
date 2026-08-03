@@ -2931,6 +2931,53 @@ def apply_minimum_shift_rate(db, records):
     return changed
 
 
+def _is_number(value):
+    if isinstance(value, (int, float)):
+        return True
+    try:
+        float(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _repair_boat_derived_numbers(db, rows):
+    """A candidate can end up with a resolved boat but blank/invalid
+    fuel_cost/mooring_cost/commission_pct — e.g. it was merged (by an
+    earlier, buggier version of merge_pending_candidates, or any future
+    bug like it) from a boat-less partner that revenue-sorted first, and
+    its boat-derived numbers were never backfilled. Heal any such row on
+    every run, independent of whether it's merging with anything *this*
+    time — otherwise a candidate stuck this way before the fix shipped
+    stays stuck forever, since it's alone in its slot from here on and
+    the merge loop below only touches groups of 2+."""
+    for row in rows:
+        payload = json.loads(row["payload"])
+        boat = payload.get("boat") or ""
+        if not boat:
+            continue
+        if (
+            _is_number(payload.get("fuel_cost"))
+            and _is_number(payload.get("mooring_cost"))
+            and _is_number(payload.get("commission_pct"))
+        ):
+            continue
+        boat_info = boat_lookup(boat)
+        if not boat_info:
+            continue
+        payload["fuel_cost"] = boat_info["fuel"]
+        payload["mooring_cost"] = boat_info["mooring"]
+        payload["commission_pct"] = (
+            boat_info["commission_aggregator"]
+            if payload.get("sale_channel") == "aggregator"
+            else boat_info["commission_direct"]
+        )
+        db.execute(
+            "UPDATE import_candidates SET payload = ? WHERE id = ?",
+            (json.dumps(payload, ensure_ascii=False), row["id"]),
+        )
+
+
 def merge_pending_candidates(db):
     """Second line of defence, independent of Yclients' own data: scan every
     candidate currently waiting for confirmation and merge any that share
@@ -2939,6 +2986,10 @@ def merge_pending_candidates(db):
     second staff member" situation, just detected on our own already-parsed
     data instead of relying on matching raw Yclients fields exactly.
     Returns how many candidates were merged away."""
+    rows = db.execute(
+        "SELECT * FROM import_candidates ORDER BY id ASC"
+    ).fetchall()
+    _repair_boat_derived_numbers(db, rows)
     rows = db.execute(
         "SELECT * FROM import_candidates ORDER BY id ASC"
     ).fetchall()
