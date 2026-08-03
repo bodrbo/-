@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Аналитика</title>
+<title>Проекты — Аналитика</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -78,79 +78,30 @@
     <a href="{{ url_for('analytics_projects') }}" class="{{ 'active' if sub_page == 'projects' }}">Проекты</a>
   </nav>
 
-  {% if not tbank_configured %}
-  <div class="alert">
-    <strong>Т-Банк не подключён.</strong> На хостинге нужно задать переменные окружения
-    <code>TBANK_API_TOKEN</code> и <code>TBANK_ACCOUNT_NUMBER</code> (токен создаётся в личном
-    кабинете Т-Бизнес с доступом «Счета и выписки»).
-  </div>
-  {% endif %}
-
-  {% if fetch_error %}
-  <div class="alert"><strong>Не удалось загрузить выписку:</strong> {{ fetch_error }}</div>
-  {% endif %}
-  {% if fetch_result %}
-  <div class="import-note hint">{{ fetch_result }}</div>
-  {% endif %}
-
-  {% if tbank_configured %}
   <section class="panel">
-    <h2>Загрузить выписку из Т-Банка</h2>
-    <form action="{{ url_for('analytics_fetch') }}" method="post" class="entry-form">
-      <div class="field field-narrow">
-        <label for="start_date">С даты</label>
-        <input type="date" id="start_date" name="start_date" value="{{ fetch_default_start }}" required>
-      </div>
-      <div class="field field-narrow">
-        <label for="end_date">По дату</label>
-        <input type="date" id="end_date" name="end_date" value="{{ fetch_default_end }}" required>
-      </div>
-      <div class="field field-submit">
-        <button type="submit">Загрузить из Т-Банка</button>
-      </div>
-    </form>
-  </section>
-  {% endif %}
-
-  <section class="panel">
-    <h2>Транзакции по счёту</h2>
-    {% if transactions %}
+    <h2>Проекты</h2>
+    <p class="hint" style="margin-top:0;">
+      Проект создаётся автоматически для каждого заказа тюнинг-центра. Привяжите транзакции
+      к проекту на вкладке «Транзакции», чтобы увидеть его доходы, расходы и прибыль.
+    </p>
+    {% if projects %}
     <div class="table-scroll">
       <table class="records">
         <thead>
           <tr>
-            <th>Дата</th>
-            <th>Сумма</th>
-            <th>Контрагент</th>
-            <th>ИНН</th>
-            <th>Назначение платежа</th>
-            <th>Категория</th>
-            <th>Статус</th>
             <th>Проект</th>
+            <th>Доходы</th>
+            <th>Расходы</th>
+            <th>Прибыль</th>
           </tr>
         </thead>
         <tbody>
-          {% for t in transactions %}
+          {% for p in projects %}
           <tr>
-            <td class="muted">{{ t.operation_date[:10]|ru_date }}</td>
-            <td class="amount">{{ (t.amount if t.direction == 'in' else -t.amount)|money }}</td>
-            <td>{{ t.counterparty_name or '—' }}</td>
-            <td class="muted">{{ t.counterparty_inn or '—' }}</td>
-            <td>{{ t.purpose or '—' }}</td>
-            <td class="muted">{{ t.category or '—' }}</td>
-            <td><span class="status-badge status-{{ t.status }}">{{ t.status or '—' }}</span></td>
-            <td>
-              <form action="{{ url_for('set_transaction_project') }}" method="post">
-                <input type="hidden" name="transaction_id" value="{{ t.id }}">
-                <input type="hidden" name="next" value="{{ url_for('analytics_index') }}">
-                <select name="project_id" onchange="this.form.submit()">
-                  <option value="">— без проекта —</option>
-                  {% for p in projects %}
-                  <option value="{{ p.id }}" {{ 'selected' if t.project_id == p.id }}>{{ p.name }}</option>
-                  {% endfor %}
-                </select>
-              </form>
-            </td>
+            <td><a href="{{ url_for('project_detail', project_id=p.id) }}" class="term">{{ p.name }}</a></td>
+            <td class="amount">{{ p.income|money }}</td>
+            <td>{{ p.expense|money }}</td>
+            <td class="amount" style="{{ 'color:var(--danger);' if p.profit < 0 }}">{{ p.profit|money }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -159,14 +110,8 @@
     {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">Транзакций пока нет</div>
-      <div class="s">
-        {% if tbank_configured %}
-        Здесь появится выписка по счёту, как только заработает выгрузка из Т-Банка.
-        {% else %}
-        Подключите Т-Банк (см. подсказку выше), чтобы начать загружать выписку.
-        {% endif %}
-      </div>
+      <div class="t">Проектов пока нет</div>
+      <div class="s">Проект появится сам, как только создадите заказ в тюнинг-центре.</div>
     </div>
     {% endif %}
   </section>

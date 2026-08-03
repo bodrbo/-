@@ -591,6 +591,31 @@ def init_db():
         )
         """
     )
+    bank_tx_cols = [row[1] for row in conn.execute("PRAGMA table_info(bank_transactions)").fetchall()]
+    if "project_id" not in bank_tx_cols:
+        conn.execute("ALTER TABLE bank_transactions ADD COLUMN project_id INTEGER")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            tuning_order_id INTEGER,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    # Backfill: every tuning order should have a matching project, including
+    # ones created before this feature existed.
+    conn.execute(
+        """
+        INSERT INTO projects (name, tuning_order_id, created_at)
+        SELECT 'Заказ №' || tuning_orders.id, tuning_orders.id, tuning_orders.created_at
+        FROM tuning_orders
+        WHERE tuning_orders.id NOT IN (
+            SELECT tuning_order_id FROM projects WHERE tuning_order_id IS NOT NULL
+        )
+        """
+    )
     # Migration path for tuning_orders created before client_id/status existed.
     tuning_cols = [row[1] for row in conn.execute("PRAGMA table_info(tuning_orders)").fetchall()]
     if "client_id" not in tuning_cols:
@@ -2116,6 +2141,10 @@ def add_tuning_order():
             (order_id, item["work_name"], item["cost_price"], item["multiplier"], item["price"],
              DEFAULT_WORK_STATUS),
         )
+    db.execute(
+        "INSERT INTO projects (name, tuning_order_id, created_at) VALUES (?, ?, ?)",
+        (f"Заказ №{order_id}", order_id, now),
+    )
     db.commit()
     return redirect(url_for("tuning_index"))
 
@@ -3722,11 +3751,12 @@ def analytics_index():
     transactions = db.execute(
         "SELECT * FROM bank_transactions ORDER BY operation_date DESC, id DESC LIMIT 200"
     ).fetchall()
+    projects = db.execute("SELECT * FROM projects ORDER BY tuning_order_id DESC").fetchall()
     today = dt.date.today()
     week_ago = today - dt.timedelta(days=7)
     return render_template(
         "analytics.html", active_page="analytics", sub_page="transactions",
-        transactions=transactions, tbank_configured=tbank_configured(),
+        transactions=transactions, projects=projects, tbank_configured=tbank_configured(),
         fetch_default_start=week_ago.isoformat(), fetch_default_end=today.isoformat(),
         fetch_error=session.pop("tbank_fetch_error", None),
         fetch_result=session.pop("tbank_fetch_result", None),
@@ -3804,6 +3834,80 @@ def analytics_fetch():
         + (f" Без ID (пропущено): {skipped_no_id}." if skipped_no_id else "")
     )
     return redirect(url_for("analytics_index"))
+
+
+def _project_totals(db, project_id):
+    row = db.execute(
+        "SELECT "
+        "COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE 0 END), 0) AS income, "
+        "COALESCE(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END), 0) AS expense "
+        "FROM bank_transactions WHERE project_id = ?",
+        (project_id,),
+    ).fetchone()
+    income, expense = row["income"], row["expense"]
+    return income, expense, income - expense
+
+
+@app.route("/analytics/projects")
+@admin_login_required
+def analytics_projects():
+    db = get_db()
+    rows = db.execute("SELECT * FROM projects ORDER BY tuning_order_id DESC").fetchall()
+    projects = []
+    for p in rows:
+        income, expense, profit = _project_totals(db, p["id"])
+        projects.append({
+            "id": p["id"], "name": p["name"], "tuning_order_id": p["tuning_order_id"],
+            "income": income, "expense": expense, "profit": profit,
+        })
+    return render_template(
+        "analytics_projects.html", active_page="analytics", sub_page="projects",
+        projects=projects,
+    )
+
+
+@app.route("/analytics/projects/<int:project_id>")
+@admin_login_required
+def project_detail(project_id):
+    db = get_db()
+    project = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+    if project is None:
+        return redirect(url_for("analytics_projects"))
+    transactions = db.execute(
+        "SELECT * FROM bank_transactions WHERE project_id = ? ORDER BY operation_date DESC, id DESC",
+        (project_id,),
+    ).fetchall()
+    unattached = db.execute(
+        "SELECT * FROM bank_transactions WHERE project_id IS NULL "
+        "ORDER BY operation_date DESC, id DESC LIMIT 300"
+    ).fetchall()
+    income, expense, profit = _project_totals(db, project_id)
+    order = None
+    if project["tuning_order_id"]:
+        order = db.execute(
+            "SELECT * FROM tuning_orders WHERE id = ?", (project["tuning_order_id"],)
+        ).fetchone()
+    return render_template(
+        "project_detail.html", active_page="analytics", sub_page="projects",
+        project=project, order=order, transactions=transactions, unattached=unattached,
+        income=income, expense=expense, profit=profit,
+    )
+
+
+@app.route("/analytics/transactions/project", methods=["POST"])
+@admin_login_required
+def set_transaction_project():
+    db = get_db()
+    transaction_id = request.form.get("transaction_id", "").strip()
+    project_id = request.form.get("project_id", "").strip()
+    if transaction_id.isdigit():
+        db.execute(
+            "UPDATE bank_transactions SET project_id = ? WHERE id = ?",
+            (int(project_id) if project_id.isdigit() else None, int(transaction_id)),
+        )
+        db.commit()
+    next_url = request.form.get("next") or url_for("analytics_index")
+    return redirect(next_url)
 
 
 init_db()
