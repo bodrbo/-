@@ -2944,13 +2944,33 @@ def merge_pending_candidates(db):
     ).fetchall()
 
     groups = {}
+    unresolved = []
     for row in rows:
         payload = json.loads(row["payload"])
         boat = payload.get("boat") or ""
         if not boat:
-            continue  # never auto-merge candidates with an unresolved boat
+            # This staff member's own Yclients record never carried a boat
+            # color (that's the "empty placeholder" record — see
+            # _yclients_group_key) — set aside for the date+time fallback
+            # below instead of guessing a boat from nothing.
+            unresolved.append((row, payload))
+            continue
         slot = (boat, payload.get("trip_date", ""), payload.get("trip_time", ""))
         groups.setdefault(slot, []).append((row, payload))
+
+    # A boat-less candidate can still be matched up by date+time alone, as
+    # long as exactly one resolved-boat candidate shares that exact slot —
+    # if two+ boats have trips at the same moment, don't guess which one
+    # this partner belongs to; leave it for manual review instead.
+    slots_by_datetime = {}
+    for slot in groups:
+        boat, trip_date, trip_time = slot
+        slots_by_datetime.setdefault((trip_date, trip_time), []).append(slot)
+    for row, payload in unresolved:
+        when = (payload.get("trip_date", ""), payload.get("trip_time", ""))
+        matches = slots_by_datetime.get(when) or []
+        if len(matches) == 1:
+            groups[matches[0]].append((row, payload))
 
     merged_away = 0
     for slot, items in groups.items():
@@ -3010,6 +3030,10 @@ def merge_pending_candidates(db):
         ]
         keep_payload["note"] = " / ".join(n for n in notes if n)
         keep_payload["merged_refs"] = merged_refs
+        # items[0] (picked by revenue above) may have been the boat-less
+        # partner if its "revenue" happened to sort first — force the slot's
+        # own (always-resolved) boat so a merge can never silently drop it.
+        keep_payload["boat"] = slot[0]
 
         employees_label = ", ".join(
             i["employee"] for i in keep_payload["labor_items"] if i.get("employee")
