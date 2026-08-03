@@ -1065,6 +1065,11 @@ button.btn-delete:hover { background: var(--danger); color: #fff8f4; border-colo
 table.records tr.row-pending td { background: rgba(212, 141, 74, 0.14); }
 table.records tr.row-pending:hover td { background: rgba(212, 141, 74, 0.2); }
 
+/* Разовый расход — отдельная строка среди рейсов, суммы у неё отрицательные. */
+table.records tr.row-expense td { background: rgba(179, 64, 44, 0.06); }
+table.records tr.row-expense:hover td { background: rgba(179, 64, 44, 0.12); }
+table.records tr.row-expense td.amount { color: var(--danger); }
+
 .empty { color: var(--muted); font-style: italic; }
 
 /* --- empty state (with icon) --- */

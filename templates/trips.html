@@ -315,6 +315,44 @@
     </div>
   </details>
 
+  <section class="panel">
+    {% if trip_expense_error %}
+    <div class="alert"><strong>Не удалось сохранить расход:</strong> {{ trip_expense_error }}</div>
+    {% endif %}
+    <details class="doc-add">
+      <summary class="btn-add">Добавить разовый расход</summary>
+      <form action="{{ url_for('add_trip_expense') }}" method="post" class="entry-form" style="margin-top:14px;">
+        <div class="field field-narrow">
+          <label for="expense_boat">Катер</label>
+          <select id="expense_boat" name="boat" required>
+            <option value="" disabled selected>Выберите катер</option>
+            {% for b in boats %}
+            <option value="{{ b.name }}">{{ b.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field field-narrow">
+          <label for="expense_date">Дата</label>
+          <input type="date" id="expense_date" name="expense_date" value="{{ today }}" required>
+        </div>
+        <div class="field">
+          <label for="expense_description">Описание расхода</label>
+          <input type="text" id="expense_description" name="description" placeholder="Например, ремонт двигателя" required>
+        </div>
+        <div class="field field-narrow">
+          <label for="expense_amount">Сумма, ₽</label>
+          <input type="text" inputmode="decimal" id="expense_amount" name="amount" required>
+        </div>
+        <div class="field field-submit">
+          <button type="submit">Добавить расход</button>
+        </div>
+      </form>
+      <p class="hint" style="margin-top:10px;">
+        Расход делится пополам между инвестором и судовладельцем — так же, как остаток по рейсам.
+      </p>
+    </details>
+  </section>
+
   <section class="panel filter-panel">
     <h2>Период и катер</h2>
     <form action="{{ url_for('trips_index') }}" method="get" class="filter-form">
@@ -422,26 +460,37 @@
         </thead>
         <tbody>
           {% for t in trips %}
-          <tr>
-            <td class="muted">{{ t.trip_date|ru_date }} · {{ t.trip_time or '00:00' }}</td>
+          <tr class="{{ 'row-expense' if t.is_expense }}">
+            <td class="muted">{{ t.trip_date|ru_date }}{% if not t.is_expense %} · {{ t.trip_time or '00:00' }}{% endif %}</td>
             <td>{{ t.boat }}</td>
-            <td>{{ t.work_type }}</td>
+            <td>
+              {% if t.is_expense %}<span class="status-badge status-cancelled">Расход</span> {% endif %}{{ t.work_type }}
+            </td>
+            {% if t.is_expense %}
+            <td class="muted">—</td>
+            <td class="muted">—</td>
+            <td class="muted">—</td>
+            <td>{{ t.extra_total|money }}</td>
+            {% else %}
             <td>{{ t.revenue|money }}</td>
             <td class="muted">{{ 'Напрямую' if t.sale_channel == 'direct' else ('Агрегатор' if t.sale_channel == 'aggregator' else 'Смешанно') }}</td>
             <td>{{ t.commission_amount|money }} ({{ t.commission_pct|float|round(1) }}%)</td>
             <td title="Гид/капитан: {{ t.labor_cost|money }} · Топливо: {{ t.fuel_cost|money }} · Стоянка: {{ t.mooring_cost|money }}{% if t.extra_total %} · Доп: {{ t.extra_total|money }}{% endif %}">
               {{ (t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total)|money }}
             </td>
+            {% endif %}
             <td class="amount">{{ t.investor_payout|money }}</td>
             <td class="amount">{{ t.my_share|money }}</td>
             <td class="row-actions">
+              {% if not t.is_expense %}
               <a href="{{ url_for('edit_trip', trip_id=t.id) }}" class="icon-btn" title="Редактировать">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M13.5 3.5l3 3L6 17H3v-3L13.5 3.5z"/>
                 </svg>
               </a>
+              {% endif %}
               <form action="{{ url_for('delete_trip', trip_id=t.id) }}" method="post"
-                    onsubmit="return confirm('Удалить этот рейс? Связанная запись в зарплатах тоже удалится.');">
+                    onsubmit="return confirm('{{ 'Удалить этот расход?' if t.is_expense else 'Удалить этот рейс? Связанная запись в зарплатах тоже удалится.' }}');">
                 <button type="submit" class="icon-btn danger" title="Удалить">
                   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>

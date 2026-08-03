@@ -394,6 +394,8 @@ def init_db():
     if "trip_time" not in trip_cols:
         conn.execute("ALTER TABLE trips ADD COLUMN trip_time TEXT")
         conn.execute("UPDATE trips SET trip_time = '00:00' WHERE trip_time IS NULL")
+    if "is_expense" not in trip_cols:
+        conn.execute("ALTER TABLE trips ADD COLUMN is_expense INTEGER NOT NULL DEFAULT 0")
 
     conn.execute(
         """
@@ -1282,7 +1284,10 @@ def trips_index():
     selected_month = request.args.get("month")
     selected_boat = request.args.get("boat", "all")
     ctx = _trips_list_context(db, selected_month, selected_boat)
-    return render_template("trips.html", **ctx, **_trips_common_kwargs(), edit_trip=None)
+    return render_template(
+        "trips.html", **ctx, **_trips_common_kwargs(), edit_trip=None,
+        trip_expense_error=session.pop("trip_expense_error", None),
+    )
 
 
 @app.route("/trips/add", methods=["POST"])
@@ -1454,6 +1459,53 @@ def delete_trip(trip_id):
         db.execute("DELETE FROM trip_expenses WHERE trip_id = ?", (trip_id,))
         db.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
         db.commit()
+    return redirect(url_for("trips_index"))
+
+
+@app.route("/trips/expense/add", methods=["POST"])
+@admin_login_required
+def add_trip_expense():
+    db = get_db()
+    boat = request.form.get("boat", "").strip()
+    expense_date = request.form.get("expense_date", "").strip()
+    description = request.form.get("description", "").strip()
+    amount_raw = request.form.get("amount", "").strip().replace(",", ".")
+
+    errors = []
+    if boat not in [b["name"] for b in BOATS]:
+        errors.append("Выберите катер.")
+    try:
+        expense_date and dt.date.fromisoformat(expense_date)
+    except ValueError:
+        errors.append("Некорректная дата.")
+    if not expense_date:
+        errors.append("Укажите дату расхода.")
+    if not description:
+        errors.append("Укажите описание расхода.")
+    try:
+        amount = float(amount_raw)
+        if amount <= 0:
+            errors.append("Сумма расхода должна быть больше нуля.")
+    except ValueError:
+        amount = None
+        errors.append("Сумма расхода должна быть числом.")
+
+    if errors:
+        session["trip_expense_error"] = " ".join(errors)
+        return redirect(url_for("trips_index"))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    remainder = -amount
+    db.execute(
+        "INSERT INTO trips (boat, trip_date, trip_time, work_type, entry_id, revenue, sale_channel, "
+        "commission_pct, commission_amount, labor_cost, fuel_cost, mooring_cost, extra_total, "
+        "remainder, investor_payout, my_share, created_at, is_expense) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (boat, expense_date, "00:00", description, None, 0.0, "direct",
+         0.0, 0.0, 0.0, 0.0, 0.0, amount,
+         remainder, remainder / 2, remainder / 2, now, 1),
+    )
+    db.commit()
     return redirect(url_for("trips_index"))
 
 

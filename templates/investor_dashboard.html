@@ -95,6 +95,7 @@
           <tr>
             <th>Дата</th>
             {% if boats|length > 1 %}<th>Катер</th>{% endif %}
+            <th></th>
             <th>Доход</th>
             <th>Комиссия</th>
             <th>Расходы</th>
@@ -104,9 +105,10 @@
         </thead>
         <tbody>
           {% for t in trips %}
-          <tr>
-            <td class="muted">{{ t.trip_date|ru_date }} · {{ t.trip_time or '00:00' }}</td>
+          <tr class="{{ 'row-expense' if t.is_expense }}">
+            <td class="muted">{{ t.trip_date|ru_date }}{% if not t.is_expense %} · {{ t.trip_time or '00:00' }}{% endif %}</td>
             {% if boats|length > 1 %}<td>{{ t.boat }}</td>{% endif %}
+            <td>{% if t.is_expense %}<span class="status-badge status-cancelled">Расход</span> {{ t.work_type }}{% endif %}</td>
             <td>{{ t.revenue|money }}</td>
             <td>{{ t.commission_amount|money }} ({{ t.commission_pct|float|round(1) }}%)</td>
             <td>{{ (t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total)|money }}</td>
