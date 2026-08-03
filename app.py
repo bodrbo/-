@@ -3031,9 +3031,23 @@ def merge_pending_candidates(db):
         keep_payload["note"] = " / ".join(n for n in notes if n)
         keep_payload["merged_refs"] = merged_refs
         # items[0] (picked by revenue above) may have been the boat-less
-        # partner if its "revenue" happened to sort first — force the slot's
-        # own (always-resolved) boat so a merge can never silently drop it.
-        keep_payload["boat"] = slot[0]
+        # partner if its "revenue" happened to sort first — that candidate's
+        # boat/fuel_cost/mooring_cost/commission_pct were all left blank
+        # when it was built solo (no boat to look them up from), so force
+        # the slot's own (always-resolved) boat and recompute the
+        # boat-derived numbers fresh, the same way build_import_candidates
+        # would have if it had seen both records as one group from the start.
+        boat_name = slot[0]
+        keep_payload["boat"] = boat_name
+        boat_info = boat_lookup(boat_name)
+        if boat_info:
+            keep_payload["fuel_cost"] = boat_info["fuel"]
+            keep_payload["mooring_cost"] = boat_info["mooring"]
+            keep_payload["commission_pct"] = (
+                boat_info["commission_aggregator"]
+                if keep_payload.get("sale_channel") == "aggregator"
+                else boat_info["commission_direct"]
+            )
 
         employees_label = ", ".join(
             i["employee"] for i in keep_payload["labor_items"] if i.get("employee")
