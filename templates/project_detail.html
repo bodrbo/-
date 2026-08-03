@@ -121,7 +121,18 @@
             <td class="muted">{{ t.operation_date[:10]|ru_date }}</td>
             <td class="amount">{{ (t.amount if t.direction == 'in' else -t.amount)|money }}</td>
             <td>{{ t.counterparty_name or '—' }}</td>
-            <td>{{ t.purpose or '—' }}</td>
+            <td>
+              <form action="{{ url_for('set_transaction_purpose') }}" method="post" class="purpose-edit-form row-actions">
+                <input type="hidden" name="transaction_id" value="{{ t.id }}">
+                <input type="hidden" name="next" value="{{ url_for('project_detail', project_id=project.id) }}">
+                <input type="text" name="purpose" value="{{ t.purpose or '' }}" placeholder="—" class="purpose-input">
+                <button type="submit" class="icon-btn approve" title="Сохранить">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 10.5l4 4 8-9"/>
+                  </svg>
+                </button>
+              </form>
+            </td>
             <td class="row-actions">
               <form action="{{ url_for('set_transaction_project') }}" method="post">
                 <input type="hidden" name="transaction_id" value="{{ t.id }}">

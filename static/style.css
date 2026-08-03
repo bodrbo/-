@@ -699,6 +699,12 @@ code {
 }
 
 .row-actions { display: flex; gap: 6px; white-space: nowrap; }
+.purpose-edit-form { align-items: center; }
+.purpose-input {
+  min-width: 200px;
+  padding: 6px 9px;
+  font-size: 13px;
+}
 .btn-edit {
   display: inline-flex;
   align-items: center;

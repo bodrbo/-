@@ -3935,6 +3935,22 @@ def set_transaction_project():
     return redirect(next_url)
 
 
+@app.route("/analytics/transactions/purpose", methods=["POST"])
+@admin_login_required
+def set_transaction_purpose():
+    db = get_db()
+    transaction_id = request.form.get("transaction_id", "").strip()
+    purpose = request.form.get("purpose", "").strip()
+    if transaction_id.isdigit():
+        db.execute(
+            "UPDATE bank_transactions SET purpose = ? WHERE id = ?",
+            (purpose or None, int(transaction_id)),
+        )
+        db.commit()
+    next_url = request.form.get("next") or url_for("analytics_index")
+    return redirect(next_url)
+
+
 init_db()
 
 if __name__ == "__main__":
