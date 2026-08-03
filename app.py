@@ -3852,12 +3852,18 @@ def _project_totals(db, project_id):
 @admin_login_required
 def analytics_projects():
     db = get_db()
-    rows = db.execute("SELECT * FROM projects ORDER BY tuning_order_id DESC").fetchall()
+    rows = db.execute(
+        "SELECT projects.*, tuning_orders.client_name AS client_name, "
+        "tuning_orders.boat_model AS boat_model "
+        "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
+        "ORDER BY projects.tuning_order_id DESC"
+    ).fetchall()
     projects = []
     for p in rows:
         income, expense, profit = _project_totals(db, p["id"])
         projects.append({
             "id": p["id"], "name": p["name"], "tuning_order_id": p["tuning_order_id"],
+            "client_name": p["client_name"], "boat_model": p["boat_model"],
             "income": income, "expense": expense, "profit": profit,
         })
     return render_template(
