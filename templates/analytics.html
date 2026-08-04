@@ -122,10 +122,8 @@
             <th>Дата</th>
             <th>Сумма</th>
             <th>Контрагент</th>
-            <th>ИНН</th>
             <th>Назначение платежа</th>
             <th>Категория</th>
-            <th>Статус</th>
             <th>Проект</th>
             <th></th>
           </tr>
@@ -136,7 +134,6 @@
             <td class="muted">{{ t.operation_date[:10]|ru_date }}</td>
             <td class="amount">{{ (t.amount if t.direction == 'in' else -t.amount)|money }}</td>
             <td>{{ t.counterparty_name or '—' }}</td>
-            <td class="muted">{{ t.counterparty_inn or '—' }}</td>
             <td>
               <form action="{{ url_for('set_transaction_purpose') }}" method="post" class="purpose-edit-form row-actions">
                 <input type="hidden" name="transaction_id" value="{{ t.id }}">
@@ -150,7 +147,6 @@
               </form>
             </td>
             <td class="muted">{{ t.category or '—' }}</td>
-            <td><span class="status-badge status-{{ t.status }}">{{ t.status or '—' }}</span></td>
             <td>
               {% if t.id in splits_by_transaction %}
               <div class="hint" style="margin:0;">
