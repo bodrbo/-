@@ -903,7 +903,8 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .checklist-success-img {
   width: 220px;
   height: 220px;
-  object-fit: cover;
+  object-fit: contain;
+  background: var(--paper-alt);
   border-radius: 24px;
   display: block;
   margin: 0 auto 18px;

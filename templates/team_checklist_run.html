@@ -48,6 +48,10 @@
   <section class="panel">
     <h2>Осмотр завершён</h2>
     {% if problems %}
+    <div class="checklist-success">
+      <img src="{{ url_for('static', filename='checklist_problem_cat.jpg') }}" alt="" class="checklist-success-img">
+      <p class="checklist-success-text">Ну ты не счастливый какой-то, нахватал проблем... Ну ничего, разберёмся, не в первый раз!</p>
+    </div>
     <p class="hint" style="margin-top:0;">Обнаружены замечания по {{ problems|length }} из {{ total }} пунктов:</p>
     <div class="table-scroll">
       <table class="records">
