@@ -890,7 +890,12 @@ def _payroll_context(db, selected_week, selected_employee):
         if row["employee"] not in known:
             known.append(row["employee"])
 
-    projects = db.execute("SELECT * FROM projects ORDER BY created_at DESC, id DESC").fetchall()
+    projects = db.execute(
+        "SELECT projects.*, tuning_orders.client_name AS client_name, "
+        "tuning_orders.boat_model AS boat_model "
+        "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
+        "ORDER BY projects.created_at DESC, projects.id DESC"
+    ).fetchall()
 
     return dict(
         entries=entries,

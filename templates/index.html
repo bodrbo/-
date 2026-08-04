@@ -140,7 +140,9 @@
         <select id="project_id" name="project_id">
           <option value="" {{ 'selected' if not form_values or not form_values.project_id }}>— без проекта —</option>
           {% for p in projects %}
-          <option value="{{ p.id }}" {{ 'selected' if form_values and form_values.project_id == p.id|string }}>{{ p.name }}</option>
+          <option value="{{ p.id }}" {{ 'selected' if form_values and form_values.project_id == p.id|string }}>
+            {{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.boat_model %} ({{ p.boat_model }}){% endif %}
+          </option>
           {% endfor %}
         </select>
       </div>
