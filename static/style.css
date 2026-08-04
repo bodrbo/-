@@ -812,6 +812,30 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .total-card-grand .k { color: var(--brass-strong); }
 .total-card-grand .v { color: #eaf4fc; }
 
+.checklist-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.checklist-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  background: var(--paper-alt);
+  border: 1.5px dashed var(--hairline);
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--ink);
+}
+.checklist-btn svg {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  color: var(--brass-strong);
+}
+
 /* --- clickable "mark as paid" employee cards --- */
 .total-card.payable {
   cursor: pointer;

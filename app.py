@@ -120,6 +120,15 @@ TBANK_API_TOKEN = os.environ.get("TBANK_API_TOKEN")
 TBANK_ACCOUNT_NUMBER = os.environ.get("TBANK_ACCOUNT_NUMBER")
 TBANK_API_BASE = "https://business.tbank.ru/openapi/api"
 
+# ---------------------------------------------------------------------
+# Секрет для эндпоинта, который раз в день дёргает cron на хостинге, чтобы
+# проверить смены капитанов на завтра в Yclients (см. /internal/cron/...
+# ниже). Тоже настраивается только через переменную окружения:
+#   CRON_SECRET
+# Без неё эндпоинт всегда отвечает 403 — по умолчанию выключен.
+# ---------------------------------------------------------------------
+CRON_SECRET = os.environ.get("CRON_SECRET")
+
 
 def tbank_configured():
     return bool(TBANK_API_TOKEN and TBANK_ACCOUNT_NUMBER)
@@ -488,6 +497,18 @@ def init_db():
                 "DELETE FROM employee_positions WHERE employee_id = ? AND position = ?",
                 (employee_id, position),
             )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS captain_shifts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL,
+            shift_date TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(employee_id, shift_date)
+        )
+        """
+    )
 
     conn.execute(
         """
@@ -3745,6 +3766,13 @@ def team_dashboard():
             (employee_name, selected_week),
         ).fetchone() is not None
 
+    tomorrow = (dt.date.today() + dt.timedelta(days=1)).isoformat()
+    on_shift_tomorrow = db.execute(
+        "SELECT 1 FROM captain_shifts JOIN employees ON employees.id = captain_shifts.employee_id "
+        "WHERE employees.name = ? AND captain_shifts.shift_date = ?",
+        (employee_name, tomorrow),
+    ).fetchone() is not None
+
     return render_template(
         "team_dashboard.html",
         employee_name=employee_name,
@@ -3752,6 +3780,7 @@ def team_dashboard():
         selected_week=selected_week,
         entries=entries,
         total=total,
+        on_shift_tomorrow=on_shift_tomorrow,
         is_paid=is_paid,
         avatar_url=find_avatar_url(session.get("team_username")),
     )
@@ -4252,6 +4281,70 @@ def remove_transaction_split():
             db.commit()
     next_url = request.form.get("next") or url_for("analytics_index")
     return redirect(next_url)
+
+
+def _sync_captain_shifts_for_date(db, target_date):
+    """Fetch Yclients records for target_date, work out which staffed
+    names are captains we know locally, and make captain_shifts for that
+    date match exactly (add missing, drop stale) — safe to re-run.
+    Returns the number of captains found on shift that date."""
+    records = yclients_get_records(target_date, target_date)
+    staffed_names = set()
+    for r in records:
+        if r.get("deleted") or _yclients_record_is_blocker(r):
+            continue
+        name = (r.get("staff") or {}).get("name", "").strip()
+        if name:
+            staffed_names.add(name)
+
+    captain_rows = db.execute(
+        "SELECT employees.id, employees.name FROM employees "
+        "JOIN employee_positions ON employee_positions.employee_id = employees.id "
+        "WHERE employee_positions.position = 'Капитан'"
+    ).fetchall()
+    captains_on_shift = [row for row in captain_rows if row["name"] in staffed_names]
+
+    existing_employee_ids = {
+        row["employee_id"] for row in db.execute(
+            "SELECT employee_id FROM captain_shifts WHERE shift_date = ?", (target_date,)
+        ).fetchall()
+    }
+    wanted_employee_ids = {row["id"] for row in captains_on_shift}
+
+    now_str = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    for employee_id in wanted_employee_ids - existing_employee_ids:
+        db.execute(
+            "INSERT OR IGNORE INTO captain_shifts (employee_id, shift_date, created_at) "
+            "VALUES (?, ?, ?)",
+            (employee_id, target_date, now_str),
+        )
+    for employee_id in existing_employee_ids - wanted_employee_ids:
+        db.execute(
+            "DELETE FROM captain_shifts WHERE employee_id = ? AND shift_date = ?",
+            (employee_id, target_date),
+        )
+    db.commit()
+    return len(captains_on_shift)
+
+
+@app.route("/internal/cron/check-captain-shifts")
+def cron_check_captain_shifts():
+    """Hit once a day by a cron job on the host (see README) — checks
+    tomorrow's Yclients bookings and records which captains are staffed,
+    so their team dashboards can show the checklist buttons. Protected by
+    CRON_SECRET instead of a login, since cron has no session."""
+    if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
+        return "forbidden", 403
+    if not yclients_configured():
+        return "yclients not configured", 503
+
+    tomorrow = (dt.date.today() + dt.timedelta(days=1)).isoformat()
+    db = get_db()
+    try:
+        count = _sync_captain_shifts_for_date(db, tomorrow)
+    except (requests.RequestException, RuntimeError, ValueError) as e:
+        return f"error: {e}", 502
+    return f"ok: {count} captain(s) on shift {tomorrow}", 200
 
 
 init_db()
