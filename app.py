@@ -160,10 +160,11 @@ EMPLOYEES = [
     "Андрей Краснюков",
 ]
 
-# Должности сотрудников. Заполняется по мере того, как должности
-# согласовываются — имя не попавшее сюда просто останется без должности
-# в базе, ничего не сломается.
+# Должности сотрудников. У одного человека может быть несколько должностей —
+# указывайте их списком. Заполняется по мере согласования; имя, не попавшее
+# сюда, просто останется без должностей в базе, ничего не сломается.
 EMPLOYEE_POSITIONS = {
+    # "Имя Фамилия": ["Должность 1", "Должность 2"],
 }
 
 # Виды работ со стандартной ставкой и длительностью (в часах).
@@ -416,8 +417,18 @@ def init_db():
         CREATE TABLE IF NOT EXISTS employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
-            position TEXT,
             created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS employee_positions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL,
+            position TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(employee_id, position)
         )
         """
     )
@@ -431,17 +442,39 @@ def init_db():
     now_str = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     for name in known_employee_names:
         conn.execute(
-            "INSERT OR IGNORE INTO employees (name, position, created_at) VALUES (?, ?, ?)",
-            (name, EMPLOYEE_POSITIONS.get(name), now_str),
+            "INSERT OR IGNORE INTO employees (name, created_at) VALUES (?, ?)",
+            (name, now_str),
         )
-    # Self-healing: whenever EMPLOYEE_POSITIONS gains a new entry for someone
-    # whose position isn't set yet, pick it up on the next restart — no
-    # manual DB edit needed, same pattern used for bank_transactions.
-    for name, position in EMPLOYEE_POSITIONS.items():
-        conn.execute(
-            "UPDATE employees SET position = ? WHERE name = ? AND position IS NULL",
-            (position, name),
-        )
+    # EMPLOYEE_POSITIONS is the source of truth — resync employee_positions
+    # to match it on every restart (add what's missing, drop what's no
+    # longer listed), so editing the dict and redeploying is all it takes.
+    for name, positions in EMPLOYEE_POSITIONS.items():
+        if isinstance(positions, str):
+            positions = [positions]
+        employee_row = conn.execute(
+            "SELECT id FROM employees WHERE name = ?", (name,)
+        ).fetchone()
+        if employee_row is None:
+            continue
+        employee_id = employee_row[0]
+        current_positions = {
+            r[0] for r in conn.execute(
+                "SELECT position FROM employee_positions WHERE employee_id = ?",
+                (employee_id,),
+            ).fetchall()
+        }
+        for position in positions:
+            if position not in current_positions:
+                conn.execute(
+                    "INSERT OR IGNORE INTO employee_positions (employee_id, position, created_at) "
+                    "VALUES (?, ?, ?)",
+                    (employee_id, position, now_str),
+                )
+        for position in current_positions - set(positions):
+            conn.execute(
+                "DELETE FROM employee_positions WHERE employee_id = ? AND position = ?",
+                (employee_id, position),
+            )
 
     conn.execute(
         """
