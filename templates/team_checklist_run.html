@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ checklist_label }} — {{ checklist.boat }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100">
+      <g fill="var(--brass)">
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/>
+      </g>
+      <g fill="none" stroke="var(--brass)" stroke-width="2.6" stroke-linecap="round" opacity="0.85">
+        <path d="M55 15A24 24 0 0 1 62 22" transform="rotate(-6 50 50)"/>
+        <path d="M18 60A24 24 0 0 1 15 51" transform="rotate(4 50 50)"/>
+      </g>
+      <circle cx="50" cy="50" r="15" fill="none" stroke="var(--ink)" stroke-width="4"/>
+      <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
+    </svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo">
+    </div>
+    <div class="title-block">
+      <h1>{{ checklist_label }}</h1>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <a href="{{ url_for('team_dashboard') }}" class="term" style="display:inline-block; margin-bottom:14px;">← В личный кабинет</a>
+
+  <p class="hint" style="margin-top:0;">Катер: <strong>{{ checklist.boat }}</strong></p>
+
+  {% if done %}
+  <section class="panel">
+    <h2>Осмотр завершён</h2>
+    {% if problems %}
+    <p class="hint" style="margin-top:0;">Обнаружены замечания по {{ problems|length }} из {{ total }} пунктов:</p>
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th>Пункт</th>
+            <th>Комментарий</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in problems %}
+          <tr>
+            <td>{{ p.question_text }}</td>
+            <td>{{ p.comment or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint" style="margin-top:0; color:var(--success);">Замечаний не обнаружено — все {{ total }} пунктов в порядке.</p>
+    {% endif %}
+    <a href="{{ url_for('team_dashboard') }}" class="btn-secondary" style="display:inline-block; margin-top:12px;">Готово</a>
+  </section>
+  {% else %}
+  <section class="panel">
+    <div class="checklist-progress">Пункт {{ question_index + 1 }} из {{ total }}</div>
+    <h2 class="checklist-question">{{ question }}</h2>
+
+    <div class="checklist-answer-buttons" id="answer-buttons">
+      <form action="{{ url_for('team_checklist_answer', checklist_id=checklist.id) }}" method="post">
+        <input type="hidden" name="question_index" value="{{ question_index }}">
+        <input type="hidden" name="status" value="ok">
+        <button type="submit" class="checklist-answer-btn ok">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 10.5l4 4 8-9"/>
+          </svg>
+          Всё в порядке
+        </button>
+      </form>
+      <button type="button" class="checklist-answer-btn problem" onclick="document.getElementById('answer-buttons').classList.add('hidden'); document.getElementById('problem-panel').classList.remove('hidden');">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 3l8.5 14.5H1.5L10 3z"/>
+          <path d="M10 8.3v4M10 14.8h.01"/>
+        </svg>
+        Проблема
+      </button>
+    </div>
+
+    <div class="checklist-problem-panel hidden" id="problem-panel">
+      <form action="{{ url_for('team_checklist_answer', checklist_id=checklist.id) }}" method="post">
+        <input type="hidden" name="question_index" value="{{ question_index }}">
+        <input type="hidden" name="status" value="problem">
+        <label for="comment">Опишите проблему</label>
+        <textarea id="comment" name="comment" required placeholder="Что именно не в порядке"></textarea>
+        <button type="submit" class="checklist-answer-btn problem">Сообщить о проблеме</button>
+      </form>
+    </div>
+  </section>
+  {% endif %}
+
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+
+</body>
+</html>

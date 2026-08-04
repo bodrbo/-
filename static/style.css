@@ -828,12 +828,72 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   font-weight: 700;
   font-size: 14px;
   color: var(--ink);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
+.checklist-btn:hover { background: var(--paper); border-color: var(--brass); }
 .checklist-btn svg {
   flex: none;
   width: 26px;
   height: 26px;
   color: var(--brass-strong);
+}
+
+/* --- boat checklist run screen --- */
+.checklist-progress {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+.checklist-question {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 24px 0;
+  line-height: 1.35;
+}
+.checklist-answer-buttons {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.checklist-answer-buttons.hidden { display: none; }
+.checklist-answer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 22px;
+  border-radius: 10px;
+  border: none;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #fff8f4;
+}
+.checklist-answer-btn svg { width: 20px; height: 20px; }
+.checklist-answer-btn.ok { background: var(--success); }
+.checklist-answer-btn.ok:hover { background: #26593f; }
+.checklist-answer-btn.problem { background: var(--danger); }
+.checklist-answer-btn.problem:hover { background: #932f20; }
+.checklist-problem-panel { margin-top: 18px; }
+.checklist-problem-panel textarea {
+  width: 100%;
+  min-height: 90px;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--paper-alt);
+  color: var(--ink);
+  box-sizing: border-box;
+  resize: vertical;
+  margin-bottom: 10px;
 }
 
 /* --- clickable "mark as paid" employee cards --- */

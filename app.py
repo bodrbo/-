@@ -282,6 +282,39 @@ BOATS = [
     },
 ]
 
+# Чек-листы осмотра лодки, которые капитан проходит из личного кабинета —
+# по одному вопросу за раз, как онлайн-тест. Список вопросов — черновой,
+# заполнен для того, чтобы можно было сразу проверить механику; поправить
+# формулировки или добавить/убрать пункты можно тем же способом, что и
+# должности сотрудников — просто пришлите новый список.
+CHECKLIST_TYPE_LABELS = {
+    "pre": "Предрейсовый осмотр",
+    "post": "Послерейсовый осмотр",
+}
+CHECKLIST_QUESTIONS = {
+    "pre": [
+        "Уровень топлива соответствует плану на рейс",
+        "Двигатель заводится без посторонних шумов",
+        "Уровень масла и охлаждающей жидкости в норме",
+        "Аккумулятор заряжен, приборы показывают штатные значения",
+        "Спасательные жилеты в наличии по числу пассажиров и исправны",
+        "Корпус и днище без видимых повреждений и течей",
+        "Швартовы, якорь и такелаж в порядке",
+        "Навигационные огни и сигнальные приборы исправны",
+        "Средства связи (рация/телефон) работают",
+        "Палуба и поручни чистые, без посторонних предметов",
+    ],
+    "post": [
+        "Двигатель заглушен, приборы отключены",
+        "Уровень топлива и расход зафиксированы",
+        "Корпус осмотрен на предмет новых повреждений",
+        "Мусор и личные вещи пассажиров убраны с борта",
+        "Спасательные жилеты собраны и убраны на место",
+        "Швартовка выполнена, судно надёжно закреплено",
+        "Палуба вымыта, лодка готова к следующему рейсу",
+    ],
+}
+
 # Личный кабинет инвестора: (имя инвестора — должно совпадать с полем
 # "investor" в BOATS, логин, хеш пароля). Хеш добавляйте через
 # werkzeug.security.generate_password_hash(pwd, method="pbkdf2:sha256") —
@@ -506,6 +539,33 @@ def init_db():
             shift_date TEXT NOT NULL,
             created_at TEXT NOT NULL,
             UNIQUE(employee_id, shift_date)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS boat_checklists (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_name TEXT NOT NULL,
+            checklist_type TEXT NOT NULL,
+            boat TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            completed_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS boat_checklist_answers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            checklist_id INTEGER NOT NULL,
+            question_index INTEGER NOT NULL,
+            question_text TEXT NOT NULL,
+            status TEXT NOT NULL,
+            comment TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(checklist_id, question_index)
         )
         """
     )
@@ -3684,6 +3744,14 @@ def investor_dashboard():
 # Личный кабинет члена команды
 # ---------------------------------------------------------------------
 
+def _employee_has_position(db, employee_name, position):
+    return db.execute(
+        "SELECT 1 FROM employees JOIN employee_positions ON employee_positions.employee_id = employees.id "
+        "WHERE employees.name = ? AND employee_positions.position = ?",
+        (employee_name, position),
+    ).fetchone() is not None
+
+
 def team_login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -3766,12 +3834,7 @@ def team_dashboard():
             (employee_name, selected_week),
         ).fetchone() is not None
 
-    tomorrow = (dt.date.today() + dt.timedelta(days=1)).isoformat()
-    on_shift_tomorrow = db.execute(
-        "SELECT 1 FROM captain_shifts JOIN employees ON employees.id = captain_shifts.employee_id "
-        "WHERE employees.name = ? AND captain_shifts.shift_date = ?",
-        (employee_name, tomorrow),
-    ).fetchone() is not None
+    is_captain = _employee_has_position(db, employee_name, "Капитан")
 
     return render_template(
         "team_dashboard.html",
@@ -3780,10 +3843,123 @@ def team_dashboard():
         selected_week=selected_week,
         entries=entries,
         total=total,
-        on_shift_tomorrow=on_shift_tomorrow,
+        is_captain=is_captain,
         is_paid=is_paid,
         avatar_url=find_avatar_url(session.get("team_username")),
     )
+
+
+@app.route("/team/checklist/start/<checklist_type>", methods=["GET", "POST"])
+@team_login_required
+def team_checklist_start(checklist_type):
+    if checklist_type not in CHECKLIST_QUESTIONS:
+        return redirect(url_for("team_dashboard"))
+    db = get_db()
+    employee_name = session.get("team_employee_name")
+    if not _employee_has_position(db, employee_name, "Капитан"):
+        return redirect(url_for("team_dashboard"))
+
+    if request.method == "GET":
+        return render_template(
+            "team_checklist_start.html",
+            checklist_type=checklist_type,
+            checklist_label=CHECKLIST_TYPE_LABELS[checklist_type],
+            boats=[b["name"] for b in BOATS],
+        )
+
+    boat = request.form.get("boat", "").strip()
+    if not boat:
+        return render_template(
+            "team_checklist_start.html",
+            checklist_type=checklist_type,
+            checklist_label=CHECKLIST_TYPE_LABELS[checklist_type],
+            boats=[b["name"] for b in BOATS],
+            error="Выберите катер.",
+        ), 400
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    cur = db.execute(
+        "INSERT INTO boat_checklists (employee_name, checklist_type, boat, started_at) "
+        "VALUES (?, ?, ?, ?)",
+        (employee_name, checklist_type, boat, now),
+    )
+    db.commit()
+    return redirect(url_for("team_checklist_run", checklist_id=cur.lastrowid))
+
+
+@app.route("/team/checklist/<int:checklist_id>")
+@team_login_required
+def team_checklist_run(checklist_id):
+    db = get_db()
+    employee_name = session.get("team_employee_name")
+    checklist = db.execute(
+        "SELECT * FROM boat_checklists WHERE id = ? AND employee_name = ?",
+        (checklist_id, employee_name),
+    ).fetchone()
+    if checklist is None:
+        return redirect(url_for("team_dashboard"))
+
+    questions = CHECKLIST_QUESTIONS.get(checklist["checklist_type"], [])
+    answers = db.execute(
+        "SELECT * FROM boat_checklist_answers WHERE checklist_id = ? ORDER BY question_index",
+        (checklist_id,),
+    ).fetchall()
+    current_index = len(answers)
+
+    if current_index >= len(questions):
+        if not checklist["completed_at"]:
+            db.execute(
+                "UPDATE boat_checklists SET completed_at = ? WHERE id = ?",
+                (dt.datetime.now().strftime("%Y-%m-%d %H:%M"), checklist_id),
+            )
+            db.commit()
+        problems = [a for a in answers if a["status"] == "problem"]
+        return render_template(
+            "team_checklist_run.html", checklist=checklist,
+            checklist_label=CHECKLIST_TYPE_LABELS.get(checklist["checklist_type"], ""),
+            done=True, problems=problems, total=len(questions),
+        )
+
+    return render_template(
+        "team_checklist_run.html", checklist=checklist,
+        checklist_label=CHECKLIST_TYPE_LABELS.get(checklist["checklist_type"], ""),
+        done=False, question=questions[current_index],
+        question_index=current_index, total=len(questions),
+    )
+
+
+@app.route("/team/checklist/<int:checklist_id>/answer", methods=["POST"])
+@team_login_required
+def team_checklist_answer(checklist_id):
+    db = get_db()
+    employee_name = session.get("team_employee_name")
+    checklist = db.execute(
+        "SELECT * FROM boat_checklists WHERE id = ? AND employee_name = ?",
+        (checklist_id, employee_name),
+    ).fetchone()
+    if checklist is None:
+        return redirect(url_for("team_dashboard"))
+
+    questions = CHECKLIST_QUESTIONS.get(checklist["checklist_type"], [])
+    question_index_raw = request.form.get("question_index", "").strip()
+    status = request.form.get("status", "").strip()
+    comment = request.form.get("comment", "").strip()
+
+    if (
+        question_index_raw.isdigit()
+        and status in ("ok", "problem")
+        and int(question_index_raw) < len(questions)
+    ):
+        question_index = int(question_index_raw)
+        db.execute(
+            "INSERT OR IGNORE INTO boat_checklist_answers "
+            "(checklist_id, question_index, question_text, status, comment, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (checklist_id, question_index, questions[question_index], status,
+             comment or None, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+        )
+        db.commit()
+    return redirect(url_for("team_checklist_run", checklist_id=checklist_id))
 
 
 # ---------------------------------------------------------------------
