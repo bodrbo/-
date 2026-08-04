@@ -159,7 +159,7 @@
               <form action="{{ url_for('set_transaction_project') }}" method="post">
                 <input type="hidden" name="transaction_id" value="{{ t.id }}">
                 <input type="hidden" name="next" value="{{ url_for('analytics_index') }}">
-                <select name="project_id" onchange="this.form.submit()">
+                <select name="project_id" class="project-select" onchange="this.form.submit()">
                   <option value="">— без проекта —</option>
                   {% for p in projects %}
                   <option value="{{ p.id }}" {{ 'selected' if t.project_id == p.id }}>{{ p.name }}</option>

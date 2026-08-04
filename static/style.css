@@ -488,6 +488,19 @@ input[type="text"], input[type="date"], input[type="time"], input[type="password
   overflow: hidden;
   white-space: nowrap;
 }
+
+/* The browser's own dropdown arrow sits flush against a narrow select's
+   edge (most noticeable on short option text like a project name) — swap
+   it for a custom chevron with real breathing room. */
+.project-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2362707f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6.5l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px;
+  padding-right: 30px;
+}
 input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, input[type="password"]:focus, select:focus {
   outline: 2px solid var(--brass);
   outline-offset: 1px;
