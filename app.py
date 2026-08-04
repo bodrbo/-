@@ -160,6 +160,12 @@ EMPLOYEES = [
     "Андрей Краснюков",
 ]
 
+# Должности сотрудников. Заполняется по мере того, как должности
+# согласовываются — имя не попавшее сюда просто останется без должности
+# в базе, ничего не сломается.
+EMPLOYEE_POSITIONS = {
+}
+
 # Виды работ со стандартной ставкой и длительностью (в часах).
 # При выборе вида работы в форме ставка и часы подставятся автоматически
 # (их всё равно можно будет поправить вручную перед сохранением).
@@ -404,6 +410,38 @@ def init_db():
         )
     if "project_id" not in cols:
         conn.execute("ALTER TABLE entries ADD COLUMN project_id INTEGER")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS employees (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            position TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    # Backfill a row for every employee already known to the system — the
+    # configured EMPLOYEES list plus any name used in entries but not in it
+    # (mirrors the "known" merge in _payroll_context so nobody is missed).
+    known_employee_names = list(EMPLOYEES)
+    for row in conn.execute("SELECT DISTINCT employee FROM entries").fetchall():
+        if row[0] not in known_employee_names:
+            known_employee_names.append(row[0])
+    now_str = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    for name in known_employee_names:
+        conn.execute(
+            "INSERT OR IGNORE INTO employees (name, position, created_at) VALUES (?, ?, ?)",
+            (name, EMPLOYEE_POSITIONS.get(name), now_str),
+        )
+    # Self-healing: whenever EMPLOYEE_POSITIONS gains a new entry for someone
+    # whose position isn't set yet, pick it up on the next restart — no
+    # manual DB edit needed, same pattern used for bank_transactions.
+    for name, position in EMPLOYEE_POSITIONS.items():
+        conn.execute(
+            "UPDATE employees SET position = ? WHERE name = ? AND position IS NULL",
+            (position, name),
+        )
 
     conn.execute(
         """
