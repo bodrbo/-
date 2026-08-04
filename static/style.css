@@ -628,6 +628,16 @@ input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, in
   color: var(--ink);
 }
 
+.split-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.split-row .split-project { flex: 2 1 260px; min-width: 0; }
+.split-row .split-amount { flex: 1 1 140px; min-width: 0; }
+
 /* Dashed border reads as "secondary/optional action" throughout the site
    (matches .btn-add) — a stitched-canvas cue rather than a generic outline
    button, used consistently instead of ad hoc solid-border variants. */

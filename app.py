@@ -623,6 +623,17 @@ def init_db():
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS transaction_splits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaction_id INTEGER NOT NULL,
+            project_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
     # Migration path for tuning_orders created before client_id/status existed.
     tuning_cols = [row[1] for row in conn.execute("PRAGMA table_info(tuning_orders)").fetchall()]
     if "client_id" not in tuning_cols:
@@ -3769,11 +3780,22 @@ def analytics_index():
         "SELECT * FROM bank_transactions ORDER BY operation_date DESC, id DESC LIMIT 200"
     ).fetchall()
     projects = db.execute("SELECT * FROM projects ORDER BY created_at DESC, id DESC").fetchall()
+    split_rows = db.execute(
+        "SELECT ts.transaction_id, ts.amount, projects.name AS project_name "
+        "FROM transaction_splits ts JOIN projects ON projects.id = ts.project_id "
+        "ORDER BY ts.id"
+    ).fetchall()
+    splits_by_transaction = {}
+    for s in split_rows:
+        splits_by_transaction.setdefault(s["transaction_id"], []).append(
+            {"project_name": s["project_name"], "amount": s["amount"]}
+        )
     today = dt.date.today()
     week_ago = today - dt.timedelta(days=7)
     return render_template(
         "analytics.html", active_page="analytics", sub_page="transactions",
-        transactions=transactions, projects=projects, tbank_configured=tbank_configured(),
+        transactions=transactions, projects=projects, splits_by_transaction=splits_by_transaction,
+        tbank_configured=tbank_configured(),
         fetch_default_start=week_ago.isoformat(), fetch_default_end=today.isoformat(),
         fetch_error=session.pop("tbank_fetch_error", None),
         fetch_result=session.pop("tbank_fetch_result", None),
@@ -3858,15 +3880,24 @@ def _project_totals(db, project_id):
         "SELECT "
         "COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE 0 END), 0) AS income, "
         "COALESCE(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END), 0) AS expense "
-        "FROM bank_transactions WHERE project_id = ?",
+        "FROM bank_transactions "
+        "WHERE project_id = ? AND id NOT IN (SELECT transaction_id FROM transaction_splits)",
+        (project_id,),
+    ).fetchone()
+    split_row = db.execute(
+        "SELECT "
+        "COALESCE(SUM(CASE WHEN bt.direction='in' THEN ts.amount ELSE 0 END), 0) AS income, "
+        "COALESCE(SUM(CASE WHEN bt.direction='out' THEN ts.amount ELSE 0 END), 0) AS expense "
+        "FROM transaction_splits ts JOIN bank_transactions bt ON bt.id = ts.transaction_id "
+        "WHERE ts.project_id = ?",
         (project_id,),
     ).fetchone()
     entries_expense = db.execute(
         "SELECT COALESCE(SUM(amount), 0) AS expense FROM entries WHERE project_id = ?",
         (project_id,),
     ).fetchone()["expense"]
-    income = row["income"]
-    expense = row["expense"] + entries_expense
+    income = row["income"] + split_row["income"]
+    expense = row["expense"] + split_row["expense"] + entries_expense
     return income, expense, income - expense
 
 
@@ -3895,7 +3926,8 @@ def analytics_projects():
         "SELECT "
         "COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE 0 END), 0) AS income, "
         "COALESCE(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END), 0) AS expense "
-        "FROM bank_transactions WHERE project_id IS NOT NULL AND substr(operation_date, 1, 7) = ?",
+        "FROM bank_transactions WHERE substr(operation_date, 1, 7) = ? "
+        "AND (project_id IS NOT NULL OR id IN (SELECT DISTINCT transaction_id FROM transaction_splits))",
         (month_prefix,),
     ).fetchone()
     month_entries_expense = db.execute(
@@ -3922,11 +3954,26 @@ def project_detail(project_id):
     if project is None:
         return redirect(url_for("analytics_projects"))
     transactions = db.execute(
-        "SELECT * FROM bank_transactions WHERE project_id = ? ORDER BY operation_date DESC, id DESC",
-        (project_id,),
+        "SELECT * FROM ("
+        "  SELECT bt.id AS id, bt.operation_date AS operation_date, bt.direction AS direction, "
+        "         bt.counterparty_name AS counterparty_name, bt.purpose AS purpose, "
+        "         bt.amount AS full_amount, bt.amount AS display_amount, "
+        "         0 AS is_split, NULL AS split_id "
+        "  FROM bank_transactions bt "
+        "  WHERE bt.project_id = ? AND bt.id NOT IN (SELECT transaction_id FROM transaction_splits) "
+        "  UNION ALL "
+        "  SELECT bt.id AS id, bt.operation_date AS operation_date, bt.direction AS direction, "
+        "         bt.counterparty_name AS counterparty_name, bt.purpose AS purpose, "
+        "         bt.amount AS full_amount, ts.amount AS display_amount, "
+        "         1 AS is_split, ts.id AS split_id "
+        "  FROM transaction_splits ts JOIN bank_transactions bt ON bt.id = ts.transaction_id "
+        "  WHERE ts.project_id = ?"
+        ") ORDER BY operation_date DESC, id DESC",
+        (project_id, project_id),
     ).fetchall()
     unattached = db.execute(
         "SELECT * FROM bank_transactions WHERE project_id IS NULL "
+        "AND id NOT IN (SELECT transaction_id FROM transaction_splits) "
         "ORDER BY operation_date DESC, id DESC LIMIT 300"
     ).fetchall()
     work_entries = db.execute(
@@ -3953,6 +4000,10 @@ def set_transaction_project():
     transaction_id = request.form.get("transaction_id", "").strip()
     project_id = request.form.get("project_id", "").strip()
     if transaction_id.isdigit():
+        # A direct single-project assignment always overrides any prior split.
+        db.execute(
+            "DELETE FROM transaction_splits WHERE transaction_id = ?", (int(transaction_id),)
+        )
         db.execute(
             "UPDATE bank_transactions SET project_id = ? WHERE id = ?",
             (int(project_id) if project_id.isdigit() else None, int(transaction_id)),
@@ -3974,6 +4025,147 @@ def set_transaction_purpose():
             (purpose or None, int(transaction_id)),
         )
         db.commit()
+    next_url = request.form.get("next") or url_for("analytics_index")
+    return redirect(next_url)
+
+
+def _normalize_transaction_split(db, transaction_id):
+    """After a split row is removed, a single remaining row is no longer a
+    split — collapse it back into a plain project_id assignment so it
+    doesn't linger as a one-row split."""
+    remaining = db.execute(
+        "SELECT * FROM transaction_splits WHERE transaction_id = ?", (transaction_id,)
+    ).fetchall()
+    if len(remaining) == 1:
+        db.execute(
+            "UPDATE bank_transactions SET project_id = ? WHERE id = ?",
+            (remaining[0]["project_id"], transaction_id),
+        )
+        db.execute("DELETE FROM transaction_splits WHERE id = ?", (remaining[0]["id"],))
+
+
+@app.route("/analytics/transactions/<int:transaction_id>/split", methods=["GET", "POST"])
+@admin_login_required
+def transaction_split(transaction_id):
+    db = get_db()
+    transaction = db.execute(
+        "SELECT * FROM bank_transactions WHERE id = ?", (transaction_id,)
+    ).fetchone()
+    if transaction is None:
+        return redirect(url_for("analytics_index"))
+
+    projects = db.execute(
+        "SELECT projects.*, tuning_orders.client_name AS client_name, "
+        "tuning_orders.boat_model AS boat_model "
+        "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
+        "ORDER BY projects.created_at DESC, projects.id DESC"
+    ).fetchall()
+
+    if request.method == "GET":
+        next_url = request.args.get("next") or url_for("analytics_index")
+        existing = db.execute(
+            "SELECT * FROM transaction_splits WHERE transaction_id = ? ORDER BY id",
+            (transaction_id,),
+        ).fetchall()
+        splits = [
+            {"project_id": str(s["project_id"]), "amount": f"{s['amount']:.2f}".rstrip("0").rstrip(".")}
+            for s in existing
+        ]
+        return render_template(
+            "transaction_split.html", active_page="analytics", sub_page="transactions",
+            transaction=transaction, projects=projects, splits=splits,
+            next_url=next_url, errors=None,
+        )
+
+    next_url = request.form.get("next") or url_for("analytics_index")
+    project_ids = request.form.getlist("project_id[]")
+    amounts = request.form.getlist("amount[]")
+
+    display_rows = []
+    for i in range(max(len(project_ids), len(amounts))):
+        pid_raw = project_ids[i].strip() if i < len(project_ids) else ""
+        amt_raw = amounts[i].strip() if i < len(amounts) else ""
+        if not pid_raw and not amt_raw:
+            continue
+        display_rows.append({"project_id": pid_raw, "amount": amt_raw})
+
+    errors = []
+    parsed_rows = []
+    seen_projects = set()
+    for idx, r in enumerate(display_rows, start=1):
+        if not r["project_id"].isdigit():
+            errors.append(f"Строка {idx}: выберите проект.")
+            continue
+        pid = int(r["project_id"])
+        if pid in seen_projects:
+            errors.append(f"Строка {idx}: этот проект уже указан в другой строке — объедините суммы в одну строку.")
+            continue
+        try:
+            amt = float(r["amount"].replace(",", "."))
+        except ValueError:
+            errors.append(f"Строка {idx}: сумма должна быть числом.")
+            continue
+        if amt <= 0:
+            errors.append(f"Строка {idx}: сумма должна быть больше нуля.")
+            continue
+        seen_projects.add(pid)
+        parsed_rows.append({"project_id": pid, "amount": amt})
+
+    if not errors and len(parsed_rows) < 2:
+        errors.append("Укажите минимум два проекта, чтобы разбить сумму — для одного проекта используйте обычный выбор проекта.")
+
+    if not errors:
+        total = sum(r["amount"] for r in parsed_rows)
+        expected = abs(transaction["amount"])
+        if abs(total - expected) > 0.01:
+            errors.append(
+                f"Сумма частей ({format_money(total, 2)} ₽) не совпадает с суммой операции "
+                f"({format_money(expected, 2)} ₽). Поправьте суммы так, чтобы они совпадали."
+            )
+
+    if errors:
+        return render_template(
+            "transaction_split.html", active_page="analytics", sub_page="transactions",
+            transaction=transaction, projects=projects, splits=display_rows,
+            next_url=next_url, errors=errors,
+        ), 400
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute("DELETE FROM transaction_splits WHERE transaction_id = ?", (transaction_id,))
+    for r in parsed_rows:
+        db.execute(
+            "INSERT INTO transaction_splits (transaction_id, project_id, amount, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (transaction_id, r["project_id"], r["amount"], now),
+        )
+    db.execute("UPDATE bank_transactions SET project_id = NULL WHERE id = ?", (transaction_id,))
+    db.commit()
+    return redirect(next_url)
+
+
+@app.route("/analytics/transactions/<int:transaction_id>/split/clear", methods=["POST"])
+@admin_login_required
+def clear_transaction_split(transaction_id):
+    db = get_db()
+    db.execute("DELETE FROM transaction_splits WHERE transaction_id = ?", (transaction_id,))
+    db.commit()
+    next_url = request.form.get("next") or url_for("analytics_index")
+    return redirect(next_url)
+
+
+@app.route("/analytics/transactions/split/remove", methods=["POST"])
+@admin_login_required
+def remove_transaction_split():
+    db = get_db()
+    split_id = request.form.get("split_id", "").strip()
+    if split_id.isdigit():
+        row = db.execute(
+            "SELECT * FROM transaction_splits WHERE id = ?", (int(split_id),)
+        ).fetchone()
+        if row is not None:
+            db.execute("DELETE FROM transaction_splits WHERE id = ?", (int(split_id),))
+            _normalize_transaction_split(db, row["transaction_id"])
+            db.commit()
     next_url = request.form.get("next") or url_for("analytics_index")
     return redirect(next_url)
 
