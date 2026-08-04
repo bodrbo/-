@@ -68,7 +68,10 @@
       </table>
     </div>
     {% else %}
-    <p class="hint" style="margin-top:0; color:var(--success);">Замечаний не обнаружено — все {{ total }} пунктов в порядке.</p>
+    <div class="checklist-success">
+      <img src="{{ url_for('static', filename='checklist_success_cat.jpg') }}" alt="" class="checklist-success-img">
+      <p class="checklist-success-text">Поздравляю! Теперь ты готов радовать туристов — 7 футов под килем и никакого восточного ветра тебе!</p>
+    </div>
     {% endif %}
     <a href="{{ url_for('team_dashboard') }}" class="btn-secondary" style="display:inline-block; margin-top:12px;">Готово</a>
   </section>

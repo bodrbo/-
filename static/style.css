@@ -896,6 +896,28 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   margin-bottom: 10px;
 }
 
+.checklist-success {
+  text-align: center;
+  padding: 6px 0 2px;
+}
+.checklist-success-img {
+  width: 220px;
+  height: 220px;
+  object-fit: cover;
+  border-radius: 24px;
+  display: block;
+  margin: 0 auto 18px;
+  box-shadow: var(--shadow);
+}
+.checklist-success-text {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+  max-width: 420px;
+  margin: 0 auto;
+  line-height: 1.4;
+}
+
 /* --- clickable "mark as paid" employee cards --- */
 .total-card.payable {
   cursor: pointer;
