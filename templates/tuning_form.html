@@ -215,12 +215,12 @@
             <td class="row-actions">
               {% set photo_url = work_photo_urls.get(item.id) %}
               {% if photo_url %}
-              <a href="{{ photo_url }}" target="_blank" class="icon-btn" title="Открыть фото">
+              <button type="button" class="icon-btn" title="Открыть фото" onclick="openPhotoModal('{{ photo_url }}')">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M3 7a1.6 1.6 0 011.6-1.6h1.1l.7-1.2h5.2l.7 1.2h1.1A1.6 1.6 0 0117 7v7a1.6 1.6 0 01-1.6 1.6H4.6A1.6 1.6 0 013 14V7z"/>
-                  <circle cx="10" cy="10.5" r="2.7"/>
+                  <path d="M1.6 10S4.8 4.5 10 4.5 18.4 10 18.4 10 15.2 15.5 10 15.5 1.6 10 1.6 10z"/>
+                  <circle cx="10" cy="10" r="2.4"/>
                 </svg>
-              </a>
+              </button>
               {% endif %}
               <form action="{{ url_for('upload_tuning_item_photo', order_id=edit_order.id, item_id=item.id) }}"
                     method="post" enctype="multipart/form-data">
@@ -434,9 +434,34 @@
     </form>
   </section>
 
+  <div id="photo-modal" class="photo-modal hidden" onclick="if (event.target === this) closePhotoModal();">
+    <div class="photo-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closePhotoModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <img id="photo-modal-img" src="" alt="Фото работы">
+    </div>
+  </div>
+
 </main>
 
 <script>
+function openPhotoModal(url) {
+  document.getElementById('photo-modal-img').src = url;
+  document.getElementById('photo-modal').classList.remove('hidden');
+}
+
+function closePhotoModal() {
+  document.getElementById('photo-modal').classList.add('hidden');
+  document.getElementById('photo-modal-img').src = '';
+}
+
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') closePhotoModal();
+});
+
 function updateWorkRow(input) {
   var row = input.closest('.work-row');
   var cost = parseFloat((row.querySelector('.work-cost').value || '').replace(',', '.')) || 0;

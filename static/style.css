@@ -919,6 +919,48 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   line-height: 1.4;
 }
 
+.photo-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 24, 28, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  z-index: 1000;
+}
+.photo-modal.hidden { display: none; }
+.photo-modal-inner {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+}
+.photo-modal-inner img {
+  display: block;
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+.photo-modal-close {
+  position: absolute;
+  top: -16px;
+  right: -16px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: var(--ink);
+  color: var(--parchment);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.photo-modal-close svg { width: 14px; height: 14px; }
+.photo-modal-close:hover { background: var(--brass-strong); }
+
 /* --- clickable "mark as paid" employee cards --- */
 .total-card.payable {
   cursor: pointer;
