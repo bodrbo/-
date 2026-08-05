@@ -15,6 +15,7 @@
 """
 
 import os
+import sys
 import json
 import html
 import secrets
@@ -175,12 +176,23 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 
+def _log_telegram(message):
+    # Explicit stderr + flush: Passenger's error log only reliably captures
+    # stderr, and without flush=True a buffered print() can sit in memory
+    # and never actually reach the log file before the worker recycles.
+    print(message, file=sys.stderr, flush=True)
+
+
 def send_telegram_notification(text):
     """Best-effort — a Telegram outage or missing config must never break
     the request that triggered the notification, so failures never raise.
-    They ARE printed to stderr (Passenger's error log) so a silent failure
-    is at least diagnosable after the fact, instead of vanishing entirely."""
+    They ARE logged (see _log_telegram) so a silent failure is at least
+    diagnosable after the fact, instead of vanishing entirely."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        _log_telegram(
+            "Telegram notification skipped: TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set "
+            "(check .env was actually loaded — Passenger needs a restart after editing it)"
+        )
         return
     try:
         resp = requests.post(
@@ -188,10 +200,12 @@ def send_telegram_notification(text):
             json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"},
             timeout=10,
         )
-        if not resp.ok:
-            print(f"Telegram notification failed: {resp.status_code} {resp.text[:300]}")
+        if resp.ok:
+            _log_telegram("Telegram notification sent")
+        else:
+            _log_telegram(f"Telegram notification failed: {resp.status_code} {resp.text[:300]}")
     except requests.RequestException as e:
-        print(f"Telegram notification error: {e}")
+        _log_telegram(f"Telegram notification error: {e}")
 
 
 def tbank_configured():
