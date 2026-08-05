@@ -215,24 +215,22 @@
             <td class="row-actions">
               {% set photo_url = work_photo_urls.get(item.id) %}
               {% if photo_url %}
-              <button type="button" class="icon-btn" title="Открыть фото" onclick="openPhotoModal('{{ photo_url }}')">
+              <button type="button" class="icon-btn" title="Открыть фото"
+                      onclick='openPhotoModal({{ photo_url|tojson }}, {{ (item.photo_comment or "")|tojson }})'>
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M1.6 10S4.8 4.5 10 4.5 18.4 10 18.4 10 15.2 15.5 10 15.5 1.6 10 1.6 10z"/>
                   <circle cx="10" cy="10" r="2.4"/>
                 </svg>
               </button>
               {% endif %}
-              <form action="{{ url_for('upload_tuning_item_photo', order_id=edit_order.id, item_id=item.id) }}"
-                    method="post" enctype="multipart/form-data">
-                <label class="icon-btn" title="{{ 'Заменить фото' if photo_url else 'Загрузить фото' }}">
-                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M3 7a1.6 1.6 0 011.6-1.6h1.1l.7-1.2h5.2l.7 1.2h1.1A1.6 1.6 0 0117 7v7a1.6 1.6 0 01-1.6 1.6H4.6A1.6 1.6 0 013 14V7z"/>
-                    <circle cx="10" cy="10.5" r="2.7"/>
-                    {% if not photo_url %}<path d="M10 8.7v3.6M8.2 10.5h3.6" stroke-width="1.3"/>{% endif %}
-                  </svg>
-                  <input type="file" name="photo" accept="image/*" class="hidden" onchange="this.form.requestSubmit()">
-                </label>
-              </form>
+              <button type="button" class="icon-btn" title="{{ 'Заменить фото' if photo_url else 'Загрузить фото' }}"
+                      onclick='openPhotoUploadModal({{ url_for("upload_tuning_item_photo", order_id=edit_order.id, item_id=item.id)|tojson }}, {{ (item.photo_comment or "")|tojson }})'>
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 7a1.6 1.6 0 011.6-1.6h1.1l.7-1.2h5.2l.7 1.2h1.1A1.6 1.6 0 0117 7v7a1.6 1.6 0 01-1.6 1.6H4.6A1.6 1.6 0 013 14V7z"/>
+                  <circle cx="10" cy="10.5" r="2.7"/>
+                  {% if not photo_url %}<path d="M10 8.7v3.6M8.2 10.5h3.6" stroke-width="1.3"/>{% endif %}
+                </svg>
+              </button>
             </td>
           </tr>
           {% endfor %}
@@ -442,14 +440,46 @@
         </svg>
       </button>
       <img id="photo-modal-img" src="" alt="Фото работы">
+      <p id="photo-modal-comment" class="photo-modal-comment hidden"></p>
+    </div>
+  </div>
+
+  <div id="photo-upload-modal" class="photo-modal hidden" onclick="if (event.target === this) closePhotoUploadModal();">
+    <div class="photo-modal-inner photo-upload-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closePhotoUploadModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <form id="photo-upload-form" method="post" enctype="multipart/form-data">
+        <div class="field">
+          <label for="photo-upload-file">Фото</label>
+          <input type="file" id="photo-upload-file" name="photo" accept="image/*" required>
+        </div>
+        <div class="field" style="margin-top:14px;">
+          <label for="photo-upload-comment">Комментарий</label>
+          <textarea id="photo-upload-comment" name="comment" class="photo-comment-input"
+                    placeholder="Например: заменили расходники, есть скол на кромке"></textarea>
+        </div>
+        <div class="field field-submit" style="margin-top:14px;">
+          <button type="submit">Загрузить</button>
+        </div>
+      </form>
     </div>
   </div>
 
 </main>
 
 <script>
-function openPhotoModal(url) {
+function openPhotoModal(url, comment) {
   document.getElementById('photo-modal-img').src = url;
+  var commentEl = document.getElementById('photo-modal-comment');
+  if (comment) {
+    commentEl.textContent = comment;
+    commentEl.classList.remove('hidden');
+  } else {
+    commentEl.classList.add('hidden');
+  }
   document.getElementById('photo-modal').classList.remove('hidden');
 }
 
@@ -458,8 +488,22 @@ function closePhotoModal() {
   document.getElementById('photo-modal-img').src = '';
 }
 
+function openPhotoUploadModal(actionUrl, existingComment) {
+  document.getElementById('photo-upload-form').action = actionUrl;
+  document.getElementById('photo-upload-comment').value = existingComment || '';
+  document.getElementById('photo-upload-file').value = '';
+  document.getElementById('photo-upload-modal').classList.remove('hidden');
+}
+
+function closePhotoUploadModal() {
+  document.getElementById('photo-upload-modal').classList.add('hidden');
+}
+
 document.addEventListener('keydown', function (e) {
-  if (e.key === 'Escape') closePhotoModal();
+  if (e.key === 'Escape') {
+    closePhotoModal();
+    closePhotoUploadModal();
+  }
 });
 
 function updateWorkRow(input) {

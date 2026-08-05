@@ -869,6 +869,8 @@ def init_db():
         conn.execute(
             "ALTER TABLE tuning_order_items ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'"
         )
+    if "photo_comment" not in item_cols:
+        conn.execute("ALTER TABLE tuning_order_items ADD COLUMN photo_comment TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS admin_accounts (
@@ -2535,6 +2537,7 @@ def upload_tuning_item_photo(order_id, item_id):
         "SELECT id FROM tuning_order_items WHERE id = ? AND order_id = ?", (item_id, order_id)
     ).fetchone()
     file = request.files.get("photo")
+    comment = request.form.get("comment", "").strip()
     if item is not None and file and file.filename:
         ext = os.path.splitext(file.filename)[1].lower()
         if ext in WORK_PHOTO_EXTENSIONS:
@@ -2547,6 +2550,11 @@ def upload_tuning_item_photo(order_id, item_id):
                 if os.path.exists(stale_path):
                     os.remove(stale_path)
             file.save(os.path.join(photos_dir, f"{item_id}{ext}"))
+            db.execute(
+                "UPDATE tuning_order_items SET photo_comment = ? WHERE id = ?",
+                (comment or None, item_id),
+            )
+            db.commit()
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
