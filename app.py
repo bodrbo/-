@@ -88,6 +88,21 @@ def get_work_item_photos(db, item_id):
     ]
 
 
+def get_checklist_answer_photos(db, answer_id):
+    """Photos attached as evidence to one checklist problem report. No
+    per-photo comment (the problem's own comment already covers it) — shaped
+    the same as get_work_item_photos so the same modal JS can show either."""
+    rows = db.execute(
+        "SELECT id, filename FROM checklist_answer_photos WHERE answer_id = ? ORDER BY id",
+        (answer_id,),
+    ).fetchall()
+    return [
+        {"id": r["id"], "url": url_for("static", filename=f"checklist_photos/{r['filename']}"),
+         "comment": None}
+        for r in rows
+    ]
+
+
 def format_money(value, decimals=0):
     """Format a number with a thin space as the thousands separator."""
     try:
@@ -627,6 +642,16 @@ def init_db():
             comment TEXT,
             created_at TEXT NOT NULL,
             UNIQUE(checklist_id, question_index)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS checklist_answer_photos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            answer_id INTEGER NOT NULL,
+            filename TEXT NOT NULL,
+            created_at TEXT NOT NULL
         )
         """
     )
@@ -4046,7 +4071,11 @@ def team_checklist_run(checklist_id):
                 (dt.datetime.now().strftime("%Y-%m-%d %H:%M"), checklist_id),
             )
             db.commit()
-        problems = [a for a in answers if a["status"] == "problem"]
+        problems = [
+            {"question_text": a["question_text"], "comment": a["comment"],
+             "photos": get_checklist_answer_photos(db, a["id"])}
+            for a in answers if a["status"] == "problem"
+        ]
         return render_template(
             "team_checklist_run.html", checklist=checklist,
             checklist_label=CHECKLIST_TYPE_LABELS.get(checklist["checklist_type"], ""),
@@ -4084,13 +4113,31 @@ def team_checklist_answer(checklist_id):
         and int(question_index_raw) < len(questions)
     ):
         question_index = int(question_index_raw)
-        db.execute(
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        cur = db.execute(
             "INSERT OR IGNORE INTO boat_checklist_answers "
             "(checklist_id, question_index, question_text, status, comment, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (checklist_id, question_index, questions[question_index], status,
-             comment or None, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+            (checklist_id, question_index, questions[question_index], status, comment or None, now),
         )
+        # rowcount is 0 if the INSERT OR IGNORE hit the UNIQUE constraint
+        # (e.g. a double submit) — lastrowid would be stale in that case,
+        # so only attach photos when a row was actually just created.
+        if cur.rowcount == 1:
+            answer_id = cur.lastrowid
+            photos_dir = os.path.join(app.static_folder, "checklist_photos")
+            for file in request.files.getlist("photos"):
+                if file and file.filename:
+                    ext = os.path.splitext(file.filename)[1].lower()
+                    if ext in WORK_PHOTO_EXTENSIONS:
+                        os.makedirs(photos_dir, exist_ok=True)
+                        filename = f"{answer_id}-{secrets.token_hex(6)}{ext}"
+                        file.save(os.path.join(photos_dir, filename))
+                        db.execute(
+                            "INSERT INTO checklist_answer_photos (answer_id, filename, created_at) "
+                            "VALUES (?, ?, ?)",
+                            (answer_id, filename, now),
+                        )
         db.commit()
     return redirect(url_for("team_checklist_run", checklist_id=checklist_id))
 

@@ -59,6 +59,7 @@
           <tr>
             <th>Пункт</th>
             <th>Комментарий</th>
+            <th>Фото</th>
           </tr>
         </thead>
         <tbody>
@@ -66,6 +67,19 @@
           <tr>
             <td>{{ p.question_text }}</td>
             <td>{{ p.comment or '—' }}</td>
+            <td class="row-actions">
+              {% if p.photos %}
+              <button type="button" class="icon-btn" title="Открыть фото ({{ p.photos|length }})"
+                      onclick='openPhotoModal({{ p.photos|tojson }})'>
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1.6 10S4.8 4.5 10 4.5 18.4 10 18.4 10 15.2 15.5 10 15.5 1.6 10 1.6 10z"/>
+                  <circle cx="10" cy="10" r="2.4"/>
+                </svg>
+              </button>
+              {% else %}
+              —
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -105,19 +119,103 @@
     </div>
 
     <div class="checklist-problem-panel hidden" id="problem-panel">
-      <form action="{{ url_for('team_checklist_answer', checklist_id=checklist.id) }}" method="post">
+      <form action="{{ url_for('team_checklist_answer', checklist_id=checklist.id) }}" method="post" enctype="multipart/form-data">
         <input type="hidden" name="question_index" value="{{ question_index }}">
         <input type="hidden" name="status" value="problem">
         <label for="comment">Опишите проблему</label>
         <textarea id="comment" name="comment" required placeholder="Что именно не в порядке"></textarea>
+        <label for="problem-photos" style="display:block; margin-top:10px;">Фото (необязательно, можно несколько)</label>
+        <input type="file" id="problem-photos" name="photos" accept="image/*" multiple style="margin-bottom:10px;">
         <button type="submit" class="checklist-answer-btn problem">Сообщить о проблеме</button>
       </form>
     </div>
   </section>
   {% endif %}
 
+  <div id="photo-modal" class="photo-modal hidden" onclick="if (event.target === this) closePhotoModal();">
+    <div class="photo-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closePhotoModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <button type="button" id="photo-modal-prev" class="photo-modal-nav photo-modal-nav-prev hidden" onclick="showPrevPhoto()" aria-label="Предыдущее фото">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5l-6 5 6 5"/>
+        </svg>
+      </button>
+      <button type="button" id="photo-modal-next" class="photo-modal-nav photo-modal-nav-next hidden" onclick="showNextPhoto()" aria-label="Следующее фото">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 5l6 5-6 5"/>
+        </svg>
+      </button>
+      <span id="photo-modal-counter" class="photo-modal-counter hidden"></span>
+      <img id="photo-modal-img" src="" alt="Фото проблемы">
+      <p id="photo-modal-comment" class="photo-modal-comment hidden"></p>
+    </div>
+  </div>
+
 </main>
 
+<script>
+var photoModalPhotos = [];
+var photoModalIndex = 0;
+
+function openPhotoModal(photos) {
+  photoModalPhotos = photos || [];
+  photoModalIndex = 0;
+  renderPhotoModal();
+  document.getElementById('photo-modal').classList.remove('hidden');
+}
+
+function renderPhotoModal() {
+  var photo = photoModalPhotos[photoModalIndex];
+  if (!photo) return;
+  document.getElementById('photo-modal-img').src = photo.url;
+
+  var commentEl = document.getElementById('photo-modal-comment');
+  if (photo.comment) {
+    commentEl.textContent = photo.comment;
+    commentEl.classList.remove('hidden');
+  } else {
+    commentEl.classList.add('hidden');
+  }
+
+  var multiple = photoModalPhotos.length > 1;
+  document.getElementById('photo-modal-prev').classList.toggle('hidden', !multiple);
+  document.getElementById('photo-modal-next').classList.toggle('hidden', !multiple);
+  var counterEl = document.getElementById('photo-modal-counter');
+  if (multiple) {
+    counterEl.textContent = (photoModalIndex + 1) + ' / ' + photoModalPhotos.length;
+    counterEl.classList.remove('hidden');
+  } else {
+    counterEl.classList.add('hidden');
+  }
+}
+
+function showPrevPhoto() {
+  photoModalIndex = (photoModalIndex - 1 + photoModalPhotos.length) % photoModalPhotos.length;
+  renderPhotoModal();
+}
+
+function showNextPhoto() {
+  photoModalIndex = (photoModalIndex + 1) % photoModalPhotos.length;
+  renderPhotoModal();
+}
+
+function closePhotoModal() {
+  document.getElementById('photo-modal').classList.add('hidden');
+  document.getElementById('photo-modal-img').src = '';
+  photoModalPhotos = [];
+}
+
+document.addEventListener('keydown', function (e) {
+  var modalOpen = !document.getElementById('photo-modal').classList.contains('hidden');
+  if (modalOpen && e.key === 'ArrowLeft') showPrevPhoto();
+  if (modalOpen && e.key === 'ArrowRight') showNextPhoto();
+  if (e.key === 'Escape') closePhotoModal();
+});
+</script>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 
 </body>
