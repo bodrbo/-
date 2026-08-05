@@ -2607,7 +2607,8 @@ def client_dashboard(token):
     for o in order_rows:
         _, paid_amount, remaining = _order_payment_totals(db, o["id"], o["total"])
         items = db.execute(
-            "SELECT id, work_name, price, status FROM tuning_order_items WHERE order_id = ? ORDER BY id",
+            "SELECT id, work_name, price, status, photo_comment FROM tuning_order_items "
+            "WHERE order_id = ? ORDER BY id",
             (o["id"],),
         ).fetchall()
         order = dict(o)
@@ -2633,9 +2634,14 @@ def client_dashboard(token):
         ).fetchone()
         order["yookassa_pending"] = pending
 
+    work_photo_urls = {}
+    for order in orders:
+        for item in order["work_items"]:
+            work_photo_urls[item["id"]] = find_work_photo_url(item["id"])
+
     return render_template(
         "client_dashboard.html", client=client, orders=orders, grand_total=grand_total,
-        paid_total=paid_total, remaining_total=remaining_total,
+        paid_total=paid_total, remaining_total=remaining_total, work_photo_urls=work_photo_urls,
     )
 
 

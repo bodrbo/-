@@ -99,6 +99,16 @@
                   <td class="amount">{{ item.price|money }}</td>
                   <td><span class="status-badge status-{{ item.status }}">{{ item.status|work_status_label }}</span></td>
                   <td class="row-actions">
+                    {% set photo_url = work_photo_urls.get(item.id) %}
+                    {% if photo_url %}
+                    <button type="button" class="icon-btn" title="Открыть фото"
+                            onclick='openPhotoModal({{ photo_url|tojson }}, {{ (item.photo_comment or "")|tojson }})'>
+                      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1.6 10S4.8 4.5 10 4.5 18.4 10 18.4 10 15.2 15.5 10 15.5 1.6 10 1.6 10z"/>
+                        <circle cx="10" cy="10" r="2.4"/>
+                      </svg>
+                    </button>
+                    {% endif %}
                     {% if item.status == 'pending' %}
                     <form action="{{ url_for('client_approve_item', token=client.token, item_id=item.id) }}" method="post">
                       <button type="submit" class="icon-btn approve" title="Согласовать работу">
@@ -144,8 +154,42 @@
     {% endif %}
   </section>
 
+  <div id="photo-modal" class="photo-modal hidden" onclick="if (event.target === this) closePhotoModal();">
+    <div class="photo-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closePhotoModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <img id="photo-modal-img" src="" alt="Фото работы">
+      <p id="photo-modal-comment" class="photo-modal-comment hidden"></p>
+    </div>
+  </div>
+
 </main>
 
+<script>
+function openPhotoModal(url, comment) {
+  document.getElementById('photo-modal-img').src = url;
+  var commentEl = document.getElementById('photo-modal-comment');
+  if (comment) {
+    commentEl.textContent = comment;
+    commentEl.classList.remove('hidden');
+  } else {
+    commentEl.classList.add('hidden');
+  }
+  document.getElementById('photo-modal').classList.remove('hidden');
+}
+
+function closePhotoModal() {
+  document.getElementById('photo-modal').classList.add('hidden');
+  document.getElementById('photo-modal-img').src = '';
+}
+
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') closePhotoModal();
+});
+</script>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 
 </body>
