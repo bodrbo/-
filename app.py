@@ -35,6 +35,7 @@ from io import BytesIO
 # whole app down. If it's unavailable, only that one route fails.
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 15 * 1024 * 1024  # cap uploaded photos at 15 MB
 
 # Signs the investor-login session cookie. Set SECRET_KEY as a real
 # environment variable in production so sessions survive restarts/deploys —
@@ -67,6 +68,19 @@ def find_avatar_url(username):
     for ext in AVATAR_EXTENSIONS:
         if os.path.exists(os.path.join(avatars_dir, username + ext)):
             return url_for("static", filename=f"avatars/{username}{ext}")
+    return None
+
+
+WORK_PHOTO_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+
+
+def find_work_photo_url(item_id):
+    """Same lookup-by-naming-convention pattern as find_avatar_url, but for
+    a photo of the finished work attached to a tuning_order_items row."""
+    photos_dir = os.path.join(app.static_folder, "work_photos")
+    for ext in WORK_PHOTO_EXTENSIONS:
+        if os.path.exists(os.path.join(photos_dir, f"{item_id}{ext}")):
+            return url_for("static", filename=f"work_photos/{item_id}{ext}")
     return None
 
 
@@ -2412,6 +2426,7 @@ def edit_tuning_order(order_id):
         available_hull_sheets = db.execute(
             "SELECT * FROM hull_diagnostic_sheets WHERE tuning_order_id IS NULL ORDER BY boat_name"
         ).fetchall()
+        work_photo_urls = {item["id"]: find_work_photo_url(item["id"]) for item in items}
         return render_template(
             "tuning_form.html", edit_order=order, errors=None, form_values=form_values,
             items_prefill=items, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
@@ -2420,6 +2435,7 @@ def edit_tuning_order(order_id):
             yookassa_payments=yookassa_payments, yookassa_configured=yookassa_configured(),
             yookassa_error=session.pop("yookassa_error", None),
             hull_sheets=hull_sheets, available_hull_sheets=available_hull_sheets,
+            work_photo_urls=work_photo_urls,
         )
 
     errors, data = _process_tuning_form(request.form)
@@ -2508,6 +2524,29 @@ def set_tuning_item_status(order_id, item_id):
             (status, item_id, order_id),
         )
         db.commit()
+    return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
+@app.route("/tuning/<int:order_id>/item/<int:item_id>/photo", methods=["POST"])
+@admin_login_required
+def upload_tuning_item_photo(order_id, item_id):
+    db = get_db()
+    item = db.execute(
+        "SELECT id FROM tuning_order_items WHERE id = ? AND order_id = ?", (item_id, order_id)
+    ).fetchone()
+    file = request.files.get("photo")
+    if item is not None and file and file.filename:
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext in WORK_PHOTO_EXTENSIONS:
+            photos_dir = os.path.join(app.static_folder, "work_photos")
+            os.makedirs(photos_dir, exist_ok=True)
+            # Clear out a photo saved under a different extension, so a
+            # replacement upload doesn't leave the old file lying around.
+            for other_ext in WORK_PHOTO_EXTENSIONS:
+                stale_path = os.path.join(photos_dir, f"{item_id}{other_ext}")
+                if os.path.exists(stale_path):
+                    os.remove(stale_path)
+            file.save(os.path.join(photos_dir, f"{item_id}{ext}"))
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
