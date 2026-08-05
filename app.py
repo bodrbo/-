@@ -16,6 +16,7 @@
 
 import os
 import json
+import html
 import secrets
 import sqlite3
 import calendar
@@ -161,6 +162,32 @@ TBANK_API_BASE = "https://business.tbank.ru/openapi/api"
 # Без неё эндпоинт всегда отвечает 403 — по умолчанию выключен.
 # ---------------------------------------------------------------------
 CRON_SECRET = os.environ.get("CRON_SECRET")
+
+# ---------------------------------------------------------------------
+# Telegram-бот — уведомления в рабочую беседу о некоторых событиях (капитан
+# сообщил о проблеме в чек-листе, клиент согласовал работу). Тоже только
+# через переменные окружения на хостинге:
+#   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+# Без них уведомления просто тихо не отправляются — сайт продолжает
+# работать как обычно.
+# ---------------------------------------------------------------------
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+
+
+def send_telegram_notification(text):
+    """Best-effort — a Telegram outage or missing config must never break
+    the request that triggered the notification, so failures are swallowed."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"},
+            timeout=10,
+        )
+    except requests.RequestException:
+        pass
 
 
 def tbank_configured():
@@ -2714,7 +2741,8 @@ def client_approve_item(token, item_id):
     if client is None:
         return redirect(url_for("home"))
     item = db.execute(
-        "SELECT toi.id, toi.status FROM tuning_order_items toi "
+        "SELECT toi.id, toi.status, toi.work_name, o.client_name, o.boat_model "
+        "FROM tuning_order_items toi "
         "JOIN tuning_orders o ON o.id = toi.order_id "
         "WHERE toi.id = ? AND o.client_id = ?",
         (item_id, client["id"]),
@@ -2722,6 +2750,11 @@ def client_approve_item(token, item_id):
     if item is not None and item["status"] == "pending":
         db.execute("UPDATE tuning_order_items SET status = 'approved' WHERE id = ?", (item_id,))
         db.commit()
+        send_telegram_notification(
+            f"✅ Клиент согласовал работу\n"
+            f"Клиент: {html.escape(item['client_name'])} ({html.escape(item['boat_model'])})\n"
+            f"Работа: {html.escape(item['work_name'])}"
+        )
     return redirect(url_for("client_dashboard", token=token))
 
 
@@ -4139,6 +4172,16 @@ def team_checklist_answer(checklist_id):
                             (answer_id, filename, now),
                         )
         db.commit()
+        if status == "problem" and cur.rowcount == 1:
+            checklist_label = CHECKLIST_TYPE_LABELS.get(
+                checklist["checklist_type"], checklist["checklist_type"]
+            )
+            send_telegram_notification(
+                f"⚠️ <b>{html.escape(checklist_label)}</b> — {html.escape(checklist['boat'])}\n"
+                f"Капитан: {html.escape(employee_name)}\n"
+                f"Пункт: {html.escape(questions[question_index])}\n"
+                f"Комментарий: {html.escape(comment) if comment else '—'}"
+            )
     return redirect(url_for("team_checklist_run", checklist_id=checklist_id))
 
 
