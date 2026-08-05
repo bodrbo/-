@@ -165,15 +165,20 @@ TBANK_API_BASE = "https://business.tbank.ru/openapi/api"
 CRON_SECRET = os.environ.get("CRON_SECRET")
 
 # ---------------------------------------------------------------------
-# Telegram-бот — уведомления в рабочую беседу о некоторых событиях (капитан
-# сообщил о проблеме в чек-листе, клиент согласовал работу). Тоже только
-# через переменные окружения на хостинге:
-#   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-# Без них уведомления просто тихо не отправляются — сайт продолжает
-# работать как обычно.
+# Telegram-бот — уведомления о некоторых событиях. Разные события могут
+# идти в разные беседы:
+#   TELEGRAM_BOT_TOKEN          — токен бота (общий для всех уведомлений)
+#   TELEGRAM_CHAT_ID            — беседа по умолчанию (капитан сообщил о
+#                                 проблеме в чек-листе)
+#   TELEGRAM_APPROVAL_CHAT_ID   — беседа для «клиент согласовал работу»;
+#                                 если не задана, эти уведомления тоже идут
+#                                 в TELEGRAM_CHAT_ID
+# Без TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID уведомления просто тихо не
+# отправляются — сайт продолжает работать как обычно.
 # ---------------------------------------------------------------------
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+TELEGRAM_APPROVAL_CHAT_ID = os.environ.get("TELEGRAM_APPROVAL_CHAT_ID") or TELEGRAM_CHAT_ID
 
 
 def _log_telegram(message):
@@ -183,16 +188,20 @@ def _log_telegram(message):
     print(message, file=sys.stderr, flush=True)
 
 
-def send_telegram_notification(text):
+def send_telegram_notification(text, chat_id=None):
     """Best-effort — a Telegram outage or missing config must never break
     the request that triggered the notification, so failures never raise.
     They ARE logged (see _log_telegram) so a silent failure is at least
     diagnosable after the fact, instead of vanishing entirely. Also returns
     a short status string, which callers may ignore (fire-and-forget) or
-    surface directly — see /internal/telegram-test below."""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    surface directly — see /internal/telegram-test below.
+
+    chat_id defaults to TELEGRAM_CHAT_ID — pass TELEGRAM_APPROVAL_CHAT_ID
+    (or any other chat id) to route a specific event elsewhere."""
+    chat_id = chat_id or TELEGRAM_CHAT_ID
+    if not TELEGRAM_BOT_TOKEN or not chat_id:
         status = (
-            "skipped: TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set "
+            "skipped: TELEGRAM_BOT_TOKEN/chat id not set "
             "(check .env was actually loaded — Passenger needs a restart after editing it)"
         )
         _log_telegram(f"Telegram notification {status}")
@@ -200,7 +209,7 @@ def send_telegram_notification(text):
     try:
         resp = requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"},
+            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
             timeout=10,
         )
         if resp.ok:
@@ -2778,7 +2787,8 @@ def client_approve_item(token, item_id):
         send_telegram_notification(
             f"✅ Клиент согласовал работу\n"
             f"Клиент: {html.escape(item['client_name'])} ({html.escape(item['boat_model'])})\n"
-            f"Работа: {html.escape(item['work_name'])}"
+            f"Работа: {html.escape(item['work_name'])}",
+            chat_id=TELEGRAM_APPROVAL_CHAT_ID,
         )
     return redirect(url_for("client_dashboard", token=token))
 
@@ -4775,11 +4785,15 @@ def cron_check_captain_shifts():
 def telegram_test():
     """Visit this URL (with the right token) to see exactly what happens
     when a Telegram notification is sent — no log-hunting required. Same
-    CRON_SECRET as the shift-check endpoint, just to avoid a second secret."""
+    CRON_SECRET as the shift-check endpoint, just to avoid a second secret.
+    Add &target=approval to test TELEGRAM_APPROVAL_CHAT_ID instead of the
+    default TELEGRAM_CHAT_ID."""
     if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
         return "forbidden", 403
-    status = send_telegram_notification("🔧 Тестовое уведомление с сайта")
-    return f"telegram status: {status}", 200
+    target = request.args.get("target", "default")
+    chat_id = TELEGRAM_APPROVAL_CHAT_ID if target == "approval" else None
+    status = send_telegram_notification(f"🔧 Тестовое уведомление с сайта ({target})", chat_id=chat_id)
+    return f"telegram status ({target}): {status}", 200
 
 
 init_db()
