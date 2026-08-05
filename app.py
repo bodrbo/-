@@ -177,17 +177,21 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 def send_telegram_notification(text):
     """Best-effort — a Telegram outage or missing config must never break
-    the request that triggered the notification, so failures are swallowed."""
+    the request that triggered the notification, so failures never raise.
+    They ARE printed to stderr (Passenger's error log) so a silent failure
+    is at least diagnosable after the fact, instead of vanishing entirely."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
     try:
-        requests.post(
+        resp = requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
             json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"},
             timeout=10,
         )
-    except requests.RequestException:
-        pass
+        if not resp.ok:
+            print(f"Telegram notification failed: {resp.status_code} {resp.text[:300]}")
+    except requests.RequestException as e:
+        print(f"Telegram notification error: {e}")
 
 
 def tbank_configured():
