@@ -74,14 +74,18 @@ def find_avatar_url(username):
 WORK_PHOTO_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 
 
-def find_work_photo_url(item_id):
-    """Same lookup-by-naming-convention pattern as find_avatar_url, but for
-    a photo of the finished work attached to a tuning_order_items row."""
-    photos_dir = os.path.join(app.static_folder, "work_photos")
-    for ext in WORK_PHOTO_EXTENSIONS:
-        if os.path.exists(os.path.join(photos_dir, f"{item_id}{ext}")):
-            return url_for("static", filename=f"work_photos/{item_id}{ext}")
-    return None
+def get_work_item_photos(db, item_id):
+    """All photos attached to a tuning_order_items row, oldest first, each
+    with its own comment — {id, url, comment}."""
+    rows = db.execute(
+        "SELECT id, filename, comment FROM work_item_photos WHERE item_id = ? ORDER BY id",
+        (item_id,),
+    ).fetchall()
+    return [
+        {"id": r["id"], "url": url_for("static", filename=f"work_photos/{r['filename']}"),
+         "comment": r["comment"]}
+        for r in rows
+    ]
 
 
 def format_money(value, decimals=0):
@@ -871,6 +875,42 @@ def init_db():
         )
     if "photo_comment" not in item_cols:
         conn.execute("ALTER TABLE tuning_order_items ADD COLUMN photo_comment TEXT")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS work_item_photos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id INTEGER NOT NULL,
+            filename TEXT NOT NULL,
+            comment TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    # One-time carryover: the very first version of this feature stored a
+    # single photo per item as static/work_photos/<item_id>.<ext>, with its
+    # comment on tuning_order_items.photo_comment. Fold any such file still
+    # sitting there into the new multi-photo table so nothing gets lost.
+    legacy_photos_dir = os.path.join(app.static_folder, "work_photos")
+    if os.path.isdir(legacy_photos_dir):
+        for item_row in conn.execute("SELECT id, photo_comment FROM tuning_order_items").fetchall():
+            item_id = item_row[0]
+            already_migrated = conn.execute(
+                "SELECT 1 FROM work_item_photos WHERE item_id = ?", (item_id,)
+            ).fetchone()
+            if already_migrated:
+                continue
+            for ext in WORK_PHOTO_EXTENSIONS:
+                legacy_path = os.path.join(legacy_photos_dir, f"{item_id}{ext}")
+                if os.path.exists(legacy_path):
+                    new_filename = f"{item_id}-{secrets.token_hex(6)}{ext}"
+                    os.rename(legacy_path, os.path.join(legacy_photos_dir, new_filename))
+                    conn.execute(
+                        "INSERT INTO work_item_photos (item_id, filename, comment, created_at) "
+                        "VALUES (?, ?, ?, ?)",
+                        (item_id, new_filename, item_row[1],
+                         dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+                    )
+                    break
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS admin_accounts (
@@ -2428,7 +2468,7 @@ def edit_tuning_order(order_id):
         available_hull_sheets = db.execute(
             "SELECT * FROM hull_diagnostic_sheets WHERE tuning_order_id IS NULL ORDER BY boat_name"
         ).fetchall()
-        work_photo_urls = {item["id"]: find_work_photo_url(item["id"]) for item in items}
+        work_photos_by_item = {item["id"]: get_work_item_photos(db, item["id"]) for item in items}
         return render_template(
             "tuning_form.html", edit_order=order, errors=None, form_values=form_values,
             items_prefill=items, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
@@ -2437,7 +2477,7 @@ def edit_tuning_order(order_id):
             yookassa_payments=yookassa_payments, yookassa_configured=yookassa_configured(),
             yookassa_error=session.pop("yookassa_error", None),
             hull_sheets=hull_sheets, available_hull_sheets=available_hull_sheets,
-            work_photo_urls=work_photo_urls,
+            work_photos_by_item=work_photos_by_item,
         )
 
     errors, data = _process_tuning_form(request.form)
@@ -2543,16 +2583,12 @@ def upload_tuning_item_photo(order_id, item_id):
         if ext in WORK_PHOTO_EXTENSIONS:
             photos_dir = os.path.join(app.static_folder, "work_photos")
             os.makedirs(photos_dir, exist_ok=True)
-            # Clear out a photo saved under a different extension, so a
-            # replacement upload doesn't leave the old file lying around.
-            for other_ext in WORK_PHOTO_EXTENSIONS:
-                stale_path = os.path.join(photos_dir, f"{item_id}{other_ext}")
-                if os.path.exists(stale_path):
-                    os.remove(stale_path)
-            file.save(os.path.join(photos_dir, f"{item_id}{ext}"))
+            filename = f"{item_id}-{secrets.token_hex(6)}{ext}"
+            file.save(os.path.join(photos_dir, filename))
             db.execute(
-                "UPDATE tuning_order_items SET photo_comment = ? WHERE id = ?",
-                (comment or None, item_id),
+                "INSERT INTO work_item_photos (item_id, filename, comment, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (item_id, filename, comment or None, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
             )
             db.commit()
     return redirect(url_for("edit_tuning_order", order_id=order_id))
@@ -2607,7 +2643,7 @@ def client_dashboard(token):
     for o in order_rows:
         _, paid_amount, remaining = _order_payment_totals(db, o["id"], o["total"])
         items = db.execute(
-            "SELECT id, work_name, price, status, photo_comment FROM tuning_order_items "
+            "SELECT id, work_name, price, status FROM tuning_order_items "
             "WHERE order_id = ? ORDER BY id",
             (o["id"],),
         ).fetchall()
@@ -2634,14 +2670,15 @@ def client_dashboard(token):
         ).fetchone()
         order["yookassa_pending"] = pending
 
-    work_photo_urls = {}
+    work_photos_by_item = {}
     for order in orders:
         for item in order["work_items"]:
-            work_photo_urls[item["id"]] = find_work_photo_url(item["id"])
+            work_photos_by_item[item["id"]] = get_work_item_photos(db, item["id"])
 
     return render_template(
         "client_dashboard.html", client=client, orders=orders, grand_total=grand_total,
-        paid_total=paid_total, remaining_total=remaining_total, work_photo_urls=work_photo_urls,
+        paid_total=paid_total, remaining_total=remaining_total,
+        work_photos_by_item=work_photos_by_item,
     )
 
 

@@ -99,10 +99,10 @@
                   <td class="amount">{{ item.price|money }}</td>
                   <td><span class="status-badge status-{{ item.status }}">{{ item.status|work_status_label }}</span></td>
                   <td class="row-actions">
-                    {% set photo_url = work_photo_urls.get(item.id) %}
-                    {% if photo_url %}
-                    <button type="button" class="icon-btn" title="Открыть фото"
-                            onclick='openPhotoModal({{ photo_url|tojson }}, {{ (item.photo_comment or "")|tojson }})'>
+                    {% set photos = work_photos_by_item.get(item.id, []) %}
+                    {% if photos %}
+                    <button type="button" class="icon-btn" title="Открыть фото ({{ photos|length }})"
+                            onclick='openPhotoModal({{ photos|tojson }})'>
                       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M1.6 10S4.8 4.5 10 4.5 18.4 10 18.4 10 15.2 15.5 10 15.5 1.6 10 1.6 10z"/>
                         <circle cx="10" cy="10" r="2.4"/>
@@ -161,6 +161,17 @@
           <path d="M5 5l10 10M15 5L5 15"/>
         </svg>
       </button>
+      <button type="button" id="photo-modal-prev" class="photo-modal-nav photo-modal-nav-prev hidden" onclick="showPrevPhoto()" aria-label="Предыдущее фото">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5l-6 5 6 5"/>
+        </svg>
+      </button>
+      <button type="button" id="photo-modal-next" class="photo-modal-nav photo-modal-nav-next hidden" onclick="showNextPhoto()" aria-label="Следующее фото">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 5l6 5-6 5"/>
+        </svg>
+      </button>
+      <span id="photo-modal-counter" class="photo-modal-counter hidden"></span>
       <img id="photo-modal-img" src="" alt="Фото работы">
       <p id="photo-modal-comment" class="photo-modal-comment hidden"></p>
     </div>
@@ -169,24 +180,61 @@
 </main>
 
 <script>
-function openPhotoModal(url, comment) {
-  document.getElementById('photo-modal-img').src = url;
+var photoModalPhotos = [];
+var photoModalIndex = 0;
+
+function openPhotoModal(photos) {
+  photoModalPhotos = photos || [];
+  photoModalIndex = 0;
+  renderPhotoModal();
+  document.getElementById('photo-modal').classList.remove('hidden');
+}
+
+function renderPhotoModal() {
+  var photo = photoModalPhotos[photoModalIndex];
+  if (!photo) return;
+  document.getElementById('photo-modal-img').src = photo.url;
+
   var commentEl = document.getElementById('photo-modal-comment');
-  if (comment) {
-    commentEl.textContent = comment;
+  if (photo.comment) {
+    commentEl.textContent = photo.comment;
     commentEl.classList.remove('hidden');
   } else {
     commentEl.classList.add('hidden');
   }
-  document.getElementById('photo-modal').classList.remove('hidden');
+
+  var multiple = photoModalPhotos.length > 1;
+  document.getElementById('photo-modal-prev').classList.toggle('hidden', !multiple);
+  document.getElementById('photo-modal-next').classList.toggle('hidden', !multiple);
+  var counterEl = document.getElementById('photo-modal-counter');
+  if (multiple) {
+    counterEl.textContent = (photoModalIndex + 1) + ' / ' + photoModalPhotos.length;
+    counterEl.classList.remove('hidden');
+  } else {
+    counterEl.classList.add('hidden');
+  }
+}
+
+function showPrevPhoto() {
+  photoModalIndex = (photoModalIndex - 1 + photoModalPhotos.length) % photoModalPhotos.length;
+  renderPhotoModal();
+}
+
+function showNextPhoto() {
+  photoModalIndex = (photoModalIndex + 1) % photoModalPhotos.length;
+  renderPhotoModal();
 }
 
 function closePhotoModal() {
   document.getElementById('photo-modal').classList.add('hidden');
   document.getElementById('photo-modal-img').src = '';
+  photoModalPhotos = [];
 }
 
 document.addEventListener('keydown', function (e) {
+  var modalOpen = !document.getElementById('photo-modal').classList.contains('hidden');
+  if (modalOpen && e.key === 'ArrowLeft') showPrevPhoto();
+  if (modalOpen && e.key === 'ArrowRight') showNextPhoto();
   if (e.key === 'Escape') closePhotoModal();
 });
 </script>

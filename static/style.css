@@ -974,6 +974,43 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 }
 .photo-modal-comment.hidden { display: none; }
 
+.photo-modal-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(20, 24, 28, 0.6);
+  color: #fff8f4;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.photo-modal-nav.hidden { display: none; }
+.photo-modal-nav svg { width: 18px; height: 18px; }
+.photo-modal-nav:hover { background: var(--brass-strong); }
+.photo-modal-nav-prev { left: -16px; }
+.photo-modal-nav-next { right: -16px; }
+
+.photo-modal-counter {
+  position: absolute;
+  top: -16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ink);
+  color: var(--parchment);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.photo-modal-counter.hidden { display: none; }
+
 .photo-upload-modal-inner {
   background: var(--paper);
   border-radius: 14px;
