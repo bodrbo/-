@@ -187,13 +187,16 @@ def send_telegram_notification(text):
     """Best-effort — a Telegram outage or missing config must never break
     the request that triggered the notification, so failures never raise.
     They ARE logged (see _log_telegram) so a silent failure is at least
-    diagnosable after the fact, instead of vanishing entirely."""
+    diagnosable after the fact, instead of vanishing entirely. Also returns
+    a short status string, which callers may ignore (fire-and-forget) or
+    surface directly — see /internal/telegram-test below."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        _log_telegram(
-            "Telegram notification skipped: TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set "
+        status = (
+            "skipped: TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set "
             "(check .env was actually loaded — Passenger needs a restart after editing it)"
         )
-        return
+        _log_telegram(f"Telegram notification {status}")
+        return status
     try:
         resp = requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
@@ -202,10 +205,14 @@ def send_telegram_notification(text):
         )
         if resp.ok:
             _log_telegram("Telegram notification sent")
-        else:
-            _log_telegram(f"Telegram notification failed: {resp.status_code} {resp.text[:300]}")
+            return "sent"
+        status = f"failed: {resp.status_code} {resp.text[:300]}"
+        _log_telegram(f"Telegram notification {status}")
+        return status
     except requests.RequestException as e:
-        _log_telegram(f"Telegram notification error: {e}")
+        status = f"error: {e}"
+        _log_telegram(f"Telegram notification {status}")
+        return status
 
 
 def tbank_configured():
@@ -4762,6 +4769,17 @@ def cron_check_captain_shifts():
     except (requests.RequestException, RuntimeError, ValueError) as e:
         return f"error: {e}", 502
     return f"ok: {count} captain(s) on shift {tomorrow}", 200
+
+
+@app.route("/internal/telegram-test")
+def telegram_test():
+    """Visit this URL (with the right token) to see exactly what happens
+    when a Telegram notification is sent — no log-hunting required. Same
+    CRON_SECRET as the shift-check endpoint, just to avoid a second secret."""
+    if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
+        return "forbidden", 403
+    status = send_telegram_notification("🔧 Тестовое уведомление с сайта")
+    return f"telegram status: {status}", 200
 
 
 init_db()
