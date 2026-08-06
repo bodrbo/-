@@ -128,7 +128,7 @@
           <p class="hint">Работы не указаны.</p>
           {% endif %}
           <p class="hint" style="margin-top:14px;">
-            Скидка {{ o.discount_pct|float|round(1) }}% · Оплачено {{ o.paid_amount|money }} ₽ ·
+            Скидка {{ (o.discount_value|float|round(1)|string ~ '%') if o.discount_type != 'amount' else (o.discount_value|money ~ ' ₽') }} · Оплачено {{ o.paid_amount|money }} ₽ ·
             К доплате {{ o.remaining|money }} ₽
           </p>
           {% if o.yookassa_pending and o.remaining > 0 %}

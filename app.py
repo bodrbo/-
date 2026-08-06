@@ -954,6 +954,12 @@ def init_db():
         conn.execute(
             "ALTER TABLE tuning_orders ADD COLUMN status TEXT NOT NULL DEFAULT 'estimate'"
         )
+    if "discount_type" not in tuning_cols:
+        conn.execute("ALTER TABLE tuning_orders ADD COLUMN discount_type TEXT NOT NULL DEFAULT 'percent'")
+        conn.execute("ALTER TABLE tuning_orders ADD COLUMN discount_value REAL NOT NULL DEFAULT 0")
+        # discount_pct is the only place the old discount lived — carry it
+        # over once so existing orders keep showing the same discount.
+        conn.execute("UPDATE tuning_orders SET discount_value = discount_pct")
     item_cols = [row[1] for row in conn.execute("PRAGMA table_info(tuning_order_items)").fetchall()]
     if "status" not in item_cols:
         conn.execute(
@@ -2004,13 +2010,18 @@ def _process_tuning_form(form):
     if not phone:
         errors.append("Укажите номер телефона.")
 
-    discount_raw = form.get("discount_pct", "").strip().replace(",", ".")
-    discount_pct = 0.0
+    discount_type = form.get("discount_type", "percent").strip()
+    if discount_type not in ("percent", "amount"):
+        discount_type = "percent"
+    discount_raw = form.get("discount_value", "").strip().replace(",", ".")
+    discount_value = 0.0
     if discount_raw:
         try:
-            discount_pct = float(discount_raw)
-            if not (0 <= discount_pct <= 100):
-                errors.append("Скидка должна быть от 0 до 100%.")
+            discount_value = float(discount_raw)
+            if discount_value < 0:
+                errors.append("Скидка не может быть отрицательной.")
+            elif discount_type == "percent" and discount_value > 100:
+                errors.append("Скидка в процентах не может быть больше 100.")
         except ValueError:
             errors.append("Скидка должна быть числом.")
 
@@ -2056,15 +2067,24 @@ def _process_tuning_form(form):
     if not items and not any("Работа" in e for e in errors):
         errors.append("Добавьте хотя бы одну работу.")
 
+    if discount_type == "amount" and discount_value > subtotal:
+        errors.append("Скидка суммой не может быть больше суммы работ.")
+
     if errors:
         return errors, None
 
-    discount_amount = subtotal * discount_pct / 100
+    if discount_type == "percent":
+        discount_amount = subtotal * discount_value / 100
+    else:
+        discount_amount = discount_value
     total = subtotal - discount_amount
 
     data = dict(
         client_name=client_name, boat_model=boat_model, phone=phone,
-        sale_channel=sale_channel, discount_pct=discount_pct,
+        sale_channel=sale_channel, discount_type=discount_type, discount_value=discount_value,
+        # discount_pct is kept only for older code/rows that still read it —
+        # 0 when the discount is a fixed amount, since it isn't a percent.
+        discount_pct=discount_value if discount_type == "percent" else 0.0,
         items=items, subtotal=subtotal, discount_amount=discount_amount, total=total,
     )
     return errors, data
@@ -2379,12 +2399,33 @@ def _build_handover_act_pdf(order, items):
         f"{total_sum:.2f}".replace(".", ","),
     ])
 
+    if order["discount_type"] == "amount":
+        discount_amount = order["discount_value"]
+    else:
+        discount_amount = total_sum * order["discount_value"] / 100
+    summary_rows = 1
+    if discount_amount > 0:
+        discount_label = (
+            f"Скидка ({('%g' % order['discount_value']).replace('.', ',')}%):"
+            if order["discount_type"] != "amount"
+            else "Скидка:"
+        )
+        table_data.append([
+            "", "", "", "", discount_label,
+            f"{discount_amount:.2f}".replace(".", ","),
+        ])
+        table_data.append([
+            "", "", "", "", "К оплате:",
+            f"{total_sum - discount_amount:.2f}".replace(".", ","),
+        ])
+        summary_rows = 3
+
     col_widths = [12 * mm, 76 * mm, 24 * mm, 18 * mm, 18 * mm, 22 * mm]
     tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
     tbl.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, -1), "OpenSans"),
         ("FONTNAME", (0, 0), (-1, 0), "OpenSans-Bold"),
-        ("FONTNAME", (0, -1), (-1, -1), "OpenSans-Bold"),
+        ("FONTNAME", (0, -summary_rows), (-1, -1), "OpenSans-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 9.5),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
         ("ALIGN", (0, 0), (0, -1), "CENTER"),
@@ -2633,10 +2674,11 @@ def add_tuning_order():
     client_id = _get_or_create_client(db, data["phone"], data["client_name"], data["boat_model"])
     cur = db.execute(
         "INSERT INTO tuning_orders (client_id, client_name, boat_model, sale_channel, phone, "
-        "discount_pct, subtotal, total, status, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "discount_pct, discount_type, discount_value, subtotal, total, status, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (client_id, data["client_name"], data["boat_model"], data["sale_channel"], data["phone"],
-         data["discount_pct"], data["subtotal"], data["total"], DEFAULT_ORDER_STATUS, now, now),
+         data["discount_pct"], data["discount_type"], data["discount_value"],
+         data["subtotal"], data["total"], DEFAULT_ORDER_STATUS, now, now),
     )
     order_id = cur.lastrowid
     for item in data["items"]:
@@ -2673,7 +2715,7 @@ def edit_tuning_order(order_id):
         form_values = {
             "client_name": order["client_name"], "boat_model": order["boat_model"],
             "sale_channel": order["sale_channel"], "phone": order["phone"],
-            "discount_pct": order["discount_pct"],
+            "discount_type": order["discount_type"], "discount_value": order["discount_value"],
         }
         hull_sheets = db.execute(
             "SELECT * FROM hull_diagnostic_sheets WHERE tuning_order_id = ? ORDER BY id", (order_id,)
@@ -2719,9 +2761,10 @@ def edit_tuning_order(order_id):
     client_id = _get_or_create_client(db, data["phone"], data["client_name"], data["boat_model"])
     db.execute(
         "UPDATE tuning_orders SET client_id=?, client_name=?, boat_model=?, sale_channel=?, phone=?, "
-        "discount_pct=?, subtotal=?, total=?, updated_at=? WHERE id=?",
+        "discount_pct=?, discount_type=?, discount_value=?, subtotal=?, total=?, updated_at=? WHERE id=?",
         (client_id, data["client_name"], data["boat_model"], data["sale_channel"], data["phone"],
-         data["discount_pct"], data["subtotal"], data["total"], now, order_id),
+         data["discount_pct"], data["discount_type"], data["discount_value"],
+         data["subtotal"], data["total"], now, order_id),
     )
     # Preserve each surviving work row's status by position — the form
     # resubmits every row on every save (even ones untouched here), so a

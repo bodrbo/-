@@ -126,7 +126,7 @@
             <td>{{ o.boat_model }}</td>
             <td class="muted">{{ 'Напрямую' if o.sale_channel == 'direct' else ('Агрегатор' if o.sale_channel == 'aggregator' else 'Смешанно') }}</td>
             <td class="muted">{{ o.phone }}</td>
-            <td>{{ o.discount_pct|float|round(1) }}%</td>
+            <td>{{ (o.discount_value|float|round(1)|string ~ '%') if o.discount_type != 'amount' else (o.discount_value|money ~ ' ₽') }}</td>
             <td class="amount">{{ o.total|money }}</td>
             <td><span class="status-badge status-{{ o.status }}">{{ o.status|order_status_label }}</span></td>
             <td class="row-actions">

@@ -405,9 +405,16 @@
         <div class="form-group-label"><span class="n">3</span>Скидка и итог</div>
         <div class="field-row-inner">
         <div class="field field-narrow">
-          <label for="discount_pct">Скидка, %</label>
-          <input type="text" inputmode="decimal" id="discount_pct" name="discount_pct"
-                 value="{{ form_values.discount_pct if form_values else 0 }}" oninput="updateOrderTotal()">
+          <label for="discount_value">Скидка</label>
+          <input type="text" inputmode="decimal" id="discount_value" name="discount_value"
+                 value="{{ form_values.discount_value if form_values else 0 }}" oninput="updateOrderTotal()">
+        </div>
+        <div class="field field-narrow">
+          <label for="discount_type">Вид скидки</label>
+          <select id="discount_type" name="discount_type" onchange="updateOrderTotal()">
+            <option value="percent" {{ 'selected' if not form_values or form_values.discount_type != 'amount' }}>%</option>
+            <option value="amount" {{ 'selected' if form_values and form_values.discount_type == 'amount' }}>₽</option>
+          </select>
         </div>
         </div>
 
@@ -585,9 +592,11 @@ function updateOrderTotal() {
   document.querySelectorAll('#work-container .work-price').forEach(function (span) {
     subtotal += parseFloat(span.getAttribute('data-value')) || 0;
   });
-  var discountInput = document.getElementById('discount_pct');
-  var discountPct = parseFloat((discountInput.value || '0').replace(',', '.')) || 0;
-  var discountAmount = subtotal * discountPct / 100;
+  var discountInput = document.getElementById('discount_value');
+  var discountType = document.getElementById('discount_type').value;
+  var discountValue = parseFloat((discountInput.value || '0').replace(',', '.')) || 0;
+  var discountAmount = discountType === 'amount' ? discountValue : subtotal * discountValue / 100;
+  if (discountAmount > subtotal) discountAmount = subtotal;
   var total = subtotal - discountAmount;
   document.getElementById('order-subtotal').textContent = Math.round(subtotal).toLocaleString('ru-RU') + ' ₽';
   document.getElementById('order-discount-amount').textContent = Math.round(discountAmount).toLocaleString('ru-RU') + ' ₽';
