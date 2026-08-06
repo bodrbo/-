@@ -227,6 +227,37 @@ def send_telegram_notification(text, chat_id=None):
         return status
 
 
+def send_telegram_photo(photo_path, caption=None, chat_id=None):
+    """Same fire-and-forget contract as send_telegram_notification, for a
+    photo already saved to disk. Kept as a second call per photo rather than
+    a single sendMediaGroup request — simpler, and one bad photo can't take
+    the rest down with it."""
+    chat_id = chat_id or TELEGRAM_CHAT_ID
+    if not TELEGRAM_BOT_TOKEN or not chat_id:
+        status = "skipped: TELEGRAM_BOT_TOKEN/chat id not set"
+        _log_telegram(f"Telegram photo {status}")
+        return status
+    try:
+        with open(photo_path, "rb") as f:
+            data = {"chat_id": chat_id}
+            if caption:
+                data["caption"] = caption
+            resp = requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
+                data=data, files={"photo": f}, timeout=20,
+            )
+        if resp.ok:
+            _log_telegram("Telegram photo sent")
+            return "sent"
+        status = f"failed: {resp.status_code} {resp.text[:300]}"
+        _log_telegram(f"Telegram photo {status}")
+        return status
+    except (requests.RequestException, OSError) as e:
+        status = f"error: {e}"
+        _log_telegram(f"Telegram photo {status}")
+        return status
+
+
 def tbank_configured():
     return bool(TBANK_API_TOKEN and TBANK_ACCOUNT_NUMBER)
 
@@ -4489,6 +4520,7 @@ def team_checklist_answer(checklist_id):
         # rowcount is 0 if the INSERT OR IGNORE hit the UNIQUE constraint
         # (e.g. a double submit) — lastrowid would be stale in that case,
         # so only attach photos when a row was actually just created.
+        saved_photo_paths = []
         if cur.rowcount == 1:
             answer_id = cur.lastrowid
             photos_dir = os.path.join(app.static_folder, "checklist_photos")
@@ -4498,7 +4530,9 @@ def team_checklist_answer(checklist_id):
                     if ext in WORK_PHOTO_EXTENSIONS:
                         os.makedirs(photos_dir, exist_ok=True)
                         filename = f"{answer_id}-{secrets.token_hex(6)}{ext}"
-                        file.save(os.path.join(photos_dir, filename))
+                        filepath = os.path.join(photos_dir, filename)
+                        file.save(filepath)
+                        saved_photo_paths.append(filepath)
                         db.execute(
                             "INSERT INTO checklist_answer_photos (answer_id, filename, created_at) "
                             "VALUES (?, ?, ?)",
@@ -4515,6 +4549,8 @@ def team_checklist_answer(checklist_id):
                 f"Пункт: {html.escape(questions[question_index])}\n"
                 f"Комментарий: {html.escape(comment) if comment else '—'}"
             )
+            for photo_path in saved_photo_paths:
+                send_telegram_photo(photo_path)
     return redirect(url_for("team_checklist_run", checklist_id=checklist_id))
 
 
