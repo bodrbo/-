@@ -5222,6 +5222,29 @@ def telegram_test():
     return f"telegram status ({target}): {status}", 200
 
 
+@app.route("/internal/diploma-debug")
+def diploma_debug():
+    """Visit this URL (with the right token) to see exactly what the app
+    finds in static/diplomas/ — a diploma not showing up is almost always
+    a filename/extension mismatch (has to be <team username>.jpg/.jpeg/
+    .png/.webp, matched case-sensitively), and this shows it directly
+    instead of guessing blind. Add &username=<team login> to check one
+    specific captain's file."""
+    if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
+        return "forbidden", 403
+    diplomas_dir = os.path.join(app.static_folder, "diplomas")
+    try:
+        files = sorted(os.listdir(diplomas_dir))
+    except OSError as e:
+        return f"error listing {diplomas_dir}: {e}", 200
+    lines = [f"diplomas dir: {diplomas_dir}", f"files found: {files}"]
+    username = request.args.get("username", "").strip()
+    if username:
+        lines.append(f"expected filename: {username}.jpg / .jpeg / .png / .webp")
+        lines.append(f"find_diploma_url({username!r}) = {find_diploma_url(username)!r}")
+    return "\n".join(lines), 200
+
+
 init_db()
 
 if __name__ == "__main__":
