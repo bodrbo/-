@@ -158,7 +158,7 @@
 
     <section class="panel">
       <h2>Документы</h2>
-      <form action="{{ url_for('upload_boat_document', boat=boat) }}" method="post"
+      <form action="{{ url_for('upload_boat_document', boat_index=boat_index) }}" method="post"
             enctype="multipart/form-data" class="fleet-document-form">
         <div class="field">
           <label for="doc-title">Название документа</label>
@@ -187,17 +187,17 @@
             {% for doc in documents %}
             <tr>
               <td>
-                <a href="{{ url_for('download_boat_document', boat=boat, doc_id=doc.id) }}" class="term">{{ doc.title }}</a>
+                <a href="{{ url_for('download_boat_document', boat_index=boat_index, doc_id=doc.id) }}" class="term">{{ doc.title }}</a>
               </td>
               <td class="muted">{{ doc.uploaded_at[:10]|ru_date }}</td>
               <td class="row-actions">
-                <a href="{{ url_for('download_boat_document', boat=boat, doc_id=doc.id) }}" class="icon-btn" title="Скачать">
+                <a href="{{ url_for('download_boat_document', boat_index=boat_index, doc_id=doc.id) }}" class="icon-btn" title="Скачать">
                   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M10 3v9.5M6.2 9.3l3.8 3.7 3.8-3.7"/>
                     <path d="M3.5 15v1a1.5 1.5 0 001.5 1.5h10a1.5 1.5 0 001.5-1.5v-1"/>
                   </svg>
                 </a>
-                <form action="{{ url_for('delete_boat_document', boat=boat, doc_id=doc.id) }}" method="post"
+                <form action="{{ url_for('delete_boat_document', boat_index=boat_index, doc_id=doc.id) }}" method="post"
                       onsubmit="return confirm('Удалить документ «' + {{ doc.title|tojson }} + '»?');">
                   <button type="submit" class="icon-btn danger" title="Удалить">
                     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">

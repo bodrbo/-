@@ -2067,16 +2067,28 @@ def _fleet_boat_checklists(db, boat):
     return checklists
 
 
+def _boat_by_index(boat_index):
+    """Boats are looked up by their plain-ASCII position in BOATS, never by
+    name, in every /fleet/... URL — some proxy in front of the production
+    app was mangling the Cyrillic boat name once it hit the URL path (fine
+    on a bare local Werkzeug server, broken behind Beget's stack), so the
+    fix is to keep non-ASCII text out of the path entirely."""
+    if 0 <= boat_index < len(BOATS):
+        return BOATS[boat_index]["name"]
+    return None
+
+
 @app.route("/fleet")
 @admin_login_required
 def fleet_index():
     return render_template("fleet_index.html", boats=BOATS, active_page="fleet")
 
 
-@app.route("/fleet/<boat>")
+@app.route("/fleet/<int:boat_index>")
 @admin_login_required
-def fleet_boat(boat):
-    if boat not in [b["name"] for b in BOATS]:
+def fleet_boat(boat_index):
+    boat = _boat_by_index(boat_index)
+    if boat is None:
         return redirect(url_for("fleet_index"))
     db = get_db()
     checklists = _fleet_boat_checklists(db, boat)
@@ -2085,15 +2097,16 @@ def fleet_boat(boat):
         (boat,),
     ).fetchall()
     return render_template(
-        "fleet_boat.html", boat=boat, checklists=checklists, documents=documents,
-        checklist_type_labels=CHECKLIST_TYPE_LABELS, active_page="fleet",
+        "fleet_boat.html", boat=boat, boat_index=boat_index, checklists=checklists,
+        documents=documents, checklist_type_labels=CHECKLIST_TYPE_LABELS, active_page="fleet",
     )
 
 
-@app.route("/fleet/<boat>/documents", methods=["POST"])
+@app.route("/fleet/<int:boat_index>/documents", methods=["POST"])
 @admin_login_required
-def upload_boat_document(boat):
-    if boat not in [b["name"] for b in BOATS]:
+def upload_boat_document(boat_index):
+    boat = _boat_by_index(boat_index)
+    if boat is None:
         return redirect(url_for("fleet_index"))
     title = request.form.get("title", "").strip()
     file = request.files.get("document")
@@ -2111,27 +2124,33 @@ def upload_boat_document(boat):
                 (boat, title, filename, file.filename, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
             )
             db.commit()
-    return redirect(url_for("fleet_boat", boat=boat))
+    return redirect(url_for("fleet_boat", boat_index=boat_index))
 
 
-@app.route("/fleet/<boat>/documents/<int:doc_id>")
+@app.route("/fleet/<int:boat_index>/documents/<int:doc_id>")
 @admin_login_required
-def download_boat_document(boat, doc_id):
+def download_boat_document(boat_index, doc_id):
+    boat = _boat_by_index(boat_index)
+    if boat is None:
+        return redirect(url_for("fleet_index"))
     db = get_db()
     doc = db.execute(
         "SELECT * FROM boat_documents WHERE id = ? AND boat = ?", (doc_id, boat)
     ).fetchone()
     if doc is None:
-        return redirect(url_for("fleet_boat", boat=boat))
+        return redirect(url_for("fleet_boat", boat_index=boat_index))
     docs_dir = os.path.join(app.static_folder, "boat_documents")
     return send_from_directory(
         docs_dir, doc["filename"], download_name=doc["original_filename"],
     )
 
 
-@app.route("/fleet/<boat>/documents/<int:doc_id>/delete", methods=["POST"])
+@app.route("/fleet/<int:boat_index>/documents/<int:doc_id>/delete", methods=["POST"])
 @admin_login_required
-def delete_boat_document(boat, doc_id):
+def delete_boat_document(boat_index, doc_id):
+    boat = _boat_by_index(boat_index)
+    if boat is None:
+        return redirect(url_for("fleet_index"))
     db = get_db()
     doc = db.execute(
         "SELECT * FROM boat_documents WHERE id = ? AND boat = ?", (doc_id, boat)
@@ -2143,7 +2162,7 @@ def delete_boat_document(boat, doc_id):
             pass
         db.execute("DELETE FROM boat_documents WHERE id = ?", (doc_id,))
         db.commit()
-    return redirect(url_for("fleet_boat", boat=boat))
+    return redirect(url_for("fleet_boat", boat_index=boat_index))
 
 
 # =======================================================================

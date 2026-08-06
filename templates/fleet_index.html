@@ -85,7 +85,7 @@
   <section class="panel">
     <div class="fleet-grid">
       {% for boat in boats %}
-      <a href="{{ url_for('fleet_boat', boat=boat.name) }}" class="fleet-card">
+      <a href="{{ url_for('fleet_boat', boat_index=loop.index0) }}" class="fleet-card">
         <span class="fleet-card-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M4 13.5h16l-2.3 4.8a2 2 0 01-1.8 1.2H8.1a2 2 0 01-1.8-1.2L4 13.5z"/>
