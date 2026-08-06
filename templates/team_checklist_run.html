@@ -119,13 +119,15 @@
     </div>
 
     <div class="checklist-problem-panel hidden" id="problem-panel">
-      <form action="{{ url_for('team_checklist_answer', checklist_id=checklist.id) }}" method="post" enctype="multipart/form-data">
+      <form action="{{ url_for('team_checklist_answer', checklist_id=checklist.id) }}" method="post"
+            enctype="multipart/form-data" onsubmit="return validateProblemPhotos(event)">
         <input type="hidden" name="question_index" value="{{ question_index }}">
         <input type="hidden" name="status" value="problem">
         <label for="comment">Опишите проблему</label>
         <textarea id="comment" name="comment" required placeholder="Что именно не в порядке"></textarea>
         <label for="problem-photos" style="display:block; margin-top:10px;">Фото (необязательно, можно несколько)</label>
         <input type="file" id="problem-photos" name="photos" accept="image/*" multiple style="margin-bottom:10px;">
+        <p id="problem-photos-error" class="checklist-photo-error hidden"></p>
         <button type="submit" class="checklist-answer-btn problem">Сообщить о проблеме</button>
       </form>
     </div>
@@ -158,6 +160,30 @@
 </main>
 
 <script>
+// The server caps the whole request at 15 MB (app.py MAX_CONTENT_LENGTH).
+// Full-resolution phone camera photos routinely blow past that when a few
+// are picked at once — the resulting oversized upload can hang for a long
+// time on a weak connection before ultimately failing, which reads as the
+// page being stuck. Catching it here, before the upload even starts, turns
+// that into an instant, clear message instead.
+var MAX_PROBLEM_PHOTOS_BYTES = 14 * 1024 * 1024;
+
+function validateProblemPhotos(event) {
+  var input = document.getElementById('problem-photos');
+  var errorEl = document.getElementById('problem-photos-error');
+  var total = 0;
+  for (var i = 0; i < input.files.length; i++) total += input.files[i].size;
+  if (total > MAX_PROBLEM_PHOTOS_BYTES) {
+    errorEl.textContent = 'Суммарный размер фото больше 14 МБ — сервер такое не примет. ' +
+      'Загрузите меньше фото за раз или прикрепите их по одному в отдельных отчётах.';
+    errorEl.classList.remove('hidden');
+    event.preventDefault();
+    return false;
+  }
+  errorEl.classList.add('hidden');
+  return true;
+}
+
 var photoModalPhotos = [];
 var photoModalIndex = 0;
 

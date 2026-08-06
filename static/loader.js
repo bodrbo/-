@@ -3,7 +3,15 @@
   if (!loader) return;
 
   var MIN_VISIBLE_MS = 450;
+  // A large multipart upload (several full-size photos from a phone camera)
+  // over a weak mobile connection can hang or get silently dropped by the
+  // hosting proxy well short of any browser-level network error — with
+  // nothing to hide it, the overlay we show on submit would then cover the
+  // page forever. This is the failsafe: if no navigation has completed by
+  // then, give up waiting and let the user see the page (and retry) again.
+  var FAILSAFE_MS = 20000;
   var shownAt = Date.now();
+  var failsafeTimer = null;
 
   function hideInitial() {
     var elapsed = Date.now() - shownAt;
@@ -20,7 +28,21 @@
 
   function showLoader() {
     loader.classList.remove("hidden");
+    clearTimeout(failsafeTimer);
+    failsafeTimer = setTimeout(function () {
+      loader.classList.add("hidden");
+    }, FAILSAFE_MS);
   }
+
+  // Restoring a page from the back/forward cache (e.g. tapping "back" after
+  // a submit) fires no "load" event, so a loader left visible before
+  // navigating away would otherwise stay stuck on return.
+  window.addEventListener("pageshow", function (e) {
+    if (e.persisted) {
+      clearTimeout(failsafeTimer);
+      loader.classList.add("hidden");
+    }
+  });
 
   // Show the wheel again for any same-page navigation: clicking a link to
   // another page, or submitting a form (adding a trip, saving a filter,
