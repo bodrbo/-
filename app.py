@@ -26,7 +26,9 @@ from functools import wraps
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
-from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for
+from flask import (
+    Flask, g, jsonify, redirect, render_template, request, send_from_directory, session, url_for,
+)
 from werkzeug.datastructures import MultiDict
 from werkzeug.security import check_password_hash, generate_password_hash
 from io import BytesIO
@@ -74,6 +76,7 @@ def find_avatar_url(username):
 
 
 WORK_PHOTO_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+BOAT_DOCUMENT_EXTENSIONS = (".pdf", ".jpg", ".jpeg", ".png", ".webp", ".doc", ".docx")
 
 
 def get_work_item_photos(db, item_id):
@@ -713,6 +716,18 @@ def init_db():
             answer_id INTEGER NOT NULL,
             filename TEXT NOT NULL,
             created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS boat_documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            boat TEXT NOT NULL,
+            title TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            original_filename TEXT NOT NULL,
+            uploaded_at TEXT NOT NULL
         )
         """
     )
@@ -1985,6 +2000,119 @@ def add_trip_expense():
         )
     db.commit()
     return redirect(url_for("trips_index"))
+
+
+# =======================================================================
+# Флот
+# =======================================================================
+
+def _fleet_boat_checklists(db, boat):
+    """All inspection checklists for one boat, newest first, each annotated
+    with its question count and problem list (with photos) — same shape the
+    captain's own checklist-run view uses, so the same template partial
+    could render either."""
+    rows = db.execute(
+        "SELECT * FROM boat_checklists WHERE boat = ? ORDER BY started_at DESC, id DESC",
+        (boat,),
+    ).fetchall()
+    checklists = []
+    for row in rows:
+        questions = _checklist_questions_for(row["checklist_type"], row["boat"])
+        answers = db.execute(
+            "SELECT * FROM boat_checklist_answers WHERE checklist_id = ? ORDER BY question_index",
+            (row["id"],),
+        ).fetchall()
+        problems = [
+            {"question_text": a["question_text"], "comment": a["comment"],
+             "photos": get_checklist_answer_photos(db, a["id"])}
+            for a in answers if a["status"] == "problem"
+        ]
+        checklists.append({
+            "id": row["id"], "checklist_type": row["checklist_type"],
+            "employee_name": row["employee_name"], "started_at": row["started_at"],
+            "completed_at": row["completed_at"], "total": len(questions),
+            "answered": len(answers), "problems": problems,
+        })
+    return checklists
+
+
+@app.route("/fleet")
+@admin_login_required
+def fleet_index():
+    return render_template("fleet_index.html", boats=BOATS, active_page="fleet")
+
+
+@app.route("/fleet/<boat>")
+@admin_login_required
+def fleet_boat(boat):
+    if boat not in [b["name"] for b in BOATS]:
+        return redirect(url_for("fleet_index"))
+    db = get_db()
+    checklists = _fleet_boat_checklists(db, boat)
+    documents = db.execute(
+        "SELECT * FROM boat_documents WHERE boat = ? ORDER BY uploaded_at DESC, id DESC",
+        (boat,),
+    ).fetchall()
+    return render_template(
+        "fleet_boat.html", boat=boat, checklists=checklists, documents=documents,
+        checklist_type_labels=CHECKLIST_TYPE_LABELS, active_page="fleet",
+    )
+
+
+@app.route("/fleet/<boat>/documents", methods=["POST"])
+@admin_login_required
+def upload_boat_document(boat):
+    if boat not in [b["name"] for b in BOATS]:
+        return redirect(url_for("fleet_index"))
+    title = request.form.get("title", "").strip()
+    file = request.files.get("document")
+    if title and file and file.filename:
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext in BOAT_DOCUMENT_EXTENSIONS:
+            docs_dir = os.path.join(app.static_folder, "boat_documents")
+            os.makedirs(docs_dir, exist_ok=True)
+            filename = f"{secrets.token_hex(8)}{ext}"
+            file.save(os.path.join(docs_dir, filename))
+            db = get_db()
+            db.execute(
+                "INSERT INTO boat_documents (boat, title, filename, original_filename, uploaded_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (boat, title, filename, file.filename, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+            )
+            db.commit()
+    return redirect(url_for("fleet_boat", boat=boat))
+
+
+@app.route("/fleet/<boat>/documents/<int:doc_id>")
+@admin_login_required
+def download_boat_document(boat, doc_id):
+    db = get_db()
+    doc = db.execute(
+        "SELECT * FROM boat_documents WHERE id = ? AND boat = ?", (doc_id, boat)
+    ).fetchone()
+    if doc is None:
+        return redirect(url_for("fleet_boat", boat=boat))
+    docs_dir = os.path.join(app.static_folder, "boat_documents")
+    return send_from_directory(
+        docs_dir, doc["filename"], download_name=doc["original_filename"],
+    )
+
+
+@app.route("/fleet/<boat>/documents/<int:doc_id>/delete", methods=["POST"])
+@admin_login_required
+def delete_boat_document(boat, doc_id):
+    db = get_db()
+    doc = db.execute(
+        "SELECT * FROM boat_documents WHERE id = ? AND boat = ?", (doc_id, boat)
+    ).fetchone()
+    if doc is not None:
+        try:
+            os.remove(os.path.join(app.static_folder, "boat_documents", doc["filename"]))
+        except OSError:
+            pass
+        db.execute("DELETE FROM boat_documents WHERE id = ?", (doc_id,))
+        db.commit()
+    return redirect(url_for("fleet_boat", boat=boat))
 
 
 # =======================================================================

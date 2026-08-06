@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ boat }} — Флот</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100">
+      <g fill="var(--brass)">
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/>
+      </g>
+      <g fill="none" stroke="var(--brass)" stroke-width="2.6" stroke-linecap="round" opacity="0.85">
+        <path d="M55 15A24 24 0 0 1 62 22" transform="rotate(-6 50 50)"/>
+        <path d="M18 60A24 24 0 0 1 15 51" transform="rotate(4 50 50)"/>
+      </g>
+      <circle cx="50" cy="50" r="15" fill="none" stroke="var(--ink)" stroke-width="4"/>
+      <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
+    </svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo">
+    </div>
+    <nav class="main-nav">
+      <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'payroll' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.3" y="6" width="15.4" height="8" rx="1.8"/>
+          <circle cx="10" cy="10" r="2"/>
+          <path d="M4.6 8h.01M15.4 12h.01"/>
+        </svg>
+        <span class="nav-label">Зарплаты</span>
+      </a>
+      <a href="{{ url_for('trips_index') }}" class="{{ 'active' if active_page == 'trips' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="10" cy="3.8" r="1.6"/>
+          <path d="M10 5.6v10.6M6 8.4h8M4.2 11a5.8 5.8 0 0 0 11.6 0"/>
+        </svg>
+        <span class="nav-label">Рейсы и инвесторы</span>
+      </a>
+      <a href="{{ url_for('tuning_index') }}" class="{{ 'active' if active_page == 'tuning' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14.7 3.3a4 4 0 0 1-5.1 5.4L4.4 13.9a1.6 1.6 0 0 0 2.3 2.3l5.2-5.2a4 4 0 0 0 5.4-5.1l-2.6 2.6-1.9-.4-.4-1.9 2.6-2.6z"/>
+        </svg>
+        <span class="nav-label">Тюнинг-центр</span>
+      </a>
+      <a href="{{ url_for('fleet_index') }}" class="{{ 'active' if active_page == 'fleet' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 17c1.4 1 3 1 4.4 0 1.4-1 3-1 4.4 0 1.4 1 3 1 4.4 0"/>
+          <path d="M5.5 17V8.5L10 3l4.5 5.5V17"/>
+          <path d="M10 3v14"/>
+        </svg>
+        <span class="nav-label">Флот</span>
+      </a>
+      <a href="{{ url_for('analytics_index') }}" class="{{ 'active' if active_page == 'analytics' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2.5 16.5h15"/>
+          <path d="M5.5 16V10.5M10 16V4M14.5 16V11.5"/>
+        </svg>
+        <span class="nav-label">Аналитика</span>
+      </a>
+    </nav>
+    <div class="title-block">
+      <span class="kicker">Флот</span>
+      <h1>{{ boat }}</h1>
+    </div>
+    <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout">
+      <button type="submit">Выйти</button>
+    </form>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <a href="{{ url_for('fleet_index') }}" class="term" style="display:inline-block; margin-bottom:14px;">← Флот</a>
+
+  <div class="fleet-sub-grid">
+
+    <section class="panel">
+      <h2>Осмотры</h2>
+      {% if checklists %}
+      <div class="fleet-checklist-list">
+        {% for c in checklists %}
+        <details class="fleet-checklist-item">
+          <summary>
+            <span class="fci-type">{{ checklist_type_labels.get(c.checklist_type, c.checklist_type) }}</span>
+            <span class="fci-meta">{{ c.started_at[:10]|ru_date }} {{ c.started_at[11:16] }} · {{ c.employee_name }}</span>
+            {% if not c.completed_at %}
+            <span class="status-badge status-in_progress">В процессе ({{ c.answered }}/{{ c.total }})</span>
+            {% elif c.problems %}
+            <span class="status-badge status-cancelled">Замечаний: {{ c.problems|length }}</span>
+            {% else %}
+            <span class="status-badge status-done">Без замечаний</span>
+            {% endif %}
+            <span class="chev" aria-hidden="true"></span>
+          </summary>
+          <div class="fleet-checklist-body">
+            {% if c.problems %}
+            <div class="table-scroll">
+              <table class="records">
+                <thead>
+                  <tr>
+                    <th>Пункт</th>
+                    <th>Комментарий</th>
+                    <th>Фото</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for p in c.problems %}
+                  <tr>
+                    <td>{{ p.question_text }}</td>
+                    <td>{{ p.comment or '—' }}</td>
+                    <td class="row-actions">
+                      {% if p.photos %}
+                      <button type="button" class="icon-btn" title="Открыть фото ({{ p.photos|length }})"
+                              onclick='openPhotoModal({{ p.photos|tojson }})'>
+                        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M1.6 10S4.8 4.5 10 4.5 18.4 10 18.4 10 15.2 15.5 10 15.5 1.6 10 1.6 10z"/>
+                          <circle cx="10" cy="10" r="2.4"/>
+                        </svg>
+                      </button>
+                      {% else %}
+                      —
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% elif c.completed_at %}
+            <p class="fcb-ok">Осмотр пройден без замечаний.</p>
+            {% else %}
+            <p class="hint">Осмотр ещё не завершён.</p>
+            {% endif %}
+          </div>
+        </details>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        <div class="t">Осмотров пока нет</div>
+        <div class="s">Здесь появятся предрейсовые и послерейсовые осмотры, пройденные капитанами.</div>
+      </div>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <h2>Документы</h2>
+      <form action="{{ url_for('upload_boat_document', boat=boat) }}" method="post"
+            enctype="multipart/form-data" class="fleet-document-form">
+        <div class="field">
+          <label for="doc-title">Название документа</label>
+          <input type="text" id="doc-title" name="title" placeholder="Например, судовой билет" required>
+        </div>
+        <div class="field">
+          <label for="doc-file">Файл</label>
+          <input type="file" id="doc-file" name="document" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx" required>
+        </div>
+        <div class="field field-submit">
+          <button type="submit" class="btn-primary">Загрузить</button>
+        </div>
+      </form>
+
+      {% if documents %}
+      <div class="table-scroll">
+        <table class="records">
+          <thead>
+            <tr>
+              <th>Документ</th>
+              <th>Загружен</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for doc in documents %}
+            <tr>
+              <td>
+                <a href="{{ url_for('download_boat_document', boat=boat, doc_id=doc.id) }}" class="term">{{ doc.title }}</a>
+              </td>
+              <td class="muted">{{ doc.uploaded_at[:10]|ru_date }}</td>
+              <td class="row-actions">
+                <a href="{{ url_for('download_boat_document', boat=boat, doc_id=doc.id) }}" class="icon-btn" title="Скачать">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10 3v9.5M6.2 9.3l3.8 3.7 3.8-3.7"/>
+                    <path d="M3.5 15v1a1.5 1.5 0 001.5 1.5h10a1.5 1.5 0 001.5-1.5v-1"/>
+                  </svg>
+                </a>
+                <form action="{{ url_for('delete_boat_document', boat=boat, doc_id=doc.id) }}" method="post"
+                      onsubmit="return confirm('Удалить документ «' + {{ doc.title|tojson }} + '»?');">
+                  <button type="submit" class="icon-btn danger" title="Удалить">
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
+                    </svg>
+                  </button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        <div class="t">Документов пока нет</div>
+        <div class="s">Загрузите судовой билет, судовую роль или другие документы по судну.</div>
+      </div>
+      {% endif %}
+    </section>
+
+  </div>
+
+  <div id="photo-modal" class="photo-modal hidden" onclick="if (event.target === this) closePhotoModal();">
+    <div class="photo-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closePhotoModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <button type="button" id="photo-modal-prev" class="photo-modal-nav photo-modal-nav-prev hidden" onclick="showPrevPhoto()" aria-label="Предыдущее фото">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5l-6 5 6 5"/>
+        </svg>
+      </button>
+      <button type="button" id="photo-modal-next" class="photo-modal-nav photo-modal-nav-next hidden" onclick="showNextPhoto()" aria-label="Следующее фото">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 5l6 5-6 5"/>
+        </svg>
+      </button>
+      <span id="photo-modal-counter" class="photo-modal-counter hidden"></span>
+      <img id="photo-modal-img" src="" alt="Фото осмотра">
+      <p id="photo-modal-comment" class="photo-modal-comment hidden"></p>
+    </div>
+  </div>
+
+</main>
+
+<script>
+var photoModalPhotos = [];
+var photoModalIndex = 0;
+
+function openPhotoModal(photos) {
+  photoModalPhotos = photos || [];
+  photoModalIndex = 0;
+  renderPhotoModal();
+  document.getElementById('photo-modal').classList.remove('hidden');
+}
+
+function renderPhotoModal() {
+  var photo = photoModalPhotos[photoModalIndex];
+  if (!photo) return;
+  document.getElementById('photo-modal-img').src = photo.url;
+
+  var commentEl = document.getElementById('photo-modal-comment');
+  if (photo.comment) {
+    commentEl.textContent = photo.comment;
+    commentEl.classList.remove('hidden');
+  } else {
+    commentEl.classList.add('hidden');
+  }
+
+  var multiple = photoModalPhotos.length > 1;
+  document.getElementById('photo-modal-prev').classList.toggle('hidden', !multiple);
+  document.getElementById('photo-modal-next').classList.toggle('hidden', !multiple);
+  var counterEl = document.getElementById('photo-modal-counter');
+  if (multiple) {
+    counterEl.textContent = (photoModalIndex + 1) + ' / ' + photoModalPhotos.length;
+    counterEl.classList.remove('hidden');
+  } else {
+    counterEl.classList.add('hidden');
+  }
+}
+
+function showPrevPhoto() {
+  photoModalIndex = (photoModalIndex - 1 + photoModalPhotos.length) % photoModalPhotos.length;
+  renderPhotoModal();
+}
+
+function showNextPhoto() {
+  photoModalIndex = (photoModalIndex + 1) % photoModalPhotos.length;
+  renderPhotoModal();
+}
+
+function closePhotoModal() {
+  document.getElementById('photo-modal').classList.add('hidden');
+  document.getElementById('photo-modal-img').src = '';
+  photoModalPhotos = [];
+}
+
+document.addEventListener('keydown', function (e) {
+  var modalOpen = !document.getElementById('photo-modal').classList.contains('hidden');
+  if (modalOpen && e.key === 'ArrowLeft') showPrevPhoto();
+  if (modalOpen && e.key === 'ArrowRight') showNextPhoto();
+  if (e.key === 'Escape') closePhotoModal();
+});
+</script>
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+
+</body>
+</html>
