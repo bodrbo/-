@@ -5121,11 +5121,28 @@ def telegram_test():
     when a Telegram notification is sent — no log-hunting required. Same
     CRON_SECRET as the shift-check endpoint, just to avoid a second secret.
     Add &target=approval to test TELEGRAM_APPROVAL_CHAT_ID instead of the
-    default TELEGRAM_CHAT_ID."""
+    default TELEGRAM_CHAT_ID. Add &photo=1 to test sendPhoto (a real 1x1
+    PNG, not sendMessage) instead of a text notification."""
     if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
         return "forbidden", 403
     target = request.args.get("target", "default")
     chat_id = TELEGRAM_APPROVAL_CHAT_ID if target == "approval" else None
+    if request.args.get("photo"):
+        import base64
+        import tempfile
+        png_bytes = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp.write(png_bytes)
+            tmp_path = tmp.name
+        try:
+            status = send_telegram_photo(
+                tmp_path, caption=f"🔧 Тестовое фото с сайта ({target})", chat_id=chat_id,
+            )
+        finally:
+            os.remove(tmp_path)
+        return f"telegram photo status ({target}): {status}", 200
     status = send_telegram_notification(f"🔧 Тестовое уведомление с сайта ({target})", chat_id=chat_id)
     return f"telegram status ({target}): {status}", 200
 
