@@ -1053,6 +1053,16 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   border-radius: 12px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
 }
+.doc-modal-frame {
+  display: block;
+  width: 85vw;
+  height: 85vh;
+  max-width: 900px;
+  border: none;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
 .photo-modal-close {
   position: absolute;
   top: -16px;

@@ -185,12 +185,23 @@
           </thead>
           <tbody>
             {% for doc in documents %}
+            {% set ext = doc.filename.rsplit('.', 1)[-1].lower() %}
+            {% set viewable = ext in ('jpg', 'jpeg', 'png', 'webp', 'pdf') %}
             <tr>
               <td>
                 <a href="{{ url_for('download_boat_document', boat_index=boat_index, doc_id=doc.id) }}" class="term">{{ doc.title }}</a>
               </td>
               <td class="muted">{{ doc.uploaded_at[:10]|ru_date }}</td>
               <td class="row-actions">
+                {% if viewable %}
+                <button type="button" class="icon-btn" title="Открыть"
+                        onclick='openDocModal({{ url_for("download_boat_document", boat_index=boat_index, doc_id=doc.id)|tojson }}, {{ ext|tojson }})'>
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1.6 10S4.8 4.5 10 4.5 18.4 10 18.4 10 15.2 15.5 10 15.5 1.6 10 1.6 10z"/>
+                    <circle cx="10" cy="10" r="2.4"/>
+                  </svg>
+                </button>
+                {% endif %}
                 <a href="{{ url_for('download_boat_document', boat_index=boat_index, doc_id=doc.id) }}" class="icon-btn" title="Скачать">
                   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M10 3v9.5M6.2 9.3l3.8 3.7 3.8-3.7"/>
@@ -245,9 +256,38 @@
     </div>
   </div>
 
+  <div id="doc-modal" class="photo-modal hidden" onclick="if (event.target === this) closeDocModal();">
+    <div class="photo-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closeDocModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <iframe id="doc-modal-frame" class="doc-modal-frame" src="" title="Документ"></iframe>
+    </div>
+  </div>
+
 </main>
 
 <script>
+// Images reuse the existing photo modal (openPhotoModal below); a PDF can't
+// go in an <img>, so it gets its own tiny iframe-based modal instead — no
+// modal for .doc/.docx, browsers can't render those inline at all, so those
+// stay plain downloads (see the `viewable` check in the template).
+function openDocModal(url, ext) {
+  if (ext === 'pdf') {
+    document.getElementById('doc-modal-frame').src = url;
+    document.getElementById('doc-modal').classList.remove('hidden');
+  } else {
+    openPhotoModal([{url: url, comment: null}]);
+  }
+}
+
+function closeDocModal() {
+  document.getElementById('doc-modal').classList.add('hidden');
+  document.getElementById('doc-modal-frame').src = '';
+}
+
 var photoModalPhotos = [];
 var photoModalIndex = 0;
 
@@ -303,7 +343,10 @@ document.addEventListener('keydown', function (e) {
   var modalOpen = !document.getElementById('photo-modal').classList.contains('hidden');
   if (modalOpen && e.key === 'ArrowLeft') showPrevPhoto();
   if (modalOpen && e.key === 'ArrowRight') showNextPhoto();
-  if (e.key === 'Escape') closePhotoModal();
+  if (e.key === 'Escape') {
+    closePhotoModal();
+    closeDocModal();
+  }
 });
 </script>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
