@@ -75,6 +75,19 @@ def find_avatar_url(username):
     return None
 
 
+def find_diploma_url(username):
+    """Same convention as find_avatar_url, one folder over: drop a captain's
+    diploma scan at static/diplomas/<username>.<ext> and it shows up in
+    their cabinet — no upload form, no DB row, nothing to build."""
+    if not username:
+        return None
+    diplomas_dir = os.path.join(app.static_folder, "diplomas")
+    for ext in AVATAR_EXTENSIONS:
+        if os.path.exists(os.path.join(diplomas_dir, username + ext)):
+            return url_for("static", filename=f"diplomas/{username}{ext}")
+    return None
+
+
 WORK_PHOTO_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 BOAT_DOCUMENT_EXTENSIONS = (".pdf", ".jpg", ".jpeg", ".png", ".webp", ".doc", ".docx")
 
@@ -4420,6 +4433,49 @@ def team_dashboard():
         is_captain=is_captain,
         is_paid=is_paid,
         avatar_url=find_avatar_url(session.get("team_username")),
+    )
+
+
+@app.route("/team/documents")
+@team_login_required
+def team_documents():
+    db = get_db()
+    employee_name = session.get("team_employee_name")
+    if not _employee_has_position(db, employee_name, "Капитан"):
+        return redirect(url_for("team_dashboard"))
+
+    try:
+        boat_index = int(request.args.get("boat_index", "0"))
+    except ValueError:
+        boat_index = 0
+    if not (0 <= boat_index < len(BOATS)):
+        boat_index = 0
+    boat = BOATS[boat_index]["name"]
+
+    documents = db.execute(
+        "SELECT * FROM boat_documents WHERE boat = ? ORDER BY uploaded_at DESC, id DESC",
+        (boat,),
+    ).fetchall()
+
+    return render_template(
+        "team_documents.html", boats=BOATS, boat_index=boat_index, boat=boat,
+        documents=documents, diploma_url=find_diploma_url(session.get("team_username")),
+    )
+
+
+@app.route("/team/documents/boat/<int:doc_id>")
+@team_login_required
+def team_download_boat_document(doc_id):
+    db = get_db()
+    employee_name = session.get("team_employee_name")
+    if not _employee_has_position(db, employee_name, "Капитан"):
+        return redirect(url_for("team_dashboard"))
+    doc = db.execute("SELECT * FROM boat_documents WHERE id = ?", (doc_id,)).fetchone()
+    if doc is None:
+        return redirect(url_for("team_documents"))
+    docs_dir = os.path.join(app.static_folder, "boat_documents")
+    return send_from_directory(
+        docs_dir, doc["filename"], download_name=doc["original_filename"],
     )
 
 
