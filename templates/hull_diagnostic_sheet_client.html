@@ -38,7 +38,7 @@
 <header class="topbar">
   <div class="topbar-inner">
     <div class="brand">
-      <img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo brand-logo-large">
+      <a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo brand-logo-large"></a>
     </div>
     <div class="title-block">
       <h1>{{ sheet.boat_name }} — диагностический лист</h1>
