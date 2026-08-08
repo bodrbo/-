@@ -541,7 +541,7 @@ TEAM_ACCOUNTS = [
     ("Даниил Галецкий", "galetz",
      "pbkdf2:sha256:1000000$3oeteJt4OyqvMxkD$7b9bc3114c928b31a98f038a0990412e163b8cc5ebfd42b6fa6995a5d73d3e05"),
     ("Михаил Вишневский", "vishnevsky",
-     "pbkdf2:sha256:1000000$gWPBSUnEBziyBfJo$f3d98eb9eee5b6a4c0a487c7d29f73bab5b47126525957c6f6d13a180cbce538"),
+     "pbkdf2:sha256:1000000$aKQj76eKMNuDSUbs$dbf20c073db61f811964fd151c66de01ba228027a341c2c5640f54bf4f9d1333"),
 ]
 
 SALE_CHANNELS = [
@@ -1116,9 +1116,14 @@ def init_db():
             (investor_name, username, password_hash, now),
         )
     for employee_name, username, password_hash in TEAM_ACCOUNTS:
+        # Upsert, not insert-or-ignore: editing a hash here (a password
+        # reset) has to actually take effect on restart, not just apply to
+        # brand-new accounts.
         conn.execute(
-            "INSERT OR IGNORE INTO team_accounts (employee_name, username, password_hash, created_at) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO team_accounts (employee_name, username, password_hash, created_at) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(username) DO UPDATE SET "
+            "employee_name = excluded.employee_name, password_hash = excluded.password_hash",
             (employee_name, username, password_hash, now),
         )
     conn.commit()
