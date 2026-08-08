@@ -29,10 +29,17 @@
 
 <header class="topbar">
   <div class="topbar-inner">
-    <div class="brand">
-      <img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo">
+    <div class="topbar-top-row">
+      <div class="brand">
+        <img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo">
+      </div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 5.5h14M3 10h14M3 14.5h14"/>
+        </svg>
+      </button>
     </div>
-    <nav class="main-nav">
+    <nav class="main-nav" id="mainNav">
       <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'payroll' }}">
         <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
           <rect x="2.3" y="6" width="15.4" height="8" rx="1.8"/>

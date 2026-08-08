@@ -104,12 +104,31 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
   gap: 16px 24px;
 }
 
+.topbar-top-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .brand { display: flex; align-items: center; }
 .brand-logo { display: block; height: 52px; width: auto; }
 /* The client cabinet is the one page a person can land on with zero prior
    context (a bare link, no login) — give the brand a bit more presence
    there than in the internal admin/investor/team screens. */
 .brand-logo-large { height: 68px; }
+
+/* Hidden on desktop — the nav shows inline there. Only takes over as a
+   burger button under the mobile breakpoint below. */
+.nav-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: transparent;
+  color: #ffffff;
+  cursor: pointer;
+}
+.nav-toggle svg { width: 20px; height: 20px; }
+.nav-toggle:hover { background: rgba(255, 255, 255, 0.14); }
 
 .title-block { text-align: right; }
 
@@ -527,8 +546,29 @@ a.diag-card:hover { border-color: var(--brass); box-shadow: var(--shadow); }
 
 @media (max-width: 560px) {
   .topbar-inner { flex-direction: column; align-items: flex-start; }
+  .topbar-top-row { width: 100%; }
   .title-block { text-align: left; }
-  .main-nav a { padding: 7px 12px; font-size: 11.5px; }
+  .nav-toggle { display: flex; }
+  .main-nav {
+    display: none;
+    flex-direction: column;
+    width: 100%;
+    margin-top: 14px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.25);
+  }
+  .main-nav.open { display: flex; }
+  .main-nav a {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    width: 100%;
+    padding: 12px 6px;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+    margin-right: 0;
+  }
+  .main-nav a:last-child { border-bottom: none; }
 }
 
 .wrap {

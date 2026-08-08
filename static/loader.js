@@ -63,3 +63,16 @@
     }
   });
 })();
+
+// Mobile burger menu — independent of the loader above (some pages, like
+// the plain login screens, have the nav but not the page-loader overlay).
+(function () {
+  var toggle = document.getElementById("navToggle");
+  var nav = document.getElementById("mainNav");
+  if (!toggle || !nav) return;
+
+  toggle.addEventListener("click", function () {
+    var isOpen = nav.classList.toggle("open");
+    toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  });
+})();
