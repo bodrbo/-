@@ -131,6 +131,7 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
 .main-nav {
   display: flex;
   align-items: stretch;
+  flex-wrap: wrap;
   gap: 0;
 }
 .main-nav a {
@@ -527,6 +528,7 @@ a.diag-card:hover { border-color: var(--brass); box-shadow: var(--shadow); }
 @media (max-width: 560px) {
   .topbar-inner { flex-direction: column; align-items: flex-start; }
   .title-block { text-align: left; }
+  .main-nav a { padding: 7px 12px; font-size: 11.5px; }
 }
 
 .wrap {
