@@ -104,7 +104,10 @@
   {% else %}
   <section class="panel">
     <div class="checklist-progress">Пункт {{ question_index + 1 }} из {{ total }}</div>
-    <h2 class="checklist-question">{{ question }}</h2>
+    {% if question.title %}
+    <h2 class="checklist-question-title">{{ question.title }}</h2>
+    {% endif %}
+    <p class="checklist-question">{{ question.text }}</p>
 
     <div class="checklist-answer-buttons" id="answer-buttons">
       <form action="{{ url_for('team_checklist_answer', checklist_id=checklist.id) }}" method="post">

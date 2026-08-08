@@ -997,12 +997,23 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   letter-spacing: 0.06em;
   margin-bottom: 8px;
 }
-.checklist-question {
-  font-size: 19px;
-  font-weight: 700;
+/* The short title (e.g. "Уровень масла") is the primary thing a captain
+   reads — big and bold, so it's understood before the full instructions
+   below it even register. Questions without a title (the "post" checklist
+   is already one-liners) skip straight to .checklist-question alone. */
+.checklist-question-title {
+  font-size: 27px;
+  font-weight: 800;
   color: var(--ink);
+  margin: 0 0 10px 0;
+  line-height: 1.2;
+}
+.checklist-question {
+  font-size: 15.5px;
+  font-weight: 400;
+  color: var(--ink-soft);
   margin: 0 0 24px 0;
-  line-height: 1.35;
+  line-height: 1.5;
 }
 .checklist-answer-buttons {
   display: flex;
