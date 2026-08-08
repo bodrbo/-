@@ -251,6 +251,63 @@
     </div>
   </details>
 
+  {% if can_have_tasks %}
+  <details class="panel collapsible-panel">
+    <summary>
+      <span>Мои задачи</span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
+      {% if my_tasks %}
+      {% for task in my_tasks %}
+      <div class="task-card">
+        <div>
+          <strong>{{ task.defect_boat }}</strong> — {{ task.defect_description }}
+        </div>
+        <div class="hint" style="margin:0;">
+          Ставка: {{ task.rate|float|round(2) }} ₽ · Нормочасы: {{ task.norm_hours|float|round(2) }}
+        </div>
+        {% if task.assignment_status == 'pending' %}
+        <div class="task-card-actions">
+          <form action="{{ url_for('team_task_respond', assignment_id=task.id) }}" method="post">
+            <input type="hidden" name="response" value="accepted">
+            <button type="submit" class="btn-accept">Принять</button>
+          </form>
+          <form action="{{ url_for('team_task_respond', assignment_id=task.id) }}" method="post">
+            <input type="hidden" name="response" value="rejected">
+            <button type="submit" class="btn-reject">Отклонить</button>
+          </form>
+        </div>
+        {% elif task.assignment_status == 'accepted' %}
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span class="status-badge status-defect-{{ task.defect_status }}">
+            {{ defect_statuses|selectattr('value', 'equalto', task.defect_status)|map(attribute='label')|first }}
+          </span>
+          <form action="{{ url_for('team_task_set_status', assignment_id=task.id) }}"
+                method="post" class="status-select-form">
+            <select name="status" onchange="this.form.submit()">
+              {% for s in defect_statuses %}
+              <option value="{{ s.value }}" {{ 'selected' if task.defect_status == s.value }}>{{ s.label }}</option>
+              {% endfor %}
+            </select>
+          </form>
+        </div>
+        {% else %}
+        <span class="hint" style="margin:0;">Отклонена</span>
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% else %}
+      <div class="empty-state">
+        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        <div class="t">Задач пока нет</div>
+        <div class="s">Порученные капитану или тюнингмэну задачи появятся здесь.</div>
+      </div>
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+
   {% if is_captain %}
   <div id="photo-modal" class="photo-modal hidden" onclick="if (event.target === this) closePhotoModal();">
     <div class="photo-modal-inner">

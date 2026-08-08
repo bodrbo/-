@@ -683,6 +683,18 @@ DEFECT_STATUSES = [
 ]
 DEFAULT_DEFECT_STATUS = "new"
 
+ASSIGNMENT_STATUSES = [
+    {"value": "pending", "label": "Ожидает ответа"},
+    {"value": "accepted", "label": "Принята"},
+    {"value": "rejected", "label": "Отклонена"},
+]
+# Positions eligible to be handed a defect as a paid task — captains know the
+# boats, tuning-center staff do the actual mechanical repairs.
+DEFECT_ASSIGNABLE_POSITIONS = ("Капитан", "Тюнингмэн")
+# Payroll work_type used for the entries row created when a captain/tuningman
+# marks their accepted task "Устранена" — see team_task_set_status.
+DEFECT_TASK_WORK_TYPE = "Устранение неисправности"
+
 
 def order_status_label(value):
     for s in ORDER_STATUSES:
@@ -940,6 +952,21 @@ def init_db():
             p256dh TEXT NOT NULL,
             auth TEXT NOT NULL,
             created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS defect_assignments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            defect_id INTEGER NOT NULL,
+            employee_name TEXT NOT NULL,
+            rate REAL NOT NULL,
+            norm_hours REAL NOT NULL,
+            assignment_status TEXT NOT NULL DEFAULT 'pending',
+            assigned_at TEXT NOT NULL,
+            responded_at TEXT,
+            entry_id INTEGER
         )
         """
     )
@@ -2352,15 +2379,32 @@ def fleet_boat(boat_index):
         "SELECT * FROM boat_documents WHERE boat = ? ORDER BY uploaded_at DESC, id DESC",
         (boat,),
     ).fetchall()
-    defects = db.execute(
-        "SELECT * FROM boat_defects WHERE boat = ? ORDER BY reported_at DESC, id DESC",
-        (boat,),
-    ).fetchall()
+    defects = []
+    for row in db.execute(
+        "SELECT * FROM boat_defects WHERE boat = ? ORDER BY reported_at DESC, id DESC", (boat,)
+    ).fetchall():
+        defect = dict(row)
+        assignment_row = db.execute(
+            "SELECT * FROM defect_assignments WHERE defect_id = ? ORDER BY id DESC LIMIT 1",
+            (defect["id"],),
+        ).fetchone()
+        assignment = dict(assignment_row) if assignment_row else None
+        defect["assignment"] = assignment
+        # "Поручить задачу" is only offered when nobody is actively on it —
+        # no assignment yet, the last one was declined, or the last one was
+        # already paid out (defect resolved) and this is effectively history.
+        defect["can_assign"] = (
+            assignment is None
+            or assignment["assignment_status"] == "rejected"
+            or (assignment["assignment_status"] == "accepted" and defect["status"] == "resolved")
+        )
+        defects.append(defect)
     open_defects_count = sum(1 for d in defects if d["status"] != "resolved")
+    assignable_employees = _employees_with_any_position(db, DEFECT_ASSIGNABLE_POSITIONS)
     return render_template(
         "fleet_boat.html", boat=boat, boat_index=boat_index, checklists=checklists,
         documents=documents, defects=defects, defect_statuses=DEFECT_STATUSES,
-        open_defects_count=open_defects_count,
+        open_defects_count=open_defects_count, assignable_employees=assignable_employees,
         checklist_type_labels=CHECKLIST_TYPE_LABELS, active_page="fleet",
     )
 
@@ -2440,6 +2484,44 @@ def set_boat_defect_status(boat_index, defect_id):
         db.execute(
             "UPDATE boat_defects SET status = ?, updated_at = ? WHERE id = ? AND boat = ?",
             (status, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), defect_id, boat),
+        )
+        db.commit()
+    return redirect(url_for("fleet_boat", boat_index=boat_index))
+
+
+@app.route("/fleet/<int:boat_index>/defects/<int:defect_id>/assign", methods=["POST"])
+@admin_login_required
+def assign_defect(boat_index, defect_id):
+    boat = _boat_by_index(boat_index)
+    if boat is None:
+        return redirect(url_for("fleet_index"))
+    db = get_db()
+    defect = db.execute(
+        "SELECT * FROM boat_defects WHERE id = ? AND boat = ?", (defect_id, boat)
+    ).fetchone()
+    if defect is None:
+        return redirect(url_for("fleet_boat", boat_index=boat_index))
+
+    employee_name = request.form.get("employee_name", "").strip()
+    rate_raw = request.form.get("rate", "").strip().replace(",", ".")
+    hours_raw = request.form.get("norm_hours", "").strip().replace(",", ".")
+
+    valid_employees = _employees_with_any_position(db, DEFECT_ASSIGNABLE_POSITIONS)
+    rate = hours = None
+    try:
+        rate = float(rate_raw)
+    except ValueError:
+        pass
+    try:
+        hours = float(hours_raw)
+    except ValueError:
+        pass
+
+    if employee_name in valid_employees and rate is not None and rate > 0 and hours is not None and hours > 0:
+        db.execute(
+            "INSERT INTO defect_assignments (defect_id, employee_name, rate, norm_hours, "
+            "assignment_status, assigned_at) VALUES (?, ?, ?, ?, 'pending', ?)",
+            (defect_id, employee_name, rate, hours, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
         )
         db.commit()
     return redirect(url_for("fleet_boat", boat_index=boat_index))
@@ -4611,6 +4693,17 @@ def _employee_has_position(db, employee_name, position):
     ).fetchone() is not None
 
 
+def _employees_with_any_position(db, positions):
+    placeholders = ",".join("?" * len(positions))
+    rows = db.execute(
+        f"SELECT DISTINCT employees.name FROM employees "
+        f"JOIN employee_positions ON employee_positions.employee_id = employees.id "
+        f"WHERE employee_positions.position IN ({placeholders}) ORDER BY employees.name",
+        positions,
+    ).fetchall()
+    return [r["name"] for r in rows]
+
+
 def team_login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -4715,6 +4808,23 @@ def team_dashboard():
         ).fetchall()
         diploma_url = find_diploma_url(session.get("team_username"))
 
+    # "Мои задачи" — defects a captain/tuningman has been handed as paid
+    # work. Anyone eligible to be assigned one sees the module, whether or
+    # not they currently have any (matches the other modules always
+    # showing, just possibly empty).
+    can_have_tasks = any(
+        _employee_has_position(db, employee_name, p) for p in DEFECT_ASSIGNABLE_POSITIONS
+    )
+    my_tasks = []
+    if can_have_tasks:
+        my_tasks = db.execute(
+            "SELECT da.*, bd.boat AS defect_boat, bd.description AS defect_description, "
+            "bd.status AS defect_status "
+            "FROM defect_assignments da JOIN boat_defects bd ON bd.id = da.defect_id "
+            "WHERE da.employee_name = ? ORDER BY da.assigned_at DESC, da.id DESC",
+            (employee_name,),
+        ).fetchall()
+
     return render_template(
         "team_dashboard.html",
         employee_name=employee_name,
@@ -4727,6 +4837,7 @@ def team_dashboard():
         avatar_url=find_avatar_url(session.get("team_username")),
         boats=BOATS, boat_index=boat_index, boat_documents=boat_documents, diploma_url=diploma_url,
         income_open="week" in request.args, documents_open="boat_index" in request.args,
+        can_have_tasks=can_have_tasks, my_tasks=my_tasks, defect_statuses=DEFECT_STATUSES,
     )
 
 
@@ -4744,6 +4855,70 @@ def team_download_boat_document(doc_id):
     return send_from_directory(
         docs_dir, doc["filename"], download_name=doc["original_filename"],
     )
+
+
+@app.route("/team/tasks/<int:assignment_id>/respond", methods=["POST"])
+@team_login_required
+def team_task_respond(assignment_id):
+    db = get_db()
+    employee_name = session.get("team_employee_name")
+    assignment = db.execute(
+        "SELECT * FROM defect_assignments WHERE id = ? AND employee_name = ?",
+        (assignment_id, employee_name),
+    ).fetchone()
+    if assignment is None or assignment["assignment_status"] != "pending":
+        return redirect(url_for("team_dashboard"))
+    response = request.form.get("response", "").strip()
+    if response in ("accepted", "rejected"):
+        db.execute(
+            "UPDATE defect_assignments SET assignment_status = ?, responded_at = ? WHERE id = ?",
+            (response, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), assignment_id),
+        )
+        db.commit()
+    return redirect(url_for("team_dashboard"))
+
+
+@app.route("/team/tasks/<int:assignment_id>/status", methods=["POST"])
+@team_login_required
+def team_task_set_status(assignment_id):
+    """The captain/tuningman moves their accepted task through the same
+    Новая/В работе/Устранена statuses the admin sees on the defect itself
+    (this writes straight to boat_defects.status — one shared field, so
+    there's nothing to keep in sync). Marking it "resolved" for the first
+    time also pays out the agreed rate × norm-hours as a real payroll entry,
+    guarded by entry_id so toggling the status back and forth can't pay
+    twice."""
+    db = get_db()
+    employee_name = session.get("team_employee_name")
+    assignment = db.execute(
+        "SELECT * FROM defect_assignments WHERE id = ? AND employee_name = ?",
+        (assignment_id, employee_name),
+    ).fetchone()
+    if assignment is None or assignment["assignment_status"] != "accepted":
+        return redirect(url_for("team_dashboard"))
+    status = request.form.get("status", "").strip()
+    if status not in [s["value"] for s in DEFECT_STATUSES]:
+        return redirect(url_for("team_dashboard"))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "UPDATE boat_defects SET status = ?, updated_at = ? WHERE id = ?",
+        (status, now, assignment["defect_id"]),
+    )
+    if status == "resolved" and not assignment["entry_id"]:
+        amount = assignment["rate"] * assignment["norm_hours"]
+        cur = db.execute(
+            "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (employee_name, DEFECT_TASK_WORK_TYPE, assignment["rate"], assignment["norm_hours"],
+             amount, dt.date.today().isoformat(), now),
+        )
+        db.execute(
+            "UPDATE defect_assignments SET entry_id = ? WHERE id = ?",
+            (cur.lastrowid, assignment_id),
+        )
+    db.commit()
+    return redirect(url_for("team_dashboard"))
 
 
 @app.route("/team/checklist/start/<checklist_type>", methods=["GET", "POST"])
