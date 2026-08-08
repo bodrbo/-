@@ -1577,8 +1577,12 @@ table.records tr.row-expense td.amount { color: var(--danger); }
 
 .table-scroll { overflow-x: auto; }
 
-/* --- import (Yclients) section, collapsed into the trips page --- */
-.import-panel > summary {
+/* --- generic collapsible <details class="panel ..."> section: the
+   Yclients import on the trips page, and anything else (e.g. Флот →
+   Неисправности) that wants a whole panel collapsed by default instead of
+   dumping its contents on the page right away. --- */
+.import-panel > summary,
+.collapsible-panel > summary {
   list-style: none;
   cursor: pointer;
   display: flex;
@@ -1588,8 +1592,10 @@ table.records tr.row-expense td.amount { color: var(--danger); }
   font-size: 18px;
   color: var(--ink);
 }
-.import-panel > summary::-webkit-details-marker { display: none; }
-.import-panel > summary .chev {
+.import-panel > summary::-webkit-details-marker,
+.collapsible-panel > summary::-webkit-details-marker { display: none; }
+.import-panel > summary .chev,
+.collapsible-panel > summary .chev {
   margin-left: auto;
   width: 9px;
   height: 9px;
@@ -1599,8 +1605,10 @@ table.records tr.row-expense td.amount { color: var(--danger); }
   transition: transform 0.2s ease;
   flex: none;
 }
-.import-panel[open] > summary .chev { transform: rotate(45deg); }
-.import-panel .badge {
+.import-panel[open] > summary .chev,
+.collapsible-panel[open] > summary .chev { transform: rotate(45deg); }
+.import-panel .badge,
+.collapsible-panel .badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1614,7 +1622,8 @@ table.records tr.row-expense td.amount { color: var(--danger); }
   font-size: 11.5px;
   font-weight: 700;
 }
-.import-body {
+.import-body,
+.collapsible-body {
   margin-top: 20px;
   padding-top: 20px;
   border-top: 1px solid var(--hairline-soft);

@@ -2217,9 +2217,11 @@ def fleet_boat(boat_index):
         "SELECT * FROM boat_defects WHERE boat = ? ORDER BY reported_at DESC, id DESC",
         (boat,),
     ).fetchall()
+    open_defects_count = sum(1 for d in defects if d["status"] != "resolved")
     return render_template(
         "fleet_boat.html", boat=boat, boat_index=boat_index, checklists=checklists,
         documents=documents, defects=defects, defect_statuses=DEFECT_STATUSES,
+        open_defects_count=open_defects_count,
         checklist_type_labels=CHECKLIST_TYPE_LABELS, active_page="fleet",
     )
 
