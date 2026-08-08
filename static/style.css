@@ -1631,8 +1631,9 @@ table.records tr.row-expense td.amount { color: var(--danger); }
   flex-direction: column;
   gap: 20px;
 }
-.import-body h3 {
-  margin: 0 0 4px;
+.import-body h3,
+.collapsible-body h3 {
+  margin: 0 0 10px;
   font-size: 15px;
   font-weight: 700;
   color: var(--ink);

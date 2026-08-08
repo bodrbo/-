@@ -4551,6 +4551,26 @@ def team_dashboard():
 
     is_captain = _employee_has_position(db, employee_name, "Капитан")
 
+    # Boat documents + diploma, folded in here (used to be their own page)
+    # so the whole dashboard is one set of collapsible modules — only
+    # captains have any use for either, and only queried for them.
+    boat_index = 0
+    boat_documents = []
+    diploma_url = None
+    if is_captain:
+        try:
+            boat_index = int(request.args.get("boat_index", "0"))
+        except ValueError:
+            boat_index = 0
+        if not (0 <= boat_index < len(BOATS)):
+            boat_index = 0
+        boat = BOATS[boat_index]["name"]
+        boat_documents = db.execute(
+            "SELECT * FROM boat_documents WHERE boat = ? ORDER BY uploaded_at DESC, id DESC",
+            (boat,),
+        ).fetchall()
+        diploma_url = find_diploma_url(session.get("team_username"))
+
     return render_template(
         "team_dashboard.html",
         employee_name=employee_name,
@@ -4561,33 +4581,8 @@ def team_dashboard():
         is_captain=is_captain,
         is_paid=is_paid,
         avatar_url=find_avatar_url(session.get("team_username")),
-    )
-
-
-@app.route("/team/documents")
-@team_login_required
-def team_documents():
-    db = get_db()
-    employee_name = session.get("team_employee_name")
-    if not _employee_has_position(db, employee_name, "Капитан"):
-        return redirect(url_for("team_dashboard"))
-
-    try:
-        boat_index = int(request.args.get("boat_index", "0"))
-    except ValueError:
-        boat_index = 0
-    if not (0 <= boat_index < len(BOATS)):
-        boat_index = 0
-    boat = BOATS[boat_index]["name"]
-
-    documents = db.execute(
-        "SELECT * FROM boat_documents WHERE boat = ? ORDER BY uploaded_at DESC, id DESC",
-        (boat,),
-    ).fetchall()
-
-    return render_template(
-        "team_documents.html", boats=BOATS, boat_index=boat_index, boat=boat,
-        documents=documents, diploma_url=find_diploma_url(session.get("team_username")),
+        boats=BOATS, boat_index=boat_index, boat_documents=boat_documents, diploma_url=diploma_url,
+        income_open="week" in request.args, documents_open="boat_index" in request.args,
     )
 
 
@@ -4600,7 +4595,7 @@ def team_download_boat_document(doc_id):
         return redirect(url_for("team_dashboard"))
     doc = db.execute("SELECT * FROM boat_documents WHERE id = ?", (doc_id,)).fetchone()
     if doc is None:
-        return redirect(url_for("team_documents"))
+        return redirect(url_for("team_dashboard"))
     docs_dir = os.path.join(app.static_folder, "boat_documents")
     return send_from_directory(
         docs_dir, doc["filename"], download_name=doc["original_filename"],

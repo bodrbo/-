@@ -63,108 +63,314 @@
   </div>
 
   {% if is_captain %}
-  <section class="panel">
-    <h2>Чек-листы осмотра лодки</h2>
-    <div class="checklist-buttons">
-      <a href="{{ url_for('team_checklist_start', checklist_type='pre') }}" class="checklist-btn">
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="4" y="3" width="12" height="15" rx="1.6"/>
-          <path d="M7.5 3V2.3a1 1 0 011-1h3a1 1 0 011 1V3"/>
-          <path d="M7 9.5l1.8 1.8L13 7.5"/>
-          <path d="M7 14.5h6"/>
-        </svg>
-        <span>Чек-лист «предрейсовый осмотр»</span>
-      </a>
-      <a href="{{ url_for('team_checklist_start', checklist_type='post') }}" class="checklist-btn">
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="4" y="3" width="12" height="15" rx="1.6"/>
-          <path d="M7.5 3V2.3a1 1 0 011-1h3a1 1 0 011 1V3"/>
-          <path d="M7 8.5h6M7 11.5h6"/>
-          <path d="M7.5 14.3l1.4 1.4L11.8 13"/>
-        </svg>
-        <span>Чек-лист «послерейсовый осмотр»</span>
-      </a>
-      <a href="{{ url_for('team_documents') }}" class="checklist-btn">
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M5 2.5h7l3 3V17a.5.5 0 01-.5.5h-9a.5.5 0 01-.5-.5V3a.5.5 0 01.5-.5z"/>
-          <path d="M12 2.5V5.5a.5.5 0 00.5.5H15.5"/>
-          <path d="M7 10.5h6M7 13.5h6"/>
-        </svg>
-        <span>Мои документы</span>
-      </a>
+  <details class="panel collapsible-panel">
+    <summary>
+      <span>Чек-листы осмотра лодки</span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
+      <div class="checklist-buttons">
+        <a href="{{ url_for('team_checklist_start', checklist_type='pre') }}" class="checklist-btn">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="3" width="12" height="15" rx="1.6"/>
+            <path d="M7.5 3V2.3a1 1 0 011-1h3a1 1 0 011 1V3"/>
+            <path d="M7 9.5l1.8 1.8L13 7.5"/>
+            <path d="M7 14.5h6"/>
+          </svg>
+          <span>Чек-лист «предрейсовый осмотр»</span>
+        </a>
+        <a href="{{ url_for('team_checklist_start', checklist_type='post') }}" class="checklist-btn">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="3" width="12" height="15" rx="1.6"/>
+            <path d="M7.5 3V2.3a1 1 0 011-1h3a1 1 0 011 1V3"/>
+            <path d="M7 8.5h6M7 11.5h6"/>
+            <path d="M7.5 14.3l1.4 1.4L11.8 13"/>
+          </svg>
+          <span>Чек-лист «послерейсовый осмотр»</span>
+        </a>
+      </div>
     </div>
-  </section>
+  </details>
+
+  <details class="panel collapsible-panel"{{ ' open' if documents_open }}>
+    <summary>
+      <span>Мои документы</span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
+      <div class="fleet-sub-grid">
+
+        <section>
+          <h3>Документы на катера</h3>
+          <form method="get" action="{{ url_for('team_dashboard') }}" class="filter-form" style="margin-bottom:16px;">
+            <input type="hidden" name="week" value="{{ selected_week }}">
+            <div class="field">
+              <label for="boat_index">Катер</label>
+              <select id="boat_index" name="boat_index" onchange="this.form.submit()">
+                {% for b in boats %}
+                <option value="{{ loop.index0 }}" {{ 'selected' if loop.index0 == boat_index }}>{{ b.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </form>
+
+          {% if boat_documents %}
+          <div class="table-scroll">
+            <table class="records">
+              <thead>
+                <tr>
+                  <th>Документ</th>
+                  <th>Загружен</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for doc in boat_documents %}
+                {% set ext = doc.filename.rsplit('.', 1)[-1].lower() %}
+                {% set viewable = ext in ('jpg', 'jpeg', 'png', 'webp', 'pdf') %}
+                <tr>
+                  <td>
+                    <a href="{{ url_for('team_download_boat_document', doc_id=doc.id) }}" class="term">{{ doc.title }}</a>
+                  </td>
+                  <td class="muted">{{ doc.uploaded_at[:10]|ru_date }}</td>
+                  <td class="row-actions">
+                    {% if viewable %}
+                    <button type="button" class="icon-btn" title="Открыть"
+                            onclick='openDocModal({{ url_for("team_download_boat_document", doc_id=doc.id)|tojson }}, {{ ext|tojson }})'>
+                      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1.6 10S4.8 4.5 10 4.5 18.4 10 18.4 10 15.2 15.5 10 15.5 1.6 10 1.6 10z"/>
+                        <circle cx="10" cy="10" r="2.4"/>
+                      </svg>
+                    </button>
+                    {% endif %}
+                    <a href="{{ url_for('team_download_boat_document', doc_id=doc.id) }}" class="icon-btn" title="Скачать">
+                      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M10 3v9.5M6.2 9.3l3.8 3.7 3.8-3.7"/>
+                        <path d="M3.5 15v1a1.5 1.5 0 001.5 1.5h10a1.5 1.5 0 001.5-1.5v-1"/>
+                      </svg>
+                    </a>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="empty-state">
+            <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+            <div class="t">Документов пока нет</div>
+            <div class="s">Администратор ещё не загрузил документы по этому катеру в разделе «Флот».</div>
+          </div>
+          {% endif %}
+        </section>
+
+        <section>
+          <h3>Диплом судоводителя</h3>
+          {% if diploma_url %}
+          <button type="button" class="btn-primary" onclick='openPhotoModal([{"url": {{ diploma_url|tojson }}, "comment": null}])'>
+            Открыть диплом
+          </button>
+          {% else %}
+          <p class="hint">Диплом ещё не загружен. Обратитесь к администратору.</p>
+          {% endif %}
+        </section>
+
+      </div>
+    </div>
+  </details>
   {% endif %}
 
-  <section class="panel filter-panel">
-    <h2>Период</h2>
-    <form action="{{ url_for('team_dashboard') }}" method="get" class="filter-form">
-      <div class="field">
-        <label for="week">Неделя</label>
-        <select id="week" name="week" onchange="this.form.submit()">
-          <option value="all" {{ 'selected' if selected_week == 'all' }}>Все периоды</option>
-          {% for w in weeks %}
-          <option value="{{ w.key }}" {{ 'selected' if selected_week == w.key }}>
-            {{ w.label }}{{ ' (текущая)' if w.is_current }}
-          </option>
-          {% endfor %}
-        </select>
-      </div>
-    </form>
-  </section>
+  <details class="panel collapsible-panel"{{ ' open' if income_open }}>
+    <summary>
+      <span>Мой доход</span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
+      <form action="{{ url_for('team_dashboard') }}" method="get" class="filter-form">
+        {% if is_captain %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
+        <div class="field">
+          <label for="week">Неделя</label>
+          <select id="week" name="week" onchange="this.form.submit()">
+            <option value="all" {{ 'selected' if selected_week == 'all' }}>Все периоды</option>
+            {% for w in weeks %}
+            <option value="{{ w.key }}" {{ 'selected' if selected_week == w.key }}>
+              {{ w.label }}{{ ' (текущая)' if w.is_current }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+      </form>
 
-  <div class="totals-grid">
-    <div class="panel total-card total-card-grand">
-      <span class="k">Заработано за период</span>
-      <span class="v">{{ total|money }} ₽</span>
+      <div class="totals-grid">
+        <div class="panel total-card total-card-grand">
+          <span class="k">Заработано за период</span>
+          <span class="v">{{ total|money }} ₽</span>
+        </div>
+      </div>
+      {% if selected_week != 'all' %}
+      <p class="hint" style="margin:-14px 0 22px;">
+        Статус за эту неделю:
+        {% if is_paid %}<strong style="color:var(--success);">оплачено</strong>
+        {% else %}<strong style="color:var(--muted);">ожидает выплаты</strong>{% endif %}
+      </p>
+      {% endif %}
+
+      <h3>Записи за период</h3>
+      {% if entries %}
+      <div class="table-scroll">
+        <table class="records">
+          <thead>
+            <tr>
+              <th>Дата</th>
+              <th>Вид работы</th>
+              <th>Часы / кол-во</th>
+              <th>Ставка, ₽</th>
+              <th>Сумма, ₽</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for e in entries %}
+            <tr>
+              <td class="muted">{{ e.work_date|ru_date }}{% if e.trip_time %} · {{ e.trip_time }}{% endif %}</td>
+              <td>{{ e.work_type }}</td>
+              <td>{{ e.quantity|float|round(2) }}</td>
+              <td>{{ e.rate|float|round(2) }}</td>
+              <td class="amount">{{ e.amount|money }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        <div class="t">За выбранный период записей нет</div>
+        <div class="s">Смените период в фильтре выше.</div>
+      </div>
+      {% endif %}
+    </div>
+  </details>
+
+  {% if is_captain %}
+  <div id="photo-modal" class="photo-modal hidden" onclick="if (event.target === this) closePhotoModal();">
+    <div class="photo-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closePhotoModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <button type="button" id="photo-modal-prev" class="photo-modal-nav photo-modal-nav-prev hidden" onclick="showPrevPhoto()" aria-label="Предыдущее фото">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5l-6 5 6 5"/>
+        </svg>
+      </button>
+      <button type="button" id="photo-modal-next" class="photo-modal-nav photo-modal-nav-next hidden" onclick="showNextPhoto()" aria-label="Следующее фото">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 5l6 5-6 5"/>
+        </svg>
+      </button>
+      <span id="photo-modal-counter" class="photo-modal-counter hidden"></span>
+      <img id="photo-modal-img" src="" alt="Диплом судоводителя">
+      <p id="photo-modal-comment" class="photo-modal-comment hidden"></p>
     </div>
   </div>
-  {% if selected_week != 'all' %}
-  <p class="hint" style="margin:-14px 0 22px;">
-    Статус за эту неделю:
-    {% if is_paid %}<strong style="color:var(--success);">оплачено</strong>
-    {% else %}<strong style="color:var(--muted);">ожидает выплаты</strong>{% endif %}
-  </p>
-  {% endif %}
 
-  <section class="panel">
-    <h2>Записи за период</h2>
-    {% if entries %}
-    <div class="table-scroll">
-      <table class="records">
-        <thead>
-          <tr>
-            <th>Дата</th>
-            <th>Вид работы</th>
-            <th>Часы / кол-во</th>
-            <th>Ставка, ₽</th>
-            <th>Сумма, ₽</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for e in entries %}
-          <tr>
-            <td class="muted">{{ e.work_date|ru_date }}{% if e.trip_time %} · {{ e.trip_time }}{% endif %}</td>
-            <td>{{ e.work_type }}</td>
-            <td>{{ e.quantity|float|round(2) }}</td>
-            <td>{{ e.rate|float|round(2) }}</td>
-            <td class="amount">{{ e.amount|money }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  <div id="doc-modal" class="photo-modal hidden" onclick="if (event.target === this) closeDocModal();">
+    <div class="photo-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closeDocModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <iframe id="doc-modal-frame" class="doc-modal-frame" src="" title="Документ"></iframe>
     </div>
-    {% else %}
-    <div class="empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">За выбранный период записей нет</div>
-      <div class="s">Смените период в фильтре выше.</div>
-    </div>
-    {% endif %}
-  </section>
+  </div>
+  {% endif %}
 
 </main>
 
+{% if is_captain %}
+<script>
+// Images reuse the existing photo modal (openPhotoModal below); a PDF can't
+// go in an <img>, so it gets its own tiny iframe-based modal instead — no
+// modal for .doc/.docx, browsers can't render those inline at all, so those
+// stay plain downloads (see the `viewable` check in the template).
+function openDocModal(url, ext) {
+  if (ext === 'pdf') {
+    document.getElementById('doc-modal-frame').src = url;
+    document.getElementById('doc-modal').classList.remove('hidden');
+  } else {
+    openPhotoModal([{url: url, comment: null}]);
+  }
+}
+
+function closeDocModal() {
+  document.getElementById('doc-modal').classList.add('hidden');
+  document.getElementById('doc-modal-frame').src = '';
+}
+
+var photoModalPhotos = [];
+var photoModalIndex = 0;
+
+function openPhotoModal(photos) {
+  photoModalPhotos = photos || [];
+  photoModalIndex = 0;
+  renderPhotoModal();
+  document.getElementById('photo-modal').classList.remove('hidden');
+}
+
+function renderPhotoModal() {
+  var photo = photoModalPhotos[photoModalIndex];
+  if (!photo) return;
+  document.getElementById('photo-modal-img').src = photo.url;
+
+  var commentEl = document.getElementById('photo-modal-comment');
+  if (photo.comment) {
+    commentEl.textContent = photo.comment;
+    commentEl.classList.remove('hidden');
+  } else {
+    commentEl.classList.add('hidden');
+  }
+
+  var multiple = photoModalPhotos.length > 1;
+  document.getElementById('photo-modal-prev').classList.toggle('hidden', !multiple);
+  document.getElementById('photo-modal-next').classList.toggle('hidden', !multiple);
+  var counterEl = document.getElementById('photo-modal-counter');
+  if (multiple) {
+    counterEl.textContent = (photoModalIndex + 1) + ' / ' + photoModalPhotos.length;
+    counterEl.classList.remove('hidden');
+  } else {
+    counterEl.classList.add('hidden');
+  }
+}
+
+function showPrevPhoto() {
+  photoModalIndex = (photoModalIndex - 1 + photoModalPhotos.length) % photoModalPhotos.length;
+  renderPhotoModal();
+}
+
+function showNextPhoto() {
+  photoModalIndex = (photoModalIndex + 1) % photoModalPhotos.length;
+  renderPhotoModal();
+}
+
+function closePhotoModal() {
+  document.getElementById('photo-modal').classList.add('hidden');
+  document.getElementById('photo-modal-img').src = '';
+  photoModalPhotos = [];
+}
+
+document.addEventListener('keydown', function (e) {
+  var modalOpen = !document.getElementById('photo-modal').classList.contains('hidden');
+  if (modalOpen && e.key === 'ArrowLeft') showPrevPhoto();
+  if (modalOpen && e.key === 'ArrowRight') showNextPhoto();
+  if (e.key === 'Escape') {
+    closePhotoModal();
+    closeDocModal();
+  }
+});
+</script>
+{% endif %}
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 
 </body>
