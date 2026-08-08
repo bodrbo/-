@@ -196,6 +196,30 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 TELEGRAM_APPROVAL_CHAT_ID = os.environ.get("TELEGRAM_APPROVAL_CHAT_ID") or TELEGRAM_CHAT_ID
 
+# ---------------------------------------------------------------------
+# Веб-пуши — тот же набор событий, что уходит в Telegram выше, но прямо на
+# экран блокировки браузера/телефона у тех, кто нажал «Включить уведомления»
+# в шапке. VAPID_PRIVATE_KEY/VAPID_PUBLIC_KEY — не сторонний секрет, а
+# просто пара ключей, которую это же приложение сгенерировало для подписи
+# пушей; сгенерировать новую пару можно так:
+#   python3 -c "
+#   from py_vapid import Vapid02
+#   from cryptography.hazmat.primitives import serialization
+#   import base64
+#   v = Vapid02(); v.generate_keys()
+#   priv = v.private_key.private_numbers().private_value.to_bytes(32, 'big')
+#   pub = v.public_key.public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+#   print('VAPID_PRIVATE_KEY=' + base64.urlsafe_b64encode(priv).decode().rstrip('='))
+#   print('VAPID_PUBLIC_KEY=' + base64.urlsafe_b64encode(pub).decode().rstrip('='))
+#   "
+# VAPID_CLAIMS_EMAIL is a "mailto:" contact address push services may use to
+# reach the sender if something's wrong — any real inbox works.
+# Without all three, push notifications are just silently skipped.
+# ---------------------------------------------------------------------
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY")
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY")
+VAPID_CLAIMS_EMAIL = os.environ.get("VAPID_CLAIMS_EMAIL")
+
 
 def _log_telegram(message):
     # Explicit stderr + flush: Passenger's error log only reliably captures
@@ -269,6 +293,57 @@ def send_telegram_photo(photo_path, caption=None, chat_id=None):
         status = f"error: {e}"
         _log_telegram(f"Telegram photo {status}")
         return status
+
+
+def send_push_notification(title, body, role="admin", url="/"):
+    """Same fire-and-forget contract as send_telegram_notification — a push
+    failure must never break the request that triggered it. Sent to every
+    subscription registered for `role`; a subscription the push service
+    reports as gone (404/410) is pruned right away, since a browser that
+    dropped it will never bring it back on its own.
+
+    pywebpush is imported lazily (see reportlab elsewhere in this file for
+    why): it's in requirements.txt, but a host that hasn't reinstalled deps
+    yet should degrade to "skipped", not break the request."""
+    if not (VAPID_PRIVATE_KEY and VAPID_PUBLIC_KEY and VAPID_CLAIMS_EMAIL):
+        status = "skipped: VAPID keys not set"
+        _log_telegram(f"Push {status}")
+        return status
+    try:
+        from pywebpush import webpush, WebPushException
+    except ImportError:
+        status = "skipped: pywebpush not installed"
+        _log_telegram(f"Push {status}")
+        return status
+
+    db = get_db()
+    subs = db.execute("SELECT * FROM push_subscriptions WHERE role = ?", (role,)).fetchall()
+    if not subs:
+        return "skipped: no subscriptions"
+
+    sent = 0
+    for sub in subs:
+        try:
+            webpush(
+                subscription_info={
+                    "endpoint": sub["endpoint"],
+                    "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]},
+                },
+                data=json.dumps({"title": title, "body": body, "url": url}),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims={"sub": VAPID_CLAIMS_EMAIL},
+                timeout=10,
+            )
+            sent += 1
+        except WebPushException as e:
+            status_code = e.response.status_code if e.response is not None else None
+            if status_code in (404, 410):
+                db.execute("DELETE FROM push_subscriptions WHERE id = ?", (sub["id"],))
+            _log_telegram(f"Push failed ({status_code}): {e}")
+        except Exception as e:  # pywebpush can also raise on malformed keys, network errors, etc.
+            _log_telegram(f"Push error: {e}")
+    db.commit()
+    return f"sent {sent}/{len(subs)}"
 
 
 def tbank_configured():
@@ -855,6 +930,19 @@ def init_db():
                 "status, reported_at, updated_at) VALUES (?, ?, ?, ?, ?, 'new', ?, ?)",
                 (boat, checklist_id, answer_id, description, employee_name, created_at, now_str),
             )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            role TEXT NOT NULL,
+            endpoint TEXT NOT NULL UNIQUE,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
 
     conn.execute(
         """
@@ -1482,6 +1570,57 @@ def admin_login():
 def admin_logout():
     session.clear()
     return redirect(url_for("admin_login"))
+
+
+@app.route("/push/vapid-public-key")
+@admin_login_required
+def push_vapid_public_key():
+    return VAPID_PUBLIC_KEY or "", 200, {"Content-Type": "text/plain"}
+
+
+@app.route("/push/subscribe", methods=["POST"])
+@admin_login_required
+def push_subscribe():
+    data = request.get_json(silent=True) or {}
+    endpoint = data.get("endpoint", "").strip()
+    keys = data.get("keys") or {}
+    p256dh = keys.get("p256dh", "").strip()
+    auth = keys.get("auth", "").strip()
+    if not (endpoint and p256dh and auth):
+        return jsonify({"ok": False, "error": "incomplete subscription"}), 400
+    db = get_db()
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    # Plain select-then-insert/update, not "ON CONFLICT ... DO UPDATE" — that
+    # SQLite syntax needs 3.24+, which this host's Python isn't necessarily
+    # built against (see the team_accounts seeding fix elsewhere in init_db).
+    existing = db.execute(
+        "SELECT id FROM push_subscriptions WHERE endpoint = ?", (endpoint,)
+    ).fetchone()
+    if existing is None:
+        db.execute(
+            "INSERT INTO push_subscriptions (role, endpoint, p256dh, auth, created_at) "
+            "VALUES ('admin', ?, ?, ?, ?)",
+            (endpoint, p256dh, auth, now),
+        )
+    else:
+        db.execute(
+            "UPDATE push_subscriptions SET p256dh = ?, auth = ? WHERE endpoint = ?",
+            (p256dh, auth, endpoint),
+        )
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/push/unsubscribe", methods=["POST"])
+@admin_login_required
+def push_unsubscribe():
+    data = request.get_json(silent=True) or {}
+    endpoint = data.get("endpoint", "").strip()
+    if endpoint:
+        db = get_db()
+        db.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
+        db.commit()
+    return jsonify({"ok": True})
 
 
 @app.route("/admin")
@@ -3279,6 +3418,11 @@ def client_approve_item(token, item_id):
             f"Работа: {html.escape(item['work_name'])}",
             chat_id=TELEGRAM_APPROVAL_CHAT_ID,
         )
+        send_push_notification(
+            "Клиент согласовал работу",
+            f"{item['client_name']} ({item['boat_model']}) — {item['work_name']}",
+            url="/tuning",
+        )
     return redirect(url_for("client_dashboard", token=token))
 
 
@@ -4761,6 +4905,12 @@ def team_checklist_answer(checklist_id):
             )
             for photo_path in saved_photo_paths:
                 send_telegram_photo(photo_path)
+            boat_index = next((i for i, b in enumerate(BOATS) if b["name"] == checklist["boat"]), None)
+            send_push_notification(
+                f"{checklist_label} — {checklist['boat']}",
+                f"{question_label}" + (f": {comment}" if comment else ""),
+                url=f"/fleet/{boat_index}" if boat_index is not None else "/fleet",
+            )
     return redirect(url_for("team_checklist_run", checklist_id=checklist_id))
 
 
@@ -4795,6 +4945,12 @@ def team_checklist_add_defects(checklist_id):
             f"Капитан: {html.escape(employee_name)}\n"
             f"Осмотр: {html.escape(checklist_label)}\n"
             f"Описание: {html.escape('; '.join(descriptions))}"
+        )
+        boat_index = next((i for i, b in enumerate(BOATS) if b["name"] == checklist["boat"]), None)
+        send_push_notification(
+            f"Неисправность вне чек-листа — {checklist['boat']}",
+            "; ".join(descriptions),
+            url=f"/fleet/{boat_index}" if boat_index is not None else "/fleet",
         )
     return redirect(url_for("team_checklist_run", checklist_id=checklist_id))
 
@@ -5413,6 +5569,23 @@ def diploma_debug():
         lines.append(f"expected filename: {username}.jpg / .jpeg / .png / .webp")
         lines.append(f"find_diploma_url({username!r}) = {find_diploma_url(username)!r}")
     return "\n".join(lines), 200
+
+
+@app.route("/internal/push-test")
+def push_test():
+    """Visit this URL (with the right token) to send a real test push to
+    every subscribed admin browser and see exactly what happened — same
+    idea as /internal/telegram-test, for the same reason: push has several
+    moving parts (VAPID keys, browser permission, subscription rows), and
+    guessing which one is broken from a "nothing happened" report is slow."""
+    if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
+        return "forbidden", 403
+    db = get_db()
+    count = db.execute("SELECT COUNT(*) FROM push_subscriptions WHERE role = 'admin'").fetchone()[0]
+    status = send_push_notification(
+        "🔧 Тестовый пуш с сайта", "Если вы это видите, всё настроено верно.", url="/admin",
+    )
+    return f"push status: {status} (admin subscriptions on file: {count})", 200
 
 
 init_db()

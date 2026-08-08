@@ -148,6 +148,29 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
 }
 .topbar-logout button:hover { background: rgba(255, 255, 255, 0.16); }
 
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.push-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  padding: 0;
+  background: transparent;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.push-toggle svg { width: 18px; height: 18px; }
+.push-toggle:hover { background: rgba(255, 255, 255, 0.16); }
+/* Subscribed state gets a filled bell + a solid border, so the state is
+   visible at a glance without needing to read a text label. */
+.push-toggle.subscribed { background: rgba(255, 255, 255, 0.22); border-color: #ffffff; }
+.push-toggle:not(.subscribed) .push-toggle-on { display: none; }
+.push-toggle.subscribed .push-toggle-off { display: none; }
+
 .main-nav {
   display: flex;
   align-items: stretch;

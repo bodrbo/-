@@ -104,9 +104,20 @@
     <div class="title-block">
       <h1>Разбить транзакцию</h1>
     </div>
-    <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout">
-      <button type="submit">Выйти</button>
-    </form>
+    <div class="topbar-actions">
+      <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
+        <svg class="push-toggle-off" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8z"/>
+          <path d="M8.3 16a1.7 1.7 0 003.4 0"/>
+        </svg>
+        <svg class="push-toggle-on" viewBox="0 0 20 20" fill="currentColor" stroke="none">
+          <path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8z"/>
+        </svg>
+      </button>
+      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout">
+        <button type="submit">Выйти</button>
+      </form>
+    </div>
   </div>
 </header>
 

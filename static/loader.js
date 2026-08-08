@@ -85,3 +85,71 @@ if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(function () {});
   });
 }
+
+// Push notification toggle (bell icon in the admin topbar) — subscribes/
+// unsubscribes this browser and tells the server about it via /push/*.
+(function () {
+  var toggle = document.getElementById("pushToggle");
+  if (!toggle) return;
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    toggle.style.display = "none";
+    return;
+  }
+
+  function urlBase64ToUint8Array(base64String) {
+    var padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    var base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    var rawData = atob(base64);
+    var outputArray = new Uint8Array(rawData.length);
+    for (var i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+    return outputArray;
+  }
+
+  function refreshState() {
+    navigator.serviceWorker.ready.then(function (reg) {
+      return reg.pushManager.getSubscription();
+    }).then(function (sub) {
+      toggle.classList.toggle("subscribed", !!sub);
+      toggle.title = sub ? "Уведомления включены (нажмите, чтобы отключить)" : "Включить уведомления";
+    });
+  }
+
+  toggle.addEventListener("click", function () {
+    navigator.serviceWorker.ready.then(function (reg) {
+      reg.pushManager.getSubscription().then(function (existing) {
+        if (existing) {
+          var endpoint = existing.endpoint;
+          existing.unsubscribe().then(function () {
+            return fetch("/push/unsubscribe", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({endpoint: endpoint}),
+            });
+          }).then(refreshState).catch(refreshState);
+          return;
+        }
+        Notification.requestPermission().then(function (permission) {
+          if (permission !== "granted") return;
+          fetch("/push/vapid-public-key").then(function (r) {
+            return r.text();
+          }).then(function (key) {
+            return reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: urlBase64ToUint8Array(key),
+            });
+          }).then(function (sub) {
+            return fetch("/push/subscribe", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify(sub.toJSON()),
+            });
+          }).then(refreshState).catch(function (err) {
+            alert("Не удалось включить уведомления: " + (err && err.message ? err.message : err));
+          });
+        });
+      });
+    });
+  });
+
+  refreshState();
+})();
