@@ -1118,14 +1118,24 @@ def init_db():
     for employee_name, username, password_hash in TEAM_ACCOUNTS:
         # Upsert, not insert-or-ignore: editing a hash here (a password
         # reset) has to actually take effect on restart, not just apply to
-        # brand-new accounts.
-        conn.execute(
-            "INSERT INTO team_accounts (employee_name, username, password_hash, created_at) "
-            "VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(username) DO UPDATE SET "
-            "employee_name = excluded.employee_name, password_hash = excluded.password_hash",
-            (employee_name, username, password_hash, now),
-        )
+        # brand-new accounts. Written as select-then-insert/update rather
+        # than SQLite's own "ON CONFLICT ... DO UPDATE" — that syntax needs
+        # SQLite 3.24+, which not every host's Python is built against, and
+        # this runs on every single startup so it can't afford to be wrong.
+        existing = conn.execute(
+            "SELECT id FROM team_accounts WHERE username = ?", (username,)
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                "INSERT INTO team_accounts (employee_name, username, password_hash, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (employee_name, username, password_hash, now),
+            )
+        else:
+            conn.execute(
+                "UPDATE team_accounts SET employee_name = ?, password_hash = ? WHERE username = ?",
+                (employee_name, password_hash, username),
+            )
     conn.commit()
     conn.close()
 
