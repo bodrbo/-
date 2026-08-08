@@ -76,3 +76,12 @@
     toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
   });
 })();
+
+// Registers the (deliberately no-op, no-caching) service worker so Chrome
+// on Android considers the site installable — see /sw.js for why. Served
+// from the domain root, not /static/, so its scope covers the whole site.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("/sw.js").catch(function () {});
+  });
+}

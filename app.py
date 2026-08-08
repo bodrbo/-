@@ -1358,6 +1358,15 @@ def home():
     return render_template("home.html")
 
 
+@app.route("/sw.js")
+def service_worker():
+    # Served from the domain root (not /static/sw.js) on purpose: a service
+    # worker's default scope is the directory it's served from, and this
+    # one needs to cover the whole site (every /admin, /team/, /client/...
+    # page), not just /static/.
+    return send_from_directory(app.static_folder, "sw.js", mimetype="application/javascript")
+
+
 def admin_login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
