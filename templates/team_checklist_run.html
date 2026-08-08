@@ -99,8 +99,37 @@
       <p class="checklist-success-text">Поздравляю! Теперь ты готов радовать туристов — 7 футов под килем и никакого восточного ветра тебе!</p>
     </div>
     {% endif %}
-    <a href="{{ url_for('team_dashboard') }}" class="btn-secondary" style="display:inline-block; margin-top:12px;">Готово</a>
   </section>
+
+  <section class="panel">
+    <h2>Другие неисправности</h2>
+    <p class="hint" style="margin-top:0;">Заметили что-то, чего нет в чек-листе? Опишите здесь, по одной проблеме на поле.</p>
+    {% if extra_defects %}
+    <ul class="extra-defects-list">
+      {% for d in extra_defects %}
+      <li>{{ d.description }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    <form action="{{ url_for('team_checklist_add_defects', checklist_id=checklist.id) }}" method="post">
+      <div id="defects-container">
+        <div class="defect-row">
+          <input type="text" name="defect[]" placeholder="Например, скрипит уключина">
+          <button type="button" class="btn-delete" onclick="removeDefectRow(this)" title="Убрать">✕</button>
+        </div>
+      </div>
+      <template id="defect-row-template">
+        <div class="defect-row">
+          <input type="text" name="defect[]" placeholder="Например, скрипит уключина">
+          <button type="button" class="btn-delete" onclick="removeDefectRow(this)" title="Убрать">✕</button>
+        </div>
+      </template>
+      <button type="button" class="btn-add" onclick="addDefectRow()">Добавить ещё</button>
+      <button type="submit" class="btn-secondary" style="margin-left:10px;">Сохранить</button>
+    </form>
+  </section>
+
+  <a href="{{ url_for('team_dashboard') }}" class="btn-secondary" style="display:inline-block; margin-top:12px;">Готово</a>
   {% else %}
   <section class="panel">
     <div class="checklist-progress">Пункт {{ question_index + 1 }} из {{ total }}</div>
@@ -193,6 +222,16 @@ function validateProblemPhotos(event) {
   }
   errorEl.classList.add('hidden');
   return true;
+}
+
+function addDefectRow() {
+  var container = document.getElementById('defects-container');
+  var template = document.getElementById('defect-row-template');
+  container.appendChild(template.content.cloneNode(true));
+}
+
+function removeDefectRow(btn) {
+  btn.closest('.defect-row').remove();
 }
 
 var photoModalPhotos = [];

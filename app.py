@@ -601,6 +601,13 @@ WORK_STATUSES = [
 ]
 DEFAULT_WORK_STATUS = "pending"
 
+DEFECT_STATUSES = [
+    {"value": "new", "label": "Новая"},
+    {"value": "in_progress", "label": "В работе"},
+    {"value": "resolved", "label": "Устранена"},
+]
+DEFAULT_DEFECT_STATUS = "new"
+
 
 def order_status_label(value):
     for s in ORDER_STATUSES:
@@ -811,6 +818,43 @@ def init_db():
         )
         """
     )
+    boat_defects_is_new = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'boat_defects'"
+    ).fetchone() is None
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS boat_defects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            boat TEXT NOT NULL,
+            checklist_id INTEGER,
+            answer_id INTEGER,
+            description TEXT NOT NULL,
+            employee_name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'new',
+            reported_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    if boat_defects_is_new:
+        # One-time backfill: every "problem" answer ever reported through a
+        # standard checklist question becomes a tracked defect too, so
+        # nothing captains already flagged is missing from the new table.
+        # Plain tuples here, not sqlite3.Row — this connection (unlike
+        # get_db()'s) never sets row_factory, so columns are positional.
+        now_str = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        for answer_id, question_text, comment, created_at, boat, checklist_id, employee_name in conn.execute(
+            "SELECT a.id, a.question_text, a.comment, a.created_at, "
+            "c.boat, c.id, c.employee_name "
+            "FROM boat_checklist_answers a JOIN boat_checklists c ON c.id = a.checklist_id "
+            "WHERE a.status = 'problem'"
+        ).fetchall():
+            description = f"{question_text} — {comment}" if comment else question_text
+            conn.execute(
+                "INSERT INTO boat_defects (boat, checklist_id, answer_id, description, employee_name, "
+                "status, reported_at, updated_at) VALUES (?, ?, ?, ?, ?, 'new', ?, ?)",
+                (boat, checklist_id, answer_id, description, employee_name, created_at, now_str),
+            )
 
     conn.execute(
         """
@@ -2169,9 +2213,14 @@ def fleet_boat(boat_index):
         "SELECT * FROM boat_documents WHERE boat = ? ORDER BY uploaded_at DESC, id DESC",
         (boat,),
     ).fetchall()
+    defects = db.execute(
+        "SELECT * FROM boat_defects WHERE boat = ? ORDER BY reported_at DESC, id DESC",
+        (boat,),
+    ).fetchall()
     return render_template(
         "fleet_boat.html", boat=boat, boat_index=boat_index, checklists=checklists,
-        documents=documents, checklist_type_labels=CHECKLIST_TYPE_LABELS, active_page="fleet",
+        documents=documents, defects=defects, defect_statuses=DEFECT_STATUSES,
+        checklist_type_labels=CHECKLIST_TYPE_LABELS, active_page="fleet",
     )
 
 
@@ -2234,6 +2283,23 @@ def delete_boat_document(boat_index, doc_id):
         except OSError:
             pass
         db.execute("DELETE FROM boat_documents WHERE id = ?", (doc_id,))
+        db.commit()
+    return redirect(url_for("fleet_boat", boat_index=boat_index))
+
+
+@app.route("/fleet/<int:boat_index>/defects/<int:defect_id>/status", methods=["POST"])
+@admin_login_required
+def set_boat_defect_status(boat_index, defect_id):
+    boat = _boat_by_index(boat_index)
+    if boat is None:
+        return redirect(url_for("fleet_index"))
+    status = request.form.get("status", "").strip()
+    if status in [s["value"] for s in DEFECT_STATUSES]:
+        db = get_db()
+        db.execute(
+            "UPDATE boat_defects SET status = ?, updated_at = ? WHERE id = ? AND boat = ?",
+            (status, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), defect_id, boat),
+        )
         db.commit()
     return redirect(url_for("fleet_boat", boat_index=boat_index))
 
@@ -4608,10 +4674,14 @@ def team_checklist_run(checklist_id):
              "photos": get_checklist_answer_photos(db, a["id"])}
             for a in answers if a["status"] == "problem"
         ]
+        extra_defects = db.execute(
+            "SELECT * FROM boat_defects WHERE checklist_id = ? AND answer_id IS NULL ORDER BY id",
+            (checklist_id,),
+        ).fetchall()
         return render_template(
             "team_checklist_run.html", checklist=checklist,
             checklist_label=CHECKLIST_TYPE_LABELS.get(checklist["checklist_type"], ""),
-            done=True, problems=problems, total=len(questions),
+            done=True, problems=problems, total=len(questions), extra_defects=extra_defects,
         )
 
     return render_template(
@@ -4656,8 +4726,16 @@ def team_checklist_answer(checklist_id):
         # (e.g. a double submit) — lastrowid would be stale in that case,
         # so only attach photos when a row was actually just created.
         saved_photo_paths = []
+        question_label = questions[question_index]["title"] or questions[question_index]["text"]
         if cur.rowcount == 1:
             answer_id = cur.lastrowid
+            if status == "problem":
+                defect_description = f"{question_label} — {comment}" if comment else question_label
+                db.execute(
+                    "INSERT INTO boat_defects (boat, checklist_id, answer_id, description, employee_name, "
+                    "status, reported_at, updated_at) VALUES (?, ?, ?, ?, ?, 'new', ?, ?)",
+                    (checklist["boat"], checklist_id, answer_id, defect_description, employee_name, now, now),
+                )
             photos_dir = os.path.join(app.static_folder, "checklist_photos")
             for file in request.files.getlist("photos"):
                 if file and file.filename:
@@ -4678,7 +4756,6 @@ def team_checklist_answer(checklist_id):
             checklist_label = CHECKLIST_TYPE_LABELS.get(
                 checklist["checklist_type"], checklist["checklist_type"]
             )
-            question_label = questions[question_index]["title"] or questions[question_index]["text"]
             send_telegram_notification(
                 f"⚠️ <b>{html.escape(checklist_label)}</b> — {html.escape(checklist['boat'])}\n"
                 f"Капитан: {html.escape(employee_name)}\n"
@@ -4687,6 +4764,41 @@ def team_checklist_answer(checklist_id):
             )
             for photo_path in saved_photo_paths:
                 send_telegram_photo(photo_path)
+    return redirect(url_for("team_checklist_run", checklist_id=checklist_id))
+
+
+@app.route("/team/checklist/<int:checklist_id>/defects", methods=["POST"])
+@team_login_required
+def team_checklist_add_defects(checklist_id):
+    """Free-text defects a captain noticed but that aren't covered by any
+    of the fixed checklist questions — added from the "Осмотр завершён"
+    screen, any number at a time, not tied to a specific question_index."""
+    db = get_db()
+    employee_name = session.get("team_employee_name")
+    checklist = db.execute(
+        "SELECT * FROM boat_checklists WHERE id = ? AND employee_name = ?",
+        (checklist_id, employee_name),
+    ).fetchone()
+    if checklist is None:
+        return redirect(url_for("team_dashboard"))
+
+    descriptions = [d.strip() for d in request.form.getlist("defect[]") if d.strip()]
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    for description in descriptions:
+        db.execute(
+            "INSERT INTO boat_defects (boat, checklist_id, answer_id, description, employee_name, "
+            "status, reported_at, updated_at) VALUES (?, ?, NULL, ?, ?, 'new', ?, ?)",
+            (checklist["boat"], checklist_id, description, employee_name, now, now),
+        )
+    db.commit()
+    if descriptions:
+        checklist_label = CHECKLIST_TYPE_LABELS.get(checklist["checklist_type"], checklist["checklist_type"])
+        send_telegram_notification(
+            f"⚠️ <b>Неисправность вне чек-листа</b> — {html.escape(checklist['boat'])}\n"
+            f"Капитан: {html.escape(employee_name)}\n"
+            f"Осмотр: {html.escape(checklist_label)}\n"
+            f"Описание: {html.escape('; '.join(descriptions))}"
+        )
     return redirect(url_for("team_checklist_run", checklist_id=checklist_id))
 
 
