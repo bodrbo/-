@@ -5297,19 +5297,41 @@ def _tbank_find_self_employed(name):
     )
 
 
-def _tbank_create_payout_registry(recipient_id, amount):
+def _tbank_create_payout_registry(recipient, amount, purpose):
     """Create a DRAFT self-employed payment registry in Т-Банк for one
-    recipient (async: create, then poll for the result). Returns the new
+    recipient (async: create, then poll for the result). The payload shape
+    here — accountNumber + selfEmployedInfo{firstName,lastName,middleName}
+    per payment, sum instead of amount, taxHolding nested per payment — is
+    confirmed against a real "Illegal json" 400 response that named exactly
+    these fields (an earlier recipientId/amount-only guess was wrong).
+    accountNumber comes from the recipient's own bankInfo, already on the
+    dict returned by _tbank_find_self_employed. Returns the new
     paymentRegistryId. Raises RuntimeError (message safe to show the admin)
     on failure or timeout."""
+    account_number = (recipient.get("bankInfo") or {}).get("accountNumber")
+    if not account_number:
+        raise RuntimeError(
+            f"У самозанятого {_tbank_recipient_full_name(recipient)} в Т-Банке не указан номер счёта "
+            "для выплат — реквизиты нужно донастроить в Т-Бизнес."
+        )
     correlation_id = str(uuid.uuid4())
     _tbank_request_post(
         "/v1/self-employed/payment-registry/create",
         {
             "correlationId": correlation_id,
             "companyAccountNumber": TBANK_ACCOUNT_NUMBER,
-            "taxHolding": False,
-            "payments": [{"recipientId": recipient_id, "amount": amount}],
+            "payments": [{
+                "number": 1,
+                "accountNumber": account_number,
+                "paymentPurpose": purpose,
+                "selfEmployedInfo": {
+                    "firstName": recipient.get("firstName"),
+                    "lastName": recipient.get("lastName"),
+                    "middleName": recipient.get("middleName"),
+                },
+                "sum": amount,
+                "taxHolding": False,
+            }],
         },
         token=TBANK_API_TOKEN_PAYMENT,
     )
@@ -5345,8 +5367,8 @@ def _tbank_send_payout(db, employee, period_key, amount):
         recipient = _tbank_find_self_employed(employee)
         recipient_name = _tbank_recipient_full_name(recipient)
         recipient_inn = recipient.get("inn")
-        recipient_id = recipient.get("id")
-        payment_registry_id = _tbank_create_payout_registry(recipient_id, amount)
+        purpose = f"Вознаграждение за оказанные услуги, расчётный период с {period_key}"
+        payment_registry_id = _tbank_create_payout_registry(recipient, amount, purpose)
         status = "created"
     except Exception as e:
         error_message = str(e)
