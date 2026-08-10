@@ -5266,9 +5266,11 @@ def _tbank_find_self_employed(name):
         raise RuntimeError(
             f"Самозанятый «{name}» не найден среди {len(found_names)} получателей в Т-Банке: {shown}"
         )
+    sample = json.dumps(recipients[0], ensure_ascii=False)[:600] if recipients else "(пусто)"
     raise RuntimeError(
-        f"Т-Банк вернул {len(recipients)} получателей, но ни в одном не удалось распознать имя — "
-        "формат ответа отличается от ожидаемого, нужно уточнять в поддержке Т-Банка."
+        f"Т-Банк вернул {len(recipients)} получателей, но ни в одном не удалось распознать имя по "
+        f"полям fullName/name/fio/shortName/displayName. Вот как выглядит первая запись целиком — "
+        f"по ней видно настоящее имя поля: {sample}"
     )
 
 
