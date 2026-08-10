@@ -171,7 +171,7 @@
       </div>
       <div class="field">
         <label for="project_id">Проект</label>
-        <select id="project_id" name="project_id">
+        <select id="project_id" name="project_id" onchange="applyProjectItems(this)">
           <option value="" {{ 'selected' if not form_values or not form_values.project_id }}>— без проекта —</option>
           {% for p in projects %}
           <option value="{{ p.id }}" {{ 'selected' if form_values and form_values.project_id == p.id|string }}>
@@ -184,7 +184,7 @@
         <button type="submit">Добавить</button>
       </div>
     </form>
-    <p class="hint">Выбор вида работы подставит обычную ставку и часы — при необходимости их можно поправить перед сохранением. Если привязать работу к проекту, её сумма попадёт в расходы этого проекта.</p>
+    <p class="hint">Выбор вида работы подставит обычную ставку и часы — при необходимости их можно поправить перед сохранением. Если привязать работу к проекту, её сумма попадёт в расходы этого проекта. Если у проекта есть заказ, в списке видов работы появятся ещё и позиции из его номенклатуры.</p>
   </section>
 
   {% if manager_errors %}
@@ -393,11 +393,44 @@ function applyWorkType(select) {
   if (hours) document.getElementById('quantity').value = hours;
 }
 
+// Project id (string, as JSON object keys always are) -> list of work names
+// from that project's linked заказ, if it has one — see project_items in
+// _payroll_context(). Lets picking a project offer its own nomenclature as
+// "Вид работы" options, in addition to the usual tour types.
+var PROJECT_ITEMS = {{ project_items|tojson }};
+
+function applyProjectItems(projectSelect, preselectedValue) {
+  var workSelect = document.getElementById('work_type');
+  var existingGroup = document.getElementById('project-items-group');
+  if (existingGroup) existingGroup.remove();
+
+  var items = PROJECT_ITEMS[projectSelect.value];
+  if (!items || !items.length) return;
+
+  var group = document.createElement('optgroup');
+  group.id = 'project-items-group';
+  group.label = 'Работы по заказу';
+  items.forEach(function (name) {
+    var opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    if (preselectedValue && name === preselectedValue) opt.selected = true;
+    group.appendChild(opt);
+  });
+  // Right after the placeholder option, so заказ items read first.
+  workSelect.insertBefore(group, workSelect.options[1] || null);
+}
+
 // Show custom fields on load if a custom value was already selected
-// (e.g. after a validation error re-render).
+// (e.g. after a validation error re-render), and restore any заказ-item
+// work type that was picked before that re-render.
 document.addEventListener('DOMContentLoaded', function () {
   toggleCustom('employee');
   toggleCustom('work_type');
+  var projectSelect = document.getElementById('project_id');
+  if (projectSelect && projectSelect.value) {
+    applyProjectItems(projectSelect, {{ (form_values.work_type if form_values else '')|tojson }});
+  }
 });
 
 (function () {

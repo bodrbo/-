@@ -1559,6 +1559,18 @@ def _payroll_context(db, selected_week, selected_employee):
         "ORDER BY projects.created_at DESC, projects.id DESC"
     ).fetchall()
 
+    # For the "Вид работы" dropdown: when a project tied to a tuning order is
+    # selected, offer that order's own nomenclature (its tuning_order_items)
+    # as work-type choices too — keyed by project id for the JS on the form.
+    project_items = {}
+    for row in db.execute(
+        "SELECT projects.id AS project_id, tuning_order_items.work_name AS work_name "
+        "FROM projects JOIN tuning_order_items ON tuning_order_items.order_id = projects.tuning_order_id "
+        "WHERE projects.tuning_order_id IS NOT NULL "
+        "ORDER BY projects.id, tuning_order_items.id"
+    ).fetchall():
+        project_items.setdefault(row["project_id"], []).append(row["work_name"])
+
     return dict(
         entries=entries,
         totals_by_employee=totals_by_employee,
@@ -1571,6 +1583,7 @@ def _payroll_context(db, selected_week, selected_employee):
         tbank_payouts=tbank_payouts,
         tbank_configured=tbank_configured(),
         projects=projects,
+        project_items=project_items,
     )
 
 
