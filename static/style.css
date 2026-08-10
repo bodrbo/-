@@ -1319,6 +1319,27 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   margin-top: 2px;
 }
 
+.tbank-payout-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+  cursor: default;
+}
+.tbank-status {
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.tbank-status-ok { color: var(--success); }
+.tbank-status-error { color: var(--danger); }
+.btn-small {
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
 /* --- confirm modal (payment) --- */
 .confirm-modal {
   position: fixed;

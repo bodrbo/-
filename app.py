@@ -18,6 +18,8 @@ import os
 import sys
 import json
 import html
+import time
+import uuid
 import secrets
 import sqlite3
 import calendar
@@ -1169,6 +1171,22 @@ def init_db():
         conn.execute("ALTER TABLE bank_transactions ADD COLUMN project_id INTEGER")
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS tbank_payout_registries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee TEXT NOT NULL,
+            period_key TEXT NOT NULL,
+            amount REAL NOT NULL,
+            recipient_name TEXT,
+            recipient_inn TEXT,
+            payment_registry_id TEXT,
+            status TEXT NOT NULL,
+            error_message TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS projects (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -1512,12 +1530,20 @@ def _payroll_context(db, selected_week, selected_employee):
     # "Все периоды" total spans however many weeks, so there's no single
     # period to mark paid.
     paid_employees = set()
+    tbank_payouts = {}
     if selected_week != "all":
         paid_employees = {
             row["employee"] for row in db.execute(
                 "SELECT employee FROM payments WHERE period_key = ?", (selected_week,)
             ).fetchall()
         }
+        # Latest attempt per employee for this week — iterating id DESC and
+        # using setdefault means the first (most recent) row wins.
+        for row in db.execute(
+            "SELECT * FROM tbank_payout_registries WHERE period_key = ? ORDER BY id DESC",
+            (selected_week,),
+        ).fetchall():
+            tbank_payouts.setdefault(row["employee"], dict(row))
 
     # Employees for the filter dropdown: the configured list, plus any
     # employee names already used but not in the list (so nothing is hidden).
@@ -1542,6 +1568,8 @@ def _payroll_context(db, selected_week, selected_employee):
         employees_filter=known,
         selected_employee=selected_employee,
         paid_employees=paid_employees,
+        tbank_payouts=tbank_payouts,
+        tbank_configured=tbank_configured(),
         projects=projects,
     )
 
@@ -1699,6 +1727,24 @@ def unmark_paid():
             (employee, period_key),
         )
         db.commit()
+    return redirect(url_for("index", week=period_key, employee=employee_filter))
+
+
+@app.route("/pay/tbank", methods=["POST"])
+@admin_login_required
+def tbank_create_payout():
+    employee = request.form.get("employee", "").strip()
+    period_key = request.form.get("week", "").strip()
+    employee_filter = request.form.get("employee_filter", "all")
+    if employee and period_key and tbank_configured():
+        db = get_db()
+        # Recompute the amount server-side from entries rather than trust a
+        # client-submitted figure — it must match exactly what the totals
+        # card shows, and this is real money leaving the account.
+        ctx = _payroll_context(db, period_key, "all")
+        amount = ctx["totals_by_employee"].get(employee)
+        if amount:
+            _tbank_send_payout(db, employee, period_key, amount)
     return redirect(url_for("index", week=period_key, employee=employee_filter))
 
 
@@ -5145,6 +5191,115 @@ def _tbank_request(path, params):
     if resp.status_code >= 400:
         raise RuntimeError(f"Т-Банк вернул ошибку {resp.status_code}: {resp.text[:500]}")
     return resp.json()
+
+
+def _tbank_request_post(path, payload):
+    resp = requests.post(
+        f"{TBANK_API_BASE}{path}",
+        headers={"Authorization": f"Bearer {TBANK_API_TOKEN}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=30,
+    )
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Т-Банк вернул ошибку {resp.status_code}: {resp.text[:500]}")
+    return resp.json()
+
+
+# ---------------------------------------------------------------------
+# Зарплаты — выплата самозанятому через Т-Банк ("Отправить в Т-Банк" на
+# карточке сотрудника). ВАЖНО: подпись платёжного реестра
+# (/self-employed/payment-registry/submit) в API Т-Банка требует mTLS-
+# сертификата, которого у нас нет — есть только Bearer-токен. Поэтому этот
+# код доводит дело только до создания ЧЕРНОВИКА реестра; подписать и
+# оплатить его администратор должен сам в личном кабинете Т-Бизнес. Это
+# осознанное ограничение, а не недоделка — см. обсуждение с владельцем
+# бизнеса.
+# ---------------------------------------------------------------------
+def _tbank_find_self_employed(name):
+    """Look up a registered self-employed recipient in Т-Банк by full name
+    (whitespace/case-insensitive exact match). Returns the matching
+    recipient dict, or None if nobody matches. Raises RuntimeError if more
+    than one recipient shares that name — too risky to guess which one."""
+    data = _tbank_request_post(
+        "/v1/self-employed/recipients/list",
+        {"status": ["ACTIVE"], "limit": 900},
+    )
+    recipients = data.get("recipients") or data.get("items") or []
+    target = " ".join(name.split()).casefold()
+    matches = [
+        r for r in recipients
+        if " ".join(str(r.get("fullName") or r.get("name") or "").split()).casefold() == target
+    ]
+    if len(matches) > 1:
+        raise RuntimeError(
+            f"В Т-Банке найдено несколько самозанятых с именем «{name}» — уточните вручную в Т-Бизнес."
+        )
+    return matches[0] if matches else None
+
+
+def _tbank_create_payout_registry(recipient_id, amount):
+    """Create a DRAFT self-employed payment registry in Т-Банк for one
+    recipient (async: create, then poll for the result). Returns the new
+    paymentRegistryId. Raises RuntimeError (message safe to show the admin)
+    on failure or timeout."""
+    correlation_id = str(uuid.uuid4())
+    _tbank_request_post(
+        "/v1/self-employed/payment-registry/create",
+        {
+            "correlationId": correlation_id,
+            "companyAccountNumber": TBANK_ACCOUNT_NUMBER,
+            "taxHolding": False,
+            "payments": [{"recipientId": recipient_id, "amount": amount}],
+        },
+    )
+    for _ in range(10):
+        result = _tbank_request(
+            "/v1/self-employed/payment-registry/create/result",
+            {"correlationId": correlation_id},
+        )
+        status = result.get("status")
+        if status == "CREATED":
+            return result.get("paymentRegistryId")
+        if status == "ERROR":
+            raise RuntimeError(result.get("errorMessage") or "Т-Банк отклонил создание реестра.")
+        time.sleep(1)
+    raise RuntimeError("Т-Банк не ответил на создание реестра за отведённое время — попробуйте ещё раз позже.")
+
+
+def _tbank_send_payout(db, employee, period_key, amount):
+    """Find the self-employed recipient matching this employee's name and
+    create a draft payment registry for them, recording the outcome
+    (success or failure — both are useful history) in
+    tbank_payout_registries. Never raises: every failure mode from name
+    lookup to the Т-Банк API is caught and stored as a row so the admin
+    always sees what happened on their next page load."""
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    recipient_name = None
+    recipient_inn = None
+    payment_registry_id = None
+    status = "error"
+    error_message = None
+    try:
+        recipient = _tbank_find_self_employed(employee)
+        if recipient is None:
+            status = "not_found"
+            error_message = f"Самозанятый «{employee}» не найден в списке Т-Банка."
+        else:
+            recipient_name = recipient.get("fullName") or recipient.get("name")
+            recipient_inn = recipient.get("inn")
+            recipient_id = recipient.get("recipientId") or recipient.get("id")
+            payment_registry_id = _tbank_create_payout_registry(recipient_id, amount)
+            status = "created"
+    except Exception as e:
+        error_message = str(e)
+    db.execute(
+        "INSERT INTO tbank_payout_registries (employee, period_key, amount, recipient_name, "
+        "recipient_inn, payment_registry_id, status, error_message, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (employee, period_key, amount, recipient_name, recipient_inn,
+         payment_registry_id, status, error_message, now),
+    )
+    db.commit()
 
 
 def _tbank_fetch_operations(start_date, end_date):

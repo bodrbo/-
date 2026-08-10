@@ -282,6 +282,24 @@
       <span class="k">{{ employee }}</span>
       <span class="v">{{ sum|money }} ₽</span>
       {% if is_paid %}<span class="paid-badge">Оплачено</span>{% endif %}
+      {% if selected_week != 'all' and tbank_configured %}
+      {% set tp = tbank_payouts.get(employee) %}
+      <div class="tbank-payout-row" onclick="event.stopPropagation();">
+        {% if tp and tp.status == 'created' %}
+        <span class="tbank-status tbank-status-ok">
+          Реестр Т-Банка №{{ tp.payment_registry_id }} создан — подпишите и оплатите в Т-Бизнес
+        </span>
+        {% elif tp %}
+        <span class="tbank-status tbank-status-error">Т-Банк: {{ tp.error_message }}</span>
+        {% endif %}
+        <form action="{{ url_for('tbank_create_payout') }}" method="post">
+          <input type="hidden" name="employee" value="{{ employee }}">
+          <input type="hidden" name="week" value="{{ selected_week }}">
+          <input type="hidden" name="employee_filter" value="{{ selected_employee }}">
+          <button type="submit" class="btn-secondary btn-small">Отправить в Т-Банк</button>
+        </form>
+      </div>
+      {% endif %}
     </div>
     {% endfor %}
   </section>
