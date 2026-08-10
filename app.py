@@ -5234,26 +5234,42 @@ def _tbank_find_self_employed(name):
     include the patronymic too ("Фамилия Имя Отчество"), and possibly in a
     different word order — so this matches whenever every word of our name
     appears somewhere in the Т-Банк name, rather than requiring the two
-    strings to be identical. Returns the matching recipient dict, or None
-    if nobody matches. Raises RuntimeError if more than one recipient
-    matches — too risky to guess which one is meant."""
-    data = _tbank_request_post(
-        "/v1/self-employed/recipients/list",
-        {"status": ["ACTIVE"], "limit": 900},
-    )
-    recipients = data.get("recipients") or data.get("items") or []
+    strings to be identical. No status filter on the list call: which
+    statuses are actually payable is enforced by Т-Банк itself at registry
+    creation, and filtering here risks silently hiding a real recipient if
+    our guess at the status value's spelling is wrong. Returns the matching
+    recipient dict. Raises RuntimeError (message safe to show the admin) if
+    nobody matches — including, on a "not found", the raw names Т-Банк
+    actually returned, since our field-name guesses for the response shape
+    (fullName/name/fio/...) may not match reality — or if more than one
+    recipient matches, since it's too risky to guess which is meant."""
+    data = _tbank_request_post("/v1/self-employed/recipients/list", {"limit": 900})
+    recipients = data.get("recipients") or data.get("items") or data.get("data") or []
     our_words = {w.casefold() for w in name.split()}
     matches = []
+    found_names = []
     for r in recipients:
-        full_name = str(r.get("fullName") or r.get("name") or "")
+        full_name = str(_tbank_pick(r, "fullName", "name", "fio", "shortName", "displayName") or "")
+        if full_name:
+            found_names.append(full_name)
         their_words = {w.casefold() for w in full_name.split()}
-        if our_words and our_words.issubset(their_words):
+        if our_words and their_words and our_words.issubset(their_words):
             matches.append(r)
     if len(matches) > 1:
         raise RuntimeError(
             f"В Т-Банке найдено несколько самозанятых, подходящих под имя «{name}» — уточните вручную в Т-Бизнес."
         )
-    return matches[0] if matches else None
+    if matches:
+        return matches[0]
+    if found_names:
+        shown = ", ".join(found_names[:20]) + ("…" if len(found_names) > 20 else "")
+        raise RuntimeError(
+            f"Самозанятый «{name}» не найден среди {len(found_names)} получателей в Т-Банке: {shown}"
+        )
+    raise RuntimeError(
+        f"Т-Банк вернул {len(recipients)} получателей, но ни в одном не удалось распознать имя — "
+        "формат ответа отличается от ожидаемого, нужно уточнять в поддержке Т-Банка."
+    )
 
 
 def _tbank_create_payout_registry(recipient_id, amount):
@@ -5300,15 +5316,11 @@ def _tbank_send_payout(db, employee, period_key, amount):
     error_message = None
     try:
         recipient = _tbank_find_self_employed(employee)
-        if recipient is None:
-            status = "not_found"
-            error_message = f"Самозанятый «{employee}» не найден в списке Т-Банка."
-        else:
-            recipient_name = recipient.get("fullName") or recipient.get("name")
-            recipient_inn = recipient.get("inn")
-            recipient_id = recipient.get("recipientId") or recipient.get("id")
-            payment_registry_id = _tbank_create_payout_registry(recipient_id, amount)
-            status = "created"
+        recipient_name = _tbank_pick(recipient, "fullName", "name", "fio", "shortName", "displayName")
+        recipient_inn = _tbank_pick(recipient, "inn", "INN")
+        recipient_id = _tbank_pick(recipient, "recipientId", "id")
+        payment_registry_id = _tbank_create_payout_registry(recipient_id, amount)
+        status = "created"
     except Exception as e:
         error_message = str(e)
     db.execute(

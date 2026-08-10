@@ -979,6 +979,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   padding: 18px 20px;
   margin-bottom: 0;
   box-shadow: none;
+  min-width: 0;
 }
 .total-card .k {
   font-size: 11px;
@@ -1322,22 +1323,28 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .tbank-payout-row {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   gap: 6px;
   margin-top: 6px;
   padding-top: 10px;
   border-top: 1px solid var(--hairline);
   cursor: default;
+  width: 100%;
+  min-width: 0;
 }
+.tbank-payout-row form { width: 100%; }
 .tbank-status {
   font-size: 11.5px;
   line-height: 1.4;
+  overflow-wrap: break-word;
 }
 .tbank-status-ok { color: var(--success); }
 .tbank-status-error { color: var(--danger); }
 .btn-small {
   font-size: 12px;
   padding: 6px 12px;
+  width: 100%;
+  white-space: normal;
+  text-align: center;
 }
 
 /* --- confirm modal (payment) --- */
