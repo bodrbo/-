@@ -168,8 +168,16 @@ YOOKASSA_RECEIPT_VAT_CODE = 7
 # коде, только переменные окружения на хостинге:
 #   TBANK_API_TOKEN, TBANK_ACCOUNT_NUMBER
 # Без них раздел «Аналитика» просто покажет, что подключение не настроено.
+#
+# Выплаты самозанятым (кнопка «Отправить в Т-Банк» на «Зарплатах») требуют
+# отдельного скоупа self-employed/payment-registry/manage, которого не было
+# на токене для выписки — так что это отдельный токен с этим правом,
+# выпущенный отдельно:
+#   TBANK_API_TOKEN_PAYMENT
+# Без него кнопка «Отправить в Т-Банк» просто не показывается.
 # ---------------------------------------------------------------------
 TBANK_API_TOKEN = os.environ.get("TBANK_API_TOKEN")
+TBANK_API_TOKEN_PAYMENT = os.environ.get("TBANK_API_TOKEN_PAYMENT")
 TBANK_ACCOUNT_NUMBER = os.environ.get("TBANK_ACCOUNT_NUMBER")
 TBANK_API_BASE = "https://business.tbank.ru/openapi/api"
 
@@ -348,8 +356,13 @@ def send_push_notification(title, body, role="admin", url="/"):
     return f"sent {sent}/{len(subs)}"
 
 
-def tbank_configured():
+def tbank_statement_configured():
     return bool(TBANK_API_TOKEN and TBANK_ACCOUNT_NUMBER)
+
+
+def tbank_payment_configured():
+    return bool(TBANK_API_TOKEN_PAYMENT and TBANK_ACCOUNT_NUMBER)
+
 
 # Соответствие цвета записи/события в Yclients — катеру. Значения подтверждены.
 BOAT_COLORS = {
@@ -1581,7 +1594,7 @@ def _payroll_context(db, selected_week, selected_employee):
         selected_employee=selected_employee,
         paid_employees=paid_employees,
         tbank_payouts=tbank_payouts,
-        tbank_configured=tbank_configured(),
+        tbank_configured=tbank_payment_configured(),
         projects=projects,
         project_items=project_items,
     )
@@ -1749,7 +1762,7 @@ def tbank_create_payout():
     employee = request.form.get("employee", "").strip()
     period_key = request.form.get("week", "").strip()
     employee_filter = request.form.get("employee_filter", "all")
-    if employee and period_key and tbank_configured():
+    if employee and period_key and tbank_payment_configured():
         db = get_db()
         # Recompute the amount server-side from entries rather than trust a
         # client-submitted figure — it must match exactly what the totals
@@ -5194,10 +5207,10 @@ def team_checklist_add_defects(checklist_id):
 # расчётному счёту из Т-Банка (см. TBANK_API_TOKEN/TBANK_ACCOUNT_NUMBER
 # выше). Пока подключение не настроено, раздел просто показывает заглушку.
 # ---------------------------------------------------------------------
-def _tbank_request(path, params):
+def _tbank_request(path, params, token=None):
     resp = requests.get(
         f"{TBANK_API_BASE}{path}",
-        headers={"Authorization": f"Bearer {TBANK_API_TOKEN}"},
+        headers={"Authorization": f"Bearer {token or TBANK_API_TOKEN}"},
         params=params,
         timeout=30,
     )
@@ -5206,10 +5219,10 @@ def _tbank_request(path, params):
     return resp.json()
 
 
-def _tbank_request_post(path, payload):
+def _tbank_request_post(path, payload, token=None):
     resp = requests.post(
         f"{TBANK_API_BASE}{path}",
-        headers={"Authorization": f"Bearer {TBANK_API_TOKEN}", "Content-Type": "application/json"},
+        headers={"Authorization": f"Bearer {token or TBANK_API_TOKEN}", "Content-Type": "application/json"},
         json=payload,
         timeout=30,
     )
@@ -5251,7 +5264,9 @@ def _tbank_find_self_employed(name):
     the names Т-Банк actually returned, so a genuine mismatch is visible
     right away — or if more than one recipient matches, since it's too
     risky to guess which is meant."""
-    data = _tbank_request_post("/v1/self-employed/recipients/list", {"limit": 900})
+    data = _tbank_request_post(
+        "/v1/self-employed/recipients/list", {"limit": 900}, token=TBANK_API_TOKEN_PAYMENT
+    )
     recipients = data.get("recipients") or data.get("items") or data.get("data") or []
     our_words = {w.casefold() for w in name.split()}
     matches = []
@@ -5296,11 +5311,13 @@ def _tbank_create_payout_registry(recipient_id, amount):
             "taxHolding": False,
             "payments": [{"recipientId": recipient_id, "amount": amount}],
         },
+        token=TBANK_API_TOKEN_PAYMENT,
     )
     for _ in range(10):
         result = _tbank_request(
             "/v1/self-employed/payment-registry/create/result",
             {"correlationId": correlation_id},
+            token=TBANK_API_TOKEN_PAYMENT,
         )
         status = result.get("status")
         if status == "CREATED":
@@ -5448,7 +5465,7 @@ def analytics_index():
     return render_template(
         "analytics.html", active_page="analytics", sub_page="transactions",
         transactions=transactions, projects=projects, splits_by_transaction=splits_by_transaction,
-        tbank_configured=tbank_configured(),
+        tbank_configured=tbank_statement_configured(),
         fetch_default_start=week_ago.isoformat(), fetch_default_end=today.isoformat(),
         fetch_error=session.pop("tbank_fetch_error", None),
         fetch_result=session.pop("tbank_fetch_result", None),
@@ -5458,7 +5475,7 @@ def analytics_index():
 @app.route("/analytics/fetch", methods=["POST"])
 @admin_login_required
 def analytics_fetch():
-    if not tbank_configured():
+    if not tbank_statement_configured():
         return redirect(url_for("analytics_index"))
 
     start_date = request.form.get("start_date", "").strip()
