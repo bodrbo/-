@@ -4437,8 +4437,8 @@ def import_fetch():
         return redirect(url_for("import_index", error=f"Ошибка при запросе групповых событий: {e}"))
 
     already = {
-        row["yclients_ref"]
-        for row in db.execute("SELECT yclients_ref FROM yclients_imports").fetchall()
+        row["yclients_ref"]: row["trip_id"]
+        for row in db.execute("SELECT yclients_ref, trip_id FROM yclients_imports").fetchall()
     }
     existing_candidates = {
         row["yclients_ref"]
@@ -4470,7 +4470,18 @@ def import_fetch():
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     added = 0
     for c in candidates:
-        if c["yclients_ref"] in already or c["yclients_ref"] in existing_candidates:
+        if c["yclients_ref"] in already:
+            review_row = _yclients_collision_review_row(db, c, already, existing_candidates)
+            if review_row is not None:
+                db.execute(
+                    "INSERT INTO import_candidates (yclients_ref, summary, payload, created_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (review_row["yclients_ref"], review_row["summary"],
+                     json.dumps(review_row["payload"], ensure_ascii=False), now),
+                )
+                added += 1
+            continue
+        if c["yclients_ref"] in existing_candidates:
             continue
         db.execute(
             "INSERT INTO import_candidates (yclients_ref, summary, payload, created_at) "
@@ -4526,6 +4537,65 @@ def import_review(candidate_id):
         labor_prefill=payload["labor_items"],
         import_note=payload.get("note", ""),
     )
+
+
+def _trip_staff_names(db, trip_id):
+    """Employee names currently on a confirmed trip's labor entries."""
+    return {
+        row["employee"] for row in db.execute(
+            "SELECT entries.employee FROM trip_labor "
+            "JOIN entries ON entries.id = trip_labor.entry_id "
+            "WHERE trip_labor.trip_id = ?", (trip_id,)
+        ).fetchall()
+    }
+
+
+def _yclients_collision_review_row(db, candidate, already, existing_candidates):
+    """A fetched candidate's ref already points at a confirmed trip —
+    normally there's nothing to do. But if two crew members' records
+    started out at accidentally different times (e.g. captain vs guide),
+    each got imported as its own one-person trip under a different ref;
+    fixing the time on Yclients' side later makes both records collapse
+    into a single group again, under the ref of whichever one was imported
+    first. The extra crew member then has nowhere to go: their name is
+    missing from the trip already on file, and this ref match makes them
+    silently vanish from the queue forever instead of surfacing as new
+    work to review.
+
+    Returns a dict with yclients_ref/summary/payload ready to insert into
+    import_candidates for manual review, or None if there's genuinely
+    nothing new here (including: the ref was explicitly skipped before,
+    which is the admin's considered decision already and not a stale-key
+    collision; or the trip on file already has everyone this group
+    names)."""
+    trip_id = already[candidate["yclients_ref"]]
+    if trip_id is None:
+        return None
+    candidate_staff = {
+        item["employee"] for item in candidate["payload"].get("labor_items", []) if item.get("employee")
+    }
+    missing_staff = candidate_staff - _trip_staff_names(db, trip_id)
+    if not missing_staff:
+        return None
+    review_ref = f"recheck:{trip_id}:{candidate['yclients_ref']}"
+    if review_ref in already or review_ref in existing_candidates:
+        return None
+    note = (
+        f"Не подтверждайте как новый рейс — выручка уже учтена в рейсе №{trip_id}. "
+        f"В свежих данных Yclients у этой смены появился ещё участник "
+        f"({', '.join(sorted(missing_staff))}), которого в рейсе №{trip_id} нет — вероятно, "
+        "у одной из записей задним числом поправили время старта, и она перестала считаться "
+        f"отдельным рейсом. Откройте рейс №{trip_id} и добавьте туда этого человека вручную, "
+        "затем нажмите «Пропустить» на этой карточке."
+    )
+    review_payload = dict(candidate["payload"])
+    review_payload["note"] = note
+    review_payload["needs_review"] = True
+    return {
+        "yclients_ref": review_ref,
+        "summary": f"{candidate['summary']} ⚠ {note}",
+        "payload": review_payload,
+    }
 
 
 def _mark_yclients_refs_imported(db, refs, trip_id):
@@ -4607,8 +4677,13 @@ def _try_auto_import_candidate(db, row):
     doesn't validate — most commonly an unresolved boat color or a Yclients
     service name that isn't in YCLIENTS_SERVICE_TO_WORK_TYPE yet (missing
     вид рейса means the hours/rate can't be filled in, which fails
-    validation same as an empty field would in the manual form)."""
+    validation same as an empty field would in the manual form). Also
+    returns False without touching anything for a needs_review candidate
+    (see import_fetch) — auto-creating a trip for one would just produce a
+    duplicate of the trip it's actually about."""
     payload = json.loads(row["payload"])
+    if payload.get("needs_review"):
+        return False
     form = _payload_to_form(payload)
     errors, data = _process_trip_form(db, form)
     if errors:
