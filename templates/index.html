@@ -287,7 +287,9 @@
       <div class="tbank-payout-row" onclick="event.stopPropagation();">
         {% if tp and tp.status == 'created' %}
         <span class="tbank-status tbank-status-ok">
-          Реестр Т-Банка №{{ tp.payment_registry_id }} создан — подпишите и оплатите в Т-Бизнес
+          Реестр Т-Банка №{{ tp.payment_registry_id }} создан для
+          {{ tp.recipient_name }}{% if tp.recipient_inn %} (ИНН {{ tp.recipient_inn }}){% endif %}
+          — проверьте, что это тот человек, и подпишите с оплатой в Т-Бизнес
         </span>
         {% elif tp %}
         <span class="tbank-status tbank-status-error">Т-Банк: {{ tp.error_message }}</span>

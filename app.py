@@ -5216,23 +5216,29 @@ def _tbank_request_post(path, payload):
 # бизнеса.
 # ---------------------------------------------------------------------
 def _tbank_find_self_employed(name):
-    """Look up a registered self-employed recipient in Т-Банк by full name
-    (whitespace/case-insensitive exact match). Returns the matching
-    recipient dict, or None if nobody matches. Raises RuntimeError if more
-    than one recipient shares that name — too risky to guess which one."""
+    """Look up a registered self-employed recipient in Т-Банк matching this
+    employee. Our employee names are just "Имя Фамилия" — Т-Банк's records
+    include the patronymic too ("Фамилия Имя Отчество"), and possibly in a
+    different word order — so this matches whenever every word of our name
+    appears somewhere in the Т-Банк name, rather than requiring the two
+    strings to be identical. Returns the matching recipient dict, or None
+    if nobody matches. Raises RuntimeError if more than one recipient
+    matches — too risky to guess which one is meant."""
     data = _tbank_request_post(
         "/v1/self-employed/recipients/list",
         {"status": ["ACTIVE"], "limit": 900},
     )
     recipients = data.get("recipients") or data.get("items") or []
-    target = " ".join(name.split()).casefold()
-    matches = [
-        r for r in recipients
-        if " ".join(str(r.get("fullName") or r.get("name") or "").split()).casefold() == target
-    ]
+    our_words = {w.casefold() for w in name.split()}
+    matches = []
+    for r in recipients:
+        full_name = str(r.get("fullName") or r.get("name") or "")
+        their_words = {w.casefold() for w in full_name.split()}
+        if our_words and our_words.issubset(their_words):
+            matches.append(r)
     if len(matches) > 1:
         raise RuntimeError(
-            f"В Т-Банке найдено несколько самозанятых с именем «{name}» — уточните вручную в Т-Бизнес."
+            f"В Т-Банке найдено несколько самозанятых, подходящих под имя «{name}» — уточните вручную в Т-Бизнес."
         )
     return matches[0] if matches else None
 
