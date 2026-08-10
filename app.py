@@ -5228,28 +5228,38 @@ def _tbank_request_post(path, payload):
 # осознанное ограничение, а не недоделка — см. обсуждение с владельцем
 # бизнеса.
 # ---------------------------------------------------------------------
+def _tbank_recipient_full_name(r):
+    """Т-Банк gives the self-employed recipient's name as three separate
+    fields (confirmed against a real account — the earlier guesses of a
+    single combined fullName/name/fio/... field were all wrong), not one
+    combined string."""
+    return " ".join(w for w in (r.get("lastName"), r.get("firstName"), r.get("middleName")) if w)
+
+
 def _tbank_find_self_employed(name):
     """Look up a registered self-employed recipient in Т-Банк matching this
     employee. Our employee names are just "Имя Фамилия" — Т-Банк's records
-    include the patronymic too ("Фамилия Имя Отчество"), and possibly in a
-    different word order — so this matches whenever every word of our name
-    appears somewhere in the Т-Банк name, rather than requiring the two
-    strings to be identical. No status filter on the list call: which
-    statuses are actually payable is enforced by Т-Банк itself at registry
-    creation, and filtering here risks silently hiding a real recipient if
-    our guess at the status value's spelling is wrong. Returns the matching
-    recipient dict. Raises RuntimeError (message safe to show the admin) if
-    nobody matches — including, on a "not found", the raw names Т-Банк
-    actually returned, since our field-name guesses for the response shape
-    (fullName/name/fio/...) may not match reality — or if more than one
-    recipient matches, since it's too risky to guess which is meant."""
+    also carry a middleName (patronymic) — so this matches whenever every
+    word of our name appears somewhere in the Т-Банк name, rather than
+    requiring the two strings to be identical. Recipients with status
+    "DELETED" are skipped outright — a deleted recipient can never receive
+    money, and matching one instead of a real active person with the same
+    name would be actively wrong. No other status filtering: which of the
+    remaining statuses are actually payable is enforced by Т-Банк itself at
+    registry creation. Returns the matching recipient dict. Raises
+    RuntimeError (message safe to show the admin) if nobody matches — with
+    the names Т-Банк actually returned, so a genuine mismatch is visible
+    right away — or if more than one recipient matches, since it's too
+    risky to guess which is meant."""
     data = _tbank_request_post("/v1/self-employed/recipients/list", {"limit": 900})
     recipients = data.get("recipients") or data.get("items") or data.get("data") or []
     our_words = {w.casefold() for w in name.split()}
     matches = []
     found_names = []
     for r in recipients:
-        full_name = str(_tbank_pick(r, "fullName", "name", "fio", "shortName", "displayName") or "")
+        if r.get("status") == "DELETED":
+            continue
+        full_name = _tbank_recipient_full_name(r)
         if full_name:
             found_names.append(full_name)
         their_words = {w.casefold() for w in full_name.split()}
@@ -5266,11 +5276,9 @@ def _tbank_find_self_employed(name):
         raise RuntimeError(
             f"Самозанятый «{name}» не найден среди {len(found_names)} получателей в Т-Банке: {shown}"
         )
-    sample = json.dumps(recipients[0], ensure_ascii=False)[:600] if recipients else "(пусто)"
     raise RuntimeError(
-        f"Т-Банк вернул {len(recipients)} получателей, но ни в одном не удалось распознать имя по "
-        f"полям fullName/name/fio/shortName/displayName. Вот как выглядит первая запись целиком — "
-        f"по ней видно настоящее имя поля: {sample}"
+        f"Т-Банк вернул {len(recipients)} получателей, но среди них нет ни одного не удалённого "
+        "с именем и фамилией — проверьте в Т-Бизнес, зарегистрирован ли этот самозанятый."
     )
 
 
@@ -5318,9 +5326,9 @@ def _tbank_send_payout(db, employee, period_key, amount):
     error_message = None
     try:
         recipient = _tbank_find_self_employed(employee)
-        recipient_name = _tbank_pick(recipient, "fullName", "name", "fio", "shortName", "displayName")
-        recipient_inn = _tbank_pick(recipient, "inn", "INN")
-        recipient_id = _tbank_pick(recipient, "recipientId", "id")
+        recipient_name = _tbank_recipient_full_name(recipient)
+        recipient_inn = recipient.get("inn")
+        recipient_id = recipient.get("id")
         payment_registry_id = _tbank_create_payout_registry(recipient_id, amount)
         status = "created"
     except Exception as e:
