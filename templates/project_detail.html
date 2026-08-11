@@ -84,6 +84,14 @@
         </svg>
         <span class="nav-label">Аналитика</span>
       </a>
+      <a href="{{ url_for('supply_warehouses') }}" class="{{ 'active' if active_page == 'supply' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 2.3l7 3.5v8.4l-7 3.5-7-3.5V5.8l7-3.5z"/>
+          <path d="M3 5.8l7 3.5 7-3.5"/>
+          <path d="M10 9.3v8.4"/>
+        </svg>
+        <span class="nav-label">Снабжение</span>
+      </a>
     </nav>
     <div class="title-block">
       <h1>{{ project.name }}</h1>

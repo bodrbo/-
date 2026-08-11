@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Разбить транзакцию — Аналитика</title>
+<title>Заявки на снабжение — Снабжение</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
@@ -34,22 +34,6 @@
     <span class="loader-label">Загрузка…</span>
   </div>
 </div>
-
-{% macro split_row(row=None) %}
-<div class="split-row">
-  <select name="project_id[]" class="split-project">
-    <option value="" disabled {{ 'selected' if not row or not row.project_id }}>Выберите проект</option>
-    {% for p in projects %}
-    <option value="{{ p.id }}" {{ 'selected' if row and row.project_id == p.id|string }}>
-      {{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.boat_model %} ({{ p.boat_model }}){% endif %}
-    </option>
-    {% endfor %}
-  </select>
-  <input type="text" inputmode="decimal" name="amount[]" placeholder="Сумма, ₽" class="split-amount"
-         value="{{ row.amount if row else '' }}" oninput="updateSplitSummary()">
-  <button type="button" class="btn-delete" onclick="removeSplitRow(this)" title="Убрать строку">✕</button>
-</div>
-{% endmacro %}
 
 <header class="topbar">
   <div class="topbar-inner">
@@ -110,7 +94,8 @@
       </a>
     </nav>
     <div class="title-block">
-      <h1>Разбить транзакцию</h1>
+      <span class="kicker">Снабжение</span>
+      <h1>Заявки на снабжение</h1>
     </div>
     <div class="topbar-actions">
       <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
@@ -131,107 +116,21 @@
 
 <main class="wrap">
 
-  <a href="{{ next_url }}" class="term" style="display:inline-block; margin-bottom:14px;">← Назад</a>
-
-  {% if errors %}
-  <div class="alert">
-    <strong>Не удалось сохранить разбивку:</strong>
-    <ul>
-      {% for err in errors %}<li>{{ err }}</li>{% endfor %}
-    </ul>
-  </div>
-  {% endif %}
+  <nav class="sub-tabs">
+    <a href="{{ url_for('supply_warehouses') }}" class="{{ 'active' if sub_page == 'warehouses' }}">Склады</a>
+    <a href="{{ url_for('supply_requests') }}" class="{{ 'active' if sub_page == 'requests' }}">Заявки на снабжение</a>
+  </nav>
 
   <section class="panel">
-    <h2>Операция</h2>
-    <p class="hint" style="margin-top:0;">
-      {{ transaction.operation_date[:10]|ru_date }} ·
-      {{ '+' if transaction.direction == 'in' else '−' }}{{ transaction.amount|money }} ₽ ·
-      {{ transaction.counterparty_name or '—' }}
-      {% if transaction.purpose %} · {{ transaction.purpose }}{% endif %}
-    </p>
-  </section>
-
-  <section class="panel form-panel">
-    <h2>Разбивка суммы по проектам</h2>
-    <form action="{{ url_for('transaction_split', transaction_id=transaction.id) }}" method="post" id="split-form">
-      <input type="hidden" name="next" value="{{ next_url }}">
-
-      <div id="split-container">
-        {% if splits %}
-          {% for row in splits %}{{ split_row(row) }}{% endfor %}
-        {% else %}
-          {{ split_row() }}
-          {{ split_row() }}
-        {% endif %}
-      </div>
-      <button type="button" class="btn-add" onclick="addSplitRow()">Добавить проект</button>
-
-      <template id="split-row-template">{{ split_row() }}</template>
-
-      <div class="totals-grid" style="margin-top:16px;">
-        <div class="panel total-card">
-          <span class="k">Сумма операции</span>
-          <span class="v" id="split-expected">{{ transaction.amount|money }} ₽</span>
-        </div>
-        <div class="panel total-card">
-          <span class="k">Указано по частям</span>
-          <span class="v" id="split-total">0 ₽</span>
-        </div>
-        <div class="panel total-card total-card-grand">
-          <span class="k">Остаток</span>
-          <span class="v" id="split-remainder">{{ transaction.amount|money }} ₽</span>
-        </div>
-      </div>
-
-      <div class="field field-submit" style="margin-top:16px;">
-        <button type="submit">Сохранить разбивку</button>
-      </div>
-    </form>
-
-    {% if splits %}
-    <form action="{{ url_for('clear_transaction_split', transaction_id=transaction.id) }}" method="post" style="margin-top:8px;">
-      <input type="hidden" name="next" value="{{ next_url }}">
-      <button type="submit" class="btn-secondary">Убрать разбивку</button>
-    </form>
-    {% endif %}
+    <div class="empty-state">
+      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      <div class="t">Заявок пока нет</div>
+      <div class="s">Раздел в разработке.</div>
+    </div>
   </section>
 
 </main>
 
-<script>
-var splitExpected = {{ transaction.amount|abs }};
-
-function addSplitRow() {
-  var container = document.getElementById('split-container');
-  var template = document.getElementById('split-row-template');
-  container.appendChild(template.content.cloneNode(true));
-}
-
-function removeSplitRow(btn) {
-  var rows = document.querySelectorAll('#split-container .split-row');
-  if (rows.length <= 2) return;
-  btn.closest('.split-row').remove();
-  updateSplitSummary();
-}
-
-function updateSplitSummary() {
-  var total = 0;
-  document.querySelectorAll('#split-container .split-amount').forEach(function (input) {
-    total += parseFloat((input.value || '').replace(',', '.')) || 0;
-  });
-  var remainder = splitExpected - total;
-  document.getElementById('split-total').textContent = Math.round(total).toLocaleString('ru-RU') + ' ₽';
-  var remainderEl = document.getElementById('split-remainder');
-  remainderEl.textContent = Math.round(remainder).toLocaleString('ru-RU') + ' ₽';
-  remainderEl.style.color = Math.abs(remainder) > 0.5 ? 'var(--danger)' : 'var(--success)';
-}
-
-document.getElementById('split-container').addEventListener('input', function (e) {
-  if (e.target.classList.contains('split-amount')) updateSplitSummary();
-});
-document.addEventListener('DOMContentLoaded', updateSplitSummary);
-</script>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 
 </body>

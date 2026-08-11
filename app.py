@@ -6171,6 +6171,22 @@ def remove_transaction_split():
     return redirect(next_url)
 
 
+# =======================================================================
+# Снабжение
+# =======================================================================
+
+@app.route("/supply/warehouses")
+@admin_login_required
+def supply_warehouses():
+    return render_template("supply_warehouses.html", active_page="supply", sub_page="warehouses")
+
+
+@app.route("/supply/requests")
+@admin_login_required
+def supply_requests():
+    return render_template("supply_requests.html", active_page="supply", sub_page="requests")
+
+
 def _sync_captain_shifts_for_date(db, target_date):
     """Fetch Yclients records for target_date, work out which staffed
     names are captains we know locally, and make captain_shifts for that
