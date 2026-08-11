@@ -723,6 +723,11 @@ DEFECT_TASK_WORK_TYPE = "Устранение неисправности"
 
 # Tuning-order work items can only be handed to tuning-center staff.
 TUNING_ASSIGNABLE_POSITIONS = ("Тюнингмэн",)
+# supply_writeoffs.reason used when a tuningman writes off materials from
+# within an assigned task — distinct from the free-choice reasons an admin
+# picks in the catalog (SUPPLY_WRITEOFF_REASONS), since this one is implied
+# by the write-off's origin rather than chosen.
+TUNING_MATERIAL_WRITEOFF_REASON = "Использовано в работе"
 
 
 def order_status_label(value):
@@ -1315,6 +1320,21 @@ def init_db():
         )
         """
     )
+    # Migration path for databases created before task-linked write-offs
+    # existed — lets a write-off be attributed to a project (for Analytics)
+    # and, when it came from an employee's assigned task rather than the
+    # admin panel, to who did it and which task it was for.
+    supply_writeoff_cols = [row[1] for row in conn.execute("PRAGMA table_info(supply_writeoffs)").fetchall()]
+    if "project_id" not in supply_writeoff_cols:
+        conn.execute("ALTER TABLE supply_writeoffs ADD COLUMN project_id INTEGER")
+    if "cost_price" not in supply_writeoff_cols:
+        conn.execute("ALTER TABLE supply_writeoffs ADD COLUMN cost_price REAL")
+    if "amount" not in supply_writeoff_cols:
+        conn.execute("ALTER TABLE supply_writeoffs ADD COLUMN amount REAL")
+    if "employee_name" not in supply_writeoff_cols:
+        conn.execute("ALTER TABLE supply_writeoffs ADD COLUMN employee_name TEXT")
+    if "tuning_item_assignment_id" not in supply_writeoff_cols:
+        conn.execute("ALTER TABLE supply_writeoffs ADD COLUMN tuning_item_assignment_id INTEGER")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS projects (
@@ -5233,6 +5253,11 @@ def _employees_with_any_position(db, positions):
     return [r["name"] for r in rows]
 
 
+def _project_id_for_tuning_order(db, order_id):
+    row = db.execute("SELECT id FROM projects WHERE tuning_order_id = ?", (order_id,)).fetchone()
+    return row["id"] if row else None
+
+
 def team_login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -5364,12 +5389,37 @@ def team_dashboard():
             "WHERE ta.employee_name = ?",
             (employee_name,),
         ).fetchall()
+        tuning_task_dicts = []
+        for t in tuning_tasks:
+            task = dict(t, kind="tuning")
+            materials = db.execute(
+                "SELECT sw.*, sp.name AS product_name "
+                "FROM supply_writeoffs sw JOIN supply_products sp ON sp.id = sw.product_id "
+                "WHERE sw.tuning_item_assignment_id = ? ORDER BY sw.id DESC",
+                (task["id"],),
+            ).fetchall()
+            task["materials"] = materials
+            task["materials_total"] = sum(m["amount"] for m in materials)
+            tuning_task_dicts.append(task)
         my_tasks = sorted(
-            [dict(t, kind="defect") for t in defect_tasks]
-            + [dict(t, kind="tuning") for t in tuning_tasks],
+            [dict(t, kind="defect") for t in defect_tasks] + tuning_task_dicts,
             key=lambda t: (t["assigned_at"], t["id"]),
             reverse=True,
         )
+
+    # Materials catalog for the "Списать материалы" modal — every product/
+    # warehouse combo that currently has stock, org-wide (not scoped to any
+    # one task, since any material could plausibly go toward any job).
+    materials = []
+    if can_have_tasks:
+        materials = db.execute(
+            "SELECT sp.id AS product_id, sp.name AS product_name, "
+            "sw.id AS warehouse_id, sw.name AS warehouse_name, ss.quantity AS quantity "
+            "FROM supply_stock ss "
+            "JOIN supply_products sp ON sp.id = ss.product_id "
+            "JOIN supply_warehouses sw ON sw.id = ss.warehouse_id "
+            "WHERE ss.quantity > 0 ORDER BY sp.name, sw.name"
+        ).fetchall()
 
     return render_template(
         "team_dashboard.html",
@@ -5384,7 +5434,8 @@ def team_dashboard():
         boats=BOATS, boat_index=boat_index, boat_documents=boat_documents, diploma_url=diploma_url,
         income_open="week" in request.args, documents_open="boat_index" in request.args,
         can_have_tasks=can_have_tasks, my_tasks=my_tasks, defect_statuses=DEFECT_STATUSES,
-        work_statuses=WORK_STATUSES,
+        work_statuses=WORK_STATUSES, materials=materials,
+        team_writeoff_error=session.pop("team_writeoff_error", None),
     )
 
 
@@ -5521,16 +5572,90 @@ def team_tuning_task_set_status(assignment_id):
     )
     if status == "done" and not assignment["entry_id"]:
         amount = assignment["rate"] * assignment["norm_hours"]
+        project_id = _project_id_for_tuning_order(db, item["order_id"])
         cur = db.execute(
-            "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at, project_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (employee_name, item["work_name"], assignment["rate"], assignment["norm_hours"],
-             amount, dt.date.today().isoformat(), now),
+             amount, dt.date.today().isoformat(), now, project_id),
         )
         db.execute(
             "UPDATE tuning_item_assignments SET entry_id = ? WHERE id = ?",
             (cur.lastrowid, assignment_id),
         )
+    db.commit()
+    return redirect(url_for("team_dashboard"))
+
+
+@app.route("/team/tuning-tasks/<int:assignment_id>/writeoff-material", methods=["POST"])
+@team_login_required
+def team_tuning_task_writeoff_material(assignment_id):
+    """Lets a tuningman spend catalog materials against their accepted task.
+    The cost is snapshotted (quantity × current cost_price) and attributed
+    to the task's project, so Analytics reflects it alongside the payroll
+    cost of the same work — see _project_id_for_tuning_order."""
+    db = get_db()
+    employee_name = session.get("team_employee_name")
+    assignment = db.execute(
+        "SELECT * FROM tuning_item_assignments WHERE id = ? AND employee_name = ?",
+        (assignment_id, employee_name),
+    ).fetchone()
+    if assignment is None or assignment["assignment_status"] != "accepted":
+        return redirect(url_for("team_dashboard"))
+    item = db.execute(
+        "SELECT * FROM tuning_order_items WHERE id = ?", (assignment["item_id"],)
+    ).fetchone()
+    if item is None:
+        return redirect(url_for("team_dashboard"))
+
+    combo_raw = request.form.get("product_warehouse", "").strip()
+    quantity_raw = request.form.get("quantity", "").strip().replace(",", ".")
+
+    errors = []
+    product_id = warehouse_id = None
+    if ":" in combo_raw:
+        pid_raw, wid_raw = combo_raw.split(":", 1)
+        if pid_raw.isdigit() and wid_raw.isdigit():
+            product_id, warehouse_id = int(pid_raw), int(wid_raw)
+    if product_id is None or warehouse_id is None:
+        errors.append("Выберите материал.")
+
+    stock_row = product = None
+    if product_id is not None and warehouse_id is not None:
+        stock_row = db.execute(
+            "SELECT * FROM supply_stock WHERE product_id = ? AND warehouse_id = ?",
+            (product_id, warehouse_id),
+        ).fetchone()
+        product = db.execute("SELECT * FROM supply_products WHERE id = ?", (product_id,)).fetchone()
+
+    quantity = None
+    try:
+        quantity = float(quantity_raw)
+        if quantity <= 0:
+            errors.append("Количество должно быть больше нуля.")
+        elif stock_row is None or quantity > stock_row["quantity"]:
+            errors.append("Нельзя списать больше, чем есть на складе.")
+    except ValueError:
+        errors.append("Количество должно быть числом.")
+
+    if errors:
+        session["team_writeoff_error"] = " ".join(errors)
+        return redirect(url_for("team_dashboard"))
+
+    project_id = _project_id_for_tuning_order(db, item["order_id"])
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    amount = quantity * product["cost_price"]
+    db.execute(
+        "INSERT INTO supply_writeoffs (product_id, warehouse_id, quantity, reason, note, created_at, "
+        "project_id, cost_price, amount, employee_name, tuning_item_assignment_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (product_id, warehouse_id, quantity, TUNING_MATERIAL_WRITEOFF_REASON, item["work_name"], now,
+         project_id, product["cost_price"], amount, employee_name, assignment_id),
+    )
+    db.execute(
+        "UPDATE supply_stock SET quantity = quantity - ? WHERE id = ?",
+        (quantity, stock_row["id"]),
+    )
     db.commit()
     return redirect(url_for("team_dashboard"))
 
@@ -6130,8 +6255,12 @@ def _project_totals(db, project_id):
         "SELECT COALESCE(SUM(amount), 0) AS expense FROM entries WHERE project_id = ?",
         (project_id,),
     ).fetchone()["expense"]
+    materials_expense = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) AS expense FROM supply_writeoffs WHERE project_id = ?",
+        (project_id,),
+    ).fetchone()["expense"]
     income = row["income"] + split_row["income"]
-    expense = row["expense"] + split_row["expense"] + entries_expense
+    expense = row["expense"] + split_row["expense"] + entries_expense + materials_expense
     return income, expense, income - expense
 
 
@@ -6169,8 +6298,13 @@ def analytics_projects():
         "WHERE project_id IS NOT NULL AND substr(work_date, 1, 7) = ?",
         (month_prefix,),
     ).fetchone()["expense"]
+    month_materials_expense = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) AS expense FROM supply_writeoffs "
+        "WHERE project_id IS NOT NULL AND substr(created_at, 1, 7) = ?",
+        (month_prefix,),
+    ).fetchone()["expense"]
     month_income = month_row["income"]
-    month_expense = month_row["expense"] + month_entries_expense
+    month_expense = month_row["expense"] + month_entries_expense + month_materials_expense
 
     return render_template(
         "analytics_projects.html", active_page="analytics", sub_page="projects",
@@ -6214,6 +6348,12 @@ def project_detail(project_id):
         "SELECT * FROM entries WHERE project_id = ? ORDER BY work_date DESC, id DESC",
         (project_id,),
     ).fetchall()
+    material_writeoffs = db.execute(
+        "SELECT sw.*, sp.name AS product_name "
+        "FROM supply_writeoffs sw JOIN supply_products sp ON sp.id = sw.product_id "
+        "WHERE sw.project_id = ? ORDER BY sw.created_at DESC, sw.id DESC",
+        (project_id,),
+    ).fetchall()
     income, expense, profit = _project_totals(db, project_id)
     order = None
     if project["tuning_order_id"]:
@@ -6223,7 +6363,8 @@ def project_detail(project_id):
     return render_template(
         "project_detail.html", active_page="analytics", sub_page="projects",
         project=project, order=order, transactions=transactions, unattached=unattached,
-        work_entries=work_entries, income=income, expense=expense, profit=profit,
+        work_entries=work_entries, material_writeoffs=material_writeoffs,
+        income=income, expense=expense, profit=profit,
     )
 
 

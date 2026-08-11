@@ -249,6 +249,38 @@
   </section>
 
   <section class="panel">
+    <h2>Списанные материалы</h2>
+    {% if material_writeoffs %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th>Сотрудник</th>
+            <th>Материал</th>
+            <th>Количество</th>
+            <th>Сумма</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for w in material_writeoffs %}
+          <tr>
+            <td class="muted">{{ w.created_at[:10]|ru_date }}</td>
+            <td>{{ w.employee_name or '—' }}</td>
+            <td>{{ w.product_name }}</td>
+            <td class="amount">{{ w.quantity|float|round(2) }}</td>
+            <td class="amount">{{ w.amount|money }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint">К проекту пока не привязано ни одного списания материалов.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
     <h2>Привязать транзакцию</h2>
     {% if unattached %}
     <form action="{{ url_for('set_transaction_project') }}" method="post" class="entry-form">

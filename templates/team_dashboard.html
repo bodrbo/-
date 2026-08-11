@@ -258,6 +258,9 @@
       <span class="chev" aria-hidden="true"></span>
     </summary>
     <div class="collapsible-body">
+      {% if team_writeoff_error %}
+      <div class="alert"><strong>Не удалось списать материалы:</strong> {{ team_writeoff_error }}</div>
+      {% endif %}
       {% if my_tasks %}
       {% for task in my_tasks %}
       <div class="task-card">
@@ -310,6 +313,20 @@
           </form>
           {% endif %}
         </div>
+        {% if task.kind == 'tuning' %}
+        <div style="margin-top:8px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <button type="button" class="btn-secondary"
+                  onclick='openMaterialModal({{ url_for("team_tuning_task_writeoff_material", assignment_id=task.id)|tojson }})'>
+            Списать материалы
+          </button>
+          {% if task.materials %}
+          <span class="hint" style="margin:0;">
+            {% for m in task.materials %}{{ m.product_name }} — {{ m.quantity|float|round(2) }}{% if not loop.last %}, {% endif %}{% endfor %}
+            (на {{ task.materials_total|money }} ₽)
+          </span>
+          {% endif %}
+        </div>
+        {% endif %}
         {% else %}
         <span class="hint" style="margin:0;">Отклонена</span>
         {% endif %}
@@ -324,6 +341,33 @@
       {% endif %}
     </div>
   </details>
+
+  <div id="material-modal" class="photo-modal hidden" onclick="if (event.target === this) closeMaterialModal();">
+    <div class="photo-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closeMaterialModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <form id="material-form" method="post" class="assign-modal-card">
+        <h3>Списать материалы</h3>
+        <div class="field">
+          <label for="material-select">Материал и склад</label>
+          <select id="material-select" name="product_warehouse" required>
+            <option value="" disabled selected>Выберите материал</option>
+            {% for m in materials %}
+            <option value="{{ m.product_id }}:{{ m.warehouse_id }}">{{ m.product_name }} — {{ m.warehouse_name }} (остаток {{ m.quantity|float|round(2) }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="material-quantity">Количество</label>
+          <input type="text" id="material-quantity" name="quantity" inputmode="decimal" required>
+        </div>
+        <button type="submit" class="btn-primary">Списать</button>
+      </form>
+    </div>
+  </div>
   {% endif %}
 
   {% if is_captain %}
@@ -363,6 +407,25 @@
   {% endif %}
 
 </main>
+
+{% if can_have_tasks %}
+<script>
+function openMaterialModal(actionUrl) {
+  document.getElementById('material-form').action = actionUrl;
+  document.getElementById('material-select').value = '';
+  document.getElementById('material-quantity').value = '';
+  document.getElementById('material-modal').classList.remove('hidden');
+}
+
+function closeMaterialModal() {
+  document.getElementById('material-modal').classList.add('hidden');
+}
+
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') closeMaterialModal();
+});
+</script>
+{% endif %}
 
 {% if is_captain %}
 <script>

@@ -269,7 +269,10 @@
             <td><span class="status-badge status-defect-new">Списание</span></td>
             <td>{{ row.warehouse_name }}</td>
             <td class="amount">−{{ row.quantity|float|round(2) }}</td>
-            <td class="muted">{{ row.reason }}{% if row.note %} — {{ row.note }}{% endif %}</td>
+            <td class="muted">
+              {{ row.reason }}{% if row.note %} — {{ row.note }}{% endif %}
+              {%- if row.employee_name %} · {{ row.employee_name }}{% endif %}
+            </td>
             {% endif %}
           </tr>
           {% else %}
