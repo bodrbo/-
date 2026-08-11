@@ -123,13 +123,18 @@ def get_checklist_answer_photos(db, answer_id):
     ]
 
 
-def format_money(value, decimals=0):
-    """Format a number with a thin space as the thousands separator."""
+def format_money(value, decimals=2):
+    """Format a number with a thin space as the thousands separator and,
+    when decimals > 0, a comma as the decimal separator (Russian convention
+    — Python's f-string grouping only gives us a period)."""
     try:
         value = float(value)
     except (TypeError, ValueError):
         return value
     formatted = f"{value:,.{decimals}f}"
+    if "." in formatted:
+        integer_part, decimal_part = formatted.split(".")
+        return integer_part.replace(",", " ") + "," + decimal_part
     return formatted.replace(",", " ")
 
 

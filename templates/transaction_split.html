@@ -221,9 +221,9 @@ function updateSplitSummary() {
     total += parseFloat((input.value || '').replace(',', '.')) || 0;
   });
   var remainder = splitExpected - total;
-  document.getElementById('split-total').textContent = Math.round(total).toLocaleString('ru-RU') + ' ₽';
+  document.getElementById('split-total').textContent = total.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
   var remainderEl = document.getElementById('split-remainder');
-  remainderEl.textContent = Math.round(remainder).toLocaleString('ru-RU') + ' ₽';
+  remainderEl.textContent = remainder.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
   remainderEl.style.color = Math.abs(remainder) > 0.5 ? 'var(--danger)' : 'var(--success)';
 }
 

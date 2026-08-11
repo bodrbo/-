@@ -668,7 +668,7 @@ function updateWorkRow(input) {
   var price = cost * mult;
   var span = row.querySelector('.work-price');
   span.setAttribute('data-value', price);
-  span.textContent = Math.round(price).toLocaleString('ru-RU') + ' ₽';
+  span.textContent = price.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
   updateOrderTotal();
 }
 
@@ -696,9 +696,9 @@ function updateOrderTotal() {
   var discountAmount = discountType === 'amount' ? discountValue : subtotal * discountValue / 100;
   if (discountAmount > subtotal) discountAmount = subtotal;
   var total = subtotal - discountAmount;
-  document.getElementById('order-subtotal').textContent = Math.round(subtotal).toLocaleString('ru-RU') + ' ₽';
-  document.getElementById('order-discount-amount').textContent = Math.round(discountAmount).toLocaleString('ru-RU') + ' ₽';
-  document.getElementById('order-total').textContent = Math.round(total).toLocaleString('ru-RU') + ' ₽';
+  document.getElementById('order-subtotal').textContent = subtotal.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
+  document.getElementById('order-discount-amount').textContent = discountAmount.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
+  document.getElementById('order-total').textContent = total.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
 }
 
 document.addEventListener('DOMContentLoaded', updateOrderTotal);
