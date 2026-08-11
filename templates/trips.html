@@ -149,12 +149,16 @@
     </div>
   {% endif %}
 
-  <section class="panel form-panel">
-    <h2>
-      {% if import_candidate %}Подтвердить рейс из Yclients
-      {% elif edit_trip %}Редактировать рейс
-      {% else %}Добавить рейс{% endif %}
-    </h2>
+  <details class="panel collapsible-panel"{{ ' open' if edit_trip or import_candidate or errors }}>
+    <summary>
+      <span>
+        {% if import_candidate %}Подтвердить рейс из Yclients
+        {% elif edit_trip %}Редактировать рейс
+        {% else %}Добавить рейс{% endif %}
+      </span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
     {% if import_note %}
     <p class="hint import-note">Комментарий из Yclients (похоже на канал продажи): «{{ import_note }}»</p>
     {% endif %}
@@ -278,7 +282,8 @@
       </div>
     </form>
     <p class="hint">Выбор катера подставит топливо/стоянку/комиссию, вид рейса — ставку и часы. Все значения можно поправить вручную перед сохранением.</p>
-  </section>
+    </div>
+  </details>
 
   <details class="panel import-panel"{{ ' open' if open_import }}>
     <summary>
@@ -356,13 +361,16 @@
     </div>
   </details>
 
-  <section class="panel">
-    {% if trip_expense_error %}
-    <div class="alert"><strong>Не удалось сохранить расход:</strong> {{ trip_expense_error }}</div>
-    {% endif %}
-    <details class="doc-add">
-      <summary class="btn-add">Добавить разовый расход</summary>
-      <form action="{{ url_for('add_trip_expense') }}" method="post" class="entry-form" style="margin-top:14px;">
+  <details class="panel collapsible-panel"{{ ' open' if trip_expense_error }}>
+    <summary>
+      <span>Добавить разовый расход</span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
+      {% if trip_expense_error %}
+      <div class="alert"><strong>Не удалось сохранить расход:</strong> {{ trip_expense_error }}</div>
+      {% endif %}
+      <form action="{{ url_for('add_trip_expense') }}" method="post" class="entry-form">
         <div class="field field-narrow">
           <label for="expense_boat">Катер</label>
           <select id="expense_boat" name="boat" required>
@@ -397,171 +405,178 @@
           <button type="submit">Добавить расход</button>
         </div>
       </form>
-      <p class="hint" style="margin-top:10px;">
+      <p class="hint">
         Расход делится пополам между инвестором и судовладельцем — так же, как остаток по рейсам.
         Если выбрать сотрудника, та же сумма отдельно попадёт ему в зарплату.
       </p>
-    </details>
-  </section>
-
-  <section class="panel filter-panel">
-    <h2>Период и катер</h2>
-    <form action="{{ url_for('trips_index') }}" method="get" class="filter-form">
-      <div class="field">
-        <label for="month">Месяц</label>
-        <select id="month" name="month" onchange="this.form.submit()">
-          <option value="all" {{ 'selected' if selected_month == 'all' }}>Все периоды</option>
-          {% for m in months %}
-          <option value="{{ m.key }}" {{ 'selected' if selected_month == m.key }}>
-            {{ m.label }}{{ ' (текущий)' if m.is_current }}
-          </option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="field">
-        <label for="boat-filter">Катер</label>
-        <select id="boat-filter" name="boat" onchange="this.form.submit()">
-          <option value="all" {{ 'selected' if selected_boat == 'all' }}>Все катера</option>
-          {% for b in boats %}
-          <option value="{{ b.name }}" {{ 'selected' if selected_boat == b.name }}>{{ b.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-    </form>
-  </section>
-
-  <div class="hero-grid">
-    <div class="hero-card">
-      <span class="k">Итог судовладельца за период</span>
-      <span class="v tabular">{{ grand_my_share|money }} ₽</span>
-      <span class="d">Доход рейсов {{ grand_revenue|money }} ₽{% if by_investor %} · инвесторам {{ by_investor.values()|sum(attribute='payout')|money }} ₽{% endif %}</span>
     </div>
-    {% for boat_name, t in by_boat.items() %}
-    {% set investor = (boats|selectattr('name', 'equalto', boat_name)|map(attribute='investor')|first) or 'не указан' %}
-    {% set split_total = t.my_share + t.investor_payout %}
-    <div class="boat-card">
-      <div class="top">
-        <div>
-          <div class="boat-name">{{ boat_name }}</div>
-          <div class="boat-investor">Инвестор — {{ investor }}</div>
+  </details>
+
+  <details class="panel collapsible-panel" open>
+    <summary>
+      <span>Аналитика по рейсам</span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
+      <form action="{{ url_for('trips_index') }}" method="get" class="filter-form">
+        <div class="field">
+          <label for="month">Месяц</label>
+          <select id="month" name="month" onchange="this.form.submit()">
+            <option value="all" {{ 'selected' if selected_month == 'all' }}>Все периоды</option>
+            {% for m in months %}
+            <option value="{{ m.key }}" {{ 'selected' if selected_month == m.key }}>
+              {{ m.label }}{{ ' (текущий)' if m.is_current }}
+            </option>
+            {% endfor %}
+          </select>
         </div>
-        <div class="boat-amount">
-          <div class="v tabular">{{ t.investor_payout|money }} ₽</div>
-          <div class="k">инвестору</div>
+        <div class="field">
+          <label for="boat-filter">Катер</label>
+          <select id="boat-filter" name="boat" onchange="this.form.submit()">
+            <option value="all" {{ 'selected' if selected_boat == 'all' }}>Все катера</option>
+            {% for b in boats %}
+            <option value="{{ b.name }}" {{ 'selected' if selected_boat == b.name }}>{{ b.name }}</option>
+            {% endfor %}
+          </select>
         </div>
+      </form>
+
+      <div>
+        <div class="hero-grid">
+          <div class="hero-card">
+            <span class="k">Итог судовладельца за период</span>
+            <span class="v tabular">{{ grand_my_share|money }} ₽</span>
+            <span class="d">Доход рейсов {{ grand_revenue|money }} ₽{% if by_investor %} · инвесторам {{ by_investor.values()|sum(attribute='payout')|money }} ₽{% endif %}</span>
+          </div>
+          {% for boat_name, t in by_boat.items() %}
+          {% set investor = (boats|selectattr('name', 'equalto', boat_name)|map(attribute='investor')|first) or 'не указан' %}
+          {% set split_total = t.my_share + t.investor_payout %}
+          <div class="boat-card">
+            <div class="top">
+              <div>
+                <div class="boat-name">{{ boat_name }}</div>
+                <div class="boat-investor">Инвестор — {{ investor }}</div>
+              </div>
+              <div class="boat-amount">
+                <div class="v tabular">{{ t.investor_payout|money }} ₽</div>
+                <div class="k">инвестору</div>
+              </div>
+            </div>
+            <div class="split-bar" aria-hidden="true">
+              {% if split_total > 0 %}
+              <span style="width:{{ (t.my_share / split_total * 100)|round(1) }}%; background:var(--brass);"></span>
+              <span style="width:{{ (t.investor_payout / split_total * 100)|round(1) }}%; background:var(--ink-soft);"></span>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% if by_boat %}
+        <div class="split-legend">
+          <span><i style="background:var(--brass);"></i>Судовладельцу</span>
+          <span><i style="background:var(--ink-soft);"></i>Инвестору</span>
+        </div>
+        {% endif %}
       </div>
-      <div class="split-bar" aria-hidden="true">
-        {% if split_total > 0 %}
-        <span style="width:{{ (t.my_share / split_total * 100)|round(1) }}%; background:var(--brass);"></span>
-        <span style="width:{{ (t.investor_payout / split_total * 100)|round(1) }}%; background:var(--ink-soft);"></span>
+
+      <div>
+        <h3>Сводка по катерам за период</h3>
+        {% if by_boat %}
+        <div class="table-scroll">
+          <table class="gloss">
+            <tr>
+              <th>Катер</th><th>Рейсов</th><th>Доход</th><th>Комиссия</th><th>Прямые расходы</th>
+              <th>Остаток</th><th>Инвестору</th><th>Судовладельцу</th>
+            </tr>
+            {% for boat_name, t in by_boat.items() %}
+            <tr>
+              <td class="term">{{ boat_name }}</td>
+              <td>{{ t.count }}</td>
+              <td>{{ t.revenue|money }}</td>
+              <td>{{ t.commission|money }}</td>
+              <td>{{ (t.labor + t.fuel + t.mooring + t.extra)|money }}</td>
+              <td>{{ t.remainder|money }}</td>
+              <td class="amount">{{ t.investor_payout|money }}</td>
+              <td class="amount">{{ t.my_share|money }}</td>
+            </tr>
+            {% endfor %}
+          </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+          <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+          <div class="t">За выбранный период рейсов нет</div>
+          <div class="s">Добавьте рейс через форму выше или смените период/катер в фильтре.</div>
+        </div>
+        {% endif %}
+      </div>
+
+      <div>
+        <h3>Все рейсы за период</h3>
+        {% if trips %}
+        <div class="table-scroll">
+          <table class="records">
+            <thead>
+              <tr>
+                <th>Дата</th><th>Катер</th><th>Вид рейса</th><th>Доход</th><th>Канал</th>
+                <th>Комиссия</th><th>Расходы</th><th>Инвестору</th><th>Судовладельцу</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for t in trips %}
+              <tr class="{{ 'row-expense' if t.is_expense }}">
+                <td class="muted">{{ t.trip_date|ru_date }}{% if not t.is_expense %} · {{ t.trip_time or '00:00' }}{% endif %}</td>
+                <td>{{ t.boat }}</td>
+                <td>
+                  {% if t.is_expense %}<span class="status-badge status-cancelled">Расход</span> {% endif %}{{ t.work_type }}
+                </td>
+                {% if t.is_expense %}
+                <td class="muted">—</td>
+                <td class="muted">—</td>
+                <td class="muted">—</td>
+                <td>{{ t.extra_total|money }}</td>
+                {% else %}
+                <td>{{ t.revenue|money }}</td>
+                <td class="muted">{{ 'Напрямую' if t.sale_channel == 'direct' else ('Агрегатор' if t.sale_channel == 'aggregator' else 'Смешанно') }}</td>
+                <td>{{ t.commission_amount|money }} ({{ t.commission_pct|float|round(1) }}%)</td>
+                <td title="Гид/капитан: {{ t.labor_cost|money }} · Топливо: {{ t.fuel_cost|money }} · Стоянка: {{ t.mooring_cost|money }}{% if t.extra_total %} · Доп: {{ t.extra_total|money }}{% endif %}">
+                  {{ (t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total)|money }}
+                </td>
+                {% endif %}
+                <td class="amount">{{ t.investor_payout|money }}</td>
+                <td class="amount">{{ t.my_share|money }}</td>
+                <td class="row-actions">
+                  {% if not t.is_expense %}
+                  <a href="{{ url_for('edit_trip', trip_id=t.id) }}" class="icon-btn" title="Редактировать">
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M13.5 3.5l3 3L6 17H3v-3L13.5 3.5z"/>
+                    </svg>
+                  </a>
+                  {% endif %}
+                  <form action="{{ url_for('delete_trip', trip_id=t.id) }}" method="post"
+                        onsubmit="return confirm('{{ 'Удалить этот расход?' if t.is_expense else 'Удалить этот рейс? Связанная запись в зарплатах тоже удалится.' }}');">
+                    <button type="submit" class="icon-btn danger" title="Удалить">
+                      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
+                      </svg>
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+          <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+          <div class="t">За выбранный период записей нет</div>
+          <div class="s">Добавьте рейс через форму выше или смените период/катер в фильтре.</div>
+        </div>
         {% endif %}
       </div>
     </div>
-    {% endfor %}
-  </div>
-  {% if by_boat %}
-  <div class="split-legend">
-    <span><i style="background:var(--brass);"></i>Судовладельцу</span>
-    <span><i style="background:var(--ink-soft);"></i>Инвестору</span>
-  </div>
-  {% endif %}
-
-  <section class="panel">
-    <h2>Сводка по катерам за период</h2>
-    {% if by_boat %}
-    <div class="table-scroll">
-      <table class="gloss">
-        <tr>
-          <th>Катер</th><th>Рейсов</th><th>Доход</th><th>Комиссия</th><th>Прямые расходы</th>
-          <th>Остаток</th><th>Инвестору</th><th>Судовладельцу</th>
-        </tr>
-        {% for boat_name, t in by_boat.items() %}
-        <tr>
-          <td class="term">{{ boat_name }}</td>
-          <td>{{ t.count }}</td>
-          <td>{{ t.revenue|money }}</td>
-          <td>{{ t.commission|money }}</td>
-          <td>{{ (t.labor + t.fuel + t.mooring + t.extra)|money }}</td>
-          <td>{{ t.remainder|money }}</td>
-          <td class="amount">{{ t.investor_payout|money }}</td>
-          <td class="amount">{{ t.my_share|money }}</td>
-        </tr>
-        {% endfor %}
-      </table>
-    </div>
-    {% else %}
-    <div class="empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">За выбранный период рейсов нет</div>
-      <div class="s">Добавьте рейс через форму выше или смените период/катер в фильтре.</div>
-    </div>
-    {% endif %}
-  </section>
-
-  <section class="panel">
-    <h2>Все рейсы за период</h2>
-    {% if trips %}
-    <div class="table-scroll">
-      <table class="records">
-        <thead>
-          <tr>
-            <th>Дата</th><th>Катер</th><th>Вид рейса</th><th>Доход</th><th>Канал</th>
-            <th>Комиссия</th><th>Расходы</th><th>Инвестору</th><th>Судовладельцу</th><th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for t in trips %}
-          <tr class="{{ 'row-expense' if t.is_expense }}">
-            <td class="muted">{{ t.trip_date|ru_date }}{% if not t.is_expense %} · {{ t.trip_time or '00:00' }}{% endif %}</td>
-            <td>{{ t.boat }}</td>
-            <td>
-              {% if t.is_expense %}<span class="status-badge status-cancelled">Расход</span> {% endif %}{{ t.work_type }}
-            </td>
-            {% if t.is_expense %}
-            <td class="muted">—</td>
-            <td class="muted">—</td>
-            <td class="muted">—</td>
-            <td>{{ t.extra_total|money }}</td>
-            {% else %}
-            <td>{{ t.revenue|money }}</td>
-            <td class="muted">{{ 'Напрямую' if t.sale_channel == 'direct' else ('Агрегатор' if t.sale_channel == 'aggregator' else 'Смешанно') }}</td>
-            <td>{{ t.commission_amount|money }} ({{ t.commission_pct|float|round(1) }}%)</td>
-            <td title="Гид/капитан: {{ t.labor_cost|money }} · Топливо: {{ t.fuel_cost|money }} · Стоянка: {{ t.mooring_cost|money }}{% if t.extra_total %} · Доп: {{ t.extra_total|money }}{% endif %}">
-              {{ (t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total)|money }}
-            </td>
-            {% endif %}
-            <td class="amount">{{ t.investor_payout|money }}</td>
-            <td class="amount">{{ t.my_share|money }}</td>
-            <td class="row-actions">
-              {% if not t.is_expense %}
-              <a href="{{ url_for('edit_trip', trip_id=t.id) }}" class="icon-btn" title="Редактировать">
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M13.5 3.5l3 3L6 17H3v-3L13.5 3.5z"/>
-                </svg>
-              </a>
-              {% endif %}
-              <form action="{{ url_for('delete_trip', trip_id=t.id) }}" method="post"
-                    onsubmit="return confirm('{{ 'Удалить этот расход?' if t.is_expense else 'Удалить этот рейс? Связанная запись в зарплатах тоже удалится.' }}');">
-                <button type="submit" class="icon-btn danger" title="Удалить">
-                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
-                  </svg>
-                </button>
-              </form>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <div class="empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">За выбранный период записей нет</div>
-      <div class="s">Добавьте рейс через форму выше или смените период/катер в фильтре.</div>
-    </div>
-    {% endif %}
-  </section>
+  </details>
 
 </main>
 
