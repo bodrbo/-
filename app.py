@@ -1029,6 +1029,26 @@ def init_db():
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS trip_contracts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            contract_number TEXT NOT NULL,
+            contract_date TEXT NOT NULL,
+            client_name TEXT NOT NULL,
+            client_representative TEXT,
+            client_representative_basis TEXT,
+            client_requisites TEXT,
+            service_description TEXT NOT NULL,
+            service_date TEXT,
+            service_time TEXT,
+            total_amount REAL NOT NULL,
+            prepayment_terms TEXT,
+            prepayment_amount REAL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS trip_labor (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             trip_id INTEGER NOT NULL,
@@ -1923,6 +1943,19 @@ def delete_entry(entry_id):
     return redirect(url_for("index"))
 
 
+def _suggest_contract_number(db, today):
+    """Next contract number in the template's own DDMMYY-N convention
+    (see "Договор оказания услуг 200825-1" in the template) — N is how
+    many contracts already exist for today, plus one. Just a prefill the
+    admin can overwrite; nothing enforces it stays unique or sequential."""
+    prefix = today.strftime("%d%m%y")
+    count_today = db.execute(
+        "SELECT COUNT(*) AS n FROM trip_contracts WHERE contract_number LIKE ?",
+        (f"{prefix}-%",),
+    ).fetchone()["n"]
+    return f"{prefix}-{count_today + 1}"
+
+
 def _trips_list_context(db, selected_month=None, selected_boat="all"):
     months, current_key = build_month_options(db)
     if not selected_month:
@@ -1954,6 +1987,10 @@ def _trips_list_context(db, selected_month=None, selected_boat="all"):
         "SELECT * FROM import_candidates ORDER BY created_at DESC, id DESC"
     ).fetchall()
 
+    contracts = db.execute(
+        "SELECT * FROM trip_contracts ORDER BY id DESC"
+    ).fetchall()
+
     return dict(
         trips=trips_list,
         months=months,
@@ -1968,6 +2005,8 @@ def _trips_list_context(db, selected_month=None, selected_boat="all"):
         import_configured=yclients_configured(),
         import_default_start=week_ago.isoformat(),
         import_default_end=today.isoformat(),
+        contracts=contracts,
+        contract_number_suggestion=_suggest_contract_number(db, today),
     )
 
 
@@ -2148,6 +2187,7 @@ def trips_index():
     return render_template(
         "trips.html", **ctx, **_trips_common_kwargs(), edit_trip=None,
         trip_expense_error=session.pop("trip_expense_error", None),
+        trip_contract_error=session.pop("trip_contract_error", None),
     )
 
 
@@ -2386,6 +2426,127 @@ def add_trip_expense():
         )
     db.commit()
     return redirect(url_for("trips_index"))
+
+
+@app.route("/trips/contracts/generate", methods=["POST"])
+@admin_login_required
+def generate_trip_contract():
+    db = get_db()
+    form = request.form
+
+    contract_number = form.get("contract_number", "").strip()
+    contract_date_raw = form.get("contract_date", "").strip()
+    client_name = form.get("client_name", "").strip()
+    client_representative = form.get("client_representative", "").strip()
+    client_representative_basis = form.get("client_representative_basis", "").strip()
+    client_requisites = form.get("client_requisites", "").strip()
+    service_description = form.get("service_description", "").strip()
+    service_date_raw = form.get("service_date", "").strip()
+    service_time = form.get("service_time", "").strip()
+    total_amount_raw = form.get("total_amount", "").strip().replace(",", ".")
+    prepayment_terms = form.get("prepayment_terms", "").strip()
+    prepayment_amount_raw = form.get("prepayment_amount", "").strip().replace(",", ".")
+
+    errors = []
+    if not contract_number:
+        errors.append("Укажите номер договора.")
+    if not client_name:
+        errors.append("Укажите заказчика.")
+    if not service_description:
+        errors.append("Укажите описание услуги.")
+
+    try:
+        contract_date = dt.date.fromisoformat(contract_date_raw).isoformat() if contract_date_raw else dt.date.today().isoformat()
+    except ValueError:
+        errors.append("Некорректная дата договора.")
+        contract_date = dt.date.today().isoformat()
+
+    try:
+        service_date = dt.date.fromisoformat(service_date_raw).isoformat() if service_date_raw else None
+    except ValueError:
+        errors.append("Некорректная дата оказания услуги.")
+        service_date = None
+
+    total_amount = None
+    try:
+        total_amount = float(total_amount_raw)
+        if total_amount <= 0:
+            errors.append("Стоимость услуг должна быть больше нуля.")
+    except ValueError:
+        errors.append("Стоимость услуг должна быть числом.")
+
+    prepayment_amount = None
+    if prepayment_amount_raw:
+        try:
+            prepayment_amount = float(prepayment_amount_raw)
+        except ValueError:
+            errors.append("Размер предоплаты должен быть числом.")
+
+    if errors:
+        session["trip_contract_error"] = " ".join(errors)
+        return redirect(url_for("trips_index"))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    cur = db.execute(
+        "INSERT INTO trip_contracts (contract_number, contract_date, client_name, "
+        "client_representative, client_representative_basis, client_requisites, "
+        "service_description, service_date, service_time, total_amount, "
+        "prepayment_terms, prepayment_amount, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (contract_number, contract_date, client_name, client_representative or None,
+         client_representative_basis or None, client_requisites or None,
+         service_description, service_date, service_time or None, total_amount,
+         prepayment_terms or None, prepayment_amount, now),
+    )
+    db.commit()
+    return redirect(url_for("download_trip_contract", contract_id=cur.lastrowid))
+
+
+@app.route("/trips/contracts/<int:contract_id>/download")
+@admin_login_required
+def download_trip_contract(contract_id):
+    db = get_db()
+    row = db.execute("SELECT * FROM trip_contracts WHERE id = ?", (contract_id,)).fetchone()
+    if row is None:
+        return redirect(url_for("trips_index"))
+
+    data = {
+        "contract_number": row["contract_number"],
+        "contract_date": format_ru_date(row["contract_date"]).replace("/", "."),
+        "client_name": row["client_name"],
+        "client_representative": row["client_representative"] or "",
+        "client_representative_basis": row["client_representative_basis"] or "",
+        "client_requisites": row["client_requisites"] or "",
+        "service_description": row["service_description"],
+        "service_date": format_ru_date(row["service_date"]).replace("/", ".") if row["service_date"] else "",
+        "service_time": row["service_time"] or "",
+        "total_amount": f"{format_money(row['total_amount'])} ₽",
+        "prepayment_terms": row["prepayment_terms"] or "",
+        "prepayment_amount": f"{format_money(row['prepayment_amount'])} ₽" if row["prepayment_amount"] else "",
+    }
+    try:
+        docx_bytes = _build_trip_contract_docx(data)
+    except ImportError:
+        return (
+            "Формирование договора временно недоступно: на сервере не установлена "
+            "библиотека python-docx. Установите зависимости из requirements.txt "
+            "и перезапустите приложение.",
+            503,
+        )
+    except FileNotFoundError:
+        return (
+            "Не найден шаблон договора (static/contract_template.docx) — "
+            "загрузите файл шаблона на сервер.",
+            503,
+        )
+    response = app.response_class(
+        docx_bytes,
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="Dogovor-{row["contract_number"]}.docx"'
+    )
+    return response
 
 
 # =======================================================================
@@ -3066,6 +3227,79 @@ def _build_handover_act_pdf(order, items):
     flow.append(sig_table)
 
     doc.build(flow)
+    return buf.getvalue()
+
+
+CONTRACT_TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "contract_template.docx")
+
+
+def _build_trip_contract_docx(data):
+    """Fill static/contract_template.docx ("Договор оказания услуг") with
+    a contract's data and return the resulting .docx bytes.
+
+    Edits the template's existing paragraph runs in place (via python-docx)
+    rather than building a document from scratch, so every bit of the
+    original formatting — fonts, tab stops, the numbered-list clauses —
+    survives untouched; only the run objects holding blanks change.
+
+    The (paragraph index, run index) pairs below were hand-mapped against
+    the exact current static/contract_template.docx and verified by
+    rendering a filled sample and reading it back — if that template file
+    is ever replaced with a differently-worded one, this map has to be
+    redone against the new file's paragraph/run structure, the same way.
+    An optional field whose value is empty is left untouched, so its
+    blank stays a visible run of underscores for hand-completion instead
+    of silently asserting an empty string."""
+    import docx
+
+    doc = docx.Document(CONTRACT_TEMPLATE_PATH)
+    paras = doc.paragraphs
+
+    # P0: "Договор оказания услуг 200825-1" — replace just the number.
+    paras[0].runs[0].text = paras[0].runs[0].text.replace("200825-1", data["contract_number"])
+
+    # P1: "г. Санкт-Петербург [tab-aligned]20.08.2025" — date is the last run.
+    paras[1].runs[-1].text = data["contract_date"]
+
+    # P2: preamble — Заказчик name/representative/basis, and the
+    # Исполнитель director's name, which the template itself has wrong
+    # here (right in the signature block at P36) — always corrected.
+    p2 = paras[2]
+    p2.runs[0].text = data["client_name"]
+    if data["client_representative"]:
+        p2.runs[4].text = data["client_representative"]
+    if data["client_representative_basis"]:
+        p2.runs[6].text = data["client_representative_basis"]
+    p2.runs[13].text = p2.runs[13].text.replace("Евгений Аленович", "Даниил Евгеньевич")
+
+    # P4: "...следующую услугу (далее- Услуга): ______."
+    paras[4].runs[3].text = data["service_description"]
+
+    # P5/P6: "Дата/Время оказания услуги: ______" — label and blank share
+    # one run, so append after the label rather than replacing it whole.
+    if data["service_date"]:
+        paras[5].runs[0].text = "Дата оказания услуги: " + data["service_date"]
+    if data["service_time"]:
+        paras[6].runs[0].text = "Время оказания услуги: " + data["service_time"]
+
+    # P10: cost/prepayment clause.
+    p10 = paras[10]
+    p10.runs[2].text = data["total_amount"]
+    if data["prepayment_terms"]:
+        p10.runs[8].text = data["prepayment_terms"]
+    if data["prepayment_amount"]:
+        p10.runs[15].text = data["prepayment_amount"]
+
+    # P29: "Заказчик: ______" in the signature block — full requisites if
+    # given, otherwise just repeat the name from P2.
+    paras[29].runs[2].text = data["client_requisites"] or data["client_name"]
+
+    # P30: "От имени Заказчика______ <printed name>" — mirrors how the
+    # Исполнитель's own signature line (P36) prints the director's name.
+    paras[30].runs[1].text = data["client_representative"] or data["client_name"]
+
+    buf = BytesIO()
+    doc.save(buf)
     return buf.getvalue()
 
 

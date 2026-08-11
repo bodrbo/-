@@ -412,6 +412,108 @@
     </div>
   </details>
 
+  <details class="panel collapsible-panel"{{ ' open' if trip_contract_error }}>
+    <summary>
+      <span>Договора и счета</span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
+      {% if trip_contract_error %}
+      <div class="alert"><strong>Не удалось сформировать договор:</strong> {{ trip_contract_error }}</div>
+      {% endif %}
+
+      <h3>Сформировать договор оказания услуг</h3>
+      <form action="{{ url_for('generate_trip_contract') }}" method="post" class="entry-form">
+        <div class="field field-narrow">
+          <label for="contract_number">Номер договора</label>
+          <input type="text" id="contract_number" name="contract_number"
+                 value="{{ contract_number_suggestion }}" required>
+        </div>
+        <div class="field field-narrow">
+          <label for="contract_date">Дата договора</label>
+          <input type="date" id="contract_date" name="contract_date" value="{{ today }}" required>
+        </div>
+        <div class="field">
+          <label for="client_name">Заказчик (ФИО или наименование)</label>
+          <input type="text" id="client_name" name="client_name" placeholder="Иванов Иван Иванович" required>
+        </div>
+        <div class="field">
+          <label for="client_representative">Представитель заказчика</label>
+          <input type="text" id="client_representative" name="client_representative"
+                 placeholder="Необязательно — для юрлица">
+        </div>
+        <div class="field">
+          <label for="client_representative_basis">Основание полномочий представителя</label>
+          <input type="text" id="client_representative_basis" name="client_representative_basis"
+                 placeholder="Например, устава или доверенности">
+        </div>
+        <div class="field field-wide">
+          <label for="client_requisites">Реквизиты заказчика для блока подписи</label>
+          <input type="text" id="client_requisites" name="client_requisites"
+                 placeholder="Необязательно — если не заполнено, используется ФИО/наименование заказчика">
+        </div>
+        <div class="field field-wide">
+          <label for="service_description">Описание услуги</label>
+          <input type="text" id="service_description" name="service_description"
+                 placeholder="Например, малый тур на катере «Ларус», 6 человек" required>
+        </div>
+        <div class="field field-narrow">
+          <label for="service_date">Дата оказания услуги</label>
+          <input type="date" id="service_date" name="service_date">
+        </div>
+        <div class="field field-narrow">
+          <label for="service_time">Время оказания услуги</label>
+          <input type="time" id="service_time" name="service_time">
+        </div>
+        <div class="field field-narrow">
+          <label for="total_amount">Общая стоимость услуг, ₽</label>
+          <input type="text" inputmode="decimal" id="total_amount" name="total_amount" required>
+        </div>
+        <div class="field field-narrow">
+          <label for="prepayment_terms">Порядок предоплаты</label>
+          <input type="text" id="prepayment_terms" name="prepayment_terms" placeholder="Например, 100%">
+        </div>
+        <div class="field field-narrow">
+          <label for="prepayment_amount">Размер предоплаты, ₽</label>
+          <input type="text" inputmode="decimal" id="prepayment_amount" name="prepayment_amount">
+        </div>
+        <div class="field field-submit">
+          <button type="submit">Сформировать и скачать .docx</button>
+        </div>
+      </form>
+
+      <h3>Ранее сформированные договора</h3>
+      {% if contracts %}
+      <div class="table-scroll">
+        <table class="records">
+          <thead>
+            <tr><th>№</th><th>Дата</th><th>Заказчик</th><th>Сумма</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for c in contracts %}
+            <tr>
+              <td class="term">{{ c.contract_number }}</td>
+              <td class="muted">{{ c.contract_date|ru_date }}</td>
+              <td>{{ c.client_name }}</td>
+              <td class="amount">{{ c.total_amount|money }} ₽</td>
+              <td class="row-actions">
+                <a href="{{ url_for('download_trip_contract', contract_id=c.id) }}" class="btn-secondary">Скачать</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        <div class="t">Договоров пока нет</div>
+        <div class="s">Заполните форму выше, чтобы сформировать первый.</div>
+      </div>
+      {% endif %}
+    </div>
+  </details>
+
   <details class="panel collapsible-panel" open>
     <summary>
       <span>Аналитика по рейсам</span>
