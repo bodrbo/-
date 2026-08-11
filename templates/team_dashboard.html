@@ -262,24 +262,29 @@
       {% for task in my_tasks %}
       <div class="task-card">
         <div>
+          {% if task.kind == 'defect' %}
           <strong>{{ task.defect_boat }}</strong> — {{ task.defect_description }}
+          {% else %}
+          <strong>Тюнинг-заказ №{{ task.tuning_order_id }}</strong> ({{ task.order_client_name }}, {{ task.order_boat_model }}) — {{ task.item_work_name }}
+          {% endif %}
         </div>
         <div class="hint" style="margin:0;">
           Ставка: {{ task.rate|float|round(2) }} ₽ · Нормочасы: {{ task.norm_hours|float|round(2) }}
         </div>
         {% if task.assignment_status == 'pending' %}
         <div class="task-card-actions">
-          <form action="{{ url_for('team_task_respond', assignment_id=task.id) }}" method="post">
+          <form action="{{ url_for('team_task_respond' if task.kind == 'defect' else 'team_tuning_task_respond', assignment_id=task.id) }}" method="post">
             <input type="hidden" name="response" value="accepted">
             <button type="submit" class="btn-accept">Принять</button>
           </form>
-          <form action="{{ url_for('team_task_respond', assignment_id=task.id) }}" method="post">
+          <form action="{{ url_for('team_task_respond' if task.kind == 'defect' else 'team_tuning_task_respond', assignment_id=task.id) }}" method="post">
             <input type="hidden" name="response" value="rejected">
             <button type="submit" class="btn-reject">Отклонить</button>
           </form>
         </div>
         {% elif task.assignment_status == 'accepted' %}
         <div style="display:flex; align-items:center; gap:10px;">
+          {% if task.kind == 'defect' %}
           <span class="status-badge status-defect-{{ task.defect_status }}">
             {{ defect_statuses|selectattr('value', 'equalto', task.defect_status)|map(attribute='label')|first }}
           </span>
@@ -291,6 +296,19 @@
               {% endfor %}
             </select>
           </form>
+          {% else %}
+          <span class="status-badge status-{{ task.item_status }}">
+            {{ work_statuses|selectattr('value', 'equalto', task.item_status)|map(attribute='label')|first }}
+          </span>
+          <form action="{{ url_for('team_tuning_task_set_status', assignment_id=task.id) }}"
+                method="post" class="status-select-form">
+            <select name="status" onchange="this.form.submit()">
+              {% for s in work_statuses %}
+              <option value="{{ s.value }}" {{ 'selected' if task.item_status == s.value }}>{{ s.label }}</option>
+              {% endfor %}
+            </select>
+          </form>
+          {% endif %}
         </div>
         {% else %}
         <span class="hint" style="margin:0;">Отклонена</span>

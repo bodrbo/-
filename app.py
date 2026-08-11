@@ -721,6 +721,9 @@ DEFECT_ASSIGNABLE_POSITIONS = ("Капитан", "Тюнингмэн")
 # marks their accepted task "Устранена" — see team_task_set_status.
 DEFECT_TASK_WORK_TYPE = "Устранение неисправности"
 
+# Tuning-order work items can only be handed to tuning-center staff.
+TUNING_ASSIGNABLE_POSITIONS = ("Тюнингмэн",)
+
 
 def order_status_label(value):
     for s in ORDER_STATUSES:
@@ -986,6 +989,21 @@ def init_db():
         CREATE TABLE IF NOT EXISTS defect_assignments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             defect_id INTEGER NOT NULL,
+            employee_name TEXT NOT NULL,
+            rate REAL NOT NULL,
+            norm_hours REAL NOT NULL,
+            assignment_status TEXT NOT NULL DEFAULT 'pending',
+            assigned_at TEXT NOT NULL,
+            responded_at TEXT,
+            entry_id INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tuning_item_assignments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id INTEGER NOT NULL,
             employee_name TEXT NOT NULL,
             rate REAL NOT NULL,
             norm_hours REAL NOT NULL,
@@ -3630,9 +3648,24 @@ def edit_tuning_order(order_id):
         return redirect(url_for("tuning_index"))
 
     if request.method == "GET":
-        items = db.execute(
+        items = []
+        for row in db.execute(
             "SELECT * FROM tuning_order_items WHERE order_id = ? ORDER BY id", (order_id,)
-        ).fetchall()
+        ).fetchall():
+            item = dict(row)
+            assignment_row = db.execute(
+                "SELECT * FROM tuning_item_assignments WHERE item_id = ? ORDER BY id DESC LIMIT 1",
+                (item["id"],),
+            ).fetchone()
+            assignment = dict(assignment_row) if assignment_row else None
+            item["assignment"] = assignment
+            item["can_assign"] = (
+                assignment is None
+                or assignment["assignment_status"] == "rejected"
+                or (assignment["assignment_status"] == "accepted" and item["status"] == "done")
+            )
+            items.append(item)
+        assignable_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
         payments, paid_amount, remaining = _order_payment_totals(db, order_id, order["total"])
         yookassa_payments = db.execute(
             "SELECT * FROM tuning_yookassa_payments WHERE order_id = ? ORDER BY id DESC", (order_id,)
@@ -3658,6 +3691,7 @@ def edit_tuning_order(order_id):
             yookassa_error=session.pop("yookassa_error", None),
             hull_sheets=hull_sheets, available_hull_sheets=available_hull_sheets,
             work_photos_by_item=work_photos_by_item,
+            assignable_employees=assignable_employees,
         )
 
     errors, data = _process_tuning_form(request.form)
@@ -3745,6 +3779,41 @@ def set_tuning_item_status(order_id, item_id):
         db.execute(
             "UPDATE tuning_order_items SET status = ? WHERE id = ? AND order_id = ?",
             (status, item_id, order_id),
+        )
+        db.commit()
+    return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
+@app.route("/tuning/<int:order_id>/item/<int:item_id>/assign", methods=["POST"])
+@admin_login_required
+def assign_tuning_item(order_id, item_id):
+    db = get_db()
+    item = db.execute(
+        "SELECT * FROM tuning_order_items WHERE id = ? AND order_id = ?", (item_id, order_id)
+    ).fetchone()
+    if item is None:
+        return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+    employee_name = request.form.get("employee_name", "").strip()
+    rate_raw = request.form.get("rate", "").strip().replace(",", ".")
+    hours_raw = request.form.get("norm_hours", "").strip().replace(",", ".")
+
+    valid_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
+    rate = hours = None
+    try:
+        rate = float(rate_raw)
+    except ValueError:
+        pass
+    try:
+        hours = float(hours_raw)
+    except ValueError:
+        pass
+
+    if employee_name in valid_employees and rate is not None and rate > 0 and hours is not None and hours > 0:
+        db.execute(
+            "INSERT INTO tuning_item_assignments (item_id, employee_name, rate, norm_hours, "
+            "assignment_status, assigned_at) VALUES (?, ?, ?, ?, 'pending', ?)",
+            (item_id, employee_name, rate, hours, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
         )
         db.commit()
     return redirect(url_for("edit_tuning_order", order_id=order_id))
@@ -5268,22 +5337,39 @@ def team_dashboard():
         ).fetchall()
         diploma_url = find_diploma_url(session.get("team_username"))
 
-    # "Мои задачи" — defects a captain/tuningman has been handed as paid
-    # work. Anyone eligible to be assigned one sees the module, whether or
-    # not they currently have any (matches the other modules always
-    # showing, just possibly empty).
+    # "Мои задачи" — defects and tuning-order work items a captain/tuningman
+    # has been handed as paid work. Anyone eligible to be assigned one sees
+    # the module, whether or not they currently have any (matches the other
+    # modules always showing, just possibly empty).
     can_have_tasks = any(
-        _employee_has_position(db, employee_name, p) for p in DEFECT_ASSIGNABLE_POSITIONS
+        _employee_has_position(db, employee_name, p)
+        for p in set(DEFECT_ASSIGNABLE_POSITIONS) | set(TUNING_ASSIGNABLE_POSITIONS)
     )
     my_tasks = []
     if can_have_tasks:
-        my_tasks = db.execute(
+        defect_tasks = db.execute(
             "SELECT da.*, bd.boat AS defect_boat, bd.description AS defect_description, "
             "bd.status AS defect_status "
             "FROM defect_assignments da JOIN boat_defects bd ON bd.id = da.defect_id "
-            "WHERE da.employee_name = ? ORDER BY da.assigned_at DESC, da.id DESC",
+            "WHERE da.employee_name = ?",
             (employee_name,),
         ).fetchall()
+        tuning_tasks = db.execute(
+            "SELECT ta.*, ti.work_name AS item_work_name, ti.status AS item_status, "
+            "tord.client_name AS order_client_name, tord.boat_model AS order_boat_model, "
+            "tord.id AS tuning_order_id "
+            "FROM tuning_item_assignments ta "
+            "JOIN tuning_order_items ti ON ti.id = ta.item_id "
+            "JOIN tuning_orders tord ON tord.id = ti.order_id "
+            "WHERE ta.employee_name = ?",
+            (employee_name,),
+        ).fetchall()
+        my_tasks = sorted(
+            [dict(t, kind="defect") for t in defect_tasks]
+            + [dict(t, kind="tuning") for t in tuning_tasks],
+            key=lambda t: (t["assigned_at"], t["id"]),
+            reverse=True,
+        )
 
     return render_template(
         "team_dashboard.html",
@@ -5298,6 +5384,7 @@ def team_dashboard():
         boats=BOATS, boat_index=boat_index, boat_documents=boat_documents, diploma_url=diploma_url,
         income_open="week" in request.args, documents_open="boat_index" in request.args,
         can_have_tasks=can_have_tasks, my_tasks=my_tasks, defect_statuses=DEFECT_STATUSES,
+        work_statuses=WORK_STATUSES,
     )
 
 
@@ -5375,6 +5462,73 @@ def team_task_set_status(assignment_id):
         )
         db.execute(
             "UPDATE defect_assignments SET entry_id = ? WHERE id = ?",
+            (cur.lastrowid, assignment_id),
+        )
+    db.commit()
+    return redirect(url_for("team_dashboard"))
+
+
+@app.route("/team/tuning-tasks/<int:assignment_id>/respond", methods=["POST"])
+@team_login_required
+def team_tuning_task_respond(assignment_id):
+    db = get_db()
+    employee_name = session.get("team_employee_name")
+    assignment = db.execute(
+        "SELECT * FROM tuning_item_assignments WHERE id = ? AND employee_name = ?",
+        (assignment_id, employee_name),
+    ).fetchone()
+    if assignment is None or assignment["assignment_status"] != "pending":
+        return redirect(url_for("team_dashboard"))
+    response = request.form.get("response", "").strip()
+    if response in ("accepted", "rejected"):
+        db.execute(
+            "UPDATE tuning_item_assignments SET assignment_status = ?, responded_at = ? WHERE id = ?",
+            (response, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), assignment_id),
+        )
+        db.commit()
+    return redirect(url_for("team_dashboard"))
+
+
+@app.route("/team/tuning-tasks/<int:assignment_id>/status", methods=["POST"])
+@team_login_required
+def team_tuning_task_set_status(assignment_id):
+    """Mirrors team_task_set_status for tuning-order work items: writes
+    straight to tuning_order_items.status (the same field the admin's own
+    Статусы работ table edits) and pays out rate × norm-hours the first time
+    the item reaches "done", guarded by entry_id against double payment."""
+    db = get_db()
+    employee_name = session.get("team_employee_name")
+    assignment = db.execute(
+        "SELECT * FROM tuning_item_assignments WHERE id = ? AND employee_name = ?",
+        (assignment_id, employee_name),
+    ).fetchone()
+    if assignment is None or assignment["assignment_status"] != "accepted":
+        return redirect(url_for("team_dashboard"))
+    status = request.form.get("status", "").strip()
+    if status not in [s["value"] for s in WORK_STATUSES]:
+        return redirect(url_for("team_dashboard"))
+
+    item = db.execute(
+        "SELECT * FROM tuning_order_items WHERE id = ?", (assignment["item_id"],)
+    ).fetchone()
+    if item is None:
+        return redirect(url_for("team_dashboard"))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "UPDATE tuning_order_items SET status = ? WHERE id = ?",
+        (status, assignment["item_id"]),
+    )
+    if status == "done" and not assignment["entry_id"]:
+        amount = assignment["rate"] * assignment["norm_hours"]
+        cur = db.execute(
+            "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (employee_name, item["work_name"], assignment["rate"], assignment["norm_hours"],
+             amount, dt.date.today().isoformat(), now),
+        )
+        db.execute(
+            "UPDATE tuning_item_assignments SET entry_id = ? WHERE id = ?",
             (cur.lastrowid, assignment_id),
         )
     db.commit()

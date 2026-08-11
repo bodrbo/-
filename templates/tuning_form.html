@@ -241,7 +241,7 @@
     {% if items_prefill %}
     <div class="table-scroll">
       <table class="records">
-        <thead><tr><th>Работа</th><th>Цена, ₽</th><th>Статус</th><th>Фото</th></tr></thead>
+        <thead><tr><th>Работа</th><th>Цена, ₽</th><th>Статус</th><th>Задача</th><th>Фото</th></tr></thead>
         <tbody>
           {% for item in items_prefill %}
           <tr>
@@ -256,6 +256,18 @@
                   {% endfor %}
                 </select>
               </form>
+            </td>
+            <td class="muted">
+              {% if item.can_assign %}
+              <button type="button" class="btn-secondary"
+                      onclick='openAssignModal({{ url_for("assign_tuning_item", order_id=edit_order.id, item_id=item.id)|tojson }}, {{ item.work_name|tojson }})'>
+                Поручить задачу
+              </button>
+              {% elif item.assignment and item.assignment.assignment_status == 'pending' %}
+              Ожидает ответа: {{ item.assignment.employee_name }}
+              {% elif item.assignment and item.assignment.assignment_status == 'accepted' %}
+              Исполнитель: {{ item.assignment.employee_name }}
+              {% endif %}
             </td>
             <td class="row-actions">
               {% set photos = work_photos_by_item.get(item.id, []) %}
@@ -530,9 +542,52 @@
     </div>
   </div>
 
+  <div id="assign-modal" class="photo-modal hidden" onclick="if (event.target === this) closeAssignModal();">
+    <div class="photo-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closeAssignModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <form id="assign-form" method="post" class="assign-modal-card">
+        <h3>Поручить задачу</h3>
+        <p class="hint" id="assign-modal-description"></p>
+        <div class="field">
+          <label for="assign-employee">Сотрудник</label>
+          <select id="assign-employee" name="employee_name" required>
+            {% for e in assignable_employees %}
+            <option value="{{ e }}">{{ e }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="assign-rate">Ставка, ₽</label>
+          <input type="text" id="assign-rate" name="rate" inputmode="decimal" required>
+        </div>
+        <div class="field">
+          <label for="assign-hours">Нормочасы</label>
+          <input type="text" id="assign-hours" name="norm_hours" inputmode="decimal" required>
+        </div>
+        <button type="submit" class="btn-primary">Поручить</button>
+      </form>
+    </div>
+  </div>
+
 </main>
 
 <script>
+function openAssignModal(actionUrl, description) {
+  document.getElementById('assign-form').action = actionUrl;
+  document.getElementById('assign-modal-description').textContent = description;
+  document.getElementById('assign-rate').value = '';
+  document.getElementById('assign-hours').value = '';
+  document.getElementById('assign-modal').classList.remove('hidden');
+}
+
+function closeAssignModal() {
+  document.getElementById('assign-modal').classList.add('hidden');
+}
+
 var photoModalPhotos = [];
 var photoModalIndex = 0;
 
@@ -602,6 +657,7 @@ document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') {
     closePhotoModal();
     closePhotoUploadModal();
+    closeAssignModal();
   }
 });
 
