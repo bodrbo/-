@@ -859,6 +859,16 @@ input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, in
   white-space: nowrap;
 }
 .btn-secondary:hover { background: var(--paper-alt); border-color: var(--brass); }
+/* "Задача" column buttons (fleet_boat.html defects table, tuning_form.html
+   work-items table) sit next to a .status-select-form select in the row
+   above/beside — match its compact size and drop the standalone margin so
+   both controls line up on the same baseline instead of the button reading
+   larger and lower. */
+table.records .btn-secondary {
+  font-size: 12.5px;
+  padding: 6px 12px;
+  margin-top: 0;
+}
 
 .btn-add {
   display: inline-flex;
