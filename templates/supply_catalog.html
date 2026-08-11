@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Заявки на снабжение — Снабжение</title>
+<title>Каталог — Снабжение</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
@@ -95,7 +95,7 @@
     </nav>
     <div class="title-block">
       <span class="kicker">Снабжение</span>
-      <h1>Заявки на снабжение</h1>
+      <h1>Каталог</h1>
     </div>
     <div class="topbar-actions">
       <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
@@ -122,12 +122,99 @@
     <a href="{{ url_for('supply_requests') }}" class="{{ 'active' if sub_page == 'requests' }}">Заявки на снабжение</a>
   </nav>
 
+  {% if product_error %}
+  <div class="alert"><strong>Не удалось добавить товар:</strong> {{ product_error }}</div>
+  {% endif %}
+
+  <details class="panel collapsible-panel">
+    <summary>
+      <span>Добавить товар</span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
+      <form action="{{ url_for('add_supply_product') }}" method="post" class="entry-form" enctype="multipart/form-data">
+        <div class="field">
+          <label for="product_name">Название</label>
+          <input type="text" id="product_name" name="name" required>
+        </div>
+        <div class="field field-narrow">
+          <label for="product_sku">Артикул</label>
+          <input type="text" id="product_sku" name="sku">
+        </div>
+        <div class="field field-narrow">
+          <label for="product_supplier">Поставщик</label>
+          <input type="text" id="product_supplier" name="supplier">
+        </div>
+        <div class="field field-wide">
+          <label for="product_description">Описание</label>
+          <input type="text" id="product_description" name="description">
+        </div>
+        <div class="field field-narrow">
+          <label for="product_cost_price">Себестоимость, ₽</label>
+          <input type="text" inputmode="decimal" id="product_cost_price" name="cost_price" required>
+        </div>
+        <div class="field field-narrow">
+          <label for="product_cost_unit">Единица измерения</label>
+          <select id="product_cost_unit" name="cost_unit" required>
+            {% for u in cost_units %}
+            <option value="{{ u.value }}" {{ 'selected' if u.value == 'piece' }}>{{ u.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field field-narrow">
+          <label for="product_sale_price">Цена продажи, ₽</label>
+          <input type="text" inputmode="decimal" id="product_sale_price" name="sale_price" required>
+        </div>
+        <div class="field">
+          <label for="product_photo">Фотография</label>
+          <input type="file" id="product_photo" name="photo" accept="image/*">
+        </div>
+        <div class="field field-submit">
+          <button type="submit">Добавить товар</button>
+        </div>
+      </form>
+    </div>
+  </details>
+
   <section class="panel">
+    <h2>Товары</h2>
+    {% if products %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th></th><th>Название</th><th>Артикул</th><th>Поставщик</th>
+            <th>Себестоимость</th><th>Цена продажи</th><th>Остаток, всего</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in products %}
+          <tr class="row-clickable" onclick="window.location.href='{{ url_for('supply_product', product_id=p.id) }}'">
+            <td>
+              {% if p.photo_filename %}
+              <img src="{{ url_for('static', filename='supply_photos/' ~ p.photo_filename) }}" alt="" class="supply-thumb">
+              {% else %}
+              <span class="supply-thumb supply-thumb-empty"></span>
+              {% endif %}
+            </td>
+            <td class="term"><a href="{{ url_for('supply_product', product_id=p.id) }}">{{ p.name }}</a></td>
+            <td class="muted">{{ p.sku or '—' }}</td>
+            <td class="muted">{{ p.supplier or '—' }}</td>
+            <td>{{ p.cost_price|money }} ₽ / {{ cost_units|selectattr('value', 'equalto', p.cost_unit)|map(attribute='label')|first }}</td>
+            <td>{{ p.sale_price|money }} ₽</td>
+            <td class="amount">{{ p.total_quantity|float|round(2) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">Заявок пока нет</div>
-      <div class="s">Раздел в разработке.</div>
+      <div class="t">В каталоге пока нет товаров</div>
+      <div class="s">Добавьте первый товар через форму выше.</div>
     </div>
+    {% endif %}
   </section>
 
 </main>

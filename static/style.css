@@ -1588,8 +1588,23 @@ table.records td, table.gloss td {
   font-variant-numeric: tabular-nums;
 }
 table.records tr:hover td, table.gloss tr:hover td { background: var(--paper-alt); }
+table.records tr.row-clickable { cursor: pointer; }
 table.records td.muted { color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: normal; }
 table.records td.amount, table.gloss td.amount { font-weight: 700; color: var(--success); }
+
+.supply-thumb {
+  display: block;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--paper-alt);
+  border: 1px solid var(--hairline);
+}
+.supply-thumb-empty {
+  background: var(--paper-alt) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2362707f' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 2.3l7 3.5v8.4l-7 3.5-7-3.5V5.8l7-3.5z'/%3E%3Cpath d='M3 5.8l7 3.5 7-3.5'/%3E%3Cpath d='M10 9.3v8.4'/%3E%3C/svg%3E") no-repeat center;
+  background-size: 20px;
+}
 table.gloss td.term { font-weight: 700; color: var(--ink); font-variant-numeric: normal; }
 
 /* "button." (not just ".btn-delete") so this out-specifies the generic

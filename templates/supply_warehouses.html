@@ -118,15 +118,58 @@
 
   <nav class="sub-tabs">
     <a href="{{ url_for('supply_warehouses') }}" class="{{ 'active' if sub_page == 'warehouses' }}">Склады</a>
+    <a href="{{ url_for('supply_catalog') }}" class="{{ 'active' if sub_page == 'catalog' }}">Каталог</a>
     <a href="{{ url_for('supply_requests') }}" class="{{ 'active' if sub_page == 'requests' }}">Заявки на снабжение</a>
   </nav>
 
+  {% if warehouse_error %}
+  <div class="alert"><strong>Не удалось добавить склад:</strong> {{ warehouse_error }}</div>
+  {% endif %}
+
+  <section class="panel form-panel">
+    <h2>Добавить склад</h2>
+    <form action="{{ url_for('add_supply_warehouse') }}" method="post" class="entry-form">
+      <div class="field">
+        <label for="warehouse_name">Название</label>
+        <input type="text" id="warehouse_name" name="name" placeholder="Основной склад" required>
+      </div>
+      <div class="field field-wide">
+        <label for="warehouse_address">Адрес / описание</label>
+        <input type="text" id="warehouse_address" name="address" placeholder="Например, г. Кронштадт, ул. ...">
+      </div>
+      <div class="field field-submit">
+        <button type="submit">Добавить склад</button>
+      </div>
+    </form>
+  </section>
+
   <section class="panel">
+    <h2>Склады</h2>
+    {% if warehouses %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr><th>Название</th><th>Адрес / описание</th><th>Товаров на складе</th><th>Остаток, всего</th></tr>
+        </thead>
+        <tbody>
+          {% for w in warehouses %}
+          <tr>
+            <td class="term">{{ w.name }}</td>
+            <td class="muted">{{ w.address or '—' }}</td>
+            <td>{{ w.product_count }}</td>
+            <td class="amount">{{ w.total_quantity|float|round(2) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
       <div class="t">Складов пока нет</div>
-      <div class="s">Раздел в разработке.</div>
+      <div class="s">Добавьте первый склад через форму выше.</div>
     </div>
+    {% endif %}
   </section>
 
 </main>

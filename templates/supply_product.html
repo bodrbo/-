@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ product.name }} — Каталог</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<meta name="theme-color" content="#3498db">
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Боцман">
+</head>
+<body>
+
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100">
+      <g fill="var(--brass)">
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/>
+      </g>
+      <g fill="none" stroke="var(--brass)" stroke-width="2.6" stroke-linecap="round" opacity="0.85">
+        <path d="M55 15A24 24 0 0 1 62 22" transform="rotate(-6 50 50)"/>
+        <path d="M18 60A24 24 0 0 1 15 51" transform="rotate(4 50 50)"/>
+      </g>
+      <circle cx="50" cy="50" r="15" fill="none" stroke="var(--ink)" stroke-width="4"/>
+      <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
+    </svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="topbar-top-row">
+      <div class="brand">
+        <a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a>
+      </div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 5.5h14M3 10h14M3 14.5h14"/>
+        </svg>
+      </button>
+    </div>
+    <nav class="main-nav" id="mainNav">
+      <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'payroll' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.3" y="6" width="15.4" height="8" rx="1.8"/>
+          <circle cx="10" cy="10" r="2"/>
+          <path d="M4.6 8h.01M15.4 12h.01"/>
+        </svg>
+        <span class="nav-label">Зарплаты</span>
+      </a>
+      <a href="{{ url_for('trips_index') }}" class="{{ 'active' if active_page == 'trips' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="10" cy="3.8" r="1.6"/>
+          <path d="M10 5.6v10.6M6 8.4h8M4.2 11a5.8 5.8 0 0 0 11.6 0"/>
+        </svg>
+        <span class="nav-label">Рейсы и инвесторы</span>
+      </a>
+      <a href="{{ url_for('tuning_index') }}" class="{{ 'active' if active_page == 'tuning' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14.7 3.3a4 4 0 0 1-5.1 5.4L4.4 13.9a1.6 1.6 0 0 0 2.3 2.3l5.2-5.2a4 4 0 0 0 5.4-5.1l-2.6 2.6-1.9-.4-.4-1.9 2.6-2.6z"/>
+        </svg>
+        <span class="nav-label">Тюнинг-центр</span>
+      </a>
+      <a href="{{ url_for('fleet_index') }}" class="{{ 'active' if active_page == 'fleet' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 17c1.4 1 3 1 4.4 0 1.4-1 3-1 4.4 0 1.4 1 3 1 4.4 0"/>
+          <path d="M5.5 17V8.5L10 3l4.5 5.5V17"/>
+          <path d="M10 3v14"/>
+        </svg>
+        <span class="nav-label">Флот</span>
+      </a>
+      <a href="{{ url_for('analytics_index') }}" class="{{ 'active' if active_page == 'analytics' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2.5 16.5h15"/>
+          <path d="M5.5 16V10.5M10 16V4M14.5 16V11.5"/>
+        </svg>
+        <span class="nav-label">Аналитика</span>
+      </a>
+      <a href="{{ url_for('supply_warehouses') }}" class="{{ 'active' if active_page == 'supply' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 2.3l7 3.5v8.4l-7 3.5-7-3.5V5.8l7-3.5z"/>
+          <path d="M3 5.8l7 3.5 7-3.5"/>
+          <path d="M10 9.3v8.4"/>
+        </svg>
+        <span class="nav-label">Снабжение</span>
+      </a>
+    </nav>
+    <div class="title-block">
+      <span class="kicker">Снабжение · Каталог</span>
+      <h1>{{ product.name }}</h1>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
+        <svg class="push-toggle-off" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8z"/>
+          <path d="M8.3 16a1.7 1.7 0 003.4 0"/>
+        </svg>
+        <svg class="push-toggle-on" viewBox="0 0 20 20" fill="currentColor" stroke="none">
+          <path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8z"/>
+        </svg>
+      </button>
+      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout">
+        <button type="submit">Выйти</button>
+      </form>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <a href="{{ url_for('supply_catalog') }}" class="term" style="display:inline-block; margin-bottom:14px;">← Каталог</a>
+
+  <section class="panel" style="display:flex; gap:22px; flex-wrap:wrap; align-items:flex-start;">
+    {% if product.photo_filename %}
+    <img src="{{ url_for('static', filename='supply_photos/' ~ product.photo_filename) }}" alt=""
+         style="width:160px; height:160px; object-fit:cover; border-radius:12px; border:1px solid var(--hairline); flex:none;">
+    {% endif %}
+    <div style="flex:1 1 260px;">
+      <table class="gloss">
+        <tr><th>Артикул</th><td>{{ product.sku or '—' }}</td></tr>
+        <tr><th>Поставщик</th><td>{{ product.supplier or '—' }}</td></tr>
+        <tr><th>Описание</th><td>{{ product.description or '—' }}</td></tr>
+        <tr><th>Себестоимость</th>
+          <td>{{ product.cost_price|money }} ₽ / {{ cost_units|selectattr('value', 'equalto', product.cost_unit)|map(attribute='label')|first }}</td></tr>
+        <tr><th>Цена продажи</th><td>{{ product.sale_price|money }} ₽</td></tr>
+        <tr><th>Остаток, всего</th><td class="amount">{{ total_quantity|float|round(2) }}</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Остатки по складам</h2>
+    {% if stock %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead><tr><th>Склад</th><th>Адрес</th><th>Количество</th></tr></thead>
+        <tbody>
+          {% for s in stock %}
+          <tr>
+            <td class="term">{{ s.warehouse_name }}</td>
+            <td class="muted">
+              {%- set addr_parts = [] -%}
+              {%- if s.zone %}{{ addr_parts.append('зона ' ~ s.zone) or '' }}{% endif -%}
+              {%- if s.rack %}{{ addr_parts.append('стеллаж ' ~ s.rack) or '' }}{% endif -%}
+              {%- if s.spot %}{{ addr_parts.append('место ' ~ s.spot) or '' }}{% endif -%}
+              {{ addr_parts|join(' · ') if addr_parts else '—' }}
+            </td>
+            <td class="amount">{{ s.quantity|float|round(2) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint">Пока не оприходован ни на один склад.</p>
+    {% endif %}
+  </section>
+
+  <div class="hero-grid" style="grid-template-columns: 1fr 1fr;">
+    <section class="panel">
+      <h2>Оприходовать</h2>
+      {% if receive_error %}
+      <div class="alert"><strong>Не удалось оприходовать:</strong> {{ receive_error }}</div>
+      {% endif %}
+      <form action="{{ url_for('receive_supply_product', product_id=product.id) }}" method="post" class="entry-form">
+        <div class="field">
+          <label for="receive_warehouse">Склад</label>
+          <select id="receive_warehouse" name="warehouse_id" required>
+            <option value="" disabled selected>Выберите склад</option>
+            {% for w in warehouses %}
+            <option value="{{ w.id }}">{{ w.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field field-narrow">
+          <label for="receive_quantity">Количество</label>
+          <input type="text" inputmode="decimal" id="receive_quantity" name="quantity" required>
+        </div>
+        <div class="field field-narrow">
+          <label for="receive_zone">Зона</label>
+          <input type="text" id="receive_zone" name="zone">
+        </div>
+        <div class="field field-narrow">
+          <label for="receive_rack">Стеллаж</label>
+          <input type="text" id="receive_rack" name="rack">
+        </div>
+        <div class="field field-narrow">
+          <label for="receive_spot">Место</label>
+          <input type="text" id="receive_spot" name="spot">
+        </div>
+        <div class="field field-wide">
+          <label for="receive_note">Примечание</label>
+          <input type="text" id="receive_note" name="note">
+        </div>
+        <div class="field field-submit">
+          <button type="submit">Оприходовать</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Списать</h2>
+      {% if writeoff_error %}
+      <div class="alert"><strong>Не удалось списать:</strong> {{ writeoff_error }}</div>
+      {% endif %}
+      {% if stock %}
+      <form action="{{ url_for('writeoff_supply_product', product_id=product.id) }}" method="post" class="entry-form">
+        <div class="field">
+          <label for="writeoff_warehouse">Склад</label>
+          <select id="writeoff_warehouse" name="warehouse_id" required>
+            <option value="" disabled selected>Выберите склад</option>
+            {% for s in stock %}
+            <option value="{{ s.warehouse_id }}">{{ s.warehouse_name }} (остаток {{ s.quantity|float|round(2) }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field field-narrow">
+          <label for="writeoff_quantity">Количество</label>
+          <input type="text" inputmode="decimal" id="writeoff_quantity" name="quantity" required>
+        </div>
+        <div class="field">
+          <label for="writeoff_reason">Причина</label>
+          <select id="writeoff_reason" name="reason" onchange="toggleCustom('writeoff_reason')">
+            {% for r in writeoff_reasons %}
+            <option value="{{ r }}">{{ r }}</option>
+            {% endfor %}
+            <option value="{{ custom_value }}">+ Другое (вручную)</option>
+          </select>
+          <input type="text" id="writeoff_reason_custom" name="reason_custom" class="custom-input hidden" placeholder="Причина">
+        </div>
+        <div class="field field-wide">
+          <label for="writeoff_note">Примечание</label>
+          <input type="text" id="writeoff_note" name="note">
+        </div>
+        <div class="field field-submit">
+          <button type="submit">Списать</button>
+        </div>
+      </form>
+      {% else %}
+      <p class="hint">Товар пока не оприходован ни на один склад — списывать нечего.</p>
+      {% endif %}
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>История движений</h2>
+    <div class="table-scroll">
+      <table class="records">
+        <thead><tr><th>Дата</th><th>Тип</th><th>Склад</th><th>Количество</th><th>Комментарий</th></tr></thead>
+        <tbody>
+          {% for h in history %}
+          {% set row = h.row %}
+          <tr>
+            <td class="muted">{{ row.created_at[:10]|ru_date }}</td>
+            {% if h.kind == 'receipt' %}
+            <td><span class="status-badge status-defect-resolved">Приход</span></td>
+            <td>{{ row.warehouse_name }}</td>
+            <td class="amount">+{{ row.quantity|float|round(2) }}</td>
+            <td class="muted">{{ row.note or '—' }}</td>
+            {% else %}
+            <td><span class="status-badge status-defect-new">Списание</span></td>
+            <td>{{ row.warehouse_name }}</td>
+            <td class="amount">−{{ row.quantity|float|round(2) }}</td>
+            <td class="muted">{{ row.reason }}{% if row.note %} — {{ row.note }}{% endif %}</td>
+            {% endif %}
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="muted">Движений пока не было.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+function toggleCustom(fieldPrefix) {
+  var select = document.getElementById(fieldPrefix);
+  var custom = document.getElementById(fieldPrefix + '_custom');
+  if (!select || !custom) return;
+  if (select.value === '{{ custom_value }}') {
+    custom.classList.remove('hidden');
+    custom.required = true;
+  } else {
+    custom.classList.add('hidden');
+    custom.required = false;
+  }
+}
+</script>
+
+</body>
+</html>

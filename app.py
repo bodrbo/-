@@ -698,6 +698,17 @@ DEFECT_STATUSES = [
 ]
 DEFAULT_DEFECT_STATUS = "new"
 
+SUPPLY_COST_UNITS = [
+    {"value": "piece", "label": "шт."},
+    {"value": "sqm", "label": "м²"},
+    {"value": "linear_m", "label": "пог. м"},
+]
+DEFAULT_SUPPLY_COST_UNIT = "piece"
+
+SUPPLY_WRITEOFF_REASONS = ["Брак", "Недостача", "Порча при хранении", "Истёк срок годности"]
+
+SUPPLY_PHOTO_EXTENSIONS = WORK_PHOTO_EXTENSIONS
+
 ASSIGNMENT_STATUSES = [
     {"value": "pending", "label": "Ожидает ответа"},
     {"value": "accepted", "label": "Принята"},
@@ -1214,6 +1225,74 @@ def init_db():
             payment_registry_id TEXT,
             status TEXT NOT NULL,
             error_message TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS supply_warehouses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            address TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS supply_products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            sku TEXT,
+            description TEXT,
+            supplier TEXT,
+            photo_filename TEXT,
+            cost_price REAL NOT NULL,
+            cost_unit TEXT NOT NULL,
+            sale_price REAL NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS supply_stock (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL,
+            warehouse_id INTEGER NOT NULL,
+            quantity REAL NOT NULL DEFAULT 0,
+            zone TEXT,
+            rack TEXT,
+            spot TEXT,
+            UNIQUE(product_id, warehouse_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS supply_receipts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL,
+            warehouse_id INTEGER NOT NULL,
+            quantity REAL NOT NULL,
+            zone TEXT,
+            rack TEXT,
+            spot TEXT,
+            note TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS supply_writeoffs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL,
+            warehouse_id INTEGER NOT NULL,
+            quantity REAL NOT NULL,
+            reason TEXT NOT NULL,
+            note TEXT,
             created_at TEXT NOT NULL
         )
         """
@@ -6175,10 +6254,297 @@ def remove_transaction_split():
 # Снабжение
 # =======================================================================
 
+def _supply_warehouses(db):
+    return db.execute("SELECT * FROM supply_warehouses ORDER BY name").fetchall()
+
+
 @app.route("/supply/warehouses")
 @admin_login_required
 def supply_warehouses():
-    return render_template("supply_warehouses.html", active_page="supply", sub_page="warehouses")
+    db = get_db()
+    warehouses = db.execute(
+        "SELECT sw.*, "
+        "(SELECT COALESCE(SUM(quantity), 0) FROM supply_stock WHERE warehouse_id = sw.id) AS total_quantity, "
+        "(SELECT COUNT(DISTINCT product_id) FROM supply_stock WHERE warehouse_id = sw.id AND quantity > 0) AS product_count "
+        "FROM supply_warehouses sw ORDER BY sw.name"
+    ).fetchall()
+    return render_template(
+        "supply_warehouses.html", active_page="supply", sub_page="warehouses",
+        warehouses=warehouses, warehouse_error=session.pop("warehouse_error", None),
+    )
+
+
+@app.route("/supply/warehouses/add", methods=["POST"])
+@admin_login_required
+def add_supply_warehouse():
+    db = get_db()
+    name = request.form.get("name", "").strip()
+    address = request.form.get("address", "").strip()
+    if not name:
+        session["warehouse_error"] = "Укажите название склада."
+        return redirect(url_for("supply_warehouses"))
+    db.execute(
+        "INSERT INTO supply_warehouses (name, address, created_at) VALUES (?, ?, ?)",
+        (name, address or None, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+    )
+    db.commit()
+    return redirect(url_for("supply_warehouses"))
+
+
+@app.route("/supply/catalog")
+@admin_login_required
+def supply_catalog():
+    db = get_db()
+    products = db.execute(
+        "SELECT sp.*, "
+        "(SELECT COALESCE(SUM(quantity), 0) FROM supply_stock WHERE product_id = sp.id) AS total_quantity "
+        "FROM supply_products sp ORDER BY sp.created_at DESC, sp.id DESC"
+    ).fetchall()
+    return render_template(
+        "supply_catalog.html", active_page="supply", sub_page="catalog",
+        products=products, cost_units=SUPPLY_COST_UNITS,
+        product_error=session.pop("product_error", None),
+    )
+
+
+@app.route("/supply/catalog/add", methods=["POST"])
+@admin_login_required
+def add_supply_product():
+    db = get_db()
+    name = request.form.get("name", "").strip()
+    sku = request.form.get("sku", "").strip()
+    description = request.form.get("description", "").strip()
+    supplier = request.form.get("supplier", "").strip()
+    cost_price_raw = request.form.get("cost_price", "").strip().replace(",", ".")
+    cost_unit = request.form.get("cost_unit", "").strip()
+    sale_price_raw = request.form.get("sale_price", "").strip().replace(",", ".")
+
+    errors = []
+    if not name:
+        errors.append("Укажите название товара.")
+    if cost_unit not in [u["value"] for u in SUPPLY_COST_UNITS]:
+        errors.append("Укажите единицу измерения себестоимости.")
+
+    cost_price = None
+    try:
+        cost_price = float(cost_price_raw)
+        if cost_price < 0:
+            errors.append("Себестоимость не может быть отрицательной.")
+    except ValueError:
+        errors.append("Себестоимость должна быть числом.")
+
+    sale_price = None
+    try:
+        sale_price = float(sale_price_raw)
+        if sale_price < 0:
+            errors.append("Цена продажи не может быть отрицательной.")
+    except ValueError:
+        errors.append("Цена продажи должна быть числом.")
+
+    if errors:
+        session["product_error"] = " ".join(errors)
+        return redirect(url_for("supply_catalog"))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    cur = db.execute(
+        "INSERT INTO supply_products (name, sku, description, supplier, photo_filename, "
+        "cost_price, cost_unit, sale_price, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (name, sku or None, description or None, supplier or None, None,
+         cost_price, cost_unit, sale_price, now),
+    )
+    product_id = cur.lastrowid
+
+    # Photo is optional and only ever attached after the row exists — its
+    # filename is keyed on product_id, same convention as
+    # upload_tuning_item_photo (work_photos/<item_id>-<random>.<ext>).
+    file = request.files.get("photo")
+    if file and file.filename:
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext in SUPPLY_PHOTO_EXTENSIONS:
+            photos_dir = os.path.join(app.static_folder, "supply_photos")
+            os.makedirs(photos_dir, exist_ok=True)
+            filename = f"{product_id}-{secrets.token_hex(6)}{ext}"
+            file.save(os.path.join(photos_dir, filename))
+            db.execute(
+                "UPDATE supply_products SET photo_filename = ? WHERE id = ?",
+                (filename, product_id),
+            )
+
+    db.commit()
+    return redirect(url_for("supply_catalog"))
+
+
+@app.route("/supply/catalog/<int:product_id>")
+@admin_login_required
+def supply_product(product_id):
+    db = get_db()
+    product = db.execute("SELECT * FROM supply_products WHERE id = ?", (product_id,)).fetchone()
+    if product is None:
+        return redirect(url_for("supply_catalog"))
+
+    stock = db.execute(
+        "SELECT supply_stock.*, supply_warehouses.name AS warehouse_name "
+        "FROM supply_stock JOIN supply_warehouses ON supply_warehouses.id = supply_stock.warehouse_id "
+        "WHERE supply_stock.product_id = ? AND supply_stock.quantity > 0 "
+        "ORDER BY supply_warehouses.name",
+        (product_id,),
+    ).fetchall()
+    total_quantity = sum(s["quantity"] for s in stock)
+
+    receipts = db.execute(
+        "SELECT supply_receipts.*, supply_warehouses.name AS warehouse_name "
+        "FROM supply_receipts JOIN supply_warehouses ON supply_warehouses.id = supply_receipts.warehouse_id "
+        "WHERE supply_receipts.product_id = ? ORDER BY supply_receipts.id DESC LIMIT 20",
+        (product_id,),
+    ).fetchall()
+    writeoffs = db.execute(
+        "SELECT supply_writeoffs.*, supply_warehouses.name AS warehouse_name "
+        "FROM supply_writeoffs JOIN supply_warehouses ON supply_warehouses.id = supply_writeoffs.warehouse_id "
+        "WHERE supply_writeoffs.product_id = ? ORDER BY supply_writeoffs.id DESC LIMIT 20",
+        (product_id,),
+    ).fetchall()
+    # Merge the two journals into one chronological feed — showing all
+    # receipts before all write-offs (their separate, independently-sorted
+    # queries) would misorder anything but the simplest history.
+    history = sorted(
+        [{"kind": "receipt", "row": r} for r in receipts] +
+        [{"kind": "writeoff", "row": w} for w in writeoffs],
+        key=lambda h: (h["row"]["created_at"], h["row"]["id"]),
+        reverse=True,
+    )[:20]
+
+    return render_template(
+        "supply_product.html", active_page="supply", sub_page="catalog",
+        product=product, stock=stock, total_quantity=total_quantity,
+        history=history,
+        warehouses=_supply_warehouses(db),
+        cost_units=SUPPLY_COST_UNITS, writeoff_reasons=SUPPLY_WRITEOFF_REASONS,
+        custom_value=CUSTOM_VALUE,
+        receive_error=session.pop("receive_error", None),
+        writeoff_error=session.pop("writeoff_error", None),
+    )
+
+
+@app.route("/supply/catalog/<int:product_id>/receive", methods=["POST"])
+@admin_login_required
+def receive_supply_product(product_id):
+    db = get_db()
+    product = db.execute("SELECT id FROM supply_products WHERE id = ?", (product_id,)).fetchone()
+    if product is None:
+        return redirect(url_for("supply_catalog"))
+
+    warehouse_id_raw = request.form.get("warehouse_id", "").strip()
+    quantity_raw = request.form.get("quantity", "").strip().replace(",", ".")
+    zone = request.form.get("zone", "").strip()
+    rack = request.form.get("rack", "").strip()
+    spot = request.form.get("spot", "").strip()
+    note = request.form.get("note", "").strip()
+
+    errors = []
+    warehouse_id = int(warehouse_id_raw) if warehouse_id_raw.isdigit() else None
+    if warehouse_id is None:
+        errors.append("Выберите склад.")
+
+    quantity = None
+    try:
+        quantity = float(quantity_raw)
+        if quantity <= 0:
+            errors.append("Количество должно быть больше нуля.")
+    except ValueError:
+        errors.append("Количество должно быть числом.")
+
+    if errors:
+        session["receive_error"] = " ".join(errors)
+        return redirect(url_for("supply_product", product_id=product_id))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "INSERT INTO supply_receipts (product_id, warehouse_id, quantity, zone, rack, spot, note, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (product_id, warehouse_id, quantity, zone or None, rack or None, spot or None, note or None, now),
+    )
+
+    # Plain select-then-insert/update, not "ON CONFLICT ... DO UPDATE" — that
+    # SQLite syntax needs 3.24+, not guaranteed on this host (see the
+    # push_subscriptions/defect_assignments upserts elsewhere in this file).
+    existing = db.execute(
+        "SELECT id FROM supply_stock WHERE product_id = ? AND warehouse_id = ?",
+        (product_id, warehouse_id),
+    ).fetchone()
+    if existing is None:
+        db.execute(
+            "INSERT INTO supply_stock (product_id, warehouse_id, quantity, zone, rack, spot) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (product_id, warehouse_id, quantity, zone or None, rack or None, spot or None),
+        )
+    else:
+        # A fresh receipt's address (if given) replaces the stored one —
+        # the stock row always reflects where the item was put most
+        # recently, the receipt journal keeps the full history.
+        db.execute(
+            "UPDATE supply_stock SET quantity = quantity + ?, "
+            "zone = COALESCE(?, zone), rack = COALESCE(?, rack), spot = COALESCE(?, spot) WHERE id = ?",
+            (quantity, zone or None, rack or None, spot or None, existing["id"]),
+        )
+    db.commit()
+    return redirect(url_for("supply_product", product_id=product_id))
+
+
+@app.route("/supply/catalog/<int:product_id>/writeoff", methods=["POST"])
+@admin_login_required
+def writeoff_supply_product(product_id):
+    db = get_db()
+    product = db.execute("SELECT id FROM supply_products WHERE id = ?", (product_id,)).fetchone()
+    if product is None:
+        return redirect(url_for("supply_catalog"))
+
+    warehouse_id_raw = request.form.get("warehouse_id", "").strip()
+    quantity_raw = request.form.get("quantity", "").strip().replace(",", ".")
+    reason = request.form.get("reason", "").strip()
+    if reason == CUSTOM_VALUE:
+        reason = request.form.get("reason_custom", "").strip()
+    note = request.form.get("note", "").strip()
+
+    errors = []
+    warehouse_id = int(warehouse_id_raw) if warehouse_id_raw.isdigit() else None
+    if warehouse_id is None:
+        errors.append("Выберите склад.")
+    if not reason:
+        errors.append("Укажите причину списания.")
+
+    stock_row = None
+    if warehouse_id is not None:
+        stock_row = db.execute(
+            "SELECT * FROM supply_stock WHERE product_id = ? AND warehouse_id = ?",
+            (product_id, warehouse_id),
+        ).fetchone()
+
+    quantity = None
+    try:
+        quantity = float(quantity_raw)
+        if quantity <= 0:
+            errors.append("Количество должно быть больше нуля.")
+        elif stock_row is None or quantity > stock_row["quantity"]:
+            errors.append("Нельзя списать больше, чем есть на этом складе.")
+    except ValueError:
+        errors.append("Количество должно быть числом.")
+
+    if errors:
+        session["writeoff_error"] = " ".join(errors)
+        return redirect(url_for("supply_product", product_id=product_id))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "INSERT INTO supply_writeoffs (product_id, warehouse_id, quantity, reason, note, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (product_id, warehouse_id, quantity, reason, note or None, now),
+    )
+    db.execute(
+        "UPDATE supply_stock SET quantity = quantity - ? WHERE id = ?",
+        (quantity, stock_row["id"]),
+    )
+    db.commit()
+    return redirect(url_for("supply_product", product_id=product_id))
 
 
 @app.route("/supply/requests")
