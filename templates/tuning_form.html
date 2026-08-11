@@ -338,18 +338,18 @@
         <div class="field field-narrow field-fixed">
           <label for="yookassa_amount">Сумма счёта, ₽</label>
           <input type="text" inputmode="decimal" id="yookassa_amount" name="amount"
-                 value="{{ '%.0f'|format(remaining) }}" required>
+                 value="{{ '%.0f'|format(remaining) }}" required oninput="updateYookassaSubmitState()">
         </div>
         <div class="field field-submit" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
           <button type="button" class="btn-secondary"
-                  onclick="document.getElementById('yookassa_amount').value = '{{ '%.2f'|format(edit_order.total * 0.7) }}'">
+                  onclick="setYookassaAmount('{{ '%.2f'|format(edit_order.total * 0.7) }}')">
             70% от заказа
           </button>
           <button type="button" class="btn-secondary"
-                  onclick="document.getElementById('yookassa_amount').value = '{{ '%.2f'|format(edit_order.total) }}'">
+                  onclick="setYookassaAmount('{{ '%.2f'|format(edit_order.total) }}')">
             100% от заказа
           </button>
-          <button type="submit">Выставить счёт</button>
+          <button type="submit" id="yookassa_submit_btn">Выставить счёт</button>
         </div>
       </form>
       {% if remaining <= 0 %}
@@ -638,6 +638,26 @@ function updateOrderTotal() {
 }
 
 document.addEventListener('DOMContentLoaded', updateOrderTotal);
+
+// "Выставить счёт" (ЮKassa) stays disabled until the amount field holds a
+// real positive number — clicking it with an empty/zero amount used to just
+// reload the page with nothing happening (no invoice, no visible error).
+function updateYookassaSubmitState() {
+  var input = document.getElementById('yookassa_amount');
+  var btn = document.getElementById('yookassa_submit_btn');
+  if (!input || !btn) return;
+  var amount = parseFloat((input.value || '').replace(',', '.'));
+  btn.disabled = !(amount > 0);
+}
+
+function setYookassaAmount(value) {
+  var input = document.getElementById('yookassa_amount');
+  if (!input) return;
+  input.value = value;
+  updateYookassaSubmitState();
+}
+
+document.addEventListener('DOMContentLoaded', updateYookassaSubmitState);
 </script>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 
