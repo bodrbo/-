@@ -315,7 +315,8 @@
                 method="post" class="status-select-form">
             <select name="status" onchange="this.form.submit()">
               {% for s in work_statuses %}
-              <option value="{{ s.value }}" {{ 'selected' if task.item_status == s.value }}>{{ s.label }}</option>
+              <option value="{{ s.value }}" {{ 'selected' if task.item_status == s.value }}
+                      {{ 'disabled' if s.value == 'removed' and task.item_status != 'removed' }}>{{ s.label }}</option>
               {% endfor %}
             </select>
           </form>

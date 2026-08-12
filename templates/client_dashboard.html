@@ -102,7 +102,7 @@
               <thead><tr><th>Работа</th><th>Цена, ₽</th><th>Статус</th><th></th></tr></thead>
               <tbody>
                 {% for item in o.work_items %}
-                <tr class="{{ 'row-pending' if item.status == 'pending' }}">
+                <tr class="{{ 'row-pending' if item.status == 'pending' else 'row-removed' if item.status == 'removed' }}">
                   <td>{{ item.work_name }}</td>
                   <td class="amount">{{ item.price|money }}</td>
                   <td><span class="status-badge status-{{ item.status }}">{{ item.status|work_status_label }}</span></td>

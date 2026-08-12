@@ -713,6 +713,7 @@ WORK_STATUSES = [
     {"value": "approved", "label": "Согласовано"},
     {"value": "in_progress", "label": "В работе"},
     {"value": "done", "label": "Выполнено"},
+    {"value": "removed", "label": "Задача снята"},
 ]
 DEFAULT_WORK_STATUS = "pending"
 
@@ -3125,8 +3126,11 @@ def _recompute_order_totals(db, order_id):
     order = db.execute(
         "SELECT discount_type, discount_value FROM tuning_orders WHERE id = ?", (order_id,)
     ).fetchone()
+    # A "Задача снята" work item stays in the table (for the record) but no
+    # longer counts toward what the client owes.
     work_subtotal = db.execute(
-        "SELECT COALESCE(SUM(price), 0) AS s FROM tuning_order_items WHERE order_id = ?", (order_id,)
+        "SELECT COALESCE(SUM(price), 0) AS s FROM tuning_order_items WHERE order_id = ? AND status != 'removed'",
+        (order_id,),
     ).fetchone()["s"]
     goods_subtotal = db.execute(
         "SELECT COALESCE(SUM(quantity * unit_price), 0) AS s FROM tuning_order_products WHERE order_id = ?",
@@ -3648,7 +3652,8 @@ def tuning_order_handover_pdf(order_id):
     if order is None:
         return redirect(url_for("tuning_index"))
     items = db.execute(
-        "SELECT * FROM tuning_order_items WHERE order_id = ? ORDER BY id", (order_id,)
+        "SELECT * FROM tuning_order_items WHERE order_id = ? AND status != 'removed' ORDER BY id",
+        (order_id,),
     ).fetchall()
     goods = db.execute(
         "SELECT * FROM tuning_order_products WHERE order_id = ? ORDER BY id", (order_id,)
@@ -3902,7 +3907,7 @@ def edit_tuning_order(order_id):
             ).fetchone()
             assignment = dict(assignment_row) if assignment_row else None
             item["assignment"] = assignment
-            item["can_assign"] = (
+            item["can_assign"] = item["status"] != "removed" and (
                 assignment is None
                 or assignment["assignment_status"] == "rejected"
                 or (assignment["assignment_status"] == "accepted" and item["status"] == "done")
@@ -4035,6 +4040,9 @@ def set_tuning_item_status(order_id, item_id):
             (status, item_id, order_id),
         )
         db.commit()
+        # Moving a work item to/from "Задача снята" changes whether its
+        # price counts toward the order — keep subtotal/total in sync.
+        _recompute_order_totals(db, order_id)
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
@@ -5862,7 +5870,9 @@ def team_tuning_task_set_status(assignment_id):
     if assignment is None or assignment["assignment_status"] != "accepted":
         return redirect(url_for("team_dashboard"))
     status = request.form.get("status", "").strip()
-    if status not in [s["value"] for s in WORK_STATUSES]:
+    # "Задача снята" takes the work out of the order's total — an admin-only
+    # call, not something the assigned employee can set on their own task.
+    if status == "removed" or status not in [s["value"] for s in WORK_STATUSES]:
         return redirect(url_for("team_dashboard"))
 
     item = db.execute(

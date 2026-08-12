@@ -733,9 +733,11 @@ input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, in
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232f6b4f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5'/%3E%3C/svg%3E");
 }
 .status-badge.status-cancelled,
-.status-badge.status-canceled { background: rgba(179, 64, 44, 0.14); color: var(--danger); }
+.status-badge.status-canceled,
+.status-badge.status-removed { background: rgba(179, 64, 44, 0.14); color: var(--danger); }
 .status-badge.status-cancelled::before,
-.status-badge.status-canceled::before {
+.status-badge.status-canceled::before,
+.status-badge.status-removed::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23b3402c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 4l8 8M12 4l-8 8'/%3E%3C/svg%3E");
 }
 .status-badge.status-waiting_for_capture { background: rgba(46, 134, 193, 0.16); color: var(--brass-strong); }
@@ -1686,6 +1688,10 @@ button.btn-delete:hover { background: var(--danger); color: #fff8f4; border-colo
 /* Работа "на согласовании" у клиента — подсветим строку, чтобы бросалась в глаза. */
 table.records tr.row-pending td { background: rgba(212, 141, 74, 0.14); }
 table.records tr.row-pending:hover td { background: rgba(212, 141, 74, 0.2); }
+
+/* Задача снята — гасим строку серым, её стоимость больше не входит в заказ. */
+table.records tr.row-removed td { background: rgba(98, 112, 127, 0.1); color: var(--muted); }
+table.records tr.row-removed:hover td { background: rgba(98, 112, 127, 0.16); }
 
 /* Разовый расход — отдельная строка среди рейсов, суммы у неё отрицательные. */
 table.records tr.row-expense td { background: rgba(179, 64, 44, 0.06); }

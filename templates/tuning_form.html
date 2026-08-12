@@ -244,7 +244,7 @@
         <thead><tr><th>Работа</th><th>Цена, ₽</th><th>Статус</th><th>Задача</th><th>Фото</th></tr></thead>
         <tbody>
           {% for item in items_prefill %}
-          <tr>
+          <tr class="{{ 'row-removed' if item.status == 'removed' }}">
             <td>{{ item.work_name }}</td>
             <td class="amount">{{ item.price|money }}</td>
             <td>
