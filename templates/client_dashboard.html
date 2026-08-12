@@ -135,6 +135,26 @@
           {% else %}
           <p class="hint">Работы не указаны.</p>
           {% endif %}
+
+          {% if o.goods_items %}
+          <h3 style="margin-top:18px;">Товары по заказу</h3>
+          <div class="table-scroll">
+            <table class="records">
+              <thead><tr><th>Товар</th><th>Кол-во</th><th>Цена, ₽</th><th>Сумма, ₽</th></tr></thead>
+              <tbody>
+                {% for g in o.goods_items %}
+                <tr>
+                  <td>{{ g.product_name }}</td>
+                  <td class="amount">{{ g.quantity|float|round(2) }} {{ cost_units|selectattr('value', 'equalto', g.unit)|map(attribute='label')|first }}</td>
+                  <td class="amount">{{ g.unit_price|money }}</td>
+                  <td class="amount">{{ (g.quantity * g.unit_price)|money }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+
           <p class="hint" style="margin-top:14px;">
             Скидка {{ (o.discount_value|float|round(1)|string ~ '%') if o.discount_type != 'amount' else (o.discount_value|money ~ ' ₽') }} · Оплачено {{ o.paid_amount|money }} ₽ ·
             К доплате {{ o.remaining|money }} ₽

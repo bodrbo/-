@@ -299,6 +299,58 @@
   </section>
 
   <section class="panel">
+    <h2>Товары</h2>
+    {% if goods %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead><tr><th>Товар</th><th>Кол-во</th><th>Цена, ₽</th><th>Сумма, ₽</th><th></th></tr></thead>
+        <tbody>
+          {% for g in goods %}
+          <tr>
+            <td>{{ g.product_name }}</td>
+            <td class="amount">{{ g.quantity|float|round(2) }} {{ cost_units|selectattr('value', 'equalto', g.unit)|map(attribute='label')|first }}</td>
+            <td class="amount">{{ g.unit_price|money }}</td>
+            <td class="amount">{{ (g.quantity * g.unit_price)|money }}</td>
+            <td class="row-actions">
+              <form action="{{ url_for('remove_tuning_order_product', order_id=edit_order.id, row_id=g.id) }}" method="post"
+                    onsubmit="return confirm('Убрать этот товар из заказа?');">
+                <button type="submit" class="icon-btn danger" title="Убрать">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 5l10 10M15 5L5 15"/>
+                  </svg>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint">Товары из каталога пока не добавлены.</p>
+    {% endif %}
+    <form action="{{ url_for('add_tuning_order_product', order_id=edit_order.id) }}" method="post"
+          class="entry-form" style="margin-top:14px;">
+      <div class="field">
+        <label for="product_id">Товар из каталога</label>
+        <select id="product_id" name="product_id" required>
+          <option value="" disabled selected>Выберите товар</option>
+          {% for p in catalog_products %}
+          <option value="{{ p.id }}">{{ p.name }} ({{ p.sale_price|money }} ₽ / {{ cost_units|selectattr('value', 'equalto', p.cost_unit)|map(attribute='label')|first }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field field-narrow">
+        <label for="product_quantity">Количество</label>
+        <input type="text" inputmode="decimal" id="product_quantity" name="quantity" required>
+      </div>
+      <div class="field field-submit">
+        <button type="submit">Добавить товар</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel">
     <h2>Платежи по заказу</h2>
     <form action="{{ url_for('add_tuning_payment', order_id=edit_order.id) }}" method="post" class="entry-form">
       <div class="field field-narrow field-fixed">
@@ -686,7 +738,12 @@ function removeWorkRow(btn) {
 }
 
 function updateOrderTotal() {
-  var subtotal = 0;
+  // Goods are saved immediately through their own "Товары" mini-form
+  // (not part of this work-items submit), so their total is baked in here
+  // as a constant rather than read from any live input on this page —
+  // otherwise this preview would silently ignore existing goods and look
+  // wrong compared to the actually-saved order total.
+  var subtotal = {{ goods_subtotal|default(0) }};
   document.querySelectorAll('#work-container .work-price').forEach(function (span) {
     subtotal += parseFloat(span.getAttribute('data-value')) || 0;
   });

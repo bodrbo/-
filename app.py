@@ -1196,6 +1196,21 @@ def init_db():
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS tuning_order_products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            product_id INTEGER NOT NULL,
+            product_name TEXT NOT NULL,
+            quantity REAL NOT NULL,
+            unit_price REAL NOT NULL,
+            cost_price REAL NOT NULL,
+            unit TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS tuning_payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             order_id INTEGER NOT NULL,
@@ -3099,6 +3114,38 @@ def _order_payment_totals(db, order_id, total):
     return payments, paid_amount, remaining
 
 
+def _recompute_order_totals(db, order_id):
+    """Work items (tuning_order_items) and goods (tuning_order_products) are
+    added/removed through separate forms/routes, so neither one alone can
+    keep tuning_orders.subtotal/total right — this re-derives both from
+    scratch (work price sum + goods qty*unit_price sum) against whatever
+    discount_type/discount_value is currently stored on the order, and
+    writes the result back. Call after any change to either line-item set,
+    or to the discount itself."""
+    order = db.execute(
+        "SELECT discount_type, discount_value FROM tuning_orders WHERE id = ?", (order_id,)
+    ).fetchone()
+    work_subtotal = db.execute(
+        "SELECT COALESCE(SUM(price), 0) AS s FROM tuning_order_items WHERE order_id = ?", (order_id,)
+    ).fetchone()["s"]
+    goods_subtotal = db.execute(
+        "SELECT COALESCE(SUM(quantity * unit_price), 0) AS s FROM tuning_order_products WHERE order_id = ?",
+        (order_id,),
+    ).fetchone()["s"]
+    subtotal = work_subtotal + goods_subtotal
+    if order["discount_type"] == "amount":
+        discount_amount = min(order["discount_value"], subtotal)
+    else:
+        discount_amount = subtotal * order["discount_value"] / 100
+    total = subtotal - discount_amount
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "UPDATE tuning_orders SET subtotal = ?, total = ?, updated_at = ? WHERE id = ?",
+        (subtotal, total, now, order_id),
+    )
+    db.commit()
+
+
 # ---------------------------------------------------------------------
 # Акт выполненных работ (PDF)
 # ---------------------------------------------------------------------
@@ -3183,7 +3230,7 @@ COMPANY_NAME = 'ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕ�
 COMPANY_ADDRESS = "197762, Россия, г Санкт-Петербург, г Кронштадт, ул Мануильского, 20 литера а, 2"
 
 
-def _build_act_pdf(order, items):
+def _build_act_pdf(order, items, goods=()):
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER
     from reportlab.lib.pagesizes import A4
@@ -3211,6 +3258,8 @@ def _build_act_pdf(order, items):
     style_cell = ParagraphStyle("cell", fontName="OpenSans", fontSize=9.5, leading=12.5)
     style_bold = ParagraphStyle("bold", fontName="OpenSans-Bold", fontSize=10.5, leading=15,
                                  spaceAfter=4)
+    style_section = ParagraphStyle("section", fontName="OpenSans-Bold", fontSize=11.5, leading=15,
+                                    spaceBefore=4, spaceAfter=8)
 
     try:
         order_date = dt.date.fromisoformat(order["created_at"][:10]).strftime("%d.%m.%Y")
@@ -3231,23 +3280,8 @@ def _build_act_pdf(order, items):
     flow.append(HRFlowable(width="100%", thickness=0.6, color=colors.black,
                             spaceBefore=2, spaceAfter=18))
 
-    table_data = [["№", "Наименование товара", "Цена", "Кол-во", "Ед. изм.", "Сумма"]]
-    total_sum = 0.0
-    for i, item in enumerate(items, start=1):
-        price_str = f"{item['price']:.2f}".replace(".", ",")
-        table_data.append([
-            str(i), Paragraph(item["work_name"], style_cell),
-            price_str, "1", "шт", price_str,
-        ])
-        total_sum += item["price"]
-    table_data.append([
-        "", "", "", f"{len(items):.2f}".replace(".", ","), "Итого:",
-        f"{total_sum:.2f}".replace(".", ","),
-    ])
-
     col_widths = [12 * mm, 76 * mm, 24 * mm, 18 * mm, 18 * mm, 22 * mm]
-    tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
-    tbl.setStyle(TableStyle([
+    table_style = TableStyle([
         ("FONTNAME", (0, 0), (-1, -1), "OpenSans"),
         ("FONTNAME", (0, 0), (-1, 0), "OpenSans-Bold"),
         ("FONTNAME", (0, -1), (-1, -1), "OpenSans-Bold"),
@@ -3259,8 +3293,55 @@ def _build_act_pdf(order, items):
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("TOPPADDING", (0, 0), (-1, -1), 5),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-    ]))
+    ])
+
+    # Two separate sections/tables (Работы / Товары) instead of one mixed
+    # list — only headed when both are actually present, so a pure-work
+    # order's act still renders exactly as it always has.
+    total_sum = 0.0
+    if goods:
+        flow.append(Paragraph("Работы", style_section))
+    table_data = [["№", "Наименование работы", "Цена", "Кол-во", "Ед. изм.", "Сумма"]]
+    for i, item in enumerate(items, start=1):
+        price_str = f"{item['price']:.2f}".replace(".", ",")
+        table_data.append([
+            str(i), Paragraph(item["work_name"], style_cell),
+            price_str, "1", "шт", price_str,
+        ])
+        total_sum += item["price"]
+    table_data.append([
+        "", "", "", f"{len(items):.2f}".replace(".", ","), "Итого:",
+        f"{total_sum:.2f}".replace(".", ","),
+    ])
+    tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
+    tbl.setStyle(table_style)
     flow.append(tbl)
+
+    if goods:
+        flow.append(Spacer(1, 18))
+        flow.append(Paragraph("Товары", style_section))
+        goods_data = [["№", "Наименование товара", "Цена", "Кол-во", "Ед. изм.", "Сумма"]]
+        goods_sum = 0.0
+        goods_qty = 0.0
+        for i, g in enumerate(goods, start=1):
+            price_str = f"{g['unit_price']:.2f}".replace(".", ",")
+            line_sum = g["quantity"] * g["unit_price"]
+            unit_label = next((u["label"] for u in SUPPLY_COST_UNITS if u["value"] == g["unit"]), g["unit"])
+            goods_data.append([
+                str(i), Paragraph(g["product_name"], style_cell), price_str,
+                f"{g['quantity']:g}", unit_label, f"{line_sum:.2f}".replace(".", ","),
+            ])
+            goods_sum += line_sum
+            goods_qty += g["quantity"]
+        goods_data.append([
+            "", "", "", f"{goods_qty:g}", "Итого:",
+            f"{goods_sum:.2f}".replace(".", ","),
+        ])
+        goods_tbl = Table(goods_data, colWidths=col_widths, repeatRows=1)
+        goods_tbl.setStyle(table_style)
+        flow.append(goods_tbl)
+        total_sum += goods_sum
+
     flow.append(Spacer(1, 22))
 
     flow.append(Paragraph(
@@ -3298,8 +3379,11 @@ def tuning_order_act_pdf(order_id):
         "SELECT * FROM tuning_order_items WHERE order_id = ? AND status = 'done' ORDER BY id",
         (order_id,),
     ).fetchall()
+    goods = db.execute(
+        "SELECT * FROM tuning_order_products WHERE order_id = ? ORDER BY id", (order_id,)
+    ).fetchall()
     try:
-        pdf_bytes = _build_act_pdf(order, items)
+        pdf_bytes = _build_act_pdf(order, items, goods)
     except ImportError:
         return (
             "Формирование PDF временно недоступно: на сервере не установлена "
@@ -3312,7 +3396,7 @@ def tuning_order_act_pdf(order_id):
     return response
 
 
-def _build_handover_act_pdf(order, items):
+def _build_handover_act_pdf(order, items, goods=()):
     """Same layout as _build_act_pdf (completed-work act), but signed when
     the customer drops the boat off — before any work is necessarily done,
     so it lists every work item in the order regardless of status, and
@@ -3344,6 +3428,8 @@ def _build_handover_act_pdf(order, items):
     style_cell = ParagraphStyle("cell", fontName="OpenSans", fontSize=9.5, leading=12.5)
     style_bold = ParagraphStyle("bold", fontName="OpenSans-Bold", fontSize=10.5, leading=15,
                                  spaceAfter=4)
+    style_section = ParagraphStyle("section", fontName="OpenSans-Bold", fontSize=11.5, leading=15,
+                                    spaceBefore=4, spaceAfter=8)
 
     try:
         order_date = dt.date.fromisoformat(order["created_at"][:10]).strftime("%d.%m.%Y")
@@ -3364,8 +3450,28 @@ def _build_handover_act_pdf(order, items):
     flow.append(HRFlowable(width="100%", thickness=0.6, color=colors.black,
                             spaceBefore=2, spaceAfter=18))
 
-    table_data = [["№", "Наименование товара", "Цена", "Кол-во", "Ед. изм.", "Сумма"]]
+    col_widths = [12 * mm, 76 * mm, 24 * mm, 18 * mm, 18 * mm, 22 * mm]
+    table_style = TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), "OpenSans"),
+        ("FONTNAME", (0, 0), (-1, 0), "OpenSans-Bold"),
+        ("FONTNAME", (0, -1), (-1, -1), "OpenSans-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+        ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+        ("ALIGN", (2, 0), (-1, 0), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ])
+
+    # Two separate sections/tables (Работы / Товары) instead of one mixed
+    # list — only headed when both are actually present, so a pure-work
+    # order's act still renders exactly as it always has.
     total_sum = 0.0
+    if goods:
+        flow.append(Paragraph("Работы", style_section))
+    table_data = [["№", "Наименование работы", "Цена", "Кол-во", "Ед. изм.", "Сумма"]]
     for i, item in enumerate(items, start=1):
         price_str = f"{item['price']:.2f}".replace(".", ",")
         table_data.append([
@@ -3377,44 +3483,69 @@ def _build_handover_act_pdf(order, items):
         "", "", "", f"{len(items):.2f}".replace(".", ","), "Итого:",
         f"{total_sum:.2f}".replace(".", ","),
     ])
+    tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
+    tbl.setStyle(table_style)
+    flow.append(tbl)
+
+    if goods:
+        flow.append(Spacer(1, 18))
+        flow.append(Paragraph("Товары", style_section))
+        goods_data = [["№", "Наименование товара", "Цена", "Кол-во", "Ед. изм.", "Сумма"]]
+        goods_sum = 0.0
+        goods_qty = 0.0
+        for i, g in enumerate(goods, start=1):
+            price_str = f"{g['unit_price']:.2f}".replace(".", ",")
+            line_sum = g["quantity"] * g["unit_price"]
+            unit_label = next((u["label"] for u in SUPPLY_COST_UNITS if u["value"] == g["unit"]), g["unit"])
+            goods_data.append([
+                str(i), Paragraph(g["product_name"], style_cell), price_str,
+                f"{g['quantity']:g}", unit_label, f"{line_sum:.2f}".replace(".", ","),
+            ])
+            goods_sum += line_sum
+            goods_qty += g["quantity"]
+        goods_data.append([
+            "", "", "", f"{goods_qty:g}", "Итого:",
+            f"{goods_sum:.2f}".replace(".", ","),
+        ])
+        goods_tbl = Table(goods_data, colWidths=col_widths, repeatRows=1)
+        goods_tbl.setStyle(table_style)
+        flow.append(goods_tbl)
+        total_sum += goods_sum
 
     if order["discount_type"] == "amount":
         discount_amount = order["discount_value"]
     else:
         discount_amount = total_sum * order["discount_value"] / 100
-    summary_rows = 1
-    if discount_amount > 0:
-        discount_label = (
-            f"Скидка ({('%g' % order['discount_value']).replace('.', ',')}%):"
-            if order["discount_type"] != "amount"
-            else "Скидка:"
-        )
-        table_data.append([
-            "", "", "", "", discount_label,
-            f"{discount_amount:.2f}".replace(".", ","),
-        ])
-        table_data.append([
+
+    # Only when there's something to clarify beyond the section table(s)'
+    # own "Итого:" rows — a plain no-discount, no-goods order needs no
+    # extra summary line, same as before goods existed at all.
+    if discount_amount > 0 or goods:
+        summary_data = []
+        if discount_amount > 0:
+            discount_label = (
+                f"Скидка ({('%g' % order['discount_value']).replace('.', ',')}%):"
+                if order["discount_type"] != "amount"
+                else "Скидка:"
+            )
+            summary_data.append([
+                "", "", "", "", discount_label,
+                f"{discount_amount:.2f}".replace(".", ","),
+            ])
+        summary_data.append([
             "", "", "", "", "К оплате:",
             f"{total_sum - discount_amount:.2f}".replace(".", ","),
         ])
-        summary_rows = 3
+        summary_tbl = Table(summary_data, colWidths=col_widths)
+        summary_tbl.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, -1), "OpenSans-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+            ("ALIGN", (4, 0), (-1, -1), "RIGHT"),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        flow.append(summary_tbl)
 
-    col_widths = [12 * mm, 76 * mm, 24 * mm, 18 * mm, 18 * mm, 22 * mm]
-    tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
-    tbl.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), "OpenSans"),
-        ("FONTNAME", (0, 0), (-1, 0), "OpenSans-Bold"),
-        ("FONTNAME", (0, -summary_rows), (-1, -1), "OpenSans-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9.5),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-        ("ALIGN", (0, 0), (0, -1), "CENTER"),
-        ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
-        ("ALIGN", (2, 0), (-1, 0), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-    ]))
-    flow.append(tbl)
     flow.append(Spacer(1, 22))
 
     flow.append(Paragraph("Заказчик лодку/мотор передал, а Исполнитель принял", style_bold))
@@ -3519,8 +3650,11 @@ def tuning_order_handover_pdf(order_id):
     items = db.execute(
         "SELECT * FROM tuning_order_items WHERE order_id = ? ORDER BY id", (order_id,)
     ).fetchall()
+    goods = db.execute(
+        "SELECT * FROM tuning_order_products WHERE order_id = ? ORDER BY id", (order_id,)
+    ).fetchall()
     try:
-        pdf_bytes = _build_handover_act_pdf(order, items)
+        pdf_bytes = _build_handover_act_pdf(order, items, goods)
     except ImportError:
         return (
             "Формирование PDF временно недоступно: на сервере не установлена "
@@ -3775,6 +3909,11 @@ def edit_tuning_order(order_id):
             )
             items.append(item)
         assignable_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
+        goods = db.execute(
+            "SELECT * FROM tuning_order_products WHERE order_id = ? ORDER BY id", (order_id,)
+        ).fetchall()
+        goods_subtotal = sum(g["quantity"] * g["unit_price"] for g in goods)
+        catalog_products = db.execute("SELECT * FROM supply_products ORDER BY name").fetchall()
         payments, paid_amount, remaining = _order_payment_totals(db, order_id, order["total"])
         yookassa_payments = db.execute(
             "SELECT * FROM tuning_yookassa_payments WHERE order_id = ? ORDER BY id DESC", (order_id,)
@@ -3801,6 +3940,8 @@ def edit_tuning_order(order_id):
             hull_sheets=hull_sheets, available_hull_sheets=available_hull_sheets,
             work_photos_by_item=work_photos_by_item,
             assignable_employees=assignable_employees,
+            goods=goods, goods_subtotal=goods_subtotal, catalog_products=catalog_products,
+            cost_units=SUPPLY_COST_UNITS,
         )
 
     errors, data = _process_tuning_form(request.form)
@@ -3851,6 +3992,10 @@ def edit_tuning_order(order_id):
             (order_id, item["work_name"], item["cost_price"], item["multiplier"], item["price"], status),
         )
     db.commit()
+    # The UPDATE above wrote subtotal/total from work items alone (all
+    # _process_tuning_form knows about) — fold in any goods added via the
+    # separate "Товары" mini-form now that the new work rows are saved.
+    _recompute_order_totals(db, order_id)
     return redirect(url_for("tuning_index"))
 
 
@@ -3985,6 +4130,50 @@ def delete_tuning_payment(order_id, payment_id):
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
+@app.route("/tuning/<int:order_id>/products/add", methods=["POST"])
+@admin_login_required
+def add_tuning_order_product(order_id):
+    db = get_db()
+    order = db.execute("SELECT id FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None:
+        return redirect(url_for("tuning_index"))
+
+    product_id_raw = request.form.get("product_id", "").strip()
+    quantity_raw = request.form.get("quantity", "").strip().replace(",", ".")
+    product_id = int(product_id_raw) if product_id_raw.isdigit() else None
+    product = None
+    if product_id is not None:
+        product = db.execute("SELECT * FROM supply_products WHERE id = ?", (product_id,)).fetchone()
+
+    quantity = None
+    try:
+        quantity = float(quantity_raw)
+    except ValueError:
+        pass
+
+    if product is not None and quantity is not None and quantity > 0:
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        db.execute(
+            "INSERT INTO tuning_order_products (order_id, product_id, product_name, quantity, "
+            "unit_price, cost_price, unit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (order_id, product_id, product["name"], quantity,
+             product["sale_price"], product["cost_price"], product["cost_unit"], now),
+        )
+        db.commit()
+        _recompute_order_totals(db, order_id)
+    return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
+@app.route("/tuning/<int:order_id>/products/<int:row_id>/remove", methods=["POST"])
+@admin_login_required
+def remove_tuning_order_product(order_id, row_id):
+    db = get_db()
+    db.execute("DELETE FROM tuning_order_products WHERE id = ? AND order_id = ?", (row_id, order_id))
+    db.commit()
+    _recompute_order_totals(db, order_id)
+    return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
 @app.route("/client/<token>")
 def client_dashboard(token):
     db = get_db()
@@ -4006,10 +4195,16 @@ def client_dashboard(token):
             "WHERE order_id = ? ORDER BY id",
             (o["id"],),
         ).fetchall()
+        goods_items = db.execute(
+            "SELECT id, product_name, quantity, unit_price, unit FROM tuning_order_products "
+            "WHERE order_id = ? ORDER BY id",
+            (o["id"],),
+        ).fetchall()
         order = dict(o)
         order["paid_amount"] = paid_amount
         order["remaining"] = remaining
         order["work_items"] = items
+        order["goods_items"] = goods_items
         order["hull_sheets"] = db.execute(
             "SELECT * FROM hull_diagnostic_sheets WHERE tuning_order_id = ? ORDER BY id", (o["id"],)
         ).fetchall()
@@ -4037,7 +4232,7 @@ def client_dashboard(token):
     return render_template(
         "client_dashboard.html", client=client, orders=orders, grand_total=grand_total,
         paid_total=paid_total, remaining_total=remaining_total,
-        work_photos_by_item=work_photos_by_item,
+        work_photos_by_item=work_photos_by_item, cost_units=SUPPLY_COST_UNITS,
     )
 
 
