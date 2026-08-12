@@ -3345,7 +3345,7 @@ def _build_act_pdf(order, items, goods=()):
     flow.append(Spacer(1, 22))
 
     flow.append(Paragraph(
-        f"Итого выполнено работ на сумму: {_rubles_to_words(total_sum)}", style_bold,
+        f"Итого выполнено работ и продано товаров на сумму: {_rubles_to_words(total_sum)}", style_bold,
     ))
     flow.append(Spacer(1, 14))
     flow.append(Paragraph("Работы выполнено качественно и в срок и полностью оплачены", style_bold))
