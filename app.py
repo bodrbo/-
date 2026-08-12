@@ -766,6 +766,12 @@ SUPPLY_REQUEST_STATUSES = [
     {"value": "delivered", "label": "Доставлено"},
 ]
 DEFAULT_SUPPLY_REQUEST_STATUS = "new"
+# supply_requests.employee_name used for requests raised automatically by
+# _maybe_create_low_stock_request rather than by a person — distinguishes
+# them in the admin table, and deliberately never matches a real
+# team_accounts row so they can't accidentally trigger a Telegram DM or
+# show up in anyone's personal "Мои задачи".
+SUPPLY_LOW_STOCK_REQUESTER = "Автозаявка: минимальный остаток"
 
 
 def order_status_label(value):
@@ -1316,6 +1322,12 @@ def init_db():
         )
         """
     )
+    # Migration path for databases created before the low-stock auto-request
+    # feature existed. NULL/0 means "no threshold set" — the check is
+    # simply skipped for that product.
+    supply_product_cols = [row[1] for row in conn.execute("PRAGMA table_info(supply_products)").fetchall()]
+    if "min_stock" not in supply_product_cols:
+        conn.execute("ALTER TABLE supply_products ADD COLUMN min_stock REAL")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS supply_stock (
@@ -1385,6 +1397,14 @@ def init_db():
         )
         """
     )
+    # Migration path for databases created before low-stock auto-requests
+    # existed. Set only on system-generated requests (see
+    # _maybe_create_low_stock_request) — lets the check find "is there
+    # already an open request for this product" so a product sitting below
+    # threshold doesn't spawn a fresh one on every write-off.
+    supply_request_cols = [row[1] for row in conn.execute("PRAGMA table_info(supply_requests)").fetchall()]
+    if "product_id" not in supply_request_cols:
+        conn.execute("ALTER TABLE supply_requests ADD COLUMN product_id INTEGER")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS supply_request_items (
@@ -5748,6 +5768,7 @@ def team_tuning_task_writeoff_material(assignment_id):
         (quantity, stock_row["id"]),
     )
     db.commit()
+    _maybe_create_low_stock_request(db, product_id)
     return redirect(url_for("team_dashboard"))
 
 
@@ -6687,6 +6708,44 @@ def _supply_warehouses(db):
     return db.execute("SELECT * FROM supply_warehouses ORDER BY name").fetchall()
 
 
+def _maybe_create_low_stock_request(db, product_id):
+    """Call after anything that decreases a product's stock. If the total
+    across all warehouses has hit (or dropped below) the product's
+    min_stock, raises a supply request asking to restock it — routed
+    through the same Заявки на снабжение queue as employee requests, so
+    admin handles it the same way (Принята → ... → Доставлено).
+
+    Guarded by product_id so a product already sitting below threshold
+    doesn't spawn a fresh request on every single write-off — marking the
+    existing one "Доставлено" is what re-arms the check."""
+    product = db.execute("SELECT * FROM supply_products WHERE id = ?", (product_id,)).fetchone()
+    if product is None or not product["min_stock"]:
+        return
+    total = db.execute(
+        "SELECT COALESCE(SUM(quantity), 0) AS total FROM supply_stock WHERE product_id = ?",
+        (product_id,),
+    ).fetchone()["total"]
+    if total > product["min_stock"]:
+        return
+    existing = db.execute(
+        "SELECT 1 FROM supply_requests WHERE product_id = ? AND status != 'delivered'",
+        (product_id,),
+    ).fetchone()
+    if existing:
+        return
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    shortfall = max(1, product["min_stock"] - total)
+    cur = db.execute(
+        "INSERT INTO supply_requests (employee_name, status, created_at, product_id) VALUES (?, ?, ?, ?)",
+        (SUPPLY_LOW_STOCK_REQUESTER, DEFAULT_SUPPLY_REQUEST_STATUS, now, product_id),
+    )
+    db.execute(
+        "INSERT INTO supply_request_items (request_id, item_name, quantity) VALUES (?, ?, ?)",
+        (cur.lastrowid, product["name"], shortfall),
+    )
+    db.commit()
+
+
 @app.route("/supply/warehouses")
 @admin_login_required
 def supply_warehouses():
@@ -6747,6 +6806,7 @@ def add_supply_product():
     cost_price_raw = request.form.get("cost_price", "").strip().replace(",", ".")
     cost_unit = request.form.get("cost_unit", "").strip()
     sale_price_raw = request.form.get("sale_price", "").strip().replace(",", ".")
+    min_stock_raw = request.form.get("min_stock", "").strip().replace(",", ".")
 
     errors = []
     if not name:
@@ -6770,6 +6830,16 @@ def add_supply_product():
     except ValueError:
         errors.append("Цена продажи должна быть числом.")
 
+    # Optional — leave blank for "no automatic restock request".
+    min_stock = None
+    if min_stock_raw:
+        try:
+            min_stock = float(min_stock_raw)
+            if min_stock < 0:
+                errors.append("Минимальный остаток не может быть отрицательным.")
+        except ValueError:
+            errors.append("Минимальный остаток должен быть числом.")
+
     if errors:
         session["product_error"] = " ".join(errors)
         return redirect(url_for("supply_catalog"))
@@ -6777,9 +6847,9 @@ def add_supply_product():
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     cur = db.execute(
         "INSERT INTO supply_products (name, sku, description, supplier, photo_filename, "
-        "cost_price, cost_unit, sale_price, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "cost_price, cost_unit, sale_price, min_stock, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (name, sku or None, description or None, supplier or None, None,
-         cost_price, cost_unit, sale_price, now),
+         cost_price, cost_unit, sale_price, min_stock, now),
     )
     product_id = cur.lastrowid
 
@@ -6852,6 +6922,32 @@ def supply_product(product_id):
         receive_error=session.pop("receive_error", None),
         writeoff_error=session.pop("writeoff_error", None),
     )
+
+
+@app.route("/supply/catalog/<int:product_id>/min-stock", methods=["POST"])
+@admin_login_required
+def set_supply_product_min_stock(product_id):
+    db = get_db()
+    product = db.execute("SELECT id FROM supply_products WHERE id = ?", (product_id,)).fetchone()
+    if product is None:
+        return redirect(url_for("supply_catalog"))
+    raw = request.form.get("min_stock", "").strip().replace(",", ".")
+    if not raw:
+        db.execute("UPDATE supply_products SET min_stock = NULL WHERE id = ?", (product_id,))
+        db.commit()
+        return redirect(url_for("supply_product", product_id=product_id))
+    try:
+        min_stock = float(raw)
+    except ValueError:
+        return redirect(url_for("supply_product", product_id=product_id))
+    if min_stock < 0:
+        return redirect(url_for("supply_product", product_id=product_id))
+    db.execute("UPDATE supply_products SET min_stock = ? WHERE id = ?", (min_stock, product_id))
+    db.commit()
+    # Raising/lowering the bar can itself cross the threshold — check right
+    # away instead of waiting for the next write-off.
+    _maybe_create_low_stock_request(db, product_id)
+    return redirect(url_for("supply_product", product_id=product_id))
 
 
 @app.route("/supply/catalog/<int:product_id>/receive", methods=["POST"])
@@ -6973,6 +7069,7 @@ def writeoff_supply_product(product_id):
         (quantity, stock_row["id"]),
     )
     db.commit()
+    _maybe_create_low_stock_request(db, product_id)
     return redirect(url_for("supply_product", product_id=product_id))
 
 

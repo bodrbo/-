@@ -131,7 +131,20 @@
         <tr><th>Себестоимость</th>
           <td>{{ product.cost_price|money }} ₽ / {{ cost_units|selectattr('value', 'equalto', product.cost_unit)|map(attribute='label')|first }}</td></tr>
         <tr><th>Цена продажи</th><td>{{ product.sale_price|money }} ₽</td></tr>
-        <tr><th>Остаток, всего</th><td class="amount">{{ total_quantity|float|round(2) }}</td></tr>
+        <tr><th>Остаток, всего</th>
+          <td class="amount" style="{{ 'color:var(--danger);' if product.min_stock and total_quantity <= product.min_stock }}">
+            {{ total_quantity|float|round(2) }}
+          </td></tr>
+        <tr><th>Минимальный остаток</th>
+          <td>
+            <form action="{{ url_for('set_supply_product_min_stock', product_id=product.id) }}" method="post"
+                  style="display:flex; gap:8px; align-items:center;">
+              <input type="text" inputmode="decimal" name="min_stock" placeholder="Не задан"
+                     value="{{ product.min_stock|float|round(2) if product.min_stock is not none else '' }}"
+                     style="width:90px;">
+              <button type="submit" class="btn-secondary" style="padding:6px 12px; font-size:12.5px;">Сохранить</button>
+            </form>
+          </td></tr>
       </table>
     </div>
   </section>

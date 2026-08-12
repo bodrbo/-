@@ -165,6 +165,11 @@
           <label for="product_sale_price">Цена продажи, ₽</label>
           <input type="text" inputmode="decimal" id="product_sale_price" name="sale_price" required>
         </div>
+        <div class="field field-narrow">
+          <label for="product_min_stock">Минимальный остаток</label>
+          <input type="text" inputmode="decimal" id="product_min_stock" name="min_stock"
+                 placeholder="Необязательно">
+        </div>
         <div class="field">
           <label for="product_photo">Фотография</label>
           <input type="file" id="product_photo" name="photo" accept="image/*">
@@ -202,7 +207,9 @@
             <td class="muted">{{ p.supplier or '—' }}</td>
             <td>{{ p.cost_price|money }} ₽ / {{ cost_units|selectattr('value', 'equalto', p.cost_unit)|map(attribute='label')|first }}</td>
             <td>{{ p.sale_price|money }} ₽</td>
-            <td class="amount">{{ p.total_quantity|float|round(2) }}</td>
+            <td class="amount" style="{{ 'color:var(--danger);' if p.min_stock and p.total_quantity <= p.min_stock }}">
+              {{ p.total_quantity|float|round(2) }}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
