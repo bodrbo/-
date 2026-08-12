@@ -7162,6 +7162,7 @@ def supply_product(product_id):
         custom_value=CUSTOM_VALUE,
         receive_error=session.pop("receive_error", None),
         writeoff_error=session.pop("writeoff_error", None),
+        edit_error=session.pop("edit_error", None),
     )
 
 
@@ -7188,6 +7189,72 @@ def set_supply_product_min_stock(product_id):
     # Raising/lowering the bar can itself cross the threshold — check right
     # away instead of waiting for the next write-off.
     _maybe_create_low_stock_request(db, product_id)
+    return redirect(url_for("supply_product", product_id=product_id))
+
+
+@app.route("/supply/catalog/<int:product_id>/edit", methods=["POST"])
+@admin_login_required
+def edit_supply_product(product_id):
+    db = get_db()
+    product = db.execute("SELECT id FROM supply_products WHERE id = ?", (product_id,)).fetchone()
+    if product is None:
+        return redirect(url_for("supply_catalog"))
+
+    name = request.form.get("name", "").strip()
+    sku = request.form.get("sku", "").strip()
+    description = request.form.get("description", "").strip()
+    supplier = request.form.get("supplier", "").strip()
+    cost_price_raw = request.form.get("cost_price", "").strip().replace(",", ".")
+    cost_unit = request.form.get("cost_unit", "").strip()
+    sale_price_raw = request.form.get("sale_price", "").strip().replace(",", ".")
+
+    errors = []
+    if not name:
+        errors.append("Укажите название товара.")
+    if cost_unit not in [u["value"] for u in SUPPLY_COST_UNITS]:
+        errors.append("Укажите единицу измерения себестоимости.")
+
+    cost_price = None
+    try:
+        cost_price = float(cost_price_raw)
+        if cost_price < 0:
+            errors.append("Себестоимость не может быть отрицательной.")
+    except ValueError:
+        errors.append("Себестоимость должна быть числом.")
+
+    sale_price = None
+    try:
+        sale_price = float(sale_price_raw)
+        if sale_price < 0:
+            errors.append("Цена продажи не может быть отрицательной.")
+    except ValueError:
+        errors.append("Цена продажи должна быть числом.")
+
+    if errors:
+        session["edit_error"] = " ".join(errors)
+        return redirect(url_for("supply_product", product_id=product_id))
+
+    db.execute(
+        "UPDATE supply_products SET name = ?, sku = ?, description = ?, supplier = ?, "
+        "cost_price = ?, cost_unit = ?, sale_price = ? WHERE id = ?",
+        (name, sku or None, description or None, supplier or None,
+         cost_price, cost_unit, sale_price, product_id),
+    )
+
+    file = request.files.get("photo")
+    if file and file.filename:
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext in SUPPLY_PHOTO_EXTENSIONS:
+            photos_dir = os.path.join(app.static_folder, "supply_photos")
+            os.makedirs(photos_dir, exist_ok=True)
+            filename = f"{product_id}-{secrets.token_hex(6)}{ext}"
+            file.save(os.path.join(photos_dir, filename))
+            db.execute(
+                "UPDATE supply_products SET photo_filename = ? WHERE id = ?",
+                (filename, product_id),
+            )
+
+    db.commit()
     return redirect(url_for("supply_product", product_id=product_id))
 
 

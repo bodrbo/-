@@ -149,6 +149,61 @@
     </div>
   </section>
 
+  <details class="panel collapsible-panel">
+    <summary>
+      <span>Редактировать товар</span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
+      {% if edit_error %}
+      <div class="alert"><strong>Не удалось сохранить:</strong> {{ edit_error }}</div>
+      {% endif %}
+      <form action="{{ url_for('edit_supply_product', product_id=product.id) }}" method="post" class="entry-form" enctype="multipart/form-data">
+        <div class="field">
+          <label for="edit_name">Название</label>
+          <input type="text" id="edit_name" name="name" value="{{ product.name }}" required>
+        </div>
+        <div class="field field-narrow">
+          <label for="edit_sku">Артикул</label>
+          <input type="text" id="edit_sku" name="sku" value="{{ product.sku or '' }}">
+        </div>
+        <div class="field field-narrow">
+          <label for="edit_supplier">Поставщик</label>
+          <input type="text" id="edit_supplier" name="supplier" value="{{ product.supplier or '' }}">
+        </div>
+        <div class="field field-wide">
+          <label for="edit_description">Описание</label>
+          <input type="text" id="edit_description" name="description" value="{{ product.description or '' }}">
+        </div>
+        <div class="field field-narrow">
+          <label for="edit_cost_price">Себестоимость, ₽</label>
+          <input type="text" inputmode="decimal" id="edit_cost_price" name="cost_price"
+                 value="{{ product.cost_price|float|round(2) }}" required>
+        </div>
+        <div class="field field-narrow">
+          <label for="edit_cost_unit">Единица измерения</label>
+          <select id="edit_cost_unit" name="cost_unit" required>
+            {% for u in cost_units %}
+            <option value="{{ u.value }}" {{ 'selected' if u.value == product.cost_unit }}>{{ u.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field field-narrow">
+          <label for="edit_sale_price">Цена продажи, ₽</label>
+          <input type="text" inputmode="decimal" id="edit_sale_price" name="sale_price"
+                 value="{{ product.sale_price|float|round(2) }}" required>
+        </div>
+        <div class="field">
+          <label for="edit_photo">Фотография</label>
+          <input type="file" id="edit_photo" name="photo" accept="image/*">
+        </div>
+        <div class="field field-submit">
+          <button type="submit">Сохранить</button>
+        </div>
+      </form>
+    </div>
+  </details>
+
   <section class="panel">
     <h2>Остатки по складам</h2>
     {% if stock %}
