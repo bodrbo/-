@@ -310,6 +310,26 @@ def send_telegram_photo(photo_path, caption=None, chat_id=None):
         return status
 
 
+def send_telegram_notification_to_employee(db, employee_name, text):
+    """Same fire-and-forget contract as send_telegram_notification, routed
+    to one employee's personal chat instead of a shared group — looked up
+    by team_accounts.telegram_chat_id, which only gets populated once that
+    employee has messaged the bot at least once (Telegram bots can't
+    initiate a DM) and an admin has linked the resulting chat id via
+    /internal/telegram-updates + a manual UPDATE. Does nothing (but still
+    logs it, same as a missing bot token) if the employee has no linked
+    chat id yet."""
+    row = db.execute(
+        "SELECT telegram_chat_id FROM team_accounts WHERE employee_name = ? AND telegram_chat_id IS NOT NULL",
+        (employee_name,),
+    ).fetchone()
+    if row is None:
+        status = f"skipped: no telegram_chat_id linked for {employee_name!r}"
+        _log_telegram(f"Telegram notification {status}")
+        return status
+    return send_telegram_notification(text, chat_id=row["telegram_chat_id"])
+
+
 def send_push_notification(title, body, role="admin", url="/"):
     """Same fire-and-forget contract as send_telegram_notification — a push
     failure must never break the request that triggered it. Sent to every
@@ -1498,6 +1518,15 @@ def init_db():
         )
         """
     )
+    # Migration path for databases created before per-employee Telegram
+    # notifications existed. Deliberately NOT part of the TEAM_ACCOUNTS
+    # seed tuples below — linking a chat id is a runtime action (the
+    # employee has to message the bot first), not something to redeploy
+    # code for, and the seed loop's UPDATE only ever touches employee_name/
+    # password_hash so it won't stomp on this column.
+    team_account_cols = [row[1] for row in conn.execute("PRAGMA table_info(team_accounts)").fetchall()]
+    if "telegram_chat_id" not in team_account_cols:
+        conn.execute("ALTER TABLE team_accounts ADD COLUMN telegram_chat_id TEXT")
     # Seed the known investor/team accounts if they don't exist yet.
     # Passwords only ever exist as pbkdf2 hashes here — nothing plaintext is
     # stored in the repo. pbkdf2 (not the werkzeug default of scrypt) is
@@ -6981,6 +7010,16 @@ def set_supply_request_status(request_id):
             (status, comment or None, now, request_id),
         )
         db.commit()
+        label = next((s["label"] for s in SUPPLY_REQUEST_STATUSES if s["value"] == status), status)
+        items = db.execute(
+            "SELECT item_name, quantity FROM supply_request_items WHERE request_id = ? ORDER BY id",
+            (request_id,),
+        ).fetchall()
+        items_text = "\n".join(f"— {html.escape(it['item_name'])} × {it['quantity']:g}" for it in items)
+        text = f"📦 Заявка на снабжение: <b>{html.escape(label)}</b>\n{items_text}"
+        if comment:
+            text += f"\n\nКомментарий: {html.escape(comment)}"
+        send_telegram_notification_to_employee(db, req["employee_name"], text)
     return redirect(url_for("supply_requests"))
 
 
@@ -7078,6 +7117,50 @@ def telegram_test():
         return f"telegram photo status ({target}): {status}", 200
     status = send_telegram_notification(f"🔧 Тестовое уведомление с сайта ({target})", chat_id=chat_id)
     return f"telegram status ({target}): {status}", 200
+
+
+@app.route("/internal/telegram-updates")
+def telegram_updates():
+    """Visit this URL (with the right token) to see who has messaged the
+    bot recently and their numeric chat id — Telegram bots can't message a
+    user who hasn't messaged them first, so this is how you find the chat
+    id to link once an employee has sent the bot anything (even /start).
+    Once you have it: sqlite3 workhours.db "UPDATE team_accounts SET
+    telegram_chat_id = '<chat id>' WHERE username = '<team login>';" """
+    if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
+        return "forbidden", 403
+    if not TELEGRAM_BOT_TOKEN:
+        return "TELEGRAM_BOT_TOKEN not set", 200
+    try:
+        resp = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates",
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        return f"error: {e}", 502
+    if not resp.ok:
+        return f"failed: {resp.status_code} {resp.text[:300]}", 502
+    updates = resp.json().get("result", [])
+    seen = {}
+    for u in updates:
+        msg = u.get("message") or u.get("edited_message") or {}
+        chat = msg.get("chat") or {}
+        if chat.get("id") is None:
+            continue
+        seen[chat["id"]] = {
+            "chat_id": chat["id"],
+            "username": chat.get("username"),
+            "name": " ".join(filter(None, [chat.get("first_name"), chat.get("last_name")])),
+            "last_text": msg.get("text"),
+        }
+    if not seen:
+        return (
+            "No updates found. Have the person send any message (e.g. /start) "
+            "to the bot, then reload this page.",
+            200,
+        )
+    lines = [f"{v['chat_id']}\tusername=@{v['username']}\tname={v['name']}\tlast=\"{v['last_text']}\"" for v in seen.values()]
+    return "\n".join(lines), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 @app.route("/internal/diploma-debug")
