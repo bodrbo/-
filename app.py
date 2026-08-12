@@ -7020,6 +7020,84 @@ def add_supply_warehouse():
     return redirect(url_for("supply_warehouses"))
 
 
+@app.route("/admin/import-moysklad-catalog")
+@admin_login_required
+def import_moysklad_catalog():
+    # One-off, idempotent import of scripts/moysklad_import.json (the
+    # parsed МойСклад "Остатки" report) — a route rather than a standalone
+    # script because the host's SSH shell has a glibc too old for the
+    # app's own venv Python, while this in-process route runs under
+    # whatever interpreter Passenger already uses to serve the site.
+    db = get_db()
+    data_path = os.path.join(app.root_path, "scripts", "moysklad_import.json")
+    with open(data_path, encoding="utf-8") as f:
+        items = json.load(f)
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    warehouse_name = "Тюнинг Порзолово"
+    warehouse = db.execute(
+        "SELECT id FROM supply_warehouses WHERE name = ?", (warehouse_name,)
+    ).fetchone()
+    if warehouse is None:
+        cur = db.execute(
+            "INSERT INTO supply_warehouses (name, address, created_at) VALUES (?, ?, ?)",
+            (warehouse_name, None, now),
+        )
+        warehouse_id = cur.lastrowid
+        warehouse_created = True
+    else:
+        warehouse_id = warehouse["id"]
+        warehouse_created = False
+
+    products_created = 0
+    products_existing = 0
+    stock_added = 0
+    stock_existing = 0
+
+    for item in items:
+        existing = db.execute(
+            "SELECT id FROM supply_products WHERE sku = ?", (item["sku"],)
+        ).fetchone()
+        if existing is None:
+            cur = db.execute(
+                "INSERT INTO supply_products (name, sku, description, supplier, photo_filename, "
+                "cost_price, cost_unit, sale_price, min_stock, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (item["name"], item["sku"], item["description"], None, None,
+                 0, item["cost_unit"], 0, None, now),
+            )
+            product_id = cur.lastrowid
+            products_created += 1
+        else:
+            product_id = existing["id"]
+            products_existing += 1
+
+        existing_stock = db.execute(
+            "SELECT id FROM supply_stock WHERE product_id = ? AND warehouse_id = ?",
+            (product_id, warehouse_id),
+        ).fetchone()
+        if existing_stock is None:
+            db.execute(
+                "INSERT INTO supply_stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)",
+                (product_id, warehouse_id, item["quantity"]),
+            )
+            stock_added += 1
+        else:
+            stock_existing += 1
+
+    db.commit()
+
+    lines = [
+        f"Склад «{warehouse_name}» {'создан' if warehouse_created else 'уже существовал'} (id={warehouse_id}).",
+        f"Товаров в файле: {len(items)}",
+        f"Товаров создано: {products_created}",
+        f"Товаров уже было в каталоге (по артикулу): {products_existing}",
+        f"Остатков проставлено: {stock_added}",
+        f"Остатков уже было на этом складе (пропущено): {stock_existing}",
+    ]
+    return "<pre>" + html.escape("\n".join(lines)) + "</pre>"
+
+
 @app.route("/supply/catalog")
 @admin_login_required
 def supply_catalog():
