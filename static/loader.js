@@ -64,6 +64,81 @@
   });
 })();
 
+// Restores scroll position and open <details> panels after a form submit
+// or link click reloads the page — without this, every status change /
+// delete / etc. lands back at the very top, which is especially annoying
+// on pages with several collapsible panels (Мои задачи, Заявки на
+// снабжение, ...): the user has to re-expand the panel and scroll back
+// down to wherever they were working every single time.
+(function () {
+  var STORAGE_PREFIX = "scrollState:";
+
+  function storageKey() {
+    return STORAGE_PREFIX + location.pathname;
+  }
+
+  // <details> panels aren't given ids, so identify one by its own summary
+  // text — every collapsible panel on a given page has a distinct heading
+  // ("Мои задачи", "Заявки на снабжение", ...), which is more stable
+  // across template edits than relying on DOM order.
+  function detailsKey(el, index) {
+    var summary = el.querySelector("summary");
+    return summary ? summary.textContent.trim() : "details-" + index;
+  }
+
+  function save() {
+    var open = [];
+    document.querySelectorAll("details").forEach(function (el, i) {
+      if (el.open) open.push(detailsKey(el, i));
+    });
+    try {
+      sessionStorage.setItem(storageKey(), JSON.stringify({y: window.scrollY, open: open}));
+    } catch (e) {
+      // Private-browsing storage quota, or disabled entirely — losing the
+      // scroll restore is harmless, so just skip it.
+    }
+  }
+
+  function restore() {
+    var raw;
+    try {
+      raw = sessionStorage.getItem(storageKey());
+      sessionStorage.removeItem(storageKey());
+    } catch (e) {
+      return;
+    }
+    if (!raw) return;
+    var state;
+    try {
+      state = JSON.parse(raw);
+    } catch (e) {
+      return;
+    }
+    document.querySelectorAll("details").forEach(function (el, i) {
+      if (state.open && state.open.indexOf(detailsKey(el, i)) !== -1) el.open = true;
+    });
+    if (typeof state.y !== "number") return;
+    // Two rAFs: the first lets the browser apply the layout change from
+    // just-opened <details> panels, the second scrolls only once that's
+    // actually painted — a single frame can still be mid-reflow.
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        window.scrollTo(0, state.y);
+      });
+    });
+  }
+
+  restore();
+  window.addEventListener("pagehide", save);
+  window.addEventListener("beforeunload", save);
+  // Also save on every toggle (not just before navigating away) so the
+  // open/closed state survives even where pagehide/beforeunload don't
+  // reliably fire (notably iOS Safari in some cases).
+  document.addEventListener("toggle", function (e) {
+    if (e.target && e.target.tagName === "DETAILS") save();
+  }, true);
+})();
+
 // Mobile burger menu — independent of the loader above (some pages, like
 // the plain login screens, have the nav but not the page-loader overlay).
 (function () {
