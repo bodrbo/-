@@ -35,6 +35,14 @@
   </div>
 </div>
 
+{% macro supply_request_row() %}
+<div class="supply-request-row">
+  <input type="text" name="item_name[]" placeholder="Наименование" class="supply-request-item">
+  <input type="text" inputmode="decimal" name="quantity[]" placeholder="Количество" class="supply-request-quantity">
+  <button type="button" class="btn-delete" onclick="removeSupplyRequestRow(this)" title="Убрать позицию">✕</button>
+</div>
+{% endmacro %}
+
 <header class="topbar">
   <div class="topbar-inner">
     <div class="brand">
@@ -368,6 +376,69 @@
       </form>
     </div>
   </div>
+
+  <details class="panel collapsible-panel">
+    <summary>
+      <span>Заявки на снабжение</span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
+      <button type="button" class="btn-add" onclick="openSupplyRequestModal()" style="margin-bottom:14px;">
+        Создать заявку на особое снабжение
+      </button>
+      {% if my_supply_requests %}
+      {% for r in my_supply_requests %}
+      <div class="task-card">
+        <div>
+          {% for it in r.lines %}{{ it.item_name }} — {{ it.quantity|float|round(2) }}{% if not loop.last %}, {% endif %}{% endfor %}
+        </div>
+        <div class="hint" style="margin:0;">{{ r.created_at[:10]|ru_date }}</div>
+        <button type="button" class="status-badge status-supplyreq-{{ r.status }} status-supplyreq-clickable"
+                onclick='openRequestCommentModal({{ (supply_request_statuses|selectattr("value", "equalto", r.status)|map(attribute="label")|first)|tojson }}, {{ (r.status_comment or "Комментарий пока не оставлен.")|tojson }})'>
+          {{ supply_request_statuses|selectattr('value', 'equalto', r.status)|map(attribute='label')|first }}
+        </button>
+      </div>
+      {% endfor %}
+      {% else %}
+      <div class="empty-state">
+        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        <div class="t">Заявок пока нет</div>
+        <div class="s">Если чего-то не хватает на складе, создайте заявку кнопкой выше.</div>
+      </div>
+      {% endif %}
+    </div>
+  </details>
+
+  <div id="supply-request-modal" class="photo-modal hidden" onclick="if (event.target === this) closeSupplyRequestModal();">
+    <div class="photo-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closeSupplyRequestModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <form id="supply-request-form" method="post" action="{{ url_for('team_create_supply_request') }}" class="assign-modal-card">
+        <h3>Заявка на особое снабжение</h3>
+        <div id="supply-request-container">
+          {{ supply_request_row() }}
+        </div>
+        <button type="button" class="btn-add" onclick="addSupplyRequestRow()">Добавить позицию</button>
+        <template id="supply-request-row-template">{{ supply_request_row() }}</template>
+        <button type="submit" class="btn-primary" style="margin-top:14px;">Отправить заявку</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="request-comment-modal" class="photo-modal hidden" onclick="if (event.target === this) closeRequestCommentModal();">
+    <div class="photo-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closeRequestCommentModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <h3 id="request-comment-status"></h3>
+      <p id="request-comment-text" class="hint"></p>
+    </div>
+  </div>
   {% endif %}
 
   {% if is_captain %}
@@ -421,8 +492,42 @@ function closeMaterialModal() {
   document.getElementById('material-modal').classList.add('hidden');
 }
 
+function openSupplyRequestModal() {
+  document.getElementById('supply-request-modal').classList.remove('hidden');
+}
+
+function closeSupplyRequestModal() {
+  document.getElementById('supply-request-modal').classList.add('hidden');
+}
+
+function addSupplyRequestRow() {
+  var container = document.getElementById('supply-request-container');
+  var template = document.getElementById('supply-request-row-template');
+  container.appendChild(template.content.cloneNode(true));
+}
+
+function removeSupplyRequestRow(btn) {
+  var rows = document.querySelectorAll('#supply-request-container .supply-request-row');
+  if (rows.length <= 1) return;
+  btn.closest('.supply-request-row').remove();
+}
+
+function openRequestCommentModal(statusLabel, comment) {
+  document.getElementById('request-comment-status').textContent = statusLabel;
+  document.getElementById('request-comment-text').textContent = comment;
+  document.getElementById('request-comment-modal').classList.remove('hidden');
+}
+
+function closeRequestCommentModal() {
+  document.getElementById('request-comment-modal').classList.add('hidden');
+}
+
 document.addEventListener('keydown', function (e) {
-  if (e.key === 'Escape') closeMaterialModal();
+  if (e.key === 'Escape') {
+    closeMaterialModal();
+    closeSupplyRequestModal();
+    closeRequestCommentModal();
+  }
 });
 </script>
 {% endif %}

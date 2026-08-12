@@ -760,6 +760,25 @@ input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, in
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232f6b4f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5'/%3E%3C/svg%3E");
 }
 
+/* Supply requests (Снабжение → Заявки на снабжение) — "new" reads as
+   needs-attention amber (same intent as status-defect-in_progress), the
+   remaining four processing stages are all "things are moving" green. */
+.status-badge.status-supplyreq-new { background: rgba(212, 141, 74, 0.2); color: var(--warning); }
+.status-badge.status-supplyreq-new::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23a8631a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='M8 4.8V8l2.4 1.4'/%3E%3C/svg%3E");
+}
+.status-badge.status-supplyreq-accepted,
+.status-badge.status-supplyreq-ordered,
+.status-badge.status-supplyreq-shipping,
+.status-badge.status-supplyreq-delivered { background: rgba(47, 107, 79, 0.16); color: var(--success); }
+.status-badge.status-supplyreq-accepted::before,
+.status-badge.status-supplyreq-ordered::before,
+.status-badge.status-supplyreq-shipping::before,
+.status-badge.status-supplyreq-delivered::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232f6b4f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5'/%3E%3C/svg%3E");
+}
+.status-badge.status-supplyreq-clickable { cursor: pointer; border: none; font: inherit; }
+
 .status-select-form { display: inline-block; margin: 0; }
 .status-select-form select {
   font-family: inherit;
@@ -829,6 +848,16 @@ input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, in
   text-align: right;
   color: var(--ink);
 }
+
+.supply-request-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.supply-request-row .supply-request-item { flex: 2 1 220px; min-width: 0; }
+.supply-request-row .supply-request-quantity { flex: 1 1 110px; min-width: 0; }
 
 .split-row {
   display: flex;

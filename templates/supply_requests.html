@@ -123,16 +123,102 @@
   </nav>
 
   <section class="panel">
+    <h2>Заявки на снабжение</h2>
+    {% if requests %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th>Сотрудник</th>
+            <th>Позиции</th>
+            <th>Статус</th>
+            <th>Комментарий</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in requests %}
+          <tr>
+            <td class="muted">{{ r.created_at[:10]|ru_date }}</td>
+            <td>{{ r.employee_name }}</td>
+            <td>
+              {% for it in r.lines %}
+              {{ it.item_name }} — {{ it.quantity|float|round(2) }}{% if not loop.last %}<br>{% endif %}
+              {% endfor %}
+            </td>
+            <td>
+              <span class="status-badge status-supplyreq-{{ r.status }}">
+                {{ request_statuses|selectattr('value', 'equalto', r.status)|map(attribute='label')|first }}
+              </span>
+            </td>
+            <td class="muted">{{ r.status_comment or '—' }}</td>
+            <td>
+              <button type="button" class="btn-secondary"
+                      onclick='openRequestStatusModal({{ url_for("set_supply_request_status", request_id=r.id)|tojson }}, {{ r.status|tojson }}, {{ (r.status_comment or "")|tojson }})'>
+                Изменить статус
+              </button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
       <div class="t">Заявок пока нет</div>
-      <div class="s">Раздел в разработке.</div>
+      <div class="s">Здесь появятся заявки на особое снабжение от капитанов и тюнингмэнов.</div>
     </div>
+    {% endif %}
   </section>
+
+  <div id="request-status-modal" class="photo-modal hidden" onclick="if (event.target === this) closeRequestStatusModal();">
+    <div class="photo-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closeRequestStatusModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <form id="request-status-form" method="post" class="assign-modal-card">
+        <h3>Изменить статус заявки</h3>
+        <div class="field">
+          <label for="request-status-select">Статус</label>
+          <select id="request-status-select" name="status" required>
+            {% for s in request_statuses %}
+            <option value="{{ s.value }}">{{ s.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="request-status-comment">Комментарий</label>
+          <textarea id="request-status-comment" name="comment" class="photo-comment-input"
+                    placeholder="Например: дата и время доставки"></textarea>
+        </div>
+        <button type="submit" class="btn-primary">Сохранить</button>
+      </form>
+    </div>
+  </div>
 
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+function openRequestStatusModal(actionUrl, currentStatus, currentComment) {
+  document.getElementById('request-status-form').action = actionUrl;
+  document.getElementById('request-status-select').value = currentStatus;
+  document.getElementById('request-status-comment').value = currentComment;
+  document.getElementById('request-status-modal').classList.remove('hidden');
+}
+
+function closeRequestStatusModal() {
+  document.getElementById('request-status-modal').classList.add('hidden');
+}
+
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') closeRequestStatusModal();
+});
+</script>
 
 </body>
 </html>

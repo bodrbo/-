@@ -734,6 +734,19 @@ TUNING_ASSIGNABLE_POSITIONS = ("Тюнингмэн",)
 # by the write-off's origin rather than chosen.
 TUNING_MATERIAL_WRITEOFF_REASON = "Использовано в работе"
 
+# Captains and tuningmen can both request supply of something not on the
+# shelf (special consumables, tools) — same union of positions as the
+# task-assignment mechanism, since it's the same pool of field staff.
+SUPPLY_REQUEST_POSITIONS = tuple(set(DEFECT_ASSIGNABLE_POSITIONS) | set(TUNING_ASSIGNABLE_POSITIONS))
+SUPPLY_REQUEST_STATUSES = [
+    {"value": "new", "label": "Не обработана"},
+    {"value": "accepted", "label": "Принята"},
+    {"value": "ordered", "label": "Заказано"},
+    {"value": "shipping", "label": "В доставке"},
+    {"value": "delivered", "label": "Доставлено"},
+]
+DEFAULT_SUPPLY_REQUEST_STATUS = "new"
+
 
 def order_status_label(value):
     for s in ORDER_STATUSES:
@@ -1340,6 +1353,28 @@ def init_db():
         conn.execute("ALTER TABLE supply_writeoffs ADD COLUMN employee_name TEXT")
     if "tuning_item_assignment_id" not in supply_writeoff_cols:
         conn.execute("ALTER TABLE supply_writeoffs ADD COLUMN tuning_item_assignment_id INTEGER")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS supply_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'new',
+            status_comment TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS supply_request_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id INTEGER NOT NULL,
+            item_name TEXT NOT NULL,
+            quantity REAL NOT NULL
+        )
+        """
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS projects (
@@ -5426,6 +5461,27 @@ def team_dashboard():
             "WHERE ss.quantity > 0 ORDER BY sp.name, sw.name"
         ).fetchall()
 
+    # "Заявки на снабжение" mini-section — special supply this employee has
+    # asked for that isn't on any shelf. Status/comment changes made by the
+    # admin in /supply/requests show up here on next load, since both sides
+    # read the same supply_requests row.
+    my_supply_requests = []
+    if can_have_tasks:
+        my_supply_requests = []
+        for r in db.execute(
+            "SELECT * FROM supply_requests WHERE employee_name = ? ORDER BY created_at DESC, id DESC",
+            (employee_name,),
+        ).fetchall():
+            req = dict(r)
+            # Not "items" — dict already has a builtin .items() method, and
+            # Jinja's attribute lookup would resolve to that instead of this
+            # key, silently hiding the real request lines in the template.
+            req["lines"] = db.execute(
+                "SELECT * FROM supply_request_items WHERE request_id = ? ORDER BY id",
+                (r["id"],),
+            ).fetchall()
+            my_supply_requests.append(req)
+
     return render_template(
         "team_dashboard.html",
         employee_name=employee_name,
@@ -5441,6 +5497,7 @@ def team_dashboard():
         can_have_tasks=can_have_tasks, my_tasks=my_tasks, defect_statuses=DEFECT_STATUSES,
         work_statuses=WORK_STATUSES, materials=materials,
         team_writeoff_error=session.pop("team_writeoff_error", None),
+        my_supply_requests=my_supply_requests, supply_request_statuses=SUPPLY_REQUEST_STATUSES,
     )
 
 
@@ -5661,6 +5718,49 @@ def team_tuning_task_writeoff_material(assignment_id):
         "UPDATE supply_stock SET quantity = quantity - ? WHERE id = ?",
         (quantity, stock_row["id"]),
     )
+    db.commit()
+    return redirect(url_for("team_dashboard"))
+
+
+@app.route("/team/supply-requests/create", methods=["POST"])
+@team_login_required
+def team_create_supply_request():
+    db = get_db()
+    employee_name = session.get("team_employee_name")
+    if not any(_employee_has_position(db, employee_name, p) for p in SUPPLY_REQUEST_POSITIONS):
+        return redirect(url_for("team_dashboard"))
+
+    item_names = request.form.getlist("item_name[]")
+    quantities = request.form.getlist("quantity[]")
+
+    items = []
+    for i in range(max(len(item_names), len(quantities))):
+        name = item_names[i].strip() if i < len(item_names) else ""
+        qty_raw = quantities[i].strip().replace(",", ".") if i < len(quantities) else ""
+        if not name:
+            continue
+        try:
+            qty = float(qty_raw)
+        except ValueError:
+            continue
+        if qty <= 0:
+            continue
+        items.append((name, qty))
+
+    if not items:
+        return redirect(url_for("team_dashboard"))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    cur = db.execute(
+        "INSERT INTO supply_requests (employee_name, status, created_at) VALUES (?, ?, ?)",
+        (employee_name, DEFAULT_SUPPLY_REQUEST_STATUS, now),
+    )
+    request_id = cur.lastrowid
+    for name, qty in items:
+        db.execute(
+            "INSERT INTO supply_request_items (request_id, item_name, quantity) VALUES (?, ?, ?)",
+            (request_id, name, qty),
+        )
     db.commit()
     return redirect(url_for("team_dashboard"))
 
@@ -6850,7 +6950,38 @@ def writeoff_supply_product(product_id):
 @app.route("/supply/requests")
 @admin_login_required
 def supply_requests():
-    return render_template("supply_requests.html", active_page="supply", sub_page="requests")
+    db = get_db()
+    items_by_request = {}
+    for row in db.execute("SELECT * FROM supply_request_items ORDER BY id").fetchall():
+        items_by_request.setdefault(row["request_id"], []).append(row)
+    requests = []
+    for r in db.execute("SELECT * FROM supply_requests ORDER BY created_at DESC, id DESC").fetchall():
+        req = dict(r)
+        req["lines"] = items_by_request.get(r["id"], [])
+        requests.append(req)
+    return render_template(
+        "supply_requests.html", active_page="supply", sub_page="requests",
+        requests=requests, request_statuses=SUPPLY_REQUEST_STATUSES,
+    )
+
+
+@app.route("/supply/requests/<int:request_id>/status", methods=["POST"])
+@admin_login_required
+def set_supply_request_status(request_id):
+    db = get_db()
+    req = db.execute("SELECT * FROM supply_requests WHERE id = ?", (request_id,)).fetchone()
+    if req is None:
+        return redirect(url_for("supply_requests"))
+    status = request.form.get("status", "").strip()
+    comment = request.form.get("comment", "").strip()
+    if status in [s["value"] for s in SUPPLY_REQUEST_STATUSES]:
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        db.execute(
+            "UPDATE supply_requests SET status = ?, status_comment = ?, updated_at = ? WHERE id = ?",
+            (status, comment or None, now, request_id),
+        )
+        db.commit()
+    return redirect(url_for("supply_requests"))
 
 
 def _sync_captain_shifts_for_date(db, target_date):
