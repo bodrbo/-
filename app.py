@@ -4440,6 +4440,42 @@ def check_yookassa_payment(order_id, payment_id):
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
+@app.route("/tuning/<int:order_id>/yookassa/<int:payment_id>/delete", methods=["POST"])
+@admin_login_required
+def delete_yookassa_payment(order_id, payment_id):
+    """Undo an erroneous invoice. A succeeded payment is real money already
+    received, so it's kept — deletion is for invoices that shouldn't have
+    existed (wrong amount, created by mistake, client changed their mind).
+    waiting_for_capture means ЮKassa is holding an authorization on the
+    client's card; that has to be actually canceled through their API
+    before we forget about it locally, or the hold could still get
+    captured later with nothing here to show for it. pending/canceled
+    payments never captured anything, so there's nothing to cancel — just
+    drop the local record."""
+    db = get_db()
+    record = db.execute(
+        "SELECT * FROM tuning_yookassa_payments WHERE id = ? AND order_id = ?",
+        (payment_id, order_id),
+    ).fetchone()
+    if record is None:
+        return redirect(url_for("edit_tuning_order", order_id=order_id))
+    if record["status"] == "succeeded":
+        session["yookassa_error"] = "Нельзя удалить счёт с успешной оплатой."
+        return redirect(url_for("edit_tuning_order", order_id=order_id))
+    if record["status"] == "waiting_for_capture":
+        try:
+            _yookassa_request(
+                "POST", f"/payments/{record['yookassa_payment_id']}/cancel",
+                json_body={}, idempotence_key=secrets.token_hex(16),
+            )
+        except Exception as e:
+            session["yookassa_error"] = f"Не удалось отменить счёт в ЮKassa: {e}"
+            return redirect(url_for("edit_tuning_order", order_id=order_id))
+    db.execute("DELETE FROM tuning_yookassa_payments WHERE id = ?", (payment_id,))
+    db.commit()
+    return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
 @app.route("/yookassa/webhook", methods=["POST"])
 def yookassa_webhook():
     # No auth — ЮKassa calls this directly. We never trust the notification

@@ -446,6 +446,16 @@
                 <button type="submit" class="btn-secondary">Проверить оплату</button>
               </form>
               {% endif %}
+              {% if yp.status != 'succeeded' %}
+              <form action="{{ url_for('delete_yookassa_payment', order_id=edit_order.id, payment_id=yp.id) }}" method="post"
+                    onsubmit="return confirm('Удалить этот счёт?');">
+                <button type="submit" class="icon-btn danger" title="Удалить">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 5l10 10M15 5L5 15"/>
+                  </svg>
+                </button>
+              </form>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
