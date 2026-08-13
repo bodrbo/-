@@ -129,8 +129,12 @@
   <section class="panel">
     <h2>Товары на складе</h2>
     {% if stock %}
+    <div class="table-search">
+      <input type="search" placeholder="Поиск по названию, артикулу или адресу…"
+             data-filter-table="#warehouse-stock-table" aria-label="Поиск по товарам на складе">
+    </div>
     <div class="table-scroll">
-      <table class="records">
+      <table class="records" id="warehouse-stock-table">
         <thead>
           <tr><th></th><th>Название</th><th>Артикул</th><th>Адрес на складе</th><th>Количество</th></tr>
         </thead>
@@ -159,6 +163,7 @@
         </tbody>
       </table>
     </div>
+    <p id="warehouse-stock-table-no-results" class="hint hidden">Ничего не найдено.</p>
     {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">

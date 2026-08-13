@@ -139,6 +139,41 @@
   }, true);
 })();
 
+// Instant client-side table search — an <input data-filter-table="#id">
+// hides/shows the referenced table's <tbody> rows as you type, matching
+// against each row's full text (name, article, address, whatever columns
+// that table has), no server round-trip. Used on the supply catalog and
+// warehouse pages, but written generically so any table can opt in.
+(function () {
+  var inputs = document.querySelectorAll("input[data-filter-table]");
+  if (!inputs.length) return;
+
+  inputs.forEach(function (input) {
+    var table = document.querySelector(input.getAttribute("data-filter-table"));
+    var tbody = table && table.querySelector("tbody");
+    if (!tbody) return;
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll("tr"));
+    var noResults = document.querySelector(input.getAttribute("data-filter-table") + "-no-results");
+    var timer = null;
+
+    function apply() {
+      var q = input.value.trim().toLowerCase();
+      var visible = 0;
+      rows.forEach(function (row) {
+        var match = !q || row.textContent.toLowerCase().indexOf(q) !== -1;
+        row.classList.toggle("hidden", !match);
+        if (match) visible += 1;
+      });
+      if (noResults) noResults.classList.toggle("hidden", visible !== 0 || !q);
+    }
+
+    input.addEventListener("input", function () {
+      clearTimeout(timer);
+      timer = setTimeout(apply, 120);
+    });
+  });
+})();
+
 // Mobile burger menu — independent of the loader above (some pages, like
 // the plain login screens, have the nav but not the page-loader overlay).
 (function () {
