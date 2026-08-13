@@ -1734,6 +1734,41 @@ table.records tr.row-expense td.amount { color: var(--danger); }
 .table-search { margin-bottom: 14px; }
 .table-search input[type="search"] { width: 100%; max-width: 360px; }
 
+/* Searchable combobox — swaps a giant <select> (e.g. picking a catalog
+   product to add to an order, out of ~2800) for instant text search over
+   the same option list. See loader.js for the [data-combo] behavior. */
+.combo-field { position: relative; }
+.combo-input.combo-input-error { box-shadow: 0 0 0 1px var(--danger); }
+.combo-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  z-index: 20;
+}
+.combo-option {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  font-size: 13.5px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.combo-option:last-child { border-bottom: none; }
+.combo-option:hover { background: var(--paper-alt); }
+.combo-option-name { color: var(--ink); flex: 1 1 auto; min-width: 0; }
+.combo-option-sku { color: var(--muted); font-size: 12px; flex: none; }
+.combo-option-price { color: var(--muted); font-size: 12px; flex: none; white-space: nowrap; }
+.combo-empty, .combo-more { padding: 9px 12px; margin: 0; color: var(--muted); font-size: 13px; }
+
 /* --- generic collapsible <details class="panel ..."> section: the
    Yclients import on the trips page, and anything else (e.g. Флот →
    Неисправности) that wants a whole panel collapsed by default instead of

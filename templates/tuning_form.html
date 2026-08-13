@@ -331,14 +331,24 @@
     {% endif %}
     <form action="{{ url_for('add_tuning_order_product', order_id=edit_order.id) }}" method="post"
           class="entry-form" style="margin-top:14px;">
-      <div class="field">
-        <label for="product_id">Товар из каталога</label>
-        <select id="product_id" name="product_id" required>
-          <option value="" disabled selected>Выберите товар</option>
+      <div class="field combo-field" data-combo>
+        <label for="product_search">Товар из каталога</label>
+        <input type="text" id="product_search" class="combo-input" data-combo-input
+               placeholder="Начните вводить название или артикул…" autocomplete="off">
+        <input type="hidden" name="product_id" data-combo-value>
+        <div class="combo-dropdown hidden" data-combo-dropdown>
+          <p class="combo-empty hidden" data-combo-empty>Ничего не найдено.</p>
           {% for p in catalog_products %}
-          <option value="{{ p.id }}">{{ p.name }} ({{ p.sale_price|money }} ₽ / {{ cost_units|selectattr('value', 'equalto', p.cost_unit)|map(attribute='label')|first }})</option>
+          <div class="combo-option" data-value="{{ p.id }}"
+               data-label="{{ p.name }}{{ ' (' ~ p.sku ~ ')' if p.sku }}"
+               data-search="{{ (p.name ~ ' ' ~ (p.sku or ''))|lower }}">
+            <span class="combo-option-name">{{ p.name }}</span>
+            {% if p.sku %}<span class="combo-option-sku">{{ p.sku }}</span>{% endif %}
+            <span class="combo-option-price">{{ p.sale_price|money }} ₽ / {{ cost_units|selectattr('value', 'equalto', p.cost_unit)|map(attribute='label')|first }}</span>
+          </div>
           {% endfor %}
-        </select>
+          <p class="combo-more hidden" data-combo-more></p>
+        </div>
       </div>
       <div class="field field-narrow">
         <label for="product_quantity">Количество</label>

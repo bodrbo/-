@@ -174,6 +174,104 @@
   });
 })();
 
+// Searchable combobox — replaces a giant <select> (e.g. picking a catalog
+// product to add to a tuning order, out of ~2800) with a text input that
+// filters the same option list instantly as you type. Markup contract:
+// a [data-combo] wrapper containing [data-combo-input] (visible text),
+// [data-combo-value] (hidden input actually submitted), [data-combo-dropdown]
+// holding .combo-option divs (each with data-value/data-label/data-search),
+// and optional [data-combo-empty]/[data-combo-more] status lines.
+(function () {
+  var wrappers = document.querySelectorAll("[data-combo]");
+  if (!wrappers.length) return;
+
+  var MAX_VISIBLE = 50;
+
+  wrappers.forEach(function (wrap) {
+    var input = wrap.querySelector("[data-combo-input]");
+    var hidden = wrap.querySelector("[data-combo-value]");
+    var dropdown = wrap.querySelector("[data-combo-dropdown]");
+    var emptyEl = wrap.querySelector("[data-combo-empty]");
+    var moreEl = wrap.querySelector("[data-combo-more]");
+    var options = Array.prototype.slice.call(wrap.querySelectorAll(".combo-option"));
+    if (!input || !hidden || !dropdown || !options.length) return;
+
+    var timer = null;
+
+    function close() {
+      dropdown.classList.add("hidden");
+    }
+
+    function render() {
+      var q = input.value.trim().toLowerCase();
+      if (!q) {
+        close();
+        return;
+      }
+      var shown = 0;
+      var matched = 0;
+      options.forEach(function (opt) {
+        var isMatch = opt.getAttribute("data-search").indexOf(q) !== -1;
+        if (isMatch) matched += 1;
+        var visible = isMatch && shown < MAX_VISIBLE;
+        if (visible) shown += 1;
+        opt.classList.toggle("hidden", !visible);
+      });
+      if (emptyEl) emptyEl.classList.toggle("hidden", matched !== 0);
+      if (moreEl) {
+        if (matched > shown) {
+          moreEl.textContent = "Показаны первые " + shown + " из " + matched + " — уточните запрос.";
+          moreEl.classList.remove("hidden");
+        } else {
+          moreEl.classList.add("hidden");
+        }
+      }
+      dropdown.classList.remove("hidden");
+    }
+
+    input.addEventListener("input", function () {
+      // Any edit invalidates a previous pick until a fresh one is clicked —
+      // otherwise a half-changed search term could silently submit the old
+      // product_id.
+      if (input.value !== input.dataset.selectedLabel) hidden.value = "";
+      input.classList.remove("combo-input-error");
+      clearTimeout(timer);
+      timer = setTimeout(render, 120);
+    });
+    input.addEventListener("focus", function () {
+      if (input.value.trim()) render();
+    });
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") close();
+    });
+
+    options.forEach(function (opt) {
+      opt.addEventListener("click", function () {
+        var label = opt.getAttribute("data-label");
+        hidden.value = opt.getAttribute("data-value");
+        input.value = label;
+        input.dataset.selectedLabel = label;
+        close();
+      });
+    });
+
+    document.addEventListener("click", function (e) {
+      if (!wrap.contains(e.target)) close();
+    });
+
+    var form = wrap.closest("form");
+    if (form) {
+      form.addEventListener("submit", function (e) {
+        if (!hidden.value) {
+          e.preventDefault();
+          input.classList.add("combo-input-error");
+          input.focus();
+        }
+      });
+    }
+  });
+})();
+
 // Mobile burger menu — independent of the loader above (some pages, like
 // the plain login screens, have the nav but not the page-loader overlay).
 (function () {
