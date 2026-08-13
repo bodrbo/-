@@ -343,6 +343,20 @@ def send_telegram_notification_to_employee(db, employee_name, text):
     return send_telegram_notification(text, chat_id=row["telegram_chat_id"])
 
 
+def send_telegram_notification_to_admin(db, admin_id, text):
+    """Same fire-and-forget contract as send_telegram_notification_to_employee,
+    routed to one admin's personal chat via admin_accounts.telegram_chat_id."""
+    row = db.execute(
+        "SELECT telegram_chat_id FROM admin_accounts WHERE id = ? AND telegram_chat_id IS NOT NULL",
+        (admin_id,),
+    ).fetchone()
+    if row is None:
+        status = f"skipped: no telegram_chat_id linked for admin_id={admin_id!r}"
+        _log_telegram(f"Telegram notification {status}")
+        return status
+    return send_telegram_notification(text, chat_id=row["telegram_chat_id"])
+
+
 def send_push_notification(title, body, role="admin", url="/"):
     """Same fire-and-forget contract as send_telegram_notification — a push
     failure must never break the request that triggered it. Sent to every
@@ -1225,6 +1239,29 @@ def init_db():
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS tuning_order_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            author_admin_id INTEGER,
+            text TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tuning_order_note_reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            note_id INTEGER NOT NULL,
+            remind_admin_id INTEGER NOT NULL,
+            remind_at TEXT NOT NULL,
+            sent_at TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS tuning_payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             order_id INTEGER NOT NULL,
@@ -1563,6 +1600,14 @@ def init_db():
         )
         """
     )
+    # Migration path for databases created before order-note reminders (and
+    # per-admin Telegram notifications generally) existed — same runtime
+    # linking flow as team_accounts.telegram_chat_id (see that column's own
+    # comment below): the admin has to message the bot first, then someone
+    # runs /internal/telegram-updates + a manual UPDATE.
+    admin_account_cols = [row[1] for row in conn.execute("PRAGMA table_info(admin_accounts)").fetchall()]
+    if "telegram_chat_id" not in admin_account_cols:
+        conn.execute("ALTER TABLE admin_accounts ADD COLUMN telegram_chat_id TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS investors (
@@ -3146,6 +3191,25 @@ def _order_payment_totals(db, order_id, total):
     return payments, paid_amount, remaining
 
 
+def _order_notes(db, order_id):
+    notes = [
+        dict(n) for n in db.execute(
+            "SELECT n.*, a.admin_name AS author_name "
+            "FROM tuning_order_notes n LEFT JOIN admin_accounts a ON a.id = n.author_admin_id "
+            "WHERE n.order_id = ? ORDER BY n.created_at DESC, n.id DESC",
+            (order_id,),
+        ).fetchall()
+    ]
+    for note in notes:
+        note["reminders"] = db.execute(
+            "SELECT r.*, a.admin_name AS remind_admin_name "
+            "FROM tuning_order_note_reminders r LEFT JOIN admin_accounts a ON a.id = r.remind_admin_id "
+            "WHERE r.note_id = ? ORDER BY r.remind_at",
+            (note["id"],),
+        ).fetchall()
+    return notes
+
+
 def _recompute_order_totals(db, order_id):
     """Work items (tuning_order_items) and goods (tuning_order_products) are
     added/removed through separate forms/routes, so neither one alone can
@@ -3967,6 +4031,8 @@ def edit_tuning_order(order_id):
             "SELECT * FROM hull_diagnostic_sheets WHERE tuning_order_id IS NULL ORDER BY boat_name"
         ).fetchall()
         work_photos_by_item = {item["id"]: get_work_item_photos(db, item["id"]) for item in items}
+        notes = _order_notes(db, order_id)
+        admins = db.execute("SELECT id, admin_name FROM admin_accounts ORDER BY admin_name").fetchall()
         return render_template(
             "tuning_form.html", edit_order=order, errors=None, form_values=form_values,
             items_prefill=items, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
@@ -3979,6 +4045,7 @@ def edit_tuning_order(order_id):
             assignable_employees=assignable_employees,
             goods=goods, goods_subtotal=goods_subtotal, catalog_products=catalog_products,
             cost_units=SUPPLY_COST_UNITS,
+            notes=notes, admins=admins,
         )
 
     errors, data = _process_tuning_form(request.form)
@@ -4168,6 +4235,82 @@ def delete_tuning_payment(order_id, payment_id):
     db.execute("DELETE FROM tuning_payments WHERE id = ? AND order_id = ?", (payment_id, order_id))
     db.commit()
     return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
+@app.route("/tuning/<int:order_id>/notes/add", methods=["POST"])
+@admin_login_required
+def add_tuning_order_note(order_id):
+    db = get_db()
+    order = db.execute("SELECT id FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None:
+        return redirect(url_for("tuning_index"))
+    text = request.form.get("text", "").strip()
+    if text:
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        db.execute(
+            "INSERT INTO tuning_order_notes (order_id, author_admin_id, text, created_at) VALUES (?, ?, ?, ?)",
+            (order_id, session.get("admin_id"), text, now),
+        )
+        db.commit()
+    return redirect(url_for("edit_tuning_order", order_id=order_id) + "#notes")
+
+
+@app.route("/tuning/<int:order_id>/notes/<int:note_id>/delete", methods=["POST"])
+@admin_login_required
+def delete_tuning_order_note(order_id, note_id):
+    db = get_db()
+    db.execute("DELETE FROM tuning_order_note_reminders WHERE note_id = ?", (note_id,))
+    db.execute("DELETE FROM tuning_order_notes WHERE id = ? AND order_id = ?", (note_id, order_id))
+    db.commit()
+    return redirect(url_for("edit_tuning_order", order_id=order_id) + "#notes")
+
+
+@app.route("/tuning/<int:order_id>/notes/<int:note_id>/remind", methods=["POST"])
+@admin_login_required
+def add_note_reminder(order_id, note_id):
+    db = get_db()
+    note = db.execute(
+        "SELECT id FROM tuning_order_notes WHERE id = ? AND order_id = ?", (note_id, order_id)
+    ).fetchone()
+    if note is None:
+        return redirect(url_for("edit_tuning_order", order_id=order_id) + "#notes")
+
+    remind_admin_id_raw = request.form.get("remind_admin_id", "").strip()
+    remind_at_raw = request.form.get("remind_at", "").strip()
+
+    remind_admin_id = int(remind_admin_id_raw) if remind_admin_id_raw.isdigit() else None
+    remind_at = None
+    if remind_at_raw:
+        try:
+            # <input type="datetime-local"> gives "YYYY-MM-DDTHH:MM" — store
+            # in the same "YYYY-MM-DD HH:MM" string form used everywhere
+            # else in this file, so it sorts/compares correctly as text.
+            parsed = dt.datetime.strptime(remind_at_raw, "%Y-%m-%dT%H:%M")
+            remind_at = parsed.strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            remind_at = None
+
+    if remind_admin_id and remind_at:
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        db.execute(
+            "INSERT INTO tuning_order_note_reminders (note_id, remind_admin_id, remind_at, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (note_id, remind_admin_id, remind_at, now),
+        )
+        db.commit()
+    return redirect(url_for("edit_tuning_order", order_id=order_id) + "#notes")
+
+
+@app.route("/tuning/<int:order_id>/notes/<int:note_id>/reminders/<int:reminder_id>/cancel", methods=["POST"])
+@admin_login_required
+def cancel_note_reminder(order_id, note_id, reminder_id):
+    db = get_db()
+    db.execute(
+        "DELETE FROM tuning_order_note_reminders WHERE id = ? AND note_id = ? AND sent_at IS NULL",
+        (reminder_id, note_id),
+    )
+    db.commit()
+    return redirect(url_for("edit_tuning_order", order_id=order_id) + "#notes")
 
 
 @app.route("/tuning/<int:order_id>/products/add", methods=["POST"])
@@ -7635,6 +7778,43 @@ def cron_check_captain_shifts():
     except (requests.RequestException, RuntimeError, ValueError) as e:
         return f"error: {e}", 502
     return f"ok: {count} captain(s) on shift {tomorrow}", 200
+
+
+@app.route("/internal/cron/send-note-reminders")
+def cron_send_note_reminders():
+    """Hit every few minutes by a cron job on the host — sends a Telegram
+    message for every order-note reminder whose time has come and marks it
+    sent, so it's never sent twice. Protected by CRON_SECRET instead of a
+    login, since cron has no session."""
+    if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
+        return "forbidden", 403
+
+    db = get_db()
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    due = db.execute(
+        "SELECT r.*, n.order_id, n.text AS note_text, o.client_name, o.boat_model "
+        "FROM tuning_order_note_reminders r "
+        "JOIN tuning_order_notes n ON n.id = r.note_id "
+        "JOIN tuning_orders o ON o.id = n.order_id "
+        "WHERE r.sent_at IS NULL AND r.remind_at <= ?",
+        (now,),
+    ).fetchall()
+
+    sent = 0
+    for r in due:
+        text = (
+            f"⏰ <b>Напоминание по заказу №{r['order_id']}</b>\n"
+            f"Клиент: {html.escape(r['client_name'])} ({html.escape(r['boat_model'])})\n\n"
+            f"{html.escape(r['note_text'])}"
+        )
+        send_telegram_notification_to_admin(db, r["remind_admin_id"], text)
+        db.execute(
+            "UPDATE tuning_order_note_reminders SET sent_at = ? WHERE id = ?",
+            (now, r["id"]),
+        )
+        sent += 1
+    db.commit()
+    return f"ok: {sent} reminder(s) sent", 200
 
 
 @app.route("/internal/telegram-test")

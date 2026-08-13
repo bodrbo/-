@@ -474,6 +474,90 @@
     </div>
     {% endif %}
   </section>
+
+  <details class="panel collapsible-panel" id="notes">
+    <summary>
+      <span>Заметки{% if notes %} ({{ notes|length }}){% endif %}</span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
+      {% if notes %}
+      {% for note in notes %}
+      <div class="note-card">
+        <div class="note-meta">
+          <span class="term">{{ note.author_name or 'Неизвестный автор' }}</span>
+          <span class="muted">{{ note.created_at[:10]|ru_date }} {{ note.created_at[11:] }}</span>
+          <form action="{{ url_for('delete_tuning_order_note', order_id=edit_order.id, note_id=note.id) }}" method="post"
+                onsubmit="return confirm('Удалить эту заметку?');" style="margin-left:auto;">
+            <button type="submit" class="icon-btn danger" title="Удалить заметку">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 5l10 10M15 5L5 15"/>
+              </svg>
+            </button>
+          </form>
+        </div>
+        <p class="note-text">{{ note.text }}</p>
+
+        {% if note.reminders %}
+        <ul class="note-reminders">
+          {% for r in note.reminders %}
+          <li>
+            {% if r.sent_at %}
+            <span class="status-badge status-defect-resolved">Отправлено</span>
+            {% else %}
+            <span class="status-badge status-defect-new">Ожидает</span>
+            {% endif %}
+            {{ r.remind_admin_name or 'Неизвестный' }} — {{ r.remind_at[:10]|ru_date }} {{ r.remind_at[11:] }}
+            {% if not r.sent_at %}
+            <form action="{{ url_for('cancel_note_reminder', order_id=edit_order.id, note_id=note.id, reminder_id=r.id) }}"
+                  method="post" style="display:inline;">
+              <button type="submit" class="icon-btn danger" title="Отменить напоминание" style="width:20px; height:20px;">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M5 5l10 10M15 5L5 15"/>
+                </svg>
+              </button>
+            </form>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+
+        <form action="{{ url_for('add_note_reminder', order_id=edit_order.id, note_id=note.id) }}" method="post" class="entry-form">
+          <div class="field field-narrow">
+            <label>Напомнить</label>
+            <select name="remind_admin_id" required>
+              <option value="" disabled selected>Кому</option>
+              {% for a in admins %}
+              <option value="{{ a.id }}">{{ a.admin_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field field-narrow">
+            <label>&nbsp;</label>
+            <input type="datetime-local" name="remind_at" required>
+          </div>
+          <div class="field field-submit">
+            <button type="submit" class="btn-secondary">Напомнить</button>
+          </div>
+        </form>
+      </div>
+      {% endfor %}
+      {% else %}
+      <p class="hint">Заметок пока нет.</p>
+      {% endif %}
+
+      <form action="{{ url_for('add_tuning_order_note', order_id=edit_order.id) }}" method="post" class="entry-form" style="margin-top:14px;">
+        <div class="field field-wide">
+          <label for="note_text">Новая заметка</label>
+          <textarea id="note_text" name="text" rows="2" required></textarea>
+        </div>
+        <div class="field field-submit">
+          <button type="submit">Добавить заметку</button>
+        </div>
+      </form>
+    </div>
+  </details>
   {% endif %}
 
   <section class="panel form-panel">
