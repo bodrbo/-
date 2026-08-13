@@ -152,6 +152,28 @@ window.addEventListener("pageshow", function (e) {
   }, true);
 })();
 
+// Shared "smart" text matching for the table search and combobox below:
+// splits the query into words and requires every word to appear somewhere
+// in the target text, in any order — so "лодки крепление" still matches
+// "Крепление для лодки" even though the words come in the opposite order.
+// Returns a score (lower = better match, for ranking) or -1 for no match:
+// 0 = text starts with the exact query, 1 = text contains the exact query
+// as one substring, 2+ = matched only as separate scattered words, ranked
+// by how early those words appear.
+function smartMatchScore(text, query) {
+  if (!query) return 0;
+  var words = query.split(/\s+/).filter(Boolean);
+  if (!words.length) return 0;
+  for (var i = 0; i < words.length; i++) {
+    if (text.indexOf(words[i]) === -1) return -1;
+  }
+  if (text.indexOf(query) === 0) return 0;
+  if (text.indexOf(query) !== -1) return 1;
+  var sum = 0;
+  for (var j = 0; j < words.length; j++) sum += text.indexOf(words[j]);
+  return 2 + sum / 1e6;
+}
+
 // Instant client-side table search — an <input data-filter-table="#id">
 // hides/shows the referenced table's <tbody> rows as you type, matching
 // against each row's full text (name, article, address, whatever columns
@@ -173,7 +195,7 @@ window.addEventListener("pageshow", function (e) {
       var q = input.value.trim().toLowerCase();
       var visible = 0;
       rows.forEach(function (row) {
-        var match = !q || row.textContent.toLowerCase().indexOf(q) !== -1;
+        var match = !q || smartMatchScore(row.textContent.toLowerCase(), q) !== -1;
         row.classList.toggle("hidden", !match);
         if (match) visible += 1;
       });
@@ -221,14 +243,25 @@ window.addEventListener("pageshow", function (e) {
         close();
         return;
       }
-      var shown = 0;
-      var matched = 0;
+      var scored = [];
       options.forEach(function (opt) {
-        var isMatch = opt.getAttribute("data-search").indexOf(q) !== -1;
-        if (isMatch) matched += 1;
-        var visible = isMatch && shown < MAX_VISIBLE;
-        if (visible) shown += 1;
-        opt.classList.toggle("hidden", !visible);
+        var score = smartMatchScore(opt.getAttribute("data-search"), q);
+        if (score !== -1) scored.push({opt: opt, score: score});
+      });
+      // Best matches (exact prefix, then exact substring, then scattered
+      // words ranked by how early they appear) float to the top of the
+      // dropdown via CSS "order" — cheaper than moving DOM nodes around,
+      // and .combo-dropdown is a flex column so it takes effect.
+      scored.sort(function (a, b) { return a.score - b.score; });
+      var matched = scored.length;
+      var shown = Math.min(matched, MAX_VISIBLE);
+      options.forEach(function (opt) {
+        opt.classList.add("hidden");
+        opt.style.order = "";
+      });
+      scored.slice(0, MAX_VISIBLE).forEach(function (item, idx) {
+        item.opt.classList.remove("hidden");
+        item.opt.style.order = idx;
       });
       if (emptyEl) emptyEl.classList.toggle("hidden", matched !== 0);
       if (moreEl) {

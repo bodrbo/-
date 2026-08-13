@@ -1752,7 +1752,13 @@ table.records tr.row-expense td.amount { color: var(--danger); }
   border-radius: 8px;
   box-shadow: var(--shadow);
   z-index: 20;
+  /* flex column so the per-option "order" set in loader.js (ranking best
+     matches first) actually takes effect, without moving DOM nodes. */
+  display: flex;
+  flex-direction: column;
 }
+.combo-empty { order: -1; }
+.combo-more { order: 9999; }
 .combo-option {
   display: flex;
   align-items: baseline;
