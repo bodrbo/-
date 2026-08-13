@@ -1760,6 +1760,11 @@ table.records tr.row-expense td.amount { color: var(--danger); }
   display: flex;
   flex-direction: column;
 }
+/* Same equal-specificity trap as .combo-option.hidden above: .combo-dropdown
+   sets its own "display", so plain .hidden alone can't override it without
+   this more specific pairing — without it the dropdown stays visible (with
+   every option in it) even with an empty search box. */
+.combo-dropdown.hidden { display: none; }
 .combo-empty { order: -1; }
 .combo-more { order: 9999; }
 .combo-option {

@@ -487,14 +487,16 @@
         <div class="note-meta">
           <span class="term">{{ note.author_name or 'Неизвестный автор' }}</span>
           <span class="muted">{{ note.created_at[:10]|ru_date }} {{ note.created_at[11:] }}</span>
-          <form action="{{ url_for('delete_tuning_order_note', order_id=edit_order.id, note_id=note.id) }}" method="post"
-                onsubmit="return confirm('Удалить эту заметку?');" style="margin-left:auto;">
-            <button type="submit" class="icon-btn danger" title="Удалить заметку">
-              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M5 5l10 10M15 5L5 15"/>
-              </svg>
-            </button>
-          </form>
+          <span class="row-actions" style="margin-left:auto;">
+            <form action="{{ url_for('delete_tuning_order_note', order_id=edit_order.id, note_id=note.id) }}" method="post"
+                  onsubmit="return confirm('Удалить эту заметку?');">
+              <button type="submit" class="icon-btn danger" title="Удалить заметку">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M5 5l10 10M15 5L5 15"/>
+                </svg>
+              </button>
+            </form>
+          </span>
         </div>
         <p class="note-text">{{ note.text }}</p>
 
@@ -509,14 +511,16 @@
             {% endif %}
             {{ r.remind_admin_name or 'Неизвестный' }} — {{ r.remind_at[:10]|ru_date }} {{ r.remind_at[11:] }}
             {% if not r.sent_at %}
-            <form action="{{ url_for('cancel_note_reminder', order_id=edit_order.id, note_id=note.id, reminder_id=r.id) }}"
-                  method="post" style="display:inline;">
-              <button type="submit" class="icon-btn danger" title="Отменить напоминание" style="width:20px; height:20px;">
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M5 5l10 10M15 5L5 15"/>
-                </svg>
-              </button>
-            </form>
+            <span class="row-actions" style="display:inline-flex;">
+              <form action="{{ url_for('cancel_note_reminder', order_id=edit_order.id, note_id=note.id, reminder_id=r.id) }}"
+                    method="post">
+                <button type="submit" class="icon-btn danger" title="Отменить напоминание">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 5l10 10M15 5L5 15"/>
+                  </svg>
+                </button>
+              </form>
+            </span>
             {% endif %}
           </li>
           {% endfor %}
