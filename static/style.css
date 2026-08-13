@@ -1762,6 +1762,11 @@ table.records tr.row-expense td.amount { color: var(--danger); }
   font-size: 13.5px;
   border-bottom: 1px solid var(--hairline-soft);
 }
+/* .combo-option and .hidden are both single-class selectors, so without
+   this higher-specificity override, source order alone would decide the
+   tie — and .combo-option's own "display: flex" would silently win,
+   leaving filtered-out options visible. */
+.combo-option.hidden { display: none; }
 .combo-option:last-child { border-bottom: none; }
 .combo-option:hover { background: var(--paper-alt); }
 .combo-option-name { color: var(--ink); flex: 1 1 auto; min-width: 0; }
