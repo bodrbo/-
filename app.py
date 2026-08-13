@@ -1234,6 +1234,13 @@ def init_db():
         )
         """
     )
+    # Migration path for databases created before payments counted as
+    # project income (for Analytics) — the backfill (populating this for
+    # already-existing payments) runs further down, after the projects
+    # table exists.
+    tuning_payment_cols = [row[1] for row in conn.execute("PRAGMA table_info(tuning_payments)").fetchall()]
+    if "project_id" not in tuning_payment_cols:
+        conn.execute("ALTER TABLE tuning_payments ADD COLUMN project_id INTEGER")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tuning_yookassa_payments (
@@ -1464,6 +1471,17 @@ def init_db():
         WHERE tuning_orders.id NOT IN (
             SELECT tuning_order_id FROM projects WHERE tuning_order_id IS NOT NULL
         )
+        """
+    )
+    # Backfill tuning_payments.project_id now that every order has a
+    # project — so payments recorded before this feature existed also
+    # count as income in Analytics, not just new ones.
+    conn.execute(
+        """
+        UPDATE tuning_payments SET project_id = (
+            SELECT projects.id FROM projects WHERE projects.tuning_order_id = tuning_payments.order_id
+        )
+        WHERE project_id IS NULL
         """
     )
     conn.execute(
@@ -4135,8 +4153,8 @@ def add_tuning_payment(order_id):
     if amount is not None and amount > 0:
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
         db.execute(
-            "INSERT INTO tuning_payments (order_id, amount, paid_at, created_at) VALUES (?, ?, ?, ?)",
-            (order_id, amount, now, now),
+            "INSERT INTO tuning_payments (order_id, amount, paid_at, created_at, project_id) VALUES (?, ?, ?, ?, ?)",
+            (order_id, amount, now, now, _project_id_for_tuning_order(db, order_id)),
         )
         db.commit()
     return redirect(url_for("edit_tuning_order", order_id=order_id))
@@ -4365,8 +4383,8 @@ def _sync_yookassa_payment(db, record, remote=None):
     )
     if status == "succeeded" and not record["tuning_payment_id"]:
         cur = db.execute(
-            "INSERT INTO tuning_payments (order_id, amount, paid_at, created_at) VALUES (?, ?, ?, ?)",
-            (record["order_id"], record["amount"], now, now),
+            "INSERT INTO tuning_payments (order_id, amount, paid_at, created_at, project_id) VALUES (?, ?, ?, ?, ?)",
+            (record["order_id"], record["amount"], now, now, _project_id_for_tuning_order(db, record["order_id"])),
         )
         db.execute(
             "UPDATE tuning_yookassa_payments SET tuning_payment_id = ? WHERE id = ?",
@@ -6668,7 +6686,11 @@ def _project_totals(db, project_id):
         "SELECT COALESCE(SUM(amount), 0) AS expense FROM supply_writeoffs WHERE project_id = ?",
         (project_id,),
     ).fetchone()["expense"]
-    income = row["income"] + split_row["income"]
+    payments_income = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) AS income FROM tuning_payments WHERE project_id = ?",
+        (project_id,),
+    ).fetchone()["income"]
+    income = row["income"] + split_row["income"] + payments_income
     expense = row["expense"] + split_row["expense"] + entries_expense + materials_expense
     return income, expense, income - expense
 
@@ -6712,7 +6734,12 @@ def analytics_projects():
         "WHERE project_id IS NOT NULL AND substr(created_at, 1, 7) = ?",
         (month_prefix,),
     ).fetchone()["expense"]
-    month_income = month_row["income"]
+    month_payments_income = db.execute(
+        "SELECT COALESCE(SUM(amount), 0) AS income FROM tuning_payments "
+        "WHERE project_id IS NOT NULL AND substr(paid_at, 1, 7) = ?",
+        (month_prefix,),
+    ).fetchone()["income"]
+    month_income = month_row["income"] + month_payments_income
     month_expense = month_row["expense"] + month_entries_expense + month_materials_expense
 
     return render_template(
@@ -6763,6 +6790,10 @@ def project_detail(project_id):
         "WHERE sw.project_id = ? ORDER BY sw.created_at DESC, sw.id DESC",
         (project_id,),
     ).fetchall()
+    payments = db.execute(
+        "SELECT * FROM tuning_payments WHERE project_id = ? ORDER BY paid_at DESC, id DESC",
+        (project_id,),
+    ).fetchall()
     income, expense, profit = _project_totals(db, project_id)
     order = None
     if project["tuning_order_id"]:
@@ -6772,7 +6803,7 @@ def project_detail(project_id):
     return render_template(
         "project_detail.html", active_page="analytics", sub_page="projects",
         project=project, order=order, transactions=transactions, unattached=unattached,
-        work_entries=work_entries, material_writeoffs=material_writeoffs,
+        work_entries=work_entries, material_writeoffs=material_writeoffs, payments=payments,
         income=income, expense=expense, profit=profit,
     )
 

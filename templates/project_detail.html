@@ -219,6 +219,32 @@
   </section>
 
   <section class="panel">
+    <h2>Платежи по заказу</h2>
+    {% if payments %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th>Сумма</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in payments %}
+          <tr>
+            <td class="muted">{{ p.paid_at[:10]|ru_date }}</td>
+            <td class="amount">{{ p.amount|money }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint">По заказу пока нет платежей.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
     <h2>Работы, отнесённые на расходы</h2>
     {% if work_entries %}
     <div class="table-scroll">
