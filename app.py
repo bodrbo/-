@@ -3715,6 +3715,7 @@ def tuning_index():
     grand_total = sum(o["total"] for o in orders)
     return render_template(
         "tuning_index.html", orders=orders, grand_total=grand_total,
+        order_statuses=ORDER_STATUSES,
         active_page="tuning", sub_page="orders",
     )
 

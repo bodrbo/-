@@ -177,35 +177,67 @@ function smartMatchScore(text, query) {
 // Instant client-side table search — an <input data-filter-table="#id">
 // hides/shows the referenced table's <tbody> rows as you type, matching
 // against each row's full text (name, article, address, whatever columns
-// that table has), no server round-trip. Used on the supply catalog and
-// warehouse pages, but written generically so any table can opt in.
+// that table has), no server round-trip. An optional companion
+// <select data-filter-status="#id"> (matched against each row's own
+// data-status attribute, not free text — for an exact category like an
+// order's status) combines with it: a row must satisfy both to stay
+// visible. Used on the supply catalog/warehouse pages and the tuning
+// orders list, but written generically so any table can opt into either
+// or both.
 (function () {
-  var inputs = document.querySelectorAll("input[data-filter-table]");
-  if (!inputs.length) return;
+  var textInputs = Array.prototype.slice.call(document.querySelectorAll("input[data-filter-table]"));
+  var statusSelects = Array.prototype.slice.call(document.querySelectorAll("select[data-filter-status]"));
+  if (!textInputs.length && !statusSelects.length) return;
 
-  inputs.forEach(function (input) {
-    var table = document.querySelector(input.getAttribute("data-filter-table"));
-    var tbody = table && table.querySelector("tbody");
-    if (!tbody) return;
-    var rows = Array.prototype.slice.call(tbody.querySelectorAll("tr"));
-    var noResults = document.querySelector(input.getAttribute("data-filter-table") + "-no-results");
+  var groups = {};
+  function groupFor(selector) {
+    if (!groups[selector]) {
+      var table = document.querySelector(selector);
+      var tbody = table && table.querySelector("tbody");
+      groups[selector] = {
+        rows: tbody ? Array.prototype.slice.call(tbody.querySelectorAll("tr")) : [],
+        textInput: null,
+        statusSelect: null,
+        noResults: document.querySelector(selector + "-no-results"),
+      };
+    }
+    return groups[selector];
+  }
+  textInputs.forEach(function (input) {
+    groupFor(input.getAttribute("data-filter-table")).textInput = input;
+  });
+  statusSelects.forEach(function (select) {
+    groupFor(select.getAttribute("data-filter-status")).statusSelect = select;
+  });
+
+  Object.keys(groups).forEach(function (selector) {
+    var group = groups[selector];
+    if (!group.rows.length) return;
     var timer = null;
 
     function apply() {
-      var q = input.value.trim().toLowerCase();
+      var q = group.textInput ? group.textInput.value.trim().toLowerCase() : "";
+      var status = group.statusSelect ? group.statusSelect.value : "";
       var visible = 0;
-      rows.forEach(function (row) {
-        var match = !q || smartMatchScore(row.textContent.toLowerCase(), q) !== -1;
+      group.rows.forEach(function (row) {
+        var textOk = !q || smartMatchScore(row.textContent.toLowerCase(), q) !== -1;
+        var statusOk = !status || row.getAttribute("data-status") === status;
+        var match = textOk && statusOk;
         row.classList.toggle("hidden", !match);
         if (match) visible += 1;
       });
-      if (noResults) noResults.classList.toggle("hidden", visible !== 0 || !q);
+      if (group.noResults) group.noResults.classList.toggle("hidden", visible !== 0 || (!q && !status));
     }
 
-    input.addEventListener("input", function () {
-      clearTimeout(timer);
-      timer = setTimeout(apply, 120);
-    });
+    if (group.textInput) {
+      group.textInput.addEventListener("input", function () {
+        clearTimeout(timer);
+        timer = setTimeout(apply, 120);
+      });
+    }
+    if (group.statusSelect) {
+      group.statusSelect.addEventListener("change", apply);
+    }
   });
 })();
 

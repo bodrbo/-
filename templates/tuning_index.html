@@ -137,8 +137,18 @@
       <a href="{{ url_for('add_tuning_order') }}" class="btn-add" style="float:right; margin-top:-2px;">Добавить заказ</a>
     </h2>
     {% if orders %}
+    <div class="table-search" style="display:flex; gap:10px; flex-wrap:wrap;">
+      <input type="search" placeholder="Поиск по клиенту, лодке или номеру…"
+             data-filter-table="#orders-table" aria-label="Поиск по заказам" style="flex:1 1 260px; max-width:360px;">
+      <select data-filter-status="#orders-table" aria-label="Фильтр по статусу" style="flex:none;">
+        <option value="">Все статусы</option>
+        {% for s in order_statuses %}
+        <option value="{{ s.value }}">{{ s.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
     <div class="table-scroll">
-      <table class="records">
+      <table class="records" id="orders-table">
         <thead>
           <tr>
             <th>№</th>
@@ -155,7 +165,7 @@
         </thead>
         <tbody>
           {% for o in orders %}
-          <tr>
+          <tr data-status="{{ o.status }}">
             <td><a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="term">№{{ o.id }}</a></td>
             <td class="muted">{{ o.created_at[:10]|ru_date }}</td>
             <td>
@@ -191,6 +201,7 @@
         </tbody>
       </table>
     </div>
+    <p id="orders-table-no-results" class="hint hidden">Ничего не найдено.</p>
     {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
