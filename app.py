@@ -52,6 +52,19 @@ app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workhours.db")
 
 
+@app.after_request
+def _no_cache_dynamic_pages(response):
+    # Every page here reflects live, frequently-changing data (order
+    # statuses, catalog contents, stock levels, ...). Without an explicit
+    # header, a browser can serve a stale cached copy — or restore the page
+    # straight from bfcache — on back/forward navigation instead of asking
+    # the server again, silently showing outdated data with no error.
+    # Static assets (css/js/photos) are excluded — those should still cache.
+    if request.endpoint != "static":
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 def format_ru_date(iso_date):
     """YYYY-MM-DD -> DD/MM/YYYY for display in trip tables."""
     if not iso_date:

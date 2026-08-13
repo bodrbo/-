@@ -1,3 +1,16 @@
+// A page restored from the back/forward cache (e.g. tapping "back" after
+// adding a product on another page) keeps whatever server-rendered HTML it
+// had at the moment of navigating away — no network request happens, so
+// newly added catalog items, changed statuses, etc. would silently look
+// stale (missing from search, wrong values) without ever erroring. Force a
+// real reload whenever that happens so the page always reflects the
+// current database. This runs unconditionally, ahead of every other
+// script on the page, since staleness on back-navigation is a site-wide
+// concern, not specific to any one page's own script.
+window.addEventListener("pageshow", function (e) {
+  if (e.persisted) location.reload();
+});
+
 (function () {
   var loader = document.getElementById("pageLoader");
   if (!loader) return;
