@@ -7003,6 +7003,28 @@ def supply_warehouses():
     )
 
 
+@app.route("/supply/warehouses/<int:warehouse_id>")
+@admin_login_required
+def supply_warehouse(warehouse_id):
+    db = get_db()
+    warehouse = db.execute("SELECT * FROM supply_warehouses WHERE id = ?", (warehouse_id,)).fetchone()
+    if warehouse is None:
+        return redirect(url_for("supply_warehouses"))
+    stock = db.execute(
+        "SELECT supply_stock.*, supply_products.name AS product_name, supply_products.sku AS product_sku, "
+        "supply_products.photo_filename AS product_photo "
+        "FROM supply_stock JOIN supply_products ON supply_products.id = supply_stock.product_id "
+        "WHERE supply_stock.warehouse_id = ? AND supply_stock.quantity > 0 "
+        "ORDER BY supply_products.name",
+        (warehouse_id,),
+    ).fetchall()
+    total_quantity = sum(s["quantity"] for s in stock)
+    return render_template(
+        "supply_warehouse.html", active_page="supply", sub_page="warehouses",
+        warehouse=warehouse, stock=stock, total_quantity=total_quantity,
+    )
+
+
 @app.route("/supply/warehouses/add", methods=["POST"])
 @admin_login_required
 def add_supply_warehouse():

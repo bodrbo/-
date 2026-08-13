@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Склады — Снабжение</title>
+<title>{{ warehouse.name }} — Склады</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
@@ -94,8 +94,8 @@
       </a>
     </nav>
     <div class="title-block">
-      <span class="kicker">Снабжение</span>
-      <h1>Склады</h1>
+      <span class="kicker">Снабжение · Склады</span>
+      <h1>{{ warehouse.name }}</h1>
     </div>
     <div class="topbar-actions">
       <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
@@ -116,48 +116,44 @@
 
 <main class="wrap">
 
-  <nav class="sub-tabs">
-    <a href="{{ url_for('supply_warehouses') }}" class="{{ 'active' if sub_page == 'warehouses' }}">Склады</a>
-    <a href="{{ url_for('supply_catalog') }}" class="{{ 'active' if sub_page == 'catalog' }}">Каталог</a>
-    <a href="{{ url_for('supply_requests') }}" class="{{ 'active' if sub_page == 'requests' }}">Заявки на снабжение</a>
-  </nav>
+  <a href="{{ url_for('supply_warehouses') }}" class="term" style="display:inline-block; margin-bottom:14px;">← Назад к складам</a>
 
-  {% if warehouse_error %}
-  <div class="alert"><strong>Не удалось добавить склад:</strong> {{ warehouse_error }}</div>
-  {% endif %}
-
-  <section class="panel form-panel">
-    <h2>Добавить склад</h2>
-    <form action="{{ url_for('add_supply_warehouse') }}" method="post" class="entry-form">
-      <div class="field">
-        <label for="warehouse_name">Название</label>
-        <input type="text" id="warehouse_name" name="name" placeholder="Основной склад" required>
-      </div>
-      <div class="field field-wide">
-        <label for="warehouse_address">Адрес / описание</label>
-        <input type="text" id="warehouse_address" name="address" placeholder="Например, г. Кронштадт, ул. ...">
-      </div>
-      <div class="field field-submit">
-        <button type="submit">Добавить склад</button>
-      </div>
-    </form>
+  <section class="panel">
+    <table class="gloss">
+      <tr><th>Адрес / описание</th><td>{{ warehouse.address or '—' }}</td></tr>
+      <tr><th>Товаров на складе</th><td>{{ stock|length }}</td></tr>
+      <tr><th>Остаток, всего</th><td class="amount">{{ total_quantity|float|round(2) }}</td></tr>
+    </table>
   </section>
 
   <section class="panel">
-    <h2>Склады</h2>
-    {% if warehouses %}
+    <h2>Товары на складе</h2>
+    {% if stock %}
     <div class="table-scroll">
       <table class="records">
         <thead>
-          <tr><th>Название</th><th>Адрес / описание</th><th>Товаров на складе</th><th>Остаток, всего</th></tr>
+          <tr><th></th><th>Название</th><th>Артикул</th><th>Адрес на складе</th><th>Количество</th></tr>
         </thead>
         <tbody>
-          {% for w in warehouses %}
-          <tr class="row-clickable" onclick="window.location.href='{{ url_for('supply_warehouse', warehouse_id=w.id) }}'">
-            <td class="term">{{ w.name }}</td>
-            <td class="muted">{{ w.address or '—' }}</td>
-            <td>{{ w.product_count }}</td>
-            <td class="amount">{{ w.total_quantity|float|round(2) }}</td>
+          {% for s in stock %}
+          <tr class="row-clickable" onclick="window.location.href='{{ url_for('supply_product', product_id=s.product_id) }}'">
+            <td>
+              {% if s.product_photo %}
+              <img src="{{ url_for('static', filename='supply_photos/' ~ s.product_photo) }}" alt="" class="supply-thumb">
+              {% else %}
+              <span class="supply-thumb supply-thumb-empty"></span>
+              {% endif %}
+            </td>
+            <td class="term">{{ s.product_name }}</td>
+            <td class="muted">{{ s.product_sku or '—' }}</td>
+            <td class="muted">
+              {%- set addr_parts = [] -%}
+              {%- if s.zone %}{{ addr_parts.append('зона ' ~ s.zone) or '' }}{% endif -%}
+              {%- if s.rack %}{{ addr_parts.append('стеллаж ' ~ s.rack) or '' }}{% endif -%}
+              {%- if s.spot %}{{ addr_parts.append('место ' ~ s.spot) or '' }}{% endif -%}
+              {{ addr_parts|join(' · ') if addr_parts else '—' }}
+            </td>
+            <td class="amount">{{ s.quantity|float|round(2) }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -166,8 +162,8 @@
     {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">Складов пока нет</div>
-      <div class="s">Добавьте первый склад через форму выше.</div>
+      <div class="t">На складе пока пусто</div>
+      <div class="s">Оприходуйте товары через страницу товара в каталоге.</div>
     </div>
     {% endif %}
   </section>
