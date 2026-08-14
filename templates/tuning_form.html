@@ -37,6 +37,7 @@
 
 {% macro work_row(item=None) %}
 <div class="work-row">
+  <input type="hidden" name="item_id[]" value="{{ item.id if item else '' }}">
   <input type="text" name="work_name[]" placeholder="Название работы" class="work-name"
          value="{{ item.work_name if item else '' }}">
   <input type="text" inputmode="decimal" name="cost_price[]" placeholder="Себестоимость, ₽" class="work-cost"

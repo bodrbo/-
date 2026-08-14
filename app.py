@@ -1356,6 +1356,13 @@ def init_db():
     bank_tx_cols = [row[1] for row in conn.execute("PRAGMA table_info(bank_transactions)").fetchall()]
     if "project_id" not in bank_tx_cols:
         conn.execute("ALTER TABLE bank_transactions ADD COLUMN project_id INTEGER")
+    if "item_id" not in bank_tx_cols:
+        # Optional finer-grained attribution than project_id alone — links
+        # to a specific tuning_order_items row (a single work item within
+        # the project's order) so Analytics can show which individual jobs
+        # are profitable, not just whole orders. NULL means "whole
+        # project", same as before this column existed.
+        conn.execute("ALTER TABLE bank_transactions ADD COLUMN item_id INTEGER")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tbank_payout_registries (
@@ -1541,6 +1548,10 @@ def init_db():
         )
         """
     )
+    transaction_split_cols = [row[1] for row in conn.execute("PRAGMA table_info(transaction_splits)").fetchall()]
+    if "item_id" not in transaction_split_cols:
+        # Same optional per-work-item attribution as bank_transactions.item_id.
+        conn.execute("ALTER TABLE transaction_splits ADD COLUMN item_id INTEGER")
     # Migration path for tuning_orders created before client_id/status existed.
     tuning_cols = [row[1] for row in conn.execute("PRAGMA table_info(tuning_orders)").fetchall()]
     if "client_id" not in tuning_cols:
@@ -3108,6 +3119,7 @@ def _process_tuning_form(form):
     names = form.getlist("work_name[]")
     costs = form.getlist("cost_price[]")
     mults = form.getlist("multiplier[]")
+    item_ids = form.getlist("item_id[]")
 
     def _get(lst, i):
         return lst[i] if i < len(lst) else ""
@@ -3141,7 +3153,11 @@ def _process_tuning_form(form):
 
         if name and cost is not None and mult is not None:
             price = cost * mult
-            items.append({"work_name": name, "cost_price": cost, "multiplier": mult, "price": price})
+            item_id_raw = _get(item_ids, i).strip()
+            items.append({
+                "item_id": int(item_id_raw) if item_id_raw.isdigit() else None,
+                "work_name": name, "cost_price": cost, "multiplier": mult, "price": price,
+            })
             subtotal += price
 
     if not items and not any("Работа" in e for e in errors):
@@ -4093,22 +4109,40 @@ def edit_tuning_order(order_id):
          data["discount_pct"], data["discount_type"], data["discount_value"],
          data["subtotal"], data["total"], now, order_id),
     )
-    # Preserve each surviving work row's status by position — the form
-    # resubmits every row on every save (even ones untouched here), so a
-    # plain delete+recreate would silently reset progress on every edit.
-    old_statuses = [
-        r["status"] for r in db.execute(
-            "SELECT status FROM tuning_order_items WHERE order_id = ? ORDER BY id", (order_id,)
+    # Update surviving rows in place instead of delete-all + reinsert-all —
+    # the form resubmits every row on every save (even ones untouched
+    # here), and a blanket delete+recreate used to hand every row a brand
+    # new id on every single save, silently orphaning anything keyed on
+    # tuning_order_items.id (task assignments, photos, and now the
+    # per-work-item transaction links below) — not just resetting status,
+    # which is why that used to be tracked separately by position.
+    # Each row's own item_id[] (see work_row() macro) says whether it's an
+    # existing row (UPDATE, id preserved) or a new one (INSERT); anything
+    # that existed before but wasn't resubmitted was removed via the "✕"
+    # button in the form, so its assignment/photos are cleaned up too.
+    existing_ids = {
+        r["id"] for r in db.execute(
+            "SELECT id FROM tuning_order_items WHERE order_id = ?", (order_id,)
         ).fetchall()
-    ]
-    db.execute("DELETE FROM tuning_order_items WHERE order_id = ?", (order_id,))
-    for i, item in enumerate(data["items"]):
-        status = old_statuses[i] if i < len(old_statuses) else DEFAULT_WORK_STATUS
-        db.execute(
-            "INSERT INTO tuning_order_items (order_id, work_name, cost_price, multiplier, price, status) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (order_id, item["work_name"], item["cost_price"], item["multiplier"], item["price"], status),
-        )
+    }
+    submitted_ids = {item["item_id"] for item in data["items"] if item["item_id"] in existing_ids}
+    for removed_id in existing_ids - submitted_ids:
+        db.execute("DELETE FROM tuning_item_assignments WHERE item_id = ?", (removed_id,))
+        db.execute("DELETE FROM work_item_photos WHERE item_id = ?", (removed_id,))
+        db.execute("DELETE FROM tuning_order_items WHERE id = ?", (removed_id,))
+    for item in data["items"]:
+        if item["item_id"] in existing_ids:
+            db.execute(
+                "UPDATE tuning_order_items SET work_name=?, cost_price=?, multiplier=?, price=? WHERE id=?",
+                (item["work_name"], item["cost_price"], item["multiplier"], item["price"], item["item_id"]),
+            )
+        else:
+            db.execute(
+                "INSERT INTO tuning_order_items (order_id, work_name, cost_price, multiplier, price, status) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (order_id, item["work_name"], item["cost_price"], item["multiplier"], item["price"],
+                 DEFAULT_WORK_STATUS),
+            )
     db.commit()
     # The UPDATE above wrote subtotal/total from work items alone (all
     # _process_tuning_form knows about) — fold in any goods added via the
@@ -5828,6 +5862,47 @@ def _project_id_for_tuning_order(db, order_id):
     return row["id"] if row else None
 
 
+def _resolve_transaction_target(db, raw):
+    """Parses the value of a transaction/split "target" <select> — see
+    _transactions_table.html and transaction_split.html — into
+    (project_id, item_id). The option value is "p<project_id>" for a
+    whole-project attribution (item_id stays None, same as before this
+    feature existed) or "i<tuning_order_items.id>" for a specific work
+    item, in which case the project is resolved from the item's own
+    order — the item alone is enough to know which project it belongs to,
+    so the <select> only needs to encode one id, not a pair."""
+    raw = (raw or "").strip()
+    if raw[:1] == "i" and raw[1:].isdigit():
+        item_id = int(raw[1:])
+        item = db.execute(
+            "SELECT order_id FROM tuning_order_items WHERE id = ?", (item_id,)
+        ).fetchone()
+        if item is None:
+            return None, None
+        return _project_id_for_tuning_order(db, item["order_id"]), item_id
+    if raw[:1] == "p" and raw[1:].isdigit():
+        return int(raw[1:]), None
+    return None, None
+
+
+def _items_by_project(db):
+    """All work items across every project, keyed by project_id — used to
+    build the "p<id>"/"i<id>" <optgroup> options in the transaction
+    project/item picker. Fetched as one query rather than per-row/per-split
+    to avoid an N+1 query per transaction on the Analytics page."""
+    rows = db.execute(
+        "SELECT tuning_order_items.*, projects.id AS project_id "
+        "FROM tuning_order_items "
+        "JOIN tuning_orders ON tuning_orders.id = tuning_order_items.order_id "
+        "JOIN projects ON projects.tuning_order_id = tuning_orders.id "
+        "ORDER BY tuning_order_items.id"
+    ).fetchall()
+    by_project = {}
+    for r in rows:
+        by_project.setdefault(r["project_id"], []).append(r)
+    return by_project
+
+
 def team_login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -6814,14 +6889,16 @@ def _fetch_filtered_transactions(db, filter_start, filter_end):
             "SELECT * FROM bank_transactions ORDER BY operation_date DESC, id DESC LIMIT 200"
         ).fetchall()
     split_rows = db.execute(
-        "SELECT ts.transaction_id, ts.amount, projects.name AS project_name "
+        "SELECT ts.transaction_id, ts.amount, projects.name AS project_name, "
+        "tuning_order_items.work_name AS item_name "
         "FROM transaction_splits ts JOIN projects ON projects.id = ts.project_id "
+        "LEFT JOIN tuning_order_items ON tuning_order_items.id = ts.item_id "
         "ORDER BY ts.id"
     ).fetchall()
     splits_by_transaction = {}
     for s in split_rows:
         splits_by_transaction.setdefault(s["transaction_id"], []).append(
-            {"project_name": s["project_name"], "amount": s["amount"]}
+            {"project_name": s["project_name"], "amount": s["amount"], "item_name": s["item_name"]}
         )
     return transactions, splits_by_transaction
 
@@ -6847,6 +6924,7 @@ def _transactions_table_context(db):
         "transactions": transactions, "projects": projects,
         "splits_by_transaction": splits_by_transaction, "current_url": current_url,
         "filter_start": filter_start, "filter_end": filter_end,
+        "items_by_project": _items_by_project(db),
     }
 
 
@@ -6987,6 +7065,55 @@ def _project_totals(db, project_id):
     return income, expense, income - expense
 
 
+def _item_profitability(db, order_id):
+    """Per-work-item breakdown for one order: price (what the item is
+    billed at) against material costs (via the existing
+    tuning_item_assignments chain — team_tuning_task_writeoff_material)
+    and any bank transactions explicitly linked to that item (the new
+    "Весь проект"/work-item picker in _transactions_table.html and
+    transaction_split.html). Shown separately from price rather than
+    folded into one "income" figure, since a linked transaction isn't
+    necessarily the client's payment for that item — it could be
+    something else (a refund, a supplier credit) that shouldn't be
+    silently assumed to duplicate or replace the billed price."""
+    items = db.execute(
+        "SELECT * FROM tuning_order_items WHERE order_id = ? ORDER BY id", (order_id,)
+    ).fetchall()
+    result = []
+    for item in items:
+        materials_expense = db.execute(
+            "SELECT COALESCE(SUM(sw.amount), 0) AS expense FROM supply_writeoffs sw "
+            "JOIN tuning_item_assignments tia ON tia.id = sw.tuning_item_assignment_id "
+            "WHERE tia.item_id = ?",
+            (item["id"],),
+        ).fetchone()["expense"]
+        tx_row = db.execute(
+            "SELECT "
+            "COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE 0 END), 0) AS income, "
+            "COALESCE(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END), 0) AS expense "
+            "FROM bank_transactions "
+            "WHERE item_id = ? AND id NOT IN (SELECT transaction_id FROM transaction_splits)",
+            (item["id"],),
+        ).fetchone()
+        split_row = db.execute(
+            "SELECT "
+            "COALESCE(SUM(CASE WHEN bt.direction='in' THEN ts.amount ELSE 0 END), 0) AS income, "
+            "COALESCE(SUM(CASE WHEN bt.direction='out' THEN ts.amount ELSE 0 END), 0) AS expense "
+            "FROM transaction_splits ts JOIN bank_transactions bt ON bt.id = ts.transaction_id "
+            "WHERE ts.item_id = ?",
+            (item["id"],),
+        ).fetchone()
+        tx_income = tx_row["income"] + split_row["income"]
+        tx_expense = tx_row["expense"] + split_row["expense"]
+        price = item["price"] if item["status"] != "removed" else 0.0
+        profit = price + tx_income - materials_expense - tx_expense
+        result.append({
+            "item": item, "price": price, "materials_expense": materials_expense,
+            "tx_income": tx_income, "tx_expense": tx_expense, "profit": profit,
+        })
+    return result
+
+
 @app.route("/analytics/projects")
 @admin_login_required
 def analytics_projects():
@@ -7088,15 +7215,17 @@ def project_detail(project_id):
     ).fetchall()
     income, expense, profit = _project_totals(db, project_id)
     order = None
+    item_profitability = []
     if project["tuning_order_id"]:
         order = db.execute(
             "SELECT * FROM tuning_orders WHERE id = ?", (project["tuning_order_id"],)
         ).fetchone()
+        item_profitability = _item_profitability(db, project["tuning_order_id"])
     return render_template(
         "project_detail.html", active_page="analytics", sub_page="projects",
         project=project, order=order, transactions=transactions, unattached=unattached,
         work_entries=work_entries, material_writeoffs=material_writeoffs, payments=payments,
-        income=income, expense=expense, profit=profit,
+        income=income, expense=expense, profit=profit, item_profitability=item_profitability,
     )
 
 
@@ -7117,15 +7246,15 @@ def _redirect_or_ajax_ok(next_url):
 def set_transaction_project():
     db = get_db()
     transaction_id = request.form.get("transaction_id", "").strip()
-    project_id = request.form.get("project_id", "").strip()
+    project_id, item_id = _resolve_transaction_target(db, request.form.get("target", ""))
     if transaction_id.isdigit():
         # A direct single-project assignment always overrides any prior split.
         db.execute(
             "DELETE FROM transaction_splits WHERE transaction_id = ?", (int(transaction_id),)
         )
         db.execute(
-            "UPDATE bank_transactions SET project_id = ? WHERE id = ?",
-            (int(project_id) if project_id.isdigit() else None, int(transaction_id)),
+            "UPDATE bank_transactions SET project_id = ?, item_id = ? WHERE id = ?",
+            (project_id, item_id, int(transaction_id)),
         )
         db.commit()
     next_url = request.form.get("next") or url_for("analytics_index")
@@ -7157,8 +7286,8 @@ def _normalize_transaction_split(db, transaction_id):
     ).fetchall()
     if len(remaining) == 1:
         db.execute(
-            "UPDATE bank_transactions SET project_id = ? WHERE id = ?",
-            (remaining[0]["project_id"], transaction_id),
+            "UPDATE bank_transactions SET project_id = ?, item_id = ? WHERE id = ?",
+            (remaining[0]["project_id"], remaining[0]["item_id"], transaction_id),
         )
         db.execute("DELETE FROM transaction_splits WHERE id = ?", (remaining[0]["id"],))
 
@@ -7179,6 +7308,7 @@ def transaction_split(transaction_id):
         "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
         "ORDER BY projects.created_at DESC, projects.id DESC"
     ).fetchall()
+    items_by_project = _items_by_project(db)
 
     if request.method == "GET":
         next_url = request.args.get("next") or url_for("analytics_index")
@@ -7187,37 +7317,41 @@ def transaction_split(transaction_id):
             (transaction_id,),
         ).fetchall()
         splits = [
-            {"project_id": str(s["project_id"]), "amount": f"{s['amount']:.2f}".rstrip("0").rstrip(".")}
+            {
+                "target": f"i{s['item_id']}" if s["item_id"] else f"p{s['project_id']}",
+                "amount": f"{s['amount']:.2f}".rstrip("0").rstrip("."),
+            }
             for s in existing
         ]
         return render_template(
             "transaction_split.html", active_page="analytics", sub_page="transactions",
-            transaction=transaction, projects=projects, splits=splits,
-            next_url=next_url, errors=None,
+            transaction=transaction, projects=projects, items_by_project=items_by_project,
+            splits=splits, next_url=next_url, errors=None,
         )
 
     next_url = request.form.get("next") or url_for("analytics_index")
-    project_ids = request.form.getlist("project_id[]")
+    targets_raw = request.form.getlist("target[]")
     amounts = request.form.getlist("amount[]")
 
     display_rows = []
-    for i in range(max(len(project_ids), len(amounts))):
-        pid_raw = project_ids[i].strip() if i < len(project_ids) else ""
+    for i in range(max(len(targets_raw), len(amounts))):
+        target_raw = targets_raw[i].strip() if i < len(targets_raw) else ""
         amt_raw = amounts[i].strip() if i < len(amounts) else ""
-        if not pid_raw and not amt_raw:
+        if not target_raw and not amt_raw:
             continue
-        display_rows.append({"project_id": pid_raw, "amount": amt_raw})
+        display_rows.append({"target": target_raw, "amount": amt_raw})
 
     errors = []
     parsed_rows = []
-    seen_projects = set()
+    seen_targets = set()
     for idx, r in enumerate(display_rows, start=1):
-        if not r["project_id"].isdigit():
-            errors.append(f"Строка {idx}: выберите проект.")
+        project_id, item_id = _resolve_transaction_target(db, r["target"])
+        if project_id is None:
+            errors.append(f"Строка {idx}: выберите проект или работу.")
             continue
-        pid = int(r["project_id"])
-        if pid in seen_projects:
-            errors.append(f"Строка {idx}: этот проект уже указан в другой строке — объедините суммы в одну строку.")
+        target_key = (project_id, item_id)
+        if target_key in seen_targets:
+            errors.append(f"Строка {idx}: это уже указано в другой строке — объедините суммы в одну строку.")
             continue
         try:
             amt = float(r["amount"].replace(",", "."))
@@ -7227,11 +7361,11 @@ def transaction_split(transaction_id):
         if amt <= 0:
             errors.append(f"Строка {idx}: сумма должна быть больше нуля.")
             continue
-        seen_projects.add(pid)
-        parsed_rows.append({"project_id": pid, "amount": amt})
+        seen_targets.add(target_key)
+        parsed_rows.append({"project_id": project_id, "item_id": item_id, "amount": amt})
 
     if not errors and len(parsed_rows) < 2:
-        errors.append("Укажите минимум два проекта, чтобы разбить сумму — для одного проекта используйте обычный выбор проекта.")
+        errors.append("Укажите минимум два получателя (проекта или работы), чтобы разбить сумму — для одного используйте обычный выбор.")
 
     if not errors:
         total = sum(r["amount"] for r in parsed_rows)
@@ -7245,19 +7379,19 @@ def transaction_split(transaction_id):
     if errors:
         return render_template(
             "transaction_split.html", active_page="analytics", sub_page="transactions",
-            transaction=transaction, projects=projects, splits=display_rows,
-            next_url=next_url, errors=errors,
+            transaction=transaction, projects=projects, items_by_project=items_by_project,
+            splits=display_rows, next_url=next_url, errors=errors,
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute("DELETE FROM transaction_splits WHERE transaction_id = ?", (transaction_id,))
     for r in parsed_rows:
         db.execute(
-            "INSERT INTO transaction_splits (transaction_id, project_id, amount, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (transaction_id, r["project_id"], r["amount"], now),
+            "INSERT INTO transaction_splits (transaction_id, project_id, item_id, amount, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (transaction_id, r["project_id"], r["item_id"], r["amount"], now),
         )
-    db.execute("UPDATE bank_transactions SET project_id = NULL WHERE id = ?", (transaction_id,))
+    db.execute("UPDATE bank_transactions SET project_id = NULL, item_id = NULL WHERE id = ?", (transaction_id,))
     db.commit()
     return redirect(next_url)
 

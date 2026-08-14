@@ -43,19 +43,22 @@
           <div class="hint" style="margin:0;">
             Разбито:
             {% for s in splits_by_transaction[t.id] %}
-            {{ s.project_name }} ({{ s.amount|money }} ₽){% if not loop.last %}, {% endif %}
+            {{ s.project_name }}{% if s.item_name %} → {{ s.item_name }}{% endif %} ({{ s.amount|money }} ₽){% if not loop.last %}, {% endif %}
             {% endfor %}
           </div>
           {% else %}
           <form action="{{ url_for('set_transaction_project') }}" method="post" data-ajax-form>
             <input type="hidden" name="transaction_id" value="{{ t.id }}">
             <input type="hidden" name="next" value="{{ current_url }}">
-            <select name="project_id" class="project-select" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()">
+            <select name="target" class="project-select" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()">
               <option value="">— без проекта —</option>
               {% for p in projects %}
-              <option value="{{ p.id }}" {{ 'selected' if t.project_id == p.id }}>
-                {{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.boat_model %} ({{ p.boat_model }}){% endif %}
-              </option>
+              <optgroup label="{{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.boat_model %} ({{ p.boat_model }}){% endif %}">
+                <option value="p{{ p.id }}" {{ 'selected' if t.project_id == p.id and not t.item_id }}>Весь проект</option>
+                {% for it in items_by_project.get(p.id, []) %}
+                <option value="i{{ it.id }}" {{ 'selected' if t.item_id == it.id }}>— {{ it.work_name }}</option>
+                {% endfor %}
+              </optgroup>
               {% endfor %}
             </select>
           </form>

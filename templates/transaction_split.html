@@ -37,12 +37,15 @@
 
 {% macro split_row(row=None) %}
 <div class="split-row">
-  <select name="project_id[]" class="split-project">
-    <option value="" disabled {{ 'selected' if not row or not row.project_id }}>Выберите проект</option>
+  <select name="target[]" class="split-project">
+    <option value="" disabled {{ 'selected' if not row or not row.target }}>Выберите проект или работу</option>
     {% for p in projects %}
-    <option value="{{ p.id }}" {{ 'selected' if row and row.project_id == p.id|string }}>
-      {{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.boat_model %} ({{ p.boat_model }}){% endif %}
-    </option>
+    <optgroup label="{{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.boat_model %} ({{ p.boat_model }}){% endif %}">
+      <option value="p{{ p.id }}" {{ 'selected' if row and row.target == ('p' ~ p.id) }}>Весь проект</option>
+      {% for it in items_by_project.get(p.id, []) %}
+      <option value="i{{ it.id }}" {{ 'selected' if row and row.target == ('i' ~ it.id) }}>— {{ it.work_name }}</option>
+      {% endfor %}
+    </optgroup>
     {% endfor %}
   </select>
   <input type="text" inputmode="decimal" name="amount[]" placeholder="Сумма, ₽" class="split-amount"

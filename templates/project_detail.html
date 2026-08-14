@@ -143,6 +143,39 @@
     </div>
   </div>
 
+  {% if item_profitability %}
+  <section class="panel">
+    <h2>Прибыльность по работам</h2>
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th>Работа</th>
+            <th>Цена</th>
+            <th>Материалы</th>
+            <th>Транз. доход</th>
+            <th>Транз. расход</th>
+            <th>Прибыль</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in item_profitability %}
+          <tr>
+            <td>{{ row.item.work_name }}{% if row.item.status == 'removed' %} <span class="hint">(задача снята)</span>{% endif %}</td>
+            <td class="amount">{{ row.price|money }}</td>
+            <td class="amount">{{ row.materials_expense|money }}</td>
+            <td class="amount">{{ row.tx_income|money }}</td>
+            <td class="amount">{{ row.tx_expense|money }}</td>
+            <td class="amount" style="{{ 'color:var(--danger);' if row.profit < 0 else 'color:var(--success);' }}">{{ row.profit|money }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">«Транз. доход/расход» — суммы транзакций, привязанных именно к этой работе (не обязательно оплата клиента — может быть возврат, зачёт поставщика и т.п.), отдельно от цены работы.</p>
+  </section>
+  {% endif %}
+
   <section class="panel">
     <h2>Привязанные транзакции</h2>
     {% if transactions %}
@@ -198,7 +231,7 @@
               {% else %}
               <form action="{{ url_for('set_transaction_project') }}" method="post">
                 <input type="hidden" name="transaction_id" value="{{ t.id }}">
-                <input type="hidden" name="project_id" value="">
+                <input type="hidden" name="target" value="">
                 <input type="hidden" name="next" value="{{ url_for('project_detail', project_id=project.id) }}">
                 <button type="submit" class="icon-btn danger" title="Отвязать от проекта">
                   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -310,7 +343,7 @@
     <h2>Привязать транзакцию</h2>
     {% if unattached %}
     <form action="{{ url_for('set_transaction_project') }}" method="post" class="entry-form">
-      <input type="hidden" name="project_id" value="{{ project.id }}">
+      <input type="hidden" name="target" value="p{{ project.id }}">
       <input type="hidden" name="next" value="{{ url_for('project_detail', project_id=project.id) }}">
       <div class="field">
         <label for="transaction_id">Транзакция</label>
