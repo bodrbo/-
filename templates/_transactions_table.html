@@ -22,7 +22,7 @@
     <tbody>
       {% for t in transactions %}
       <tr>
-        <td class="muted">{{ t.operation_date[:10]|ru_date }}</td>
+        <td class="muted">{{ t.operation_date[:10]|ru_date }}{% if t.source == 'manual' %} <span class="hint">(вручную)</span>{% endif %}</td>
         <td class="amount">{{ (t.amount if t.direction == 'in' else -t.amount)|money }}</td>
         <td>{{ t.counterparty_name or '—' }}</td>
         <td>
@@ -71,6 +71,17 @@
               <path d="M3 10h14M3 10l4-4M3 10l4 4M17 10l-4-4M17 10l-4 4"/>
             </svg>
           </a>
+          {% if t.source == 'manual' %}
+          <form action="{{ url_for('delete_manual_transaction', transaction_id=t.id) }}" method="post"
+                data-ajax-form data-ajax-refresh data-confirm="Удалить эту транзакцию?">
+            <input type="hidden" name="next" value="{{ current_url }}">
+            <button type="submit" class="icon-btn danger" title="Удалить">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 5l10 10M15 5L5 15"/>
+              </svg>
+            </button>
+          </form>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}

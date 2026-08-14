@@ -1363,6 +1363,14 @@ def init_db():
         # are profitable, not just whole orders. NULL means "whole
         # project", same as before this column existed.
         conn.execute("ALTER TABLE bank_transactions ADD COLUMN item_id INTEGER")
+    if "source" not in bank_tx_cols:
+        # 'tbank' (the default, so every row imported before this column
+        # existed is correctly backfilled) or 'manual' — a cash payment or
+        # anything else that never hits the bank statement. Distinguishes
+        # rows an admin typed in by hand (editable/deletable) from imported
+        # bank data (should stay in sync with the statement, not be
+        # hand-edited or deleted here).
+        conn.execute("ALTER TABLE bank_transactions ADD COLUMN source TEXT NOT NULL DEFAULT 'tbank'")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tbank_payout_registries (
@@ -6937,7 +6945,7 @@ def analytics_index():
     context = _transactions_table_context(db)
     return render_template(
         "analytics.html", active_page="analytics", sub_page="transactions",
-        tbank_configured=tbank_statement_configured(),
+        tbank_configured=tbank_statement_configured(), today=today.isoformat(),
         fetch_default_start=week_ago.isoformat(), fetch_default_end=today.isoformat(),
         fetch_error=session.pop("tbank_fetch_error", None),
         fetch_result=session.pop("tbank_fetch_result", None),
@@ -7233,6 +7241,72 @@ def _redirect_or_ajax_ok(next_url):
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
         return ("", 204)
     return redirect(next_url)
+
+
+@app.route("/analytics/transactions/manual-add", methods=["POST"])
+@admin_login_required
+def add_manual_transaction():
+    # Covers anything that never hits the bank statement — cash payments
+    # most often, but any other off-account movement too. Same table as
+    # the Т-Банк import (bank_transactions), just tagged source='manual'
+    # so it's editable/deletable here, unlike imported rows which should
+    # stay in sync with the actual statement.
+    db = get_db()
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    next_url = request.form.get("next") or url_for("analytics_index")
+    operation_date = request.form.get("operation_date", "").strip()
+    direction = request.form.get("direction", "").strip()
+    amount_raw = request.form.get("amount", "").strip().replace(",", ".")
+    counterparty_name = request.form.get("counterparty_name", "").strip()
+    purpose = request.form.get("purpose", "").strip()
+
+    errors = []
+    if not operation_date:
+        errors.append("Укажите дату.")
+    if direction not in ("in", "out"):
+        errors.append("Укажите тип операции.")
+    amount = None
+    try:
+        amount = float(amount_raw)
+        if amount <= 0:
+            errors.append("Сумма должна быть больше нуля.")
+    except ValueError:
+        errors.append("Сумма должна быть числом.")
+
+    if errors:
+        if is_ajax:
+            return (" ".join(errors), 400)
+        return redirect(next_url)
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    operation_id = f"manual-{secrets.token_hex(8)}"
+    db.execute(
+        "INSERT INTO bank_transactions (operation_id, account_number, operation_date, amount, "
+        "direction, counterparty_name, purpose, source, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 'manual', ?)",
+        (operation_id, "Вручную", operation_date, amount, direction,
+         counterparty_name or None, purpose or None, now),
+    )
+    db.commit()
+    return _redirect_or_ajax_ok(next_url)
+
+
+@app.route("/analytics/transactions/<int:transaction_id>/delete", methods=["POST"])
+@admin_login_required
+def delete_manual_transaction(transaction_id):
+    # Only ever touches source='manual' rows — imported bank statement
+    # rows aren't deletable here, they should stay in sync with the
+    # actual account instead of being hand-removed.
+    db = get_db()
+    row = db.execute(
+        "SELECT source FROM bank_transactions WHERE id = ?", (transaction_id,)
+    ).fetchone()
+    if row is not None and row["source"] == "manual":
+        db.execute("DELETE FROM transaction_splits WHERE transaction_id = ?", (transaction_id,))
+        db.execute("DELETE FROM bank_transactions WHERE id = ?", (transaction_id,))
+        db.commit()
+    next_url = request.form.get("next") or url_for("analytics_index")
+    return _redirect_or_ajax_ok(next_url)
 
 
 @app.route("/analytics/transactions/project", methods=["POST"])
