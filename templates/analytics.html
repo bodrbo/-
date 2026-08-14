@@ -156,9 +156,32 @@
 
   <section class="panel">
     <h2>Транзакции по счёту</h2>
+    <form action="{{ url_for('analytics_index') }}" method="get" class="entry-form" style="margin-bottom:14px;">
+      <div class="field field-narrow">
+        <label for="filter_start">С даты</label>
+        <input type="date" id="filter_start" name="start" value="{{ filter_start }}">
+      </div>
+      <div class="field field-narrow">
+        <label for="filter_end">По дату</label>
+        <input type="date" id="filter_end" name="end" value="{{ filter_end }}">
+      </div>
+      <div class="field field-submit">
+        <button type="submit" class="btn-secondary">Применить</button>
+        {% if filter_start or filter_end %}
+        <a href="{{ url_for('analytics_index') }}" class="term" style="margin-left:10px;">Сбросить</a>
+        {% endif %}
+      </div>
+    </form>
+    {% if filter_start or filter_end %}
+    <p class="hint">Показаны транзакции за выбранный период (до 1000). Без фильтра по датам показываются последние 200.</p>
+    {% endif %}
     {% if transactions %}
+    <div class="table-search">
+      <input type="search" placeholder="Поиск по контрагенту или назначению платежа…"
+             data-filter-table="#transactions-table" aria-label="Поиск по транзакциям">
+    </div>
     <div class="table-scroll">
-      <table class="records">
+      <table class="records" id="transactions-table">
         <thead>
           <tr>
             <th>Дата</th>
@@ -223,6 +246,7 @@
         </tbody>
       </table>
     </div>
+    <p id="transactions-table-no-results" class="hint hidden">Ничего не найдено.</p>
     {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">

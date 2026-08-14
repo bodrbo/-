@@ -6706,9 +6706,46 @@ def _tbank_normalize_operation(op):
 @admin_login_required
 def analytics_index():
     db = get_db()
-    transactions = db.execute(
-        "SELECT * FROM bank_transactions ORDER BY operation_date DESC, id DESC LIMIT 200"
-    ).fetchall()
+    filter_start = request.args.get("start", "").strip()
+    filter_end = request.args.get("end", "").strip()
+    try:
+        dt.date.fromisoformat(filter_start)
+    except ValueError:
+        filter_start = ""
+    try:
+        dt.date.fromisoformat(filter_end)
+    except ValueError:
+        filter_end = ""
+
+    if filter_start or filter_end:
+        # An explicit date range means the admin is deliberately looking
+        # for something specific (possibly months back) rather than just
+        # the recent activity the default view covers — a much higher cap
+        # than the default 200, just as a sanity limit against an
+        # accidentally huge range, not a real-world ceiling.
+        # operation_date isn't stored in one consistent shape (plain
+        # "YYYY-MM-DD" from manual entry vs "YYYY-MM-DDTHH:MM:SSZ" from the
+        # Т-Банк import) — comparing only the first 10 characters sidesteps
+        # that entirely instead of guessing a time suffix to compare
+        # against (e.g. a literal "T" sorts after a space, which would
+        # wrongly exclude same-day ISO-with-time rows from the end bound).
+        conditions = []
+        params = []
+        if filter_start:
+            conditions.append("substr(operation_date, 1, 10) >= ?")
+            params.append(filter_start)
+        if filter_end:
+            conditions.append("substr(operation_date, 1, 10) <= ?")
+            params.append(filter_end)
+        transactions = db.execute(
+            f"SELECT * FROM bank_transactions WHERE {' AND '.join(conditions)} "
+            "ORDER BY operation_date DESC, id DESC LIMIT 1000",
+            params,
+        ).fetchall()
+    else:
+        transactions = db.execute(
+            "SELECT * FROM bank_transactions ORDER BY operation_date DESC, id DESC LIMIT 200"
+        ).fetchall()
     projects = db.execute("SELECT * FROM projects ORDER BY created_at DESC, id DESC").fetchall()
     split_rows = db.execute(
         "SELECT ts.transaction_id, ts.amount, projects.name AS project_name "
@@ -6729,6 +6766,7 @@ def analytics_index():
         fetch_default_start=week_ago.isoformat(), fetch_default_end=today.isoformat(),
         fetch_error=session.pop("tbank_fetch_error", None),
         fetch_result=session.pop("tbank_fetch_result", None),
+        filter_start=filter_start, filter_end=filter_end,
     )
 
 
