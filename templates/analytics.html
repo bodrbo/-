@@ -156,7 +156,7 @@
 
   <section class="panel">
     <h2>Транзакции по счёту</h2>
-    <form action="{{ url_for('analytics_index') }}" method="get" class="entry-form" style="margin-bottom:14px;">
+    <form id="transactions-filter-form" action="{{ url_for('analytics_index') }}" method="get" class="entry-form" style="margin-bottom:14px;">
       <div class="field field-narrow">
         <label for="filter_start">С даты</label>
         <input type="date" id="filter_start" name="start" value="{{ filter_start }}">
@@ -167,106 +167,104 @@
       </div>
       <div class="field field-submit">
         <button type="submit" class="btn-secondary">Применить</button>
-        {% if filter_start or filter_end %}
-        <a href="{{ url_for('analytics_index') }}" class="term" style="margin-left:10px;">Сбросить</a>
-        {% endif %}
+        <a href="{{ url_for('analytics_index') }}" id="transactions-filter-reset"
+           class="term {{ 'hidden' if not (filter_start or filter_end) }}" style="margin-left:10px;">Сбросить</a>
       </div>
     </form>
-    {% if filter_start or filter_end %}
-    <p class="hint">Показаны транзакции за выбранный период (до 1000). Без фильтра по датам показываются последние 200.</p>
-    {% endif %}
-    {% if transactions %}
-    <div class="table-search">
-      <input type="search" placeholder="Поиск по контрагенту или назначению платежа…"
-             data-filter-table="#transactions-table" aria-label="Поиск по транзакциям">
+    <div id="transactions-container">
+      {% include "_transactions_table.html" %}
     </div>
-    <div class="table-scroll">
-      <table class="records" id="transactions-table">
-        <thead>
-          <tr>
-            <th>Дата</th>
-            <th>Сумма</th>
-            <th>Контрагент</th>
-            <th>Назначение платежа</th>
-            <th>Категория</th>
-            <th>Проект</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for t in transactions %}
-          <tr>
-            <td class="muted">{{ t.operation_date[:10]|ru_date }}</td>
-            <td class="amount">{{ (t.amount if t.direction == 'in' else -t.amount)|money }}</td>
-            <td>{{ t.counterparty_name or '—' }}</td>
-            <td>
-              <form action="{{ url_for('set_transaction_purpose') }}" method="post" class="purpose-edit-form row-actions">
-                <input type="hidden" name="transaction_id" value="{{ t.id }}">
-                <input type="hidden" name="next" value="{{ current_url }}">
-                <input type="text" name="purpose" value="{{ t.purpose or '' }}" placeholder="—" class="purpose-input">
-                <button type="submit" class="icon-btn approve" title="Сохранить">
-                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M4 10.5l4 4 8-9"/>
-                  </svg>
-                </button>
-              </form>
-            </td>
-            <td class="muted">{{ t.category or '—' }}</td>
-            <td>
-              {% if t.id in splits_by_transaction %}
-              <div class="hint" style="margin:0;">
-                Разбито:
-                {% for s in splits_by_transaction[t.id] %}
-                {{ s.project_name }} ({{ s.amount|money }} ₽){% if not loop.last %}, {% endif %}
-                {% endfor %}
-              </div>
-              {% else %}
-              <form action="{{ url_for('set_transaction_project') }}" method="post">
-                <input type="hidden" name="transaction_id" value="{{ t.id }}">
-                <input type="hidden" name="next" value="{{ current_url }}">
-                <select name="project_id" class="project-select" onchange="this.form.submit()">
-                  <option value="">— без проекта —</option>
-                  {% for p in projects %}
-                  <option value="{{ p.id }}" {{ 'selected' if t.project_id == p.id }}>
-                    {{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.boat_model %} ({{ p.boat_model }}){% endif %}
-                  </option>
-                  {% endfor %}
-                </select>
-              </form>
-              {% endif %}
-            </td>
-            <td class="row-actions">
-              <a href="{{ url_for('transaction_split', transaction_id=t.id, next=current_url) }}"
-                 class="icon-btn" title="{{ 'Изменить разбивку' if t.id in splits_by_transaction else 'Разбить между проектами' }}">
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M3 10h14M3 10l4-4M3 10l4 4M17 10l-4-4M17 10l-4 4"/>
-                </svg>
-              </a>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <p id="transactions-table-no-results" class="hint hidden">Ничего не найдено.</p>
-    {% else %}
-    <div class="empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">Транзакций пока нет</div>
-      <div class="s">
-        {% if tbank_configured %}
-        Здесь появится выписка по счёту, как только заработает выгрузка из Т-Банка.
-        {% else %}
-        Подключите Т-Банк (см. подсказку выше), чтобы начать загружать выписку.
-        {% endif %}
-      </div>
-    </div>
-    {% endif %}
   </section>
 
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+// Applying the date filter, assigning a project, or saving a purpose all
+// used to be full page navigations — this fetches the transactions table
+// in place instead, the same "no reload" feel as the instant search.
+// Listeners run in the capture phase and call preventDefault() before
+// loader.js's own (bubble-phase) submit/click handlers see the event, so
+// its page-navigation loading spinner doesn't show for these in-place
+// updates (it has no way to know they're not a real navigation, and
+// nothing would ever hide it again since the page never finishes loading).
+(function () {
+  var container = document.getElementById("transactions-container");
+  var filterForm = document.getElementById("transactions-filter-form");
+  var resetLink = document.getElementById("transactions-filter-reset");
+  var startInput = document.getElementById("filter_start");
+  var endInput = document.getElementById("filter_end");
+  if (!container || !filterForm) return;
+
+  function wireAjaxForms(root) {
+    root.querySelectorAll("form[data-ajax-form]").forEach(function (form) {
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        fetch(form.action, {
+          method: "POST",
+          body: new FormData(form),
+          headers: {"X-Requested-With": "XMLHttpRequest"},
+        }).catch(function () {
+          alert("Не удалось сохранить. Попробуйте ещё раз.");
+        });
+      }, true);
+    });
+  }
+
+  function paramsFromInputs() {
+    var parts = [];
+    if (startInput.value) parts.push("start=" + encodeURIComponent(startInput.value));
+    if (endInput.value) parts.push("end=" + encodeURIComponent(endInput.value));
+    return parts.join("&");
+  }
+
+  function loadTransactions(params, push) {
+    var query = params ? "?" + params : "";
+    fetch("/analytics/transactions-fragment" + query, {
+      headers: {"X-Requested-With": "XMLHttpRequest"},
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error("bad status " + r.status);
+        return r.text();
+      })
+      .then(function (html) {
+        container.innerHTML = html;
+        if (window.initTableFilters) window.initTableFilters(container);
+        wireAjaxForms(container);
+        if (resetLink) resetLink.classList.toggle("hidden", !params);
+        if (push) history.pushState({params: params}, "", "/analytics" + query);
+      })
+      .catch(function () {
+        // Something's genuinely wrong (network down, server error) — fall
+        // back to a real navigation rather than leaving the table stuck.
+        window.location.href = "/analytics" + query;
+      });
+  }
+
+  filterForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    loadTransactions(paramsFromInputs(), true);
+  }, true);
+
+  if (resetLink) {
+    resetLink.addEventListener("click", function (e) {
+      e.preventDefault();
+      startInput.value = "";
+      endInput.value = "";
+      loadTransactions("", true);
+    }, true);
+  }
+
+  window.addEventListener("popstate", function () {
+    var params = new URLSearchParams(location.search);
+    startInput.value = params.get("start") || "";
+    endInput.value = params.get("end") || "";
+    loadTransactions(location.search.replace(/^\?/, ""), false);
+  });
+
+  wireAjaxForms(container);
+})();
+</script>
 
 </body>
 </html>

@@ -183,10 +183,14 @@ function smartMatchScore(text, query) {
 // order's status) combines with it: a row must satisfy both to stay
 // visible. Used on the supply catalog/warehouse pages and the tuning
 // orders list, but written generically so any table can opt into either
-// or both.
-(function () {
-  var textInputs = Array.prototype.slice.call(document.querySelectorAll("input[data-filter-table]"));
-  var statusSelects = Array.prototype.slice.call(document.querySelectorAll("select[data-filter-status]"));
+// or both. Exposed as window.initTableFilters(root) — called once for the
+// whole document below, and again by any page that swaps a filtered
+// table's markup in via fetch (e.g. Analytics' date range) so the fresh
+// input/table pair gets wired up too.
+function initTableFilters(root) {
+  root = root || document;
+  var textInputs = Array.prototype.slice.call(root.querySelectorAll("input[data-filter-table]"));
+  var statusSelects = Array.prototype.slice.call(root.querySelectorAll("select[data-filter-status]"));
   if (!textInputs.length && !statusSelects.length) return;
 
   var groups = {};
@@ -254,7 +258,8 @@ function smartMatchScore(text, query) {
       group.statusSelect.addEventListener("change", apply);
     }
   });
-})();
+}
+initTableFilters();
 
 // Searchable combobox — replaces a giant <select> (e.g. picking a catalog
 // product to add to a tuning order, out of ~2800) with a text input that

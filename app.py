@@ -6702,10 +6702,7 @@ def _tbank_normalize_operation(op):
     }
 
 
-@app.route("/analytics")
-@admin_login_required
-def analytics_index():
-    db = get_db()
+def _parse_date_filter():
     filter_start = request.args.get("start", "").strip()
     filter_end = request.args.get("end", "").strip()
     try:
@@ -6716,7 +6713,10 @@ def analytics_index():
         dt.date.fromisoformat(filter_end)
     except ValueError:
         filter_end = ""
+    return filter_start, filter_end
 
+
+def _fetch_filtered_transactions(db, filter_start, filter_end):
     if filter_start or filter_end:
         # An explicit date range means the admin is deliberately looking
         # for something specific (possibly months back) rather than just
@@ -6746,12 +6746,6 @@ def analytics_index():
         transactions = db.execute(
             "SELECT * FROM bank_transactions ORDER BY operation_date DESC, id DESC LIMIT 200"
         ).fetchall()
-    projects = db.execute(
-        "SELECT projects.*, tuning_orders.client_name AS client_name, "
-        "tuning_orders.boat_model AS boat_model "
-        "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
-        "ORDER BY projects.created_at DESC, projects.id DESC"
-    ).fetchall()
     split_rows = db.execute(
         "SELECT ts.transaction_id, ts.amount, projects.name AS project_name "
         "FROM transaction_splits ts JOIN projects ON projects.id = ts.project_id "
@@ -6762,8 +6756,18 @@ def analytics_index():
         splits_by_transaction.setdefault(s["transaction_id"], []).append(
             {"project_name": s["project_name"], "amount": s["amount"]}
         )
-    today = dt.date.today()
-    week_ago = today - dt.timedelta(days=7)
+    return transactions, splits_by_transaction
+
+
+def _transactions_table_context(db):
+    filter_start, filter_end = _parse_date_filter()
+    transactions, splits_by_transaction = _fetch_filtered_transactions(db, filter_start, filter_end)
+    projects = db.execute(
+        "SELECT projects.*, tuning_orders.client_name AS client_name, "
+        "tuning_orders.boat_model AS boat_model "
+        "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
+        "ORDER BY projects.created_at DESC, projects.id DESC"
+    ).fetchall()
     # Actions on a row (assign project, save purpose, split) redirect back
     # here afterwards — carry the active date filter along in that "next"
     # URL, or it silently resets to the unfiltered view on every single
@@ -6772,15 +6776,40 @@ def analytics_index():
         "analytics_index",
         start=filter_start or None, end=filter_end or None,
     )
+    return {
+        "transactions": transactions, "projects": projects,
+        "splits_by_transaction": splits_by_transaction, "current_url": current_url,
+        "filter_start": filter_start, "filter_end": filter_end,
+    }
+
+
+@app.route("/analytics")
+@admin_login_required
+def analytics_index():
+    db = get_db()
+    today = dt.date.today()
+    week_ago = today - dt.timedelta(days=7)
+    context = _transactions_table_context(db)
     return render_template(
         "analytics.html", active_page="analytics", sub_page="transactions",
-        transactions=transactions, projects=projects, splits_by_transaction=splits_by_transaction,
-        current_url=current_url,
         tbank_configured=tbank_statement_configured(),
         fetch_default_start=week_ago.isoformat(), fetch_default_end=today.isoformat(),
         fetch_error=session.pop("tbank_fetch_error", None),
         fetch_result=session.pop("tbank_fetch_result", None),
-        filter_start=filter_start, filter_end=filter_end,
+        **context,
+    )
+
+
+@app.route("/analytics/transactions-fragment")
+@admin_login_required
+def analytics_transactions_fragment():
+    """Same transactions table as the main page, rendered without the
+    surrounding layout — fetched via JS when the date filter is applied,
+    so that doesn't need a full page navigation."""
+    db = get_db()
+    context = _transactions_table_context(db)
+    return render_template(
+        "_transactions_table.html", tbank_configured=tbank_statement_configured(), **context
     )
 
 
@@ -7004,6 +7033,18 @@ def project_detail(project_id):
     )
 
 
+def _redirect_or_ajax_ok(next_url):
+    # The transactions table submits these same forms via fetch() (see
+    # analytics.html) so assigning a project or saving a purpose doesn't
+    # reload the whole page and lose the date filter's scroll position —
+    # a plain <form> submit (JS disabled, or any other caller) still gets
+    # the normal redirect. request.form always has "next" set to the
+    # current filtered URL either way (see current_url in app.py).
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return ("", 204)
+    return redirect(next_url)
+
+
 @app.route("/analytics/transactions/project", methods=["POST"])
 @admin_login_required
 def set_transaction_project():
@@ -7021,7 +7062,7 @@ def set_transaction_project():
         )
         db.commit()
     next_url = request.form.get("next") or url_for("analytics_index")
-    return redirect(next_url)
+    return _redirect_or_ajax_ok(next_url)
 
 
 @app.route("/analytics/transactions/purpose", methods=["POST"])
@@ -7037,7 +7078,7 @@ def set_transaction_purpose():
         )
         db.commit()
     next_url = request.form.get("next") or url_for("analytics_index")
-    return redirect(next_url)
+    return _redirect_or_ajax_ok(next_url)
 
 
 def _normalize_transaction_split(db, transaction_id):

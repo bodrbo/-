@@ -1,0 +1,90 @@
+{% if filter_start or filter_end %}
+<p class="hint">Показаны транзакции за выбранный период (до 1000). Без фильтра по датам показываются последние 200.</p>
+{% endif %}
+{% if transactions %}
+<div class="table-search">
+  <input type="search" placeholder="Поиск по контрагенту или назначению платежа…"
+         data-filter-table="#transactions-table" aria-label="Поиск по транзакциям">
+</div>
+<div class="table-scroll">
+  <table class="records" id="transactions-table">
+    <thead>
+      <tr>
+        <th>Дата</th>
+        <th>Сумма</th>
+        <th>Контрагент</th>
+        <th>Назначение платежа</th>
+        <th>Категория</th>
+        <th>Проект</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in transactions %}
+      <tr>
+        <td class="muted">{{ t.operation_date[:10]|ru_date }}</td>
+        <td class="amount">{{ (t.amount if t.direction == 'in' else -t.amount)|money }}</td>
+        <td>{{ t.counterparty_name or '—' }}</td>
+        <td>
+          <form action="{{ url_for('set_transaction_purpose') }}" method="post" class="purpose-edit-form row-actions" data-ajax-form>
+            <input type="hidden" name="transaction_id" value="{{ t.id }}">
+            <input type="hidden" name="next" value="{{ current_url }}">
+            <input type="text" name="purpose" value="{{ t.purpose or '' }}" placeholder="—" class="purpose-input">
+            <button type="submit" class="icon-btn approve" title="Сохранить">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 10.5l4 4 8-9"/>
+              </svg>
+            </button>
+          </form>
+        </td>
+        <td class="muted">{{ t.category or '—' }}</td>
+        <td>
+          {% if t.id in splits_by_transaction %}
+          <div class="hint" style="margin:0;">
+            Разбито:
+            {% for s in splits_by_transaction[t.id] %}
+            {{ s.project_name }} ({{ s.amount|money }} ₽){% if not loop.last %}, {% endif %}
+            {% endfor %}
+          </div>
+          {% else %}
+          <form action="{{ url_for('set_transaction_project') }}" method="post" data-ajax-form>
+            <input type="hidden" name="transaction_id" value="{{ t.id }}">
+            <input type="hidden" name="next" value="{{ current_url }}">
+            <select name="project_id" class="project-select" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()">
+              <option value="">— без проекта —</option>
+              {% for p in projects %}
+              <option value="{{ p.id }}" {{ 'selected' if t.project_id == p.id }}>
+                {{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.boat_model %} ({{ p.boat_model }}){% endif %}
+              </option>
+              {% endfor %}
+            </select>
+          </form>
+          {% endif %}
+        </td>
+        <td class="row-actions">
+          <a href="{{ url_for('transaction_split', transaction_id=t.id, next=current_url) }}"
+             class="icon-btn" title="{{ 'Изменить разбивку' if t.id in splits_by_transaction else 'Разбить между проектами' }}">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 10h14M3 10l4-4M3 10l4 4M17 10l-4-4M17 10l-4 4"/>
+            </svg>
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p id="transactions-table-no-results" class="hint hidden">Ничего не найдено.</p>
+{% else %}
+<div class="empty-state">
+  <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+  <div class="t">Транзакций пока нет</div>
+  <div class="s">
+    {% if tbank_configured %}
+    Здесь появится выписка по счёту, как только заработает выгрузка из Т-Банка.
+    {% else %}
+    Подключите Т-Банк (см. подсказку выше), чтобы начать загружать выписку.
+    {% endif %}
+  </div>
+</div>
+{% endif %}
