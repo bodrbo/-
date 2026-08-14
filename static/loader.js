@@ -210,17 +210,32 @@ function smartMatchScore(text, query) {
     groupFor(select.getAttribute("data-filter-status")).statusSelect = select;
   });
 
+  // A row's plain textContent pulls in every <option> of any <select> it
+  // contains, not just the one currently selected — e.g. a per-row
+  // "assign to project" dropdown lists every project, so every OTHER
+  // project's name/client/boat would silently count toward this row's
+  // searchable text too. Strip <select>s out before reading textContent so
+  // a search only matches what's actually shown in the row.
+  function rowSearchText(row) {
+    var clone = row.cloneNode(true);
+    clone.querySelectorAll("select").forEach(function (s) { s.remove(); });
+    return clone.textContent.toLowerCase();
+  }
+
   Object.keys(groups).forEach(function (selector) {
     var group = groups[selector];
     if (!group.rows.length) return;
+    // Computed once, not per keystroke — the set of <option>s in a row's
+    // dropdowns doesn't change as you type, only which one is selected.
+    var searchText = group.rows.map(rowSearchText);
     var timer = null;
 
     function apply() {
       var q = group.textInput ? group.textInput.value.trim().toLowerCase() : "";
       var status = group.statusSelect ? group.statusSelect.value : "";
       var visible = 0;
-      group.rows.forEach(function (row) {
-        var textOk = !q || smartMatchScore(row.textContent.toLowerCase(), q) !== -1;
+      group.rows.forEach(function (row, i) {
+        var textOk = !q || smartMatchScore(searchText[i], q) !== -1;
         var statusOk = !status || row.getAttribute("data-status") === status;
         var match = textOk && statusOk;
         row.classList.toggle("hidden", !match);
