@@ -6746,7 +6746,12 @@ def analytics_index():
         transactions = db.execute(
             "SELECT * FROM bank_transactions ORDER BY operation_date DESC, id DESC LIMIT 200"
         ).fetchall()
-    projects = db.execute("SELECT * FROM projects ORDER BY created_at DESC, id DESC").fetchall()
+    projects = db.execute(
+        "SELECT projects.*, tuning_orders.client_name AS client_name, "
+        "tuning_orders.boat_model AS boat_model "
+        "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
+        "ORDER BY projects.created_at DESC, projects.id DESC"
+    ).fetchall()
     split_rows = db.execute(
         "SELECT ts.transaction_id, ts.amount, projects.name AS project_name "
         "FROM transaction_splits ts JOIN projects ON projects.id = ts.project_id "

@@ -227,7 +227,9 @@
                 <select name="project_id" class="project-select" onchange="this.form.submit()">
                   <option value="">— без проекта —</option>
                   {% for p in projects %}
-                  <option value="{{ p.id }}" {{ 'selected' if t.project_id == p.id }}>{{ p.name }}</option>
+                  <option value="{{ p.id }}" {{ 'selected' if t.project_id == p.id }}>
+                    {{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.boat_model %} ({{ p.boat_model }}){% endif %}
+                  </option>
                   {% endfor %}
                 </select>
               </form>
