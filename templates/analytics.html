@@ -202,7 +202,7 @@
             <td>
               <form action="{{ url_for('set_transaction_purpose') }}" method="post" class="purpose-edit-form row-actions">
                 <input type="hidden" name="transaction_id" value="{{ t.id }}">
-                <input type="hidden" name="next" value="{{ url_for('analytics_index') }}">
+                <input type="hidden" name="next" value="{{ current_url }}">
                 <input type="text" name="purpose" value="{{ t.purpose or '' }}" placeholder="—" class="purpose-input">
                 <button type="submit" class="icon-btn approve" title="Сохранить">
                   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -223,7 +223,7 @@
               {% else %}
               <form action="{{ url_for('set_transaction_project') }}" method="post">
                 <input type="hidden" name="transaction_id" value="{{ t.id }}">
-                <input type="hidden" name="next" value="{{ url_for('analytics_index') }}">
+                <input type="hidden" name="next" value="{{ current_url }}">
                 <select name="project_id" class="project-select" onchange="this.form.submit()">
                   <option value="">— без проекта —</option>
                   {% for p in projects %}
@@ -236,7 +236,7 @@
               {% endif %}
             </td>
             <td class="row-actions">
-              <a href="{{ url_for('transaction_split', transaction_id=t.id, next=url_for('analytics_index')) }}"
+              <a href="{{ url_for('transaction_split', transaction_id=t.id, next=current_url) }}"
                  class="icon-btn" title="{{ 'Изменить разбивку' if t.id in splits_by_transaction else 'Разбить между проектами' }}">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M3 10h14M3 10l4-4M3 10l4 4M17 10l-4-4M17 10l-4 4"/>

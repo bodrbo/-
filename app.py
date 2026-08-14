@@ -6764,9 +6764,18 @@ def analytics_index():
         )
     today = dt.date.today()
     week_ago = today - dt.timedelta(days=7)
+    # Actions on a row (assign project, save purpose, split) redirect back
+    # here afterwards — carry the active date filter along in that "next"
+    # URL, or it silently resets to the unfiltered view on every single
+    # action, forcing the admin to re-apply it each time.
+    current_url = url_for(
+        "analytics_index",
+        start=filter_start or None, end=filter_end or None,
+    )
     return render_template(
         "analytics.html", active_page="analytics", sub_page="transactions",
         transactions=transactions, projects=projects, splits_by_transaction=splits_by_transaction,
+        current_url=current_url,
         tbank_configured=tbank_statement_configured(),
         fetch_default_start=week_ago.isoformat(), fetch_default_end=today.isoformat(),
         fetch_error=session.pop("tbank_fetch_error", None),
