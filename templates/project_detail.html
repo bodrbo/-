@@ -153,7 +153,6 @@
             <th>Работа</th>
             <th>Цена</th>
             <th>Материалы</th>
-            <th>Транз. доход</th>
             <th>Транз. расход</th>
             <th>Прибыль</th>
           </tr>
@@ -164,7 +163,6 @@
             <td>{{ row.item.work_name }}{% if row.item.status == 'removed' %} <span class="hint">(задача снята)</span>{% endif %}</td>
             <td class="amount">{{ row.price|money }}</td>
             <td class="amount">{{ row.materials_expense|money }}</td>
-            <td class="amount">{{ row.tx_income|money }}</td>
             <td class="amount">{{ row.tx_expense|money }}</td>
             <td class="amount" style="{{ 'color:var(--danger);' if row.profit < 0 else 'color:var(--success);' }}">{{ row.profit|money }}</td>
           </tr>
@@ -172,7 +170,7 @@
         </tbody>
       </table>
     </div>
-    <p class="hint">«Транз. доход/расход» — суммы транзакций, привязанных именно к этой работе (не обязательно оплата клиента — может быть возврат, зачёт поставщика и т.п.), отдельно от цены работы.</p>
+    <p class="hint">«Транз. расход» — расходные транзакции, привязанные именно к этой работе (сверх материалов). Доход по проекту не делится по работам — клиент платит за весь заказ целиком, поэтому прибыль работы считается как цена минус её расходы.</p>
   </section>
   {% endif %}
 

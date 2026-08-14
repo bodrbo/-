@@ -7067,15 +7067,14 @@ def _project_totals(db, project_id):
 
 def _item_profitability(db, order_id):
     """Per-work-item breakdown for one order: price (what the item is
-    billed at) against material costs (via the existing
+    billed at) against its costs — material write-offs (via the existing
     tuning_item_assignments chain — team_tuning_task_writeoff_material)
-    and any bank transactions explicitly linked to that item (the new
+    and any expense transactions explicitly linked to that item (the new
     "Весь проект"/work-item picker in _transactions_table.html and
-    transaction_split.html). Shown separately from price rather than
-    folded into one "income" figure, since a linked transaction isn't
-    necessarily the client's payment for that item — it could be
-    something else (a refund, a supplier credit) that shouldn't be
-    silently assumed to duplicate or replace the billed price."""
+    transaction_split.html). Income transactions are deliberately NOT
+    attributed per item here: the client pays for the whole project, not
+    per work item, so there's no meaningful way to split their payment
+    across items — only costs can be traced to a specific one."""
     items = db.execute(
         "SELECT * FROM tuning_order_items WHERE order_id = ? ORDER BY id", (order_id,)
     ).fetchall()
@@ -7087,29 +7086,24 @@ def _item_profitability(db, order_id):
             "WHERE tia.item_id = ?",
             (item["id"],),
         ).fetchone()["expense"]
-        tx_row = db.execute(
-            "SELECT "
-            "COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE 0 END), 0) AS income, "
-            "COALESCE(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END), 0) AS expense "
-            "FROM bank_transactions "
-            "WHERE item_id = ? AND id NOT IN (SELECT transaction_id FROM transaction_splits)",
+        tx_expense_direct = db.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS expense FROM bank_transactions "
+            "WHERE item_id = ? AND direction = 'out' "
+            "AND id NOT IN (SELECT transaction_id FROM transaction_splits)",
             (item["id"],),
-        ).fetchone()
-        split_row = db.execute(
-            "SELECT "
-            "COALESCE(SUM(CASE WHEN bt.direction='in' THEN ts.amount ELSE 0 END), 0) AS income, "
-            "COALESCE(SUM(CASE WHEN bt.direction='out' THEN ts.amount ELSE 0 END), 0) AS expense "
+        ).fetchone()["expense"]
+        tx_expense_split = db.execute(
+            "SELECT COALESCE(SUM(ts.amount), 0) AS expense "
             "FROM transaction_splits ts JOIN bank_transactions bt ON bt.id = ts.transaction_id "
-            "WHERE ts.item_id = ?",
+            "WHERE ts.item_id = ? AND bt.direction = 'out'",
             (item["id"],),
-        ).fetchone()
-        tx_income = tx_row["income"] + split_row["income"]
-        tx_expense = tx_row["expense"] + split_row["expense"]
+        ).fetchone()["expense"]
+        tx_expense = tx_expense_direct + tx_expense_split
         price = item["price"] if item["status"] != "removed" else 0.0
-        profit = price + tx_income - materials_expense - tx_expense
+        profit = price - materials_expense - tx_expense
         result.append({
             "item": item, "price": price, "materials_expense": materials_expense,
-            "tx_income": tx_income, "tx_expense": tx_expense, "profit": profit,
+            "tx_expense": tx_expense, "profit": profit,
         })
     return result
 
