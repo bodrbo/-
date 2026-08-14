@@ -307,7 +307,12 @@
         <tbody>
           {% for g in goods %}
           <tr>
-            <td>{{ g.product_name }}</td>
+            <td>
+              {{ g.product_name }}
+              {% if g.writeoff_warehouse_name %}
+              <div class="hint" style="margin:2px 0 0 0;">Списано со склада «{{ g.writeoff_warehouse_name }}»</div>
+              {% endif %}
+            </td>
             <td class="amount">{{ g.quantity|float|round(2) }} {{ cost_units|selectattr('value', 'equalto', g.unit)|map(attribute='label')|first }}</td>
             <td class="amount">{{ g.unit_price|money }}</td>
             <td class="amount">{{ (g.quantity * g.unit_price)|money }}</td>

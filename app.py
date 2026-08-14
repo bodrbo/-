@@ -781,6 +781,9 @@ TUNING_ASSIGNABLE_POSITIONS = ("Тюнингмэн",)
 # picks in the catalog (SUPPLY_WRITEOFF_REASONS), since this one is implied
 # by the write-off's origin rather than chosen.
 TUNING_MATERIAL_WRITEOFF_REASON = "Использовано в работе"
+# Auto-generated when adding a catalog product to a tuning order's
+# "Товары" and a single warehouse has enough of it in stock.
+TUNING_GOODS_WRITEOFF_REASON = "Продано в заказе"
 
 # Captains and tuningmen can both request supply of something not on the
 # shelf (special consumables, tools) — same union of positions as the
@@ -1458,6 +1461,12 @@ def init_db():
         conn.execute("ALTER TABLE supply_writeoffs ADD COLUMN employee_name TEXT")
     if "tuning_item_assignment_id" not in supply_writeoff_cols:
         conn.execute("ALTER TABLE supply_writeoffs ADD COLUMN tuning_item_assignment_id INTEGER")
+    # Migration path for databases created before adding a catalog product
+    # to a tuning order (the "Товары" section) auto-wrote it off stock —
+    # links back to the specific tuning_order_products row so removing
+    # that row can find and reverse its write-off.
+    if "tuning_order_product_id" not in supply_writeoff_cols:
+        conn.execute("ALTER TABLE supply_writeoffs ADD COLUMN tuning_order_product_id INTEGER")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS supply_requests (
@@ -4011,7 +4020,12 @@ def edit_tuning_order(order_id):
             items.append(item)
         assignable_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
         goods = db.execute(
-            "SELECT * FROM tuning_order_products WHERE order_id = ? ORDER BY id", (order_id,)
+            "SELECT tuning_order_products.*, supply_warehouses.name AS writeoff_warehouse_name "
+            "FROM tuning_order_products "
+            "LEFT JOIN supply_writeoffs ON supply_writeoffs.tuning_order_product_id = tuning_order_products.id "
+            "LEFT JOIN supply_warehouses ON supply_warehouses.id = supply_writeoffs.warehouse_id "
+            "WHERE tuning_order_products.order_id = ? ORDER BY tuning_order_products.id",
+            (order_id,),
         ).fetchall()
         goods_subtotal = sum(g["quantity"] * g["unit_price"] for g in goods)
         catalog_products = db.execute("SELECT * FROM supply_products ORDER BY name").fetchall()
@@ -4313,6 +4327,45 @@ def cancel_note_reminder(order_id, note_id, reminder_id):
     return redirect(url_for("edit_tuning_order", order_id=order_id) + "#notes")
 
 
+def _auto_writeoff_order_product(db, order_id, product_id, quantity, tuning_order_product_id):
+    """If a single warehouse holds enough of this product, write that
+    quantity off automatically and attribute the cost to the order's
+    project — same idea as a tuningman writing off materials against an
+    assigned task (team_tuning_task_writeoff_material), just triggered by
+    adding a goods line to the order instead of using it on a task.
+
+    Deliberately does nothing (no error, no partial write-off) if no
+    single warehouse has enough — there's no UI here to split a write-off
+    across warehouses or to pick one by hand, so "in stock" only counts
+    when one place alone can cover it. Returns the warehouse row written
+    off from, or None."""
+    stock_row = db.execute(
+        "SELECT * FROM supply_stock WHERE product_id = ? AND quantity >= ? "
+        "ORDER BY quantity DESC LIMIT 1",
+        (product_id, quantity),
+    ).fetchone()
+    if stock_row is None:
+        return None
+    product = db.execute("SELECT * FROM supply_products WHERE id = ?", (product_id,)).fetchone()
+    project_id = _project_id_for_tuning_order(db, order_id)
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    amount = quantity * product["cost_price"]
+    db.execute(
+        "INSERT INTO supply_writeoffs (product_id, warehouse_id, quantity, reason, note, created_at, "
+        "project_id, cost_price, amount, employee_name, tuning_order_product_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (product_id, stock_row["warehouse_id"], quantity, TUNING_GOODS_WRITEOFF_REASON, None, now,
+         project_id, product["cost_price"], amount, session.get("admin_name"), tuning_order_product_id),
+    )
+    db.execute(
+        "UPDATE supply_stock SET quantity = quantity - ? WHERE id = ?",
+        (quantity, stock_row["id"]),
+    )
+    db.commit()
+    _maybe_create_low_stock_request(db, product_id)
+    return stock_row
+
+
 @app.route("/tuning/<int:order_id>/products/add", methods=["POST"])
 @admin_login_required
 def add_tuning_order_product(order_id):
@@ -4336,13 +4389,14 @@ def add_tuning_order_product(order_id):
 
     if product is not None and quantity is not None and quantity > 0:
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-        db.execute(
+        cur = db.execute(
             "INSERT INTO tuning_order_products (order_id, product_id, product_name, quantity, "
             "unit_price, cost_price, unit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (order_id, product_id, product["name"], quantity,
              product["sale_price"], product["cost_price"], product["cost_unit"], now),
         )
         db.commit()
+        _auto_writeoff_order_product(db, order_id, product_id, quantity, cur.lastrowid)
         _recompute_order_totals(db, order_id)
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
@@ -4351,6 +4405,19 @@ def add_tuning_order_product(order_id):
 @admin_login_required
 def remove_tuning_order_product(order_id, row_id):
     db = get_db()
+    # Undo any stock this row's auto-write-off took (see
+    # _auto_writeoff_order_product) — otherwise removing a mistakenly
+    # added product would leave the stock deducted with no way to get it
+    # back short of a manual "Оприходовать".
+    writeoff = db.execute(
+        "SELECT * FROM supply_writeoffs WHERE tuning_order_product_id = ?", (row_id,)
+    ).fetchone()
+    if writeoff is not None:
+        db.execute(
+            "UPDATE supply_stock SET quantity = quantity + ? WHERE product_id = ? AND warehouse_id = ?",
+            (writeoff["quantity"], writeoff["product_id"], writeoff["warehouse_id"]),
+        )
+        db.execute("DELETE FROM supply_writeoffs WHERE id = ?", (writeoff["id"],))
     db.execute("DELETE FROM tuning_order_products WHERE id = ? AND order_id = ?", (row_id, order_id))
     db.commit()
     _recompute_order_totals(db, order_id)
