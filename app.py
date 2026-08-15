@@ -219,6 +219,31 @@ CRON_SECRET = os.environ.get("CRON_SECRET")
 TILDA_WEBHOOK_SECRET = os.environ.get("TILDA_WEBHOOK_SECRET")
 
 # ---------------------------------------------------------------------
+# МодульКасса — автоматическая фискализация чека при записи оплаты по
+# заказу вручную (см. add_tuning_payment). MODULKASSA_USERNAME/PASSWORD —
+# НЕ пароль от личного кабинета МодульКассы, а логин/пароль, которые
+# выдаёт их API в ответ на разовый вызов /associate (см. README/чат) —
+# именно их нужно сохранить сюда.
+#   MODULKASSA_USERNAME, MODULKASSA_PASSWORD  — из ответа /associate
+#   MODULKASSA_ENV = "production"             — иначе (по умолчанию)
+#                                                используется тестовый
+#                                                контур demo.modulpos.ru,
+#                                                который "фискализирует"
+#                                                виртуально, без реальных
+#                                                чеков
+# Без логина/пароля фискализация просто тихо не выполняется — платёж всё
+# равно записывается как обычно.
+# ---------------------------------------------------------------------
+MODULKASSA_USERNAME = os.environ.get("MODULKASSA_USERNAME")
+MODULKASSA_PASSWORD = os.environ.get("MODULKASSA_PASSWORD")
+MODULKASSA_BASE_URL = (
+    "https://service.modulpos.ru/api/fn" if os.environ.get("MODULKASSA_ENV") == "production"
+    else "https://demo.modulpos.ru/api/fn"
+)
+# УСН доходы минус расходы, льготная ставка НДС 5% — см. чат с заказчиком.
+MODULKASSA_VAT_TAG = 1109
+
+# ---------------------------------------------------------------------
 # Telegram-бот — уведомления о некоторых событиях. Разные события могут
 # идти в разные беседы:
 #   TELEGRAM_BOT_TOKEN          — токен бота (общий для всех уведомлений)
@@ -830,8 +855,18 @@ def work_status_label(value):
     return value
 
 
+def mk_status_label(value):
+    return MODULKASSA_STATUS_DISPLAY.get(value, (value, "pending"))[0]
+
+
+def mk_status_css(value):
+    return MODULKASSA_STATUS_DISPLAY.get(value, (value, "pending"))[1]
+
+
 app.jinja_env.filters["order_status_label"] = order_status_label
 app.jinja_env.filters["work_status_label"] = work_status_label
+app.jinja_env.filters["mk_status_label"] = mk_status_label
+app.jinja_env.filters["mk_status_css"] = mk_status_css
 
 YOOKASSA_STATUS_LABELS = {
     "pending": "Ожидает оплаты",
@@ -1292,6 +1327,27 @@ def init_db():
     tuning_payment_cols = [row[1] for row in conn.execute("PRAGMA table_info(tuning_payments)").fetchall()]
     if "project_id" not in tuning_payment_cols:
         conn.execute("ALTER TABLE tuning_payments ADD COLUMN project_id INTEGER")
+    if "payment_type" not in tuning_payment_cols:
+        # CASH or CARD — how the payment was actually received, matching
+        # ModulKassa's own moneyPositions.paymentType values directly (no
+        # separate internal enum) since it's only ever used to fill that
+        # field when fiscalizing. NULL for payments recorded before this
+        # column existed, or wherever the admin skipped picking one.
+        conn.execute("ALTER TABLE tuning_payments ADD COLUMN payment_type TEXT")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS modulkassa_receipts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            payment_id INTEGER NOT NULL,
+            doc_id TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL DEFAULT 'queued',
+            fiscal_info_json TEXT,
+            failure_message TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tuning_yookassa_payments (
@@ -3248,12 +3304,152 @@ def _get_or_create_client(db, phone, client_name, boat_model):
 
 def _order_payment_totals(db, order_id, total):
     payments = db.execute(
-        "SELECT * FROM tuning_payments WHERE order_id = ? ORDER BY paid_at DESC, id DESC",
+        "SELECT tuning_payments.*, "
+        "modulkassa_receipts.status AS receipt_status, "
+        "modulkassa_receipts.failure_message AS receipt_failure_message "
+        "FROM tuning_payments "
+        # A retry adds another modulkassa_receipts row for the same
+        # payment rather than overwriting the old one (keeps history of
+        # every attempt) — join only the latest one, or a plain join would
+        # multiply the payment row per attempt and double-count its amount
+        # in paid_amount below.
+        "LEFT JOIN modulkassa_receipts ON modulkassa_receipts.id = ("
+        "  SELECT id FROM modulkassa_receipts mr2"
+        "  WHERE mr2.payment_id = tuning_payments.id ORDER BY mr2.id DESC LIMIT 1"
+        ") "
+        "WHERE tuning_payments.order_id = ? "
+        "ORDER BY tuning_payments.paid_at DESC, tuning_payments.id DESC",
         (order_id,),
     ).fetchall()
     paid_amount = sum(p["amount"] for p in payments)
     remaining = max(0.0, total - paid_amount)
     return payments, paid_amount, remaining
+
+
+def _modulkassa_configured():
+    return bool(MODULKASSA_USERNAME and MODULKASSA_PASSWORD)
+
+
+def _modulkassa_contact_from_phone(phone):
+    """ModulKassa's "email" field also accepts a phone number, required in
+    the shape +7<10 digits> or 8<10 digits> — reformat whatever we have on
+    the order into that, falling back to the raw value if it doesn't look
+    like a normal 11-digit RU number."""
+    digits = "".join(c for c in (phone or "") if c.isdigit())
+    if len(digits) == 11 and digits[0] in ("7", "8"):
+        return "+7" + digits[1:]
+    if len(digits) == 10:
+        return "+7" + digits
+    return phone or ""
+
+
+def _modulkassa_fiscalize_payment(db, order, payment_id, amount, payment_type):
+    """Best-effort — sends one order payment to ModulKassa as a single
+    "Оплата по заказу №..." line (see chat: client pays for the whole
+    project, not itemized work, so a lump line is what's meaningful here).
+    Fiscalization itself happens asynchronously on the merchant's own
+    till (it polls ModulKassa's server every 5s), so this only queues the
+    document and records a modulkassa_receipts row — status is filled in
+    later by _modulkassa_check_status, via the cron endpoint or a manual
+    check. Never raises: a ModulKassa outage must not stop the payment
+    itself from being recorded."""
+    if not _modulkassa_configured():
+        return
+    doc_id = str(uuid.uuid4())
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    body = {
+        "id": doc_id,
+        "docNum": f"order-{order['id']}-payment-{payment_id}",
+        "docType": "SALE",
+        "checkoutDateTime": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "email": _modulkassa_contact_from_phone(order["phone"]),
+        "printReceipt": False,
+        "taxMode": None,
+        "inventPositions": [{
+            "name": f"Оплата по заказу №{order['id']}",
+            "price": amount,
+            "quantity": 1,
+            "vatTag": MODULKASSA_VAT_TAG,
+            "paymentObject": "service",
+            "paymentMethod": "full_payment",
+        }],
+        "moneyPositions": [{"paymentType": payment_type, "sum": amount}],
+    }
+    try:
+        resp = requests.post(
+            f"{MODULKASSA_BASE_URL}/v2/doc", json=body,
+            auth=(MODULKASSA_USERNAME, MODULKASSA_PASSWORD), timeout=15,
+        )
+    except requests.RequestException as e:
+        db.execute(
+            "INSERT INTO modulkassa_receipts (payment_id, doc_id, status, failure_message, created_at, updated_at) "
+            "VALUES (?, ?, 'failed', ?, ?, ?)",
+            (payment_id, doc_id, str(e), now, now),
+        )
+        db.commit()
+        return
+    if resp.ok:
+        status = (resp.json().get("status") or "queued").lower()
+        db.execute(
+            "INSERT INTO modulkassa_receipts (payment_id, doc_id, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (payment_id, doc_id, status, now, now),
+        )
+    else:
+        db.execute(
+            "INSERT INTO modulkassa_receipts (payment_id, doc_id, status, failure_message, created_at, updated_at) "
+            "VALUES (?, ?, 'failed', ?, ?, ?)",
+            (payment_id, doc_id, f"HTTP {resp.status_code}: {resp.text[:300]}", now, now),
+        )
+    db.commit()
+
+
+# Statuses ModulKassa returns (see /v1/doc/<id>/status) — QUEUED and
+# PENDING are still in flight (till hasn't picked it up / is printing);
+# PRINTED/WAIT_FOR_CALLBACK/COMPLETED all mean the fiscal receipt itself
+# was successfully issued (WAIT_FOR_CALLBACK just means our unused
+# responseURL callback didn't get a 200 back, not that the receipt
+# failed); FAILED needs a manual retry. Reuses the existing status-badge
+# CSS classes (status-pending/status-done/status-cancelled) instead of
+# adding new ones.
+MODULKASSA_STATUS_DISPLAY = {
+    "queued": ("В очереди", "pending"),
+    "pending": ("Печатается на кассе", "pending"),
+    "printed": ("Пробит", "done"),
+    "wait_for_callback": ("Пробит", "done"),
+    "completed": ("Пробит", "done"),
+    "failed": ("Ошибка", "cancelled"),
+}
+
+
+def _modulkassa_check_status(db, receipt):
+    """Polls one receipt's current status and updates the row. Best-effort
+    — a network hiccup here just leaves the row as it was, retried on the
+    next cron pass or manual check."""
+    try:
+        resp = requests.get(
+            f"{MODULKASSA_BASE_URL}/v1/doc/{receipt['doc_id']}/status",
+            auth=(MODULKASSA_USERNAME, MODULKASSA_PASSWORD), timeout=15,
+        )
+    except requests.RequestException:
+        return
+    if not resp.ok:
+        return
+    data = resp.json()
+    status = (data.get("status") or "").lower()
+    if not status:
+        return
+    failure_info = data.get("failureInfo")
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.execute(
+        "UPDATE modulkassa_receipts SET status=?, fiscal_info_json=?, failure_message=?, updated_at=? WHERE id=?",
+        (
+            status,
+            json.dumps(data.get("fiscalInfo"), ensure_ascii=False) if data.get("fiscalInfo") else None,
+            json.dumps(failure_info, ensure_ascii=False) if failure_info else None,
+            now, receipt["id"],
+        ),
+    )
 
 
 def _order_notes(db, order_id):
@@ -4250,6 +4446,7 @@ def edit_tuning_order(order_id):
             goods=goods, goods_subtotal=goods_subtotal, catalog_products=catalog_products,
             cost_units=SUPPLY_COST_UNITS,
             notes=notes, admins=admins,
+            modulkassa_configured=_modulkassa_configured(),
         )
 
     errors, data = _process_tuning_form(request.form)
@@ -4272,6 +4469,7 @@ def edit_tuning_order(order_id):
             yookassa_payments=yookassa_payments, yookassa_configured=yookassa_configured(),
             yookassa_error=None,
             hull_sheets=hull_sheets, available_hull_sheets=available_hull_sheets,
+            modulkassa_configured=_modulkassa_configured(),
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -4436,17 +4634,23 @@ def add_tuning_payment(order_id):
         return redirect(url_for("tuning_index"))
 
     amount_raw = request.form.get("amount", "").strip().replace(",", ".")
+    payment_type = request.form.get("payment_type", "").strip().upper()
+    if payment_type not in ("CASH", "CARD"):
+        payment_type = None
     try:
         amount = float(amount_raw)
     except ValueError:
         amount = None
     if amount is not None and amount > 0:
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-        db.execute(
-            "INSERT INTO tuning_payments (order_id, amount, paid_at, created_at, project_id) VALUES (?, ?, ?, ?, ?)",
-            (order_id, amount, now, now, _project_id_for_tuning_order(db, order_id)),
+        cur = db.execute(
+            "INSERT INTO tuning_payments (order_id, amount, paid_at, created_at, project_id, payment_type) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (order_id, amount, now, now, _project_id_for_tuning_order(db, order_id), payment_type),
         )
         db.commit()
+        if payment_type:
+            _modulkassa_fiscalize_payment(db, order, cur.lastrowid, amount, payment_type)
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
@@ -4455,8 +4659,55 @@ def add_tuning_payment(order_id):
 def delete_tuning_payment(order_id, payment_id):
     db = get_db()
     db.execute("DELETE FROM tuning_payments WHERE id = ? AND order_id = ?", (payment_id, order_id))
+    db.execute("DELETE FROM modulkassa_receipts WHERE payment_id = ?", (payment_id,))
     db.commit()
     return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
+@app.route("/tuning/<int:order_id>/pay/<int:payment_id>/receipt/check", methods=["POST"])
+@admin_login_required
+def check_modulkassa_receipt(order_id, payment_id):
+    db = get_db()
+    receipt = db.execute(
+        "SELECT * FROM modulkassa_receipts WHERE payment_id = ? ORDER BY id DESC LIMIT 1", (payment_id,)
+    ).fetchone()
+    if receipt is not None:
+        _modulkassa_check_status(db, receipt)
+        db.commit()
+    return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
+@app.route("/tuning/<int:order_id>/pay/<int:payment_id>/receipt/retry", methods=["POST"])
+@admin_login_required
+def retry_modulkassa_receipt(order_id, payment_id):
+    db = get_db()
+    order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
+    payment = db.execute(
+        "SELECT * FROM tuning_payments WHERE id = ? AND order_id = ?", (payment_id, order_id)
+    ).fetchone()
+    if order is not None and payment is not None and payment["payment_type"]:
+        _modulkassa_fiscalize_payment(db, order, payment_id, payment["amount"], payment["payment_type"])
+    return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
+@app.route("/internal/cron/check-modulkassa-receipts")
+def cron_check_modulkassa_receipts():
+    """Hit every couple of minutes by a cron job on the host — polls
+    ModulKassa for any receipt still in flight (fiscalization happens
+    asynchronously on the merchant's own till) and updates its status.
+    Protected by CRON_SECRET, same as the other /internal/cron endpoints."""
+    if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
+        return "forbidden", 403
+    if not _modulkassa_configured():
+        return "modulkassa not configured", 503
+    db = get_db()
+    pending = db.execute(
+        "SELECT * FROM modulkassa_receipts WHERE status IN ('queued', 'pending')"
+    ).fetchall()
+    for r in pending:
+        _modulkassa_check_status(db, r)
+    db.commit()
+    return f"checked {len(pending)} receipt(s)", 200
 
 
 @app.route("/tuning/<int:order_id>/notes/add", methods=["POST"])

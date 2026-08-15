@@ -373,23 +373,56 @@
         <label for="amount">Сумма платежа, ₽</label>
         <input type="text" inputmode="decimal" id="amount" name="amount" required>
       </div>
+      <div class="field field-narrow">
+        <label for="payment_type">Способ оплаты</label>
+        <select id="payment_type" name="payment_type" required>
+          <option value="" disabled selected>Выберите способ</option>
+          <option value="CASH">Наличные</option>
+          <option value="CARD">Безналичный</option>
+        </select>
+      </div>
       <div class="field field-submit">
         <button type="submit">Записать платёж</button>
       </div>
     </form>
+    {% if modulkassa_configured %}
+    <p class="hint">Способ оплаты нужен, чтобы автоматически пробить кассовый чек через МодульКассу.</p>
+    {% endif %}
 
     {% if payments %}
     <div class="table-scroll">
       <table class="records">
         <thead>
-          <tr><th>Дата</th><th>Сумма</th><th></th></tr>
+          <tr><th>Дата</th><th>Сумма</th><th>Способ</th><th>Чек</th><th></th></tr>
         </thead>
         <tbody>
           {% for p in payments %}
           <tr>
             <td class="muted">{{ p.paid_at[:10]|ru_date }}</td>
             <td class="amount">{{ p.amount|money }}</td>
+            <td class="muted">{{ 'Наличные' if p.payment_type == 'CASH' else ('Безналичный' if p.payment_type == 'CARD' else '—') }}</td>
+            <td>
+              {% if p.receipt_status %}
+              <span class="status-badge status-{{ p.receipt_status|mk_status_css }}"
+                    {% if p.receipt_status == 'failed' and p.receipt_failure_message %}title="{{ p.receipt_failure_message }}"{% endif %}>
+                {{ p.receipt_status|mk_status_label }}
+              </span>
+              {% elif p.payment_type %}
+              <span class="hint">не отправлен</span>
+              {% else %}
+              <span class="hint">—</span>
+              {% endif %}
+            </td>
             <td class="row-actions">
+              {% if p.receipt_status in ('queued', 'pending') %}
+              <form action="{{ url_for('check_modulkassa_receipt', order_id=edit_order.id, payment_id=p.id) }}" method="post">
+                <button type="submit" class="btn-secondary">Проверить чек</button>
+              </form>
+              {% elif p.receipt_status == 'failed' %}
+              <form action="{{ url_for('retry_modulkassa_receipt', order_id=edit_order.id, payment_id=p.id) }}" method="post">
+                <button type="submit" class="btn-secondary">Повторить чек</button>
+              </form>
+              {% endif %}
               <form action="{{ url_for('delete_tuning_payment', order_id=edit_order.id, payment_id=p.id) }}" method="post"
                     onsubmit="return confirm('Удалить этот платёж?');">
                 <button type="submit" class="icon-btn danger" title="Удалить">
