@@ -209,6 +209,16 @@ TBANK_API_BASE = "https://business.tbank.ru/openapi/api"
 CRON_SECRET = os.environ.get("CRON_SECRET")
 
 # ---------------------------------------------------------------------
+# Секрет для эндпоинта, который принимает лиды с формы обратной связи на
+# сайте (Тильда → Site Settings → Forms → Webhook). Настраивается только
+# через переменную окружения:
+#   TILDA_WEBHOOK_SECRET
+# Без неё эндпоинт всегда отвечает 403 — по умолчанию выключен. В Тильде
+# укажите URL вида https://.../webhooks/tilda?token=<этот секрет>.
+# ---------------------------------------------------------------------
+TILDA_WEBHOOK_SECRET = os.environ.get("TILDA_WEBHOOK_SECRET")
+
+# ---------------------------------------------------------------------
 # Telegram-бот — уведомления о некоторых событиях. Разные события могут
 # идти в разные беседы:
 #   TELEGRAM_BOT_TOKEN          — токен бота (общий для всех уведомлений)
@@ -727,6 +737,7 @@ SALE_CHANNELS = [
 ]
 
 ORDER_STATUSES = [
+    {"value": "new_request", "label": "Новая заявка"},
     {"value": "estimate", "label": "Предварительный расчёт"},
     {"value": "in_progress", "label": "В работе"},
     {"value": "qc", "label": "Проходит независимый контроль качества"},
@@ -1574,6 +1585,16 @@ def init_db():
         # discount_pct is the only place the old discount lived — carry it
         # over once so existing orders keep showing the same discount.
         conn.execute("UPDATE tuning_orders SET discount_value = discount_pct")
+    if "source" not in tuning_cols:
+        # 'manual' (default, backfilling every pre-existing order) or
+        # 'tilda' — a lead that came in through the site's feedback form
+        # webhook rather than an admin typing it in. source_ref carries
+        # Tilda's own tranid for that submission, so a retried webhook
+        # delivery (Tilda resends up to twice if it doesn't get a 200 back
+        # in time) can be recognized and skipped instead of creating a
+        # duplicate order.
+        conn.execute("ALTER TABLE tuning_orders ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+        conn.execute("ALTER TABLE tuning_orders ADD COLUMN source_ref TEXT")
     item_cols = [row[1] for row in conn.execute("PRAGMA table_info(tuning_order_items)").fetchall()]
     if "status" not in item_cols:
         conn.execute(
@@ -4014,6 +4035,99 @@ def add_tuning_order():
     )
     db.commit()
     return redirect(url_for("tuning_index"))
+
+
+# Field names in a Tilda webhook payload are whatever the site's form
+# editor called them — there's no fixed schema — so this matches common
+# Russian/English variants case-insensitively rather than assuming one
+# exact name. Add more here if the real site form uses something else;
+# anything not recognized still isn't lost (see _extract_tilda_lead_fields).
+_TILDA_NAME_KEYS = {"name", "имя", "фио", "ваше имя", "имя и фамилия"}
+_TILDA_PHONE_KEYS = {"phone", "телефон", "тел", "тел.", "номер телефона", "ваш телефон"}
+_TILDA_SYSTEM_KEYS = {"tranid", "formid", "formname", "cookies", "test"}
+
+
+def _extract_tilda_lead_fields(form):
+    """Best-effort pull of name/phone out of a Tilda webhook payload. Every
+    other field received (minus Tilda's own bookkeeping fields) is kept as
+    raw_lines so nothing is lost even when a field isn't recognized — the
+    admin sees the full submission in the order's first note and can fix
+    up client_name/phone by hand if the guess is wrong."""
+    name = phone = None
+    raw_lines = []
+    for key, value in form.items():
+        value = (value or "").strip()
+        if not value:
+            continue
+        key_lower = key.strip().lower()
+        if key_lower in _TILDA_SYSTEM_KEYS:
+            continue
+        if name is None and key_lower in _TILDA_NAME_KEYS:
+            name = value
+        elif phone is None and key_lower in _TILDA_PHONE_KEYS:
+            phone = value
+        else:
+            raw_lines.append(f"{key}: {value}")
+    return name, phone, raw_lines
+
+
+@app.route("/webhooks/tilda", methods=["POST"])
+def tilda_webhook():
+    """Receives a lead from the site's feedback form (Tilda → Site
+    Settings → Forms → Webhook, configured with this URL plus
+    ?token=TILDA_WEBHOOK_SECRET). Tilda posts form-encoded data and expects
+    a 200 OK within 5 seconds, retrying up to twice (1 minute apart) if it
+    doesn't get one — so a repeat delivery of the same submission (same
+    tranid) is recognized and skipped instead of creating a duplicate
+    order. Creates the order with status='new_request' ("Новая заявка")
+    so it shows up distinctly in the orders list for an admin to pick up
+    and fill in properly (boat model, pricing, etc. aren't in a feedback
+    form — just name/phone/whatever else the form asks)."""
+    if not TILDA_WEBHOOK_SECRET or request.args.get("token") != TILDA_WEBHOOK_SECRET:
+        return "forbidden", 403
+
+    # Tilda's own connectivity check when the webhook URL is saved in Site
+    # Settings — nothing to create, just confirm we're reachable.
+    if request.form.get("test") == "test":
+        return "ok", 200
+
+    db = get_db()
+    tranid = request.form.get("tranid", "").strip()
+    if tranid:
+        existing = db.execute(
+            "SELECT id FROM tuning_orders WHERE source_ref = ?", (tranid,)
+        ).fetchone()
+        if existing is not None:
+            return "ok (duplicate)", 200
+
+    name, phone, raw_lines = _extract_tilda_lead_fields(request.form)
+    client_name = name or "Заявка с сайта"
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    # Only link to a client cabinet when we actually have a phone number —
+    # every lead missing one would otherwise collide onto the same blank-
+    # phone "client" row in _get_or_create_client's lookup.
+    client_id = _get_or_create_client(db, phone, client_name, "") if phone else None
+    cur = db.execute(
+        "INSERT INTO tuning_orders (client_id, client_name, boat_model, sale_channel, phone, "
+        "discount_pct, discount_type, discount_value, subtotal, total, status, source, source_ref, "
+        "created_at, updated_at) "
+        "VALUES (?, ?, ?, 'direct', ?, 0, 'percent', 0, 0, 0, 'new_request', 'tilda', ?, ?, ?)",
+        (client_id, client_name, "", phone or "", tranid or None, now, now),
+    )
+    order_id = cur.lastrowid
+    db.execute(
+        "INSERT INTO projects (name, tuning_order_id, created_at) VALUES (?, ?, ?)",
+        (f"Заказ №{order_id}", order_id, now),
+    )
+    note_text = "Заявка с сайта (форма обратной связи, Тильда)."
+    if raw_lines:
+        note_text += "\n" + "\n".join(raw_lines)
+    db.execute(
+        "INSERT INTO tuning_order_notes (order_id, author_admin_id, text, created_at) VALUES (?, NULL, ?, ?)",
+        (order_id, note_text, now),
+    )
+    db.commit()
+    return "ok", 200
 
 
 @app.route("/tuning/edit/<int:order_id>", methods=["GET", "POST"])
