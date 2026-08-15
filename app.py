@@ -1595,6 +1595,17 @@ def init_db():
         # duplicate order.
         conn.execute("ALTER TABLE tuning_orders ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
         conn.execute("ALTER TABLE tuning_orders ADD COLUMN source_ref TEXT")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tilda_webhook_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            received_at TEXT NOT NULL,
+            token_ok INTEGER NOT NULL,
+            payload_json TEXT NOT NULL,
+            result TEXT NOT NULL
+        )
+        """
+    )
     item_cols = [row[1] for row in conn.execute("PRAGMA table_info(tuning_order_items)").fetchall()]
     if "status" not in item_cols:
         conn.execute(
@@ -4071,6 +4082,20 @@ def _extract_tilda_lead_fields(form):
     return name, phone, raw_lines
 
 
+def _log_tilda_webhook(db, token_ok, result):
+    # Logged for EVERY hit, including auth failures — the only way to
+    # answer "is Tilda even calling us, and with what?" without server
+    # console access. See /internal/tilda-webhook-log below.
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    payload_json = json.dumps(dict(request.form), ensure_ascii=False)
+    db.execute(
+        "INSERT INTO tilda_webhook_log (received_at, token_ok, payload_json, result) "
+        "VALUES (?, ?, ?, ?)",
+        (now, 1 if token_ok else 0, payload_json, result),
+    )
+    db.commit()
+
+
 @app.route("/webhooks/tilda", methods=["POST"])
 def tilda_webhook():
     """Receives a lead from the site's feedback form (Tilda → Site
@@ -4083,21 +4108,25 @@ def tilda_webhook():
     so it shows up distinctly in the orders list for an admin to pick up
     and fill in properly (boat model, pricing, etc. aren't in a feedback
     form — just name/phone/whatever else the form asks)."""
-    if not TILDA_WEBHOOK_SECRET or request.args.get("token") != TILDA_WEBHOOK_SECRET:
+    db = get_db()
+    token_ok = bool(TILDA_WEBHOOK_SECRET) and request.args.get("token") == TILDA_WEBHOOK_SECRET
+    if not token_ok:
+        _log_tilda_webhook(db, False, "forbidden — missing/wrong token")
         return "forbidden", 403
 
     # Tilda's own connectivity check when the webhook URL is saved in Site
     # Settings — nothing to create, just confirm we're reachable.
     if request.form.get("test") == "test":
+        _log_tilda_webhook(db, True, "connectivity test (test=test)")
         return "ok", 200
 
-    db = get_db()
     tranid = request.form.get("tranid", "").strip()
     if tranid:
         existing = db.execute(
             "SELECT id FROM tuning_orders WHERE source_ref = ?", (tranid,)
         ).fetchone()
         if existing is not None:
+            _log_tilda_webhook(db, True, f"duplicate of order #{existing['id']}")
             return "ok (duplicate)", 200
 
     name, phone, raw_lines = _extract_tilda_lead_fields(request.form)
@@ -4127,7 +4156,30 @@ def tilda_webhook():
         (order_id, note_text, now),
     )
     db.commit()
+    _log_tilda_webhook(db, True, f"created order #{order_id}")
     return "ok", 200
+
+
+@app.route("/internal/tilda-webhook-log")
+def tilda_webhook_log():
+    """Visit this URL (with CRON_SECRET as token) to see the last 20 hits
+    on /webhooks/tilda — including auth failures — to check whether Tilda
+    is actually calling us at all, with what token, and what payload, when
+    a lead doesn't show up as an order."""
+    if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
+        return "forbidden", 403
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM tilda_webhook_log ORDER BY id DESC LIMIT 20"
+    ).fetchall()
+    if not rows:
+        return "No hits recorded yet on /webhooks/tilda.", 200
+    lines = [
+        f"{r['received_at']} | token_ok={'yes' if r['token_ok'] else 'NO'} | {r['result']}\n"
+        f"  payload: {r['payload_json']}"
+        for r in rows
+    ]
+    return "\n\n".join(lines), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 @app.route("/tuning/edit/<int:order_id>", methods=["GET", "POST"])
