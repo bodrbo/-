@@ -783,6 +783,7 @@ DEFAULT_WORK_STATUS = "pending"
 DEFECT_STATUSES = [
     {"value": "new", "label": "Новая"},
     {"value": "in_progress", "label": "В работе"},
+    {"value": "monitoring", "label": "На контроле"},
     {"value": "resolved", "label": "Устранена"},
 ]
 DEFAULT_DEFECT_STATUS = "new"
@@ -6572,7 +6573,7 @@ def team_task_respond(assignment_id):
 @team_login_required
 def team_task_set_status(assignment_id):
     """The captain/tuningman moves their accepted task through the same
-    Новая/В работе/Устранена statuses the admin sees on the defect itself
+    Новая/В работе/На контроле/Устранена statuses the admin sees on the defect itself
     (this writes straight to boat_defects.status — one shared field, so
     there's nothing to keep in sync). Marking it "resolved" for the first
     time also pays out the agreed rate × norm-hours as a real payroll entry,
