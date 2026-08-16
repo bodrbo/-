@@ -1,0 +1,56 @@
+<div class="table-scroll">
+  <table class="records">
+    <thead>
+      <tr>
+        <th>Неисправность</th>
+        <th>Обнаружено</th>
+        <th>Сотрудник</th>
+        <th>Статус</th>
+        <th>{{ 'Исполнитель' if archive_mode else 'Задача' }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in defect_rows %}
+      <tr>
+        <td>
+          <a class="defect-record-link"
+             href="{{ url_for('boat_defect_detail', boat_index=boat_index, defect_id=d.id) }}">
+            {{ d.description }}
+          </a>
+        </td>
+        <td class="muted">{{ d.reported_at[:10]|ru_date }}</td>
+        <td class="muted">{{ d.employee_name }}</td>
+        <td>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span class="status-badge status-defect-{{ d.status }}">
+              {{ defect_statuses|selectattr('value', 'equalto', d.status)|map(attribute='label')|first }}
+            </span>
+            <form action="{{ url_for('set_boat_defect_status', boat_index=boat_index, defect_id=d.id) }}"
+                  method="post" class="status-select-form">
+              <select name="status" onchange="this.form.submit()">
+                {% for s in defect_statuses %}
+                <option value="{{ s.value }}" {{ 'selected' if d.status == s.value }}>{{ s.label }}</option>
+                {% endfor %}
+              </select>
+            </form>
+          </div>
+        </td>
+        <td class="muted">
+          {% if archive_mode %}
+            {{ d.assignment.employee_name if d.assignment else '—' }}
+          {% elif d.can_assign %}
+          <button type="button" class="btn-secondary"
+                  onclick='openAssignModal({{ url_for("assign_defect", boat_index=boat_index, defect_id=d.id)|tojson }}, {{ d.description|tojson }})'>
+            Поручить задачу
+          </button>
+          {% elif d.assignment and d.assignment.assignment_status == 'pending' %}
+            Ожидает ответа: {{ d.assignment.employee_name }}
+          {% elif d.assignment and d.assignment.assignment_status == 'accepted' %}
+            Исполнитель: {{ d.assignment.employee_name }}
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

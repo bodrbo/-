@@ -120,71 +120,41 @@
 
   <details class="panel collapsible-panel">
     <summary>
-      <span>Неисправности</span>
+      <span>Текущие неисправности</span>
       {% if open_defects_count %}<span class="badge">{{ open_defects_count }}</span>{% endif %}
       <span class="chev" aria-hidden="true"></span>
     </summary>
     <div class="collapsible-body">
-      {% if defects %}
-      <div class="table-scroll">
-        <table class="records">
-          <thead>
-            <tr>
-              <th>Неисправность</th>
-              <th>Обнаружено</th>
-              <th>Сотрудник</th>
-              <th>Статус</th>
-              <th>Задача</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for d in defects %}
-            <tr>
-              <td>
-                <a class="defect-record-link"
-                   href="{{ url_for('boat_defect_detail', boat_index=boat_index, defect_id=d.id) }}">
-                  {{ d.description }}
-                </a>
-              </td>
-              <td class="muted">{{ d.reported_at[:10]|ru_date }}</td>
-              <td class="muted">{{ d.employee_name }}</td>
-              <td>
-                <div style="display:flex; align-items:center; gap:10px;">
-                  <span class="status-badge status-defect-{{ d.status }}">
-                    {{ defect_statuses|selectattr('value', 'equalto', d.status)|map(attribute='label')|first }}
-                  </span>
-                  <form action="{{ url_for('set_boat_defect_status', boat_index=boat_index, defect_id=d.id) }}"
-                        method="post" class="status-select-form">
-                    <select name="status" onchange="this.form.submit()">
-                      {% for s in defect_statuses %}
-                      <option value="{{ s.value }}" {{ 'selected' if d.status == s.value }}>{{ s.label }}</option>
-                      {% endfor %}
-                    </select>
-                  </form>
-                </div>
-              </td>
-              <td class="muted">
-                {% if d.can_assign %}
-                <button type="button" class="btn-secondary"
-                        onclick='openAssignModal({{ url_for("assign_defect", boat_index=boat_index, defect_id=d.id)|tojson }}, {{ d.description|tojson }})'>
-                  Поручить задачу
-                </button>
-                {% elif d.assignment and d.assignment.assignment_status == 'pending' %}
-                Ожидает ответа: {{ d.assignment.employee_name }}
-                {% elif d.assignment and d.assignment.assignment_status == 'accepted' %}
-                Исполнитель: {{ d.assignment.employee_name }}
-                {% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+      {% if current_defects %}
+      {% set defect_rows = current_defects %}
+      {% set archive_mode = false %}
+      {% include '_fleet_defects_table.html' %}
       {% else %}
       <div class="empty-state">
         <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-        <div class="t">Неисправностей пока нет</div>
-        <div class="s">Здесь появятся проблемы, о которых сообщают капитаны при прохождении осмотров.</div>
+        <div class="t">Текущих неисправностей нет</div>
+        <div class="s">Все обнаруженные проблемы устранены.</div>
+      </div>
+      {% endif %}
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel defect-archive-panel">
+    <summary>
+      <span>Архив неисправностей</span>
+      {% if archived_defects %}<span class="badge badge-success">{{ archived_defects|length }}</span>{% endif %}
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
+      {% if archived_defects %}
+      {% set defect_rows = archived_defects %}
+      {% set archive_mode = true %}
+      {% include '_fleet_defects_table.html' %}
+      {% else %}
+      <div class="empty-state">
+        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        <div class="t">Архив пока пуст</div>
+        <div class="s">Неисправности попадут сюда автоматически после получения статуса «Устранена».</div>
       </div>
       {% endif %}
     </div>

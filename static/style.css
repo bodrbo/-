@@ -1990,6 +1990,7 @@ table.records tr.row-expense td.amount { color: var(--danger); }
   font-size: 11.5px;
   font-weight: 700;
 }
+.collapsible-panel .badge.badge-success { background: var(--success); }
 .import-body,
 .collapsible-body {
   margin-top: 20px;

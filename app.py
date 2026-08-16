@@ -3067,15 +3067,21 @@ def fleet_boat(boat_index):
         defect["can_assign"] = (
             assignment is None
             or assignment["assignment_status"] == "rejected"
-            or (assignment["assignment_status"] == "accepted" and defect["status"] == "resolved")
+            or (assignment["assignment_status"] == "accepted" and assignment["entry_id"] is not None)
         )
         defects.append(defect)
-    open_defects_count = sum(1 for d in defects if d["status"] != "resolved")
+    current_defects = [d for d in defects if d["status"] != "resolved"]
+    archived_defects = sorted(
+        (d for d in defects if d["status"] == "resolved"),
+        key=lambda d: (d["updated_at"], d["id"]),
+        reverse=True,
+    )
     assignable_employees = _employees_with_any_position(db, DEFECT_ASSIGNABLE_POSITIONS)
     return render_template(
         "fleet_boat.html", boat=boat, boat_index=boat_index, checklists=checklists,
-        documents=documents, defects=defects, defect_statuses=DEFECT_STATUSES,
-        open_defects_count=open_defects_count, assignable_employees=assignable_employees,
+        documents=documents, current_defects=current_defects, archived_defects=archived_defects,
+        defect_statuses=DEFECT_STATUSES, open_defects_count=len(current_defects),
+        assignable_employees=assignable_employees,
         checklist_type_labels=CHECKLIST_TYPE_LABELS, active_page="fleet",
     )
 
