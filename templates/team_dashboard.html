@@ -274,7 +274,10 @@
       <div class="task-card">
         <div>
           {% if task.kind == 'defect' %}
-          <strong>{{ task.defect_boat }}</strong> — {{ task.defect_description }}
+          <strong>{{ task.defect_boat }}</strong> —
+          <a class="defect-record-link" href="{{ url_for('team_defect_detail', defect_id=task.defect_id) }}">
+            {{ task.defect_description }}
+          </a>
           {% else %}
           <strong>Тюнинг-заказ №{{ task.tuning_order_id }}</strong> ({{ task.order_client_name }}, {{ task.order_boat_model }}) — {{ task.item_work_name }}
           {% endif %}

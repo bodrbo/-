@@ -788,6 +788,11 @@ DEFECT_STATUSES = [
 ]
 DEFAULT_DEFECT_STATUS = "new"
 
+DEFECT_PLAN_STATUSES = [
+    {"value": "pending", "label": "Не выполнено"},
+    {"value": "done", "label": "Выполнено"},
+]
+
 SUPPLY_COST_UNITS = [
     {"value": "piece", "label": "шт."},
     {"value": "sqm", "label": "м²"},
@@ -1079,6 +1084,11 @@ def init_db():
         )
         """
     )
+    defect_cols = [row[1] for row in conn.execute("PRAGMA table_info(boat_defects)").fetchall()]
+    if "anamnesis" not in defect_cols:
+        conn.execute("ALTER TABLE boat_defects ADD COLUMN anamnesis TEXT NOT NULL DEFAULT ''")
+    if "diagnosis" not in defect_cols:
+        conn.execute("ALTER TABLE boat_defects ADD COLUMN diagnosis TEXT NOT NULL DEFAULT ''")
     if boat_defects_is_new:
         # One-time backfill: every "problem" answer ever reported through a
         # standard checklist question becomes a tracked defect too, so
@@ -1098,6 +1108,19 @@ def init_db():
                 "status, reported_at, updated_at) VALUES (?, ?, ?, ?, ?, 'new', ?, ?)",
                 (boat, checklist_id, answer_id, description, employee_name, created_at, now_str),
             )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS defect_work_plan_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            defect_id INTEGER NOT NULL,
+            description TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
 
     conn.execute(
         """
@@ -3055,6 +3078,111 @@ def fleet_boat(boat_index):
         open_defects_count=open_defects_count, assignable_employees=assignable_employees,
         checklist_type_labels=CHECKLIST_TYPE_LABELS, active_page="fleet",
     )
+
+
+def _defect_detail_context(db, defect, viewer_role, boat_index=None):
+    plan_items = db.execute(
+        "SELECT * FROM defect_work_plan_items WHERE defect_id = ? ORDER BY id",
+        (defect["id"],),
+    ).fetchall()
+    completed_count = sum(1 for item in plan_items if item["status"] == "done")
+    return {
+        "defect": defect,
+        "plan_items": plan_items,
+        "completed_count": completed_count,
+        "defect_statuses": DEFECT_STATUSES,
+        "plan_statuses": DEFECT_PLAN_STATUSES,
+        "viewer_role": viewer_role,
+        "boat_index": boat_index,
+        "active_page": "fleet" if viewer_role == "admin" else None,
+    }
+
+
+def _save_defect_case_notes(db, defect_id, form):
+    anamnesis = form.get("anamnesis", "").strip()
+    diagnosis = form.get("diagnosis", "").strip()
+    db.execute(
+        "UPDATE boat_defects SET anamnesis = ?, diagnosis = ?, updated_at = ? WHERE id = ?",
+        (anamnesis, diagnosis, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), defect_id),
+    )
+    db.commit()
+
+
+def _add_defect_plan_item(db, defect_id, form):
+    description = form.get("description", "").strip()
+    if not description:
+        return
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "INSERT INTO defect_work_plan_items (defect_id, description, status, created_at, updated_at) "
+        "VALUES (?, ?, 'pending', ?, ?)",
+        (defect_id, description, now, now),
+    )
+    db.commit()
+
+
+def _set_defect_plan_item_status(db, defect_id, item_id, status):
+    if status not in [item["value"] for item in DEFECT_PLAN_STATUSES]:
+        return
+    db.execute(
+        "UPDATE defect_work_plan_items SET status = ?, updated_at = ? "
+        "WHERE id = ? AND defect_id = ?",
+        (status, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), item_id, defect_id),
+    )
+    db.commit()
+
+
+@app.route("/fleet/<int:boat_index>/defects/<int:defect_id>", methods=["GET", "POST"])
+@admin_login_required
+def boat_defect_detail(boat_index, defect_id):
+    boat = _boat_by_index(boat_index)
+    if boat is None:
+        return redirect(url_for("fleet_index"))
+    db = get_db()
+    defect = db.execute(
+        "SELECT * FROM boat_defects WHERE id = ? AND boat = ?", (defect_id, boat)
+    ).fetchone()
+    if defect is None:
+        return redirect(url_for("fleet_boat", boat_index=boat_index))
+    if request.method == "POST":
+        _save_defect_case_notes(db, defect_id, request.form)
+        return redirect(url_for("boat_defect_detail", boat_index=boat_index, defect_id=defect_id))
+    return render_template(
+        "defect_detail.html", **_defect_detail_context(db, defect, "admin", boat_index)
+    )
+
+
+@app.route("/fleet/<int:boat_index>/defects/<int:defect_id>/plan", methods=["POST"])
+@admin_login_required
+def add_boat_defect_plan_item(boat_index, defect_id):
+    boat = _boat_by_index(boat_index)
+    if boat is None:
+        return redirect(url_for("fleet_index"))
+    db = get_db()
+    defect = db.execute(
+        "SELECT id FROM boat_defects WHERE id = ? AND boat = ?", (defect_id, boat)
+    ).fetchone()
+    if defect is not None:
+        _add_defect_plan_item(db, defect_id, request.form)
+    return redirect(url_for("boat_defect_detail", boat_index=boat_index, defect_id=defect_id))
+
+
+@app.route(
+    "/fleet/<int:boat_index>/defects/<int:defect_id>/plan/<int:item_id>/status",
+    methods=["POST"],
+)
+@admin_login_required
+def set_boat_defect_plan_item_status(boat_index, defect_id, item_id):
+    boat = _boat_by_index(boat_index)
+    if boat is None:
+        return redirect(url_for("fleet_index"))
+    db = get_db()
+    defect = db.execute(
+        "SELECT id FROM boat_defects WHERE id = ? AND boat = ?", (defect_id, boat)
+    ).fetchone()
+    if defect is not None:
+        _set_defect_plan_item_status(db, defect_id, item_id, request.form.get("status", ""))
+    return redirect(url_for("boat_defect_detail", boat_index=boat_index, defect_id=defect_id))
 
 
 @app.route("/fleet/<int:boat_index>/documents", methods=["POST"])
@@ -6530,6 +6658,51 @@ def team_dashboard():
         team_writeoff_error=session.pop("team_writeoff_error", None),
         my_supply_requests=my_supply_requests, supply_request_statuses=SUPPLY_REQUEST_STATUSES,
     )
+
+
+def _team_defect_for_employee(db, defect_id, employee_name):
+    return db.execute(
+        "SELECT bd.* FROM boat_defects bd WHERE bd.id = ? AND "
+        "(bd.employee_name = ? OR EXISTS ("
+        "SELECT 1 FROM defect_assignments da WHERE da.defect_id = bd.id AND da.employee_name = ?"
+        "))",
+        (defect_id, employee_name, employee_name),
+    ).fetchone()
+
+
+@app.route("/team/defects/<int:defect_id>", methods=["GET", "POST"])
+@team_login_required
+def team_defect_detail(defect_id):
+    db = get_db()
+    defect = _team_defect_for_employee(db, defect_id, session.get("team_employee_name"))
+    if defect is None:
+        return redirect(url_for("team_dashboard"))
+    if request.method == "POST":
+        _save_defect_case_notes(db, defect_id, request.form)
+        return redirect(url_for("team_defect_detail", defect_id=defect_id))
+    return render_template(
+        "defect_detail.html", **_defect_detail_context(db, defect, "team")
+    )
+
+
+@app.route("/team/defects/<int:defect_id>/plan", methods=["POST"])
+@team_login_required
+def team_add_defect_plan_item(defect_id):
+    db = get_db()
+    defect = _team_defect_for_employee(db, defect_id, session.get("team_employee_name"))
+    if defect is not None:
+        _add_defect_plan_item(db, defect_id, request.form)
+    return redirect(url_for("team_defect_detail", defect_id=defect_id))
+
+
+@app.route("/team/defects/<int:defect_id>/plan/<int:item_id>/status", methods=["POST"])
+@team_login_required
+def team_set_defect_plan_item_status(defect_id, item_id):
+    db = get_db()
+    defect = _team_defect_for_employee(db, defect_id, session.get("team_employee_name"))
+    if defect is not None:
+        _set_defect_plan_item_status(db, defect_id, item_id, request.form.get("status", ""))
+    return redirect(url_for("team_defect_detail", defect_id=defect_id))
 
 
 @app.route("/team/documents/boat/<int:doc_id>")

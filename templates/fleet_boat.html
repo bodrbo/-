@@ -140,7 +140,12 @@
           <tbody>
             {% for d in defects %}
             <tr>
-              <td>{{ d.description }}</td>
+              <td>
+                <a class="defect-record-link"
+                   href="{{ url_for('boat_defect_detail', boat_index=boat_index, defect_id=d.id) }}">
+                  {{ d.description }}
+                </a>
+              </td>
               <td class="muted">{{ d.reported_at[:10]|ru_date }}</td>
               <td class="muted">{{ d.employee_name }}</td>
               <td>
