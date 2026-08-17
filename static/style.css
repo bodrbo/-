@@ -1619,6 +1619,107 @@ button.btn-reject:hover { background: #932f20; }
 .task-card + .task-card { margin-top: 10px; }
 .task-card-actions { display: flex; gap: 10px; }
 
+/* Captain fleet workspace: one selected vessel drives inspections,
+   documents and defects, so the captain never has to select it twice. */
+.captain-boat-picker {
+  display: grid;
+  grid-template-columns: minmax(190px, 280px) auto;
+  align-items: end;
+  gap: 6px 14px;
+  margin-bottom: 18px;
+}
+.captain-boat-picker label { grid-column: 1; }
+.captain-boat-picker select { grid-column: 1; width: 100%; }
+.captain-boat-context {
+  grid-column: 2;
+  grid-row: 2;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 700;
+  padding-bottom: 10px;
+}
+.captain-fleet-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.captain-fleet-card {
+  min-width: 0;
+  padding: 17px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--paper-alt);
+}
+.captain-defects-card { grid-column: 1 / -1; }
+.captain-fleet-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-bottom: 14px;
+}
+.captain-fleet-card-head h3 { margin: 0; font-size: 15px; }
+.captain-fleet-card-head p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+.captain-fleet-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 29px;
+  height: 29px;
+  border-radius: 50%;
+  background: rgba(52, 152, 219, .13);
+  color: var(--brass-strong);
+  font-family: 'PT Mono', monospace;
+  font-weight: 700;
+}
+.captain-fleet-card-icon.captain-fleet-alert {
+  background: rgba(179, 64, 44, .13);
+  color: var(--danger);
+}
+.captain-checklist-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.captain-checklist-actions form { margin: 0; }
+.captain-checklist-actions .btn-primary { padding: 9px 13px; }
+.captain-document-list,
+.captain-defect-list { display: flex; flex-direction: column; gap: 7px; }
+.captain-document-row,
+.captain-defect-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: 7px;
+  background: var(--paper);
+}
+.captain-document-row > a,
+.captain-defect-row > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.captain-document-row > a { color: var(--ink); font-weight: 700; }
+.captain-defect-row { color: var(--ink); text-decoration: none; }
+.captain-defect-row:hover { box-shadow: inset 0 0 0 1px var(--brass); }
+.captain-defect-row .status-badge { flex: none; }
+.captain-fleet-empty { margin: 0; color: var(--muted); font-size: 13px; }
+.captain-defect-archive { margin-top: 12px; }
+.captain-defect-archive > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.captain-defect-archive[open] > summary { margin-bottom: 9px; }
+
+@media (max-width: 700px) {
+  .captain-boat-picker { grid-template-columns: 1fr; }
+  .captain-boat-context { display: none; }
+  .captain-fleet-grid { grid-template-columns: 1fr; }
+  .captain-defects-card { grid-column: auto; }
+  .captain-document-row,
+  .captain-defect-row { align-items: flex-start; }
+}
+
 /* --- hero dashboard: grand total + per-boat investor split --- */
 .hero-grid {
   display: grid;

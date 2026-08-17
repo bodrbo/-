@@ -6547,11 +6547,13 @@ def team_dashboard():
 
     is_captain = _employee_has_position(db, employee_name, "Капитан")
 
-    # Boat documents + diploma, folded in here (used to be their own page)
-    # so the whole dashboard is one set of collapsible modules — only
-    # captains have any use for either, and only queried for them.
+    # Fleet workspace — one selected boat drives its checklists, documents
+    # and defect lists. Only captains see it.
     boat_index = 0
+    selected_boat = None
     boat_documents = []
+    boat_current_defects = []
+    boat_archived_defects = []
     diploma_url = None
     if is_captain:
         try:
@@ -6560,11 +6562,17 @@ def team_dashboard():
             boat_index = 0
         if not (0 <= boat_index < len(BOATS)):
             boat_index = 0
-        boat = BOATS[boat_index]["name"]
+        selected_boat = BOATS[boat_index]["name"]
         boat_documents = db.execute(
             "SELECT * FROM boat_documents WHERE boat = ? ORDER BY uploaded_at DESC, id DESC",
-            (boat,),
+            (selected_boat,),
         ).fetchall()
+        boat_defects = db.execute(
+            "SELECT * FROM boat_defects WHERE boat = ? ORDER BY updated_at DESC, id DESC",
+            (selected_boat,),
+        ).fetchall()
+        boat_current_defects = [d for d in boat_defects if d["status"] != "resolved"]
+        boat_archived_defects = [d for d in boat_defects if d["status"] == "resolved"]
         diploma_url = find_diploma_url(session.get("team_username"))
 
     # "Мои задачи" — defects and tuning-order work items a captain/tuningman
@@ -6657,8 +6665,10 @@ def team_dashboard():
         is_captain=is_captain,
         is_paid=is_paid,
         avatar_url=find_avatar_url(session.get("team_username")),
-        boats=BOATS, boat_index=boat_index, boat_documents=boat_documents, diploma_url=diploma_url,
-        income_open="week" in request.args, documents_open="boat_index" in request.args,
+        boats=BOATS, boat_index=boat_index, selected_boat=selected_boat,
+        boat_documents=boat_documents, boat_current_defects=boat_current_defects,
+        boat_archived_defects=boat_archived_defects, diploma_url=diploma_url,
+        income_open="week" in request.args, fleet_open="boat_index" in request.args,
         can_have_tasks=can_have_tasks, my_tasks=my_tasks, defect_statuses=DEFECT_STATUSES,
         work_statuses=WORK_STATUSES, materials=materials,
         team_writeoff_error=session.pop("team_writeoff_error", None),
@@ -6667,6 +6677,8 @@ def team_dashboard():
 
 
 def _team_defect_for_employee(db, defect_id, employee_name):
+    if _employee_has_position(db, employee_name, "Капитан"):
+        return db.execute("SELECT * FROM boat_defects WHERE id = ?", (defect_id,)).fetchone()
     return db.execute(
         "SELECT bd.* FROM boat_defects bd WHERE bd.id = ? AND "
         "(bd.employee_name = ? OR EXISTS ("
@@ -6997,13 +7009,13 @@ def team_checklist_start(checklist_type):
         )
 
     boat = request.form.get("boat", "").strip()
-    if not boat:
+    if boat not in [item["name"] for item in BOATS]:
         return render_template(
             "team_checklist_start.html",
             checklist_type=checklist_type,
             checklist_label=CHECKLIST_TYPE_LABELS[checklist_type],
             boats=[b["name"] for b in BOATS],
-            error="Выберите катер.",
+            error="Выберите катер из списка.",
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")

@@ -71,119 +71,129 @@
   </div>
 
   {% if is_captain %}
-  <details class="panel collapsible-panel">
+  <details class="panel collapsible-panel captain-fleet-panel"{{ ' open' if fleet_open }}>
     <summary>
-      <span>Чек-листы осмотра лодки</span>
+      <span>Флот</span>
+      {% if boat_current_defects %}<span class="badge">{{ boat_current_defects|length }}</span>{% endif %}
       <span class="chev" aria-hidden="true"></span>
     </summary>
     <div class="collapsible-body">
-      <div class="checklist-buttons">
-        <a href="{{ url_for('team_checklist_start', checklist_type='pre') }}" class="checklist-btn">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="4" y="3" width="12" height="15" rx="1.6"/>
-            <path d="M7.5 3V2.3a1 1 0 011-1h3a1 1 0 011 1V3"/>
-            <path d="M7 9.5l1.8 1.8L13 7.5"/>
-            <path d="M7 14.5h6"/>
-          </svg>
-          <span>Чек-лист «предрейсовый осмотр»</span>
-        </a>
-        <a href="{{ url_for('team_checklist_start', checklist_type='post') }}" class="checklist-btn">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="4" y="3" width="12" height="15" rx="1.6"/>
-            <path d="M7.5 3V2.3a1 1 0 011-1h3a1 1 0 011 1V3"/>
-            <path d="M7 8.5h6M7 11.5h6"/>
-            <path d="M7.5 14.3l1.4 1.4L11.8 13"/>
-          </svg>
-          <span>Чек-лист «послерейсовый осмотр»</span>
-        </a>
+      <form method="get" action="{{ url_for('team_dashboard') }}" class="captain-boat-picker">
+        <input type="hidden" name="week" value="{{ selected_week }}">
+        <label for="boat_index">Выберите судно</label>
+        <select id="boat_index" name="boat_index" onchange="this.form.submit()">
+          {% for b in boats %}
+          <option value="{{ loop.index0 }}" {{ 'selected' if loop.index0 == boat_index }}>{{ b.name }}</option>
+          {% endfor %}
+        </select>
+        <span class="captain-boat-context">{{ selected_boat }}</span>
+      </form>
+
+      <div class="captain-fleet-grid">
+        <section class="captain-fleet-card captain-checklist-card">
+          <div class="captain-fleet-card-head">
+            <span class="captain-fleet-card-icon">✓</span>
+            <div>
+              <h3>Пройти чек-лист</h3>
+              <p>Начать осмотр выбранного судна.</p>
+            </div>
+          </div>
+          <div class="captain-checklist-actions">
+            {% for checklist_type, label in [('pre', 'Предрейсовый'), ('post', 'Послерейсовый')] %}
+            <form action="{{ url_for('team_checklist_start', checklist_type=checklist_type) }}" method="post">
+              <input type="hidden" name="boat" value="{{ selected_boat }}">
+              <button type="submit" class="btn-primary">{{ label }}</button>
+            </form>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="captain-fleet-card">
+          <div class="captain-fleet-card-head">
+            <span class="captain-fleet-card-icon">≡</span>
+            <div>
+              <h3>Документы по судну</h3>
+              <p>Документов: {{ boat_documents|length }}</p>
+            </div>
+          </div>
+          {% if boat_documents %}
+          <div class="captain-document-list">
+            {% for doc in boat_documents %}
+            {% set ext = doc.filename.rsplit('.', 1)[-1].lower() %}
+            {% set viewable = ext in ('jpg', 'jpeg', 'png', 'webp', 'pdf') %}
+            <div class="captain-document-row">
+              <a href="{{ url_for('team_download_boat_document', doc_id=doc.id) }}">{{ doc.title }}</a>
+              <span class="row-actions">
+                {% if viewable %}
+                <button type="button" class="icon-btn" title="Открыть"
+                        onclick='openDocModal({{ url_for("team_download_boat_document", doc_id=doc.id)|tojson }}, {{ ext|tojson }})'>
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.6 10S4.8 4.5 10 4.5 18.4 10 18.4 10 15.2 15.5 10 15.5 1.6 10 1.6 10z"/><circle cx="10" cy="10" r="2.4"/></svg>
+                </button>
+                {% endif %}
+                <a href="{{ url_for('team_download_boat_document', doc_id=doc.id) }}" class="icon-btn" title="Скачать">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3v9.5M6.2 9.3l3.8 3.7 3.8-3.7M3.5 15v1a1.5 1.5 0 001.5 1.5h10a1.5 1.5 0 001.5-1.5v-1"/></svg>
+                </a>
+              </span>
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="captain-fleet-empty">Документы по этому судну ещё не загружены.</p>
+          {% endif %}
+        </section>
+
+        <section class="captain-fleet-card captain-defects-card">
+          <div class="captain-fleet-card-head">
+            <span class="captain-fleet-card-icon captain-fleet-alert">!</span>
+            <div>
+              <h3>Неисправности по судну</h3>
+              <p>Текущих: {{ boat_current_defects|length }} · В архиве: {{ boat_archived_defects|length }}</p>
+            </div>
+          </div>
+          {% if boat_current_defects %}
+          <div class="captain-defect-list">
+            {% for defect in boat_current_defects %}
+            <a href="{{ url_for('team_defect_detail', defect_id=defect.id) }}" class="captain-defect-row">
+              <span>{{ defect.description }}</span>
+              <span class="status-badge status-defect-{{ defect.status }}">
+                {{ defect_statuses|selectattr('value', 'equalto', defect.status)|map(attribute='label')|first }}
+              </span>
+            </a>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="captain-fleet-empty">Текущих неисправностей нет.</p>
+          {% endif %}
+          {% if boat_archived_defects %}
+          <details class="captain-defect-archive">
+            <summary>Архив неисправностей ({{ boat_archived_defects|length }})</summary>
+            <div class="captain-defect-list">
+              {% for defect in boat_archived_defects %}
+              <a href="{{ url_for('team_defect_detail', defect_id=defect.id) }}" class="captain-defect-row">
+                <span>{{ defect.description }}</span>
+                <span class="status-badge status-defect-resolved">Устранена</span>
+              </a>
+              {% endfor %}
+            </div>
+          </details>
+          {% endif %}
+        </section>
       </div>
     </div>
   </details>
 
-  <details class="panel collapsible-panel"{{ ' open' if documents_open }}>
+  <details class="panel collapsible-panel">
     <summary>
       <span>Мои документы</span>
       <span class="chev" aria-hidden="true"></span>
     </summary>
     <div class="collapsible-body">
-      <div class="fleet-sub-grid">
-
-        <section>
-          <h3>Документы на катера</h3>
-          <form method="get" action="{{ url_for('team_dashboard') }}" class="filter-form" style="margin-bottom:16px;">
-            <input type="hidden" name="week" value="{{ selected_week }}">
-            <div class="field">
-              <label for="boat_index">Катер</label>
-              <select id="boat_index" name="boat_index" onchange="this.form.submit()">
-                {% for b in boats %}
-                <option value="{{ loop.index0 }}" {{ 'selected' if loop.index0 == boat_index }}>{{ b.name }}</option>
-                {% endfor %}
-              </select>
-            </div>
-          </form>
-
-          {% if boat_documents %}
-          <div class="table-scroll">
-            <table class="records">
-              <thead>
-                <tr>
-                  <th>Документ</th>
-                  <th>Загружен</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for doc in boat_documents %}
-                {% set ext = doc.filename.rsplit('.', 1)[-1].lower() %}
-                {% set viewable = ext in ('jpg', 'jpeg', 'png', 'webp', 'pdf') %}
-                <tr>
-                  <td>
-                    <a href="{{ url_for('team_download_boat_document', doc_id=doc.id) }}" class="term">{{ doc.title }}</a>
-                  </td>
-                  <td class="muted">{{ doc.uploaded_at[:10]|ru_date }}</td>
-                  <td class="row-actions">
-                    {% if viewable %}
-                    <button type="button" class="icon-btn" title="Открыть"
-                            onclick='openDocModal({{ url_for("team_download_boat_document", doc_id=doc.id)|tojson }}, {{ ext|tojson }})'>
-                      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M1.6 10S4.8 4.5 10 4.5 18.4 10 18.4 10 15.2 15.5 10 15.5 1.6 10 1.6 10z"/>
-                        <circle cx="10" cy="10" r="2.4"/>
-                      </svg>
-                    </button>
-                    {% endif %}
-                    <a href="{{ url_for('team_download_boat_document', doc_id=doc.id) }}" class="icon-btn" title="Скачать">
-                      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M10 3v9.5M6.2 9.3l3.8 3.7 3.8-3.7"/>
-                        <path d="M3.5 15v1a1.5 1.5 0 001.5 1.5h10a1.5 1.5 0 001.5-1.5v-1"/>
-                      </svg>
-                    </a>
-                  </td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-          {% else %}
-          <div class="empty-state">
-            <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-            <div class="t">Документов пока нет</div>
-            <div class="s">Администратор ещё не загрузил документы по этому катеру в разделе «Флот».</div>
-          </div>
-          {% endif %}
-        </section>
-
-        <section>
-          <h3>Диплом судоводителя</h3>
-          {% if diploma_url %}
-          <button type="button" class="btn-primary" onclick='openPhotoModal([{"url": {{ diploma_url|tojson }}, "comment": null}])'>
-            Открыть диплом
-          </button>
-          {% else %}
-          <p class="hint">Диплом ещё не загружен. Обратитесь к администратору.</p>
-          {% endif %}
-        </section>
-
-      </div>
+      <h3>Диплом судоводителя</h3>
+      {% if diploma_url %}
+      <button type="button" class="btn-primary" onclick='openPhotoModal([{"url": {{ diploma_url|tojson }}, "comment": null}])'>Открыть диплом</button>
+      {% else %}
+      <p class="hint">Диплом ещё не загружен. Обратитесь к администратору.</p>
+      {% endif %}
     </div>
   </details>
   {% endif %}
