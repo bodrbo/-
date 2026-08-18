@@ -1,0 +1,147 @@
+<section class="panel fuel-panel fuel-status-{{ fuel.status }}">
+  <div class="fuel-panel-heading">
+    <div>
+      <span class="fuel-eyebrow">Топливная система · {{ fuel.boat }}</span>
+      <h2>Топливо на борту</h2>
+      <p>Бак {{ fuel.capacity_liters|round(1) }} л · групповой рейс −{{ fuel.group_trip_liters|round(1) }} л</p>
+    </div>
+    {% if viewer_role == 'admin' %}
+    <form action="{{ url_for('fuel_sync_now') }}" method="post" class="fuel-sync-form">
+      <input type="hidden" name="boat_index" value="{{ boat_index }}">
+      <button type="submit" class="btn-secondary">Обновить из YCLIENTS</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if fuel_notice %}
+  <div class="fuel-notice fuel-notice-{{ fuel_notice.type }}" role="alert">{{ fuel_notice.message }}</div>
+  {% endif %}
+
+  <div class="fuel-instrument {{ 'is-inactive' if not fuel.activated }}">
+    <div class="fuel-reading">
+      {% if fuel.activated %}
+      <strong>{{ fuel.balance_liters|round(1) }}</strong><span>/ {{ fuel.capacity_liters|round(1) }} л</span>
+      {% else %}
+      <strong>—</strong><span>/ {{ fuel.capacity_liters|round(1) }} л</span>
+      {% endif %}
+    </div>
+    <div class="fuel-gauge"
+         role="progressbar"
+         aria-label="Уровень топлива на катере {{ fuel.boat }}"
+         aria-valuemin="0"
+         aria-valuemax="{{ fuel.capacity_liters }}"
+         {% if fuel.activated %}aria-valuenow="{{ fuel.gauge_liters }}"{% endif %}>
+      <div class="fuel-gauge-fill" style="--fuel-level: {{ fuel.percent }}%;"></div>
+      <span class="fuel-tick fuel-tick-25">¼</span>
+      <span class="fuel-tick fuel-tick-50">½</span>
+      <span class="fuel-tick fuel-tick-75">¾</span>
+    </div>
+    <div class="fuel-instrument-meta">
+      {% if not fuel.activated %}
+      <strong>Учёт ещё не запущен</strong>
+      <span>Первая заправка до полного установит начальный уровень.</span>
+      {% elif fuel.status == 'critical' %}
+      <strong>Критический остаток</strong>
+      <span>Расчётно хватит на {{ fuel.trips_remaining }} групповых рейсов.</span>
+      {% elif fuel.status == 'low' %}
+      <strong>Низкий уровень</strong>
+      <span>Расчётно хватит на {{ fuel.trips_remaining }} групповых рейсов.</span>
+      {% else %}
+      <strong>{{ fuel.percent|round(1) }}% бака</strong>
+      <span>Расчётно хватит на {{ fuel.trips_remaining }} групповых рейсов.</span>
+      {% endif %}
+      {% if fuel.last_synced_at %}<small>YCLIENTS обновлён {{ fuel.last_synced_at }}</small>{% endif %}
+    </div>
+  </div>
+
+  <div class="fuel-workspace">
+    <section class="fuel-refill-card">
+      <h3>{{ 'Запустить учёт полной заправкой' if not fuel.activated else 'Добавить заправку' }}</h3>
+      <p>Укажите фактически залитый объём и время заправки.</p>
+      {% if viewer_role == 'admin' %}
+      <form action="{{ url_for('fleet.add_fuel_refill', boat_index=boat_index) }}" method="post" class="fuel-refill-form">
+      {% else %}
+      <form action="{{ url_for('team_add_fuel_refill') }}" method="post" class="fuel-refill-form">
+        <input type="hidden" name="boat_index" value="{{ boat_index }}">
+      {% endif %}
+        <label>
+          <span>Залито, л</span>
+          <input type="text" inputmode="decimal" name="liters" placeholder="Например, 45" required>
+        </label>
+        <label>
+          <span>Дата и время</span>
+          <input type="datetime-local" name="occurred_at" value="{{ fuel.now_local }}" required>
+        </label>
+        <label class="fuel-full-toggle">
+          <input type="checkbox" name="fill_to_full" value="1" {{ 'checked' if not fuel.activated }}>
+          <span>Бак заправлен до полного</span>
+        </label>
+        <button type="submit" class="btn-primary">{{ 'Запустить учёт' if not fuel.activated else 'Сохранить заправку' }}</button>
+      </form>
+    </section>
+
+    <section class="fuel-pending-card">
+      <div class="fuel-card-heading">
+        <div>
+          <h3>Индивидуальные рейсы</h3>
+          <p>Расход по обычным записям YCLIENTS указывается вручную.</p>
+        </div>
+        {% if fuel.pending_trips %}<span class="badge">{{ fuel.pending_trips|length }}</span>{% endif %}
+      </div>
+      {% if fuel.pending_trips %}
+      <div class="fuel-pending-list">
+        {% for trip in fuel.pending_trips %}
+        <div class="fuel-pending-trip">
+          <div>
+            <strong>{{ trip.service_title or 'Индивидуальный рейс' }}</strong>
+            <span>{{ trip.started_at[:10]|ru_date }} · {{ trip.started_at[11:16] }}–{{ trip.ended_at[11:16] }}</span>
+          </div>
+          {% if viewer_role == 'admin' %}
+          <form action="{{ url_for('fleet.set_manual_fuel_consumption', boat_index=boat_index, event_id=trip.id) }}" method="post">
+          {% else %}
+          <form action="{{ url_for('team_set_manual_fuel_consumption', event_id=trip.id) }}" method="post">
+            <input type="hidden" name="boat_index" value="{{ boat_index }}">
+          {% endif %}
+            <label class="sr-only" for="fuel-trip-{{ trip.id }}">Расход топлива по рейсу</label>
+            <input id="fuel-trip-{{ trip.id }}" type="text" inputmode="decimal" name="liters" placeholder="Литры" required>
+            <button type="submit" class="btn-secondary">Списать</button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+      {% elif fuel.activated %}
+      <div class="fuel-empty">Все найденные индивидуальные рейсы обработаны.</div>
+      {% else %}
+      <div class="fuel-empty">Рейсы появятся после запуска учёта и синхронизации.</div>
+      {% endif %}
+    </section>
+  </div>
+
+  {% if fuel.transactions %}
+  <details class="fuel-history">
+    <summary>Журнал топлива <span>{{ fuel.transactions|length }}</span></summary>
+    <div class="table-scroll">
+      <table class="records">
+        <thead><tr><th>Дата</th><th>Операция</th><th>Автор</th><th>Литры</th></tr></thead>
+        <tbody>
+          {% for transaction in fuel.transactions %}
+          <tr>
+            <td class="muted">{{ transaction.occurred_at[:10]|ru_date }} · {{ transaction.occurred_at[11:16] }}</td>
+            <td>
+              <strong>{{ transaction.label }}</strong>
+              {% if transaction.source_label %}<span class="fuel-history-note">{{ transaction.source_label }}</span>{% endif %}
+              {% if transaction.kind == 'calibration' and transaction.reported_liters %}<span class="fuel-history-note">Залито {{ transaction.reported_liters|round(1) }} л</span>{% endif %}
+            </td>
+            <td class="muted">{{ transaction.created_by_name }}</td>
+            <td class="fuel-delta {{ 'is-positive' if transaction.liters_delta >= 0 else 'is-negative' }}">
+              {% if transaction.kind == 'calibration' %}= {{ fuel.capacity_liters|round(1) }}
+              {% else %}{{ '+' if transaction.liters_delta > 0 }}{{ transaction.liters_delta|round(1) }}{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
+</section>

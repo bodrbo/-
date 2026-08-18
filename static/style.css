@@ -714,6 +714,221 @@ a.diag-card:hover { border-color: var(--brass); box-shadow: var(--shadow); }
   font-size: 12.5px;
   color: var(--muted);
 }
+.fleet-fuel-mini {
+  display: block;
+  width: min(150px, 82%);
+  height: 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--paper-alt);
+  overflow: hidden;
+}
+.fleet-fuel-mini i { display: block; width: var(--fuel-level); height: 100%; background: var(--success); }
+.fleet-fuel-mini.fuel-mini-low i { background: var(--warning); }
+.fleet-fuel-mini.fuel-mini-critical i { background: var(--danger); }
+
+/* Fuel is presented as one vessel instrument, not a dashboard of abstract
+   KPIs: the ruled sight glass carries the current operational truth. */
+.fuel-panel {
+  margin-bottom: 22px;
+  border-top: 4px solid var(--brass);
+  overflow: hidden;
+}
+.fuel-panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+.fuel-panel-heading h2 { margin: 3px 0 0; font-size: 22px; }
+.fuel-panel-heading p,
+.fuel-refill-card > p,
+.fuel-card-heading p { margin: 3px 0 0; color: var(--muted); font-size: 12.5px; }
+.fuel-eyebrow {
+  color: var(--brass-strong);
+  font-family: 'PT Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.fuel-sync-form { margin: 0; }
+.fuel-notice {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.fuel-notice-success { color: var(--success); border-color: rgba(47, 107, 79, .3); background: rgba(47, 107, 79, .07); }
+.fuel-notice-error { color: var(--danger); border-color: rgba(179, 64, 44, .3); background: rgba(179, 64, 44, .07); }
+.fuel-instrument {
+  display: grid;
+  grid-template-columns: 150px minmax(220px, 1fr) 230px;
+  align-items: center;
+  gap: 20px;
+  padding: 20px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--paper-alt);
+}
+.fuel-reading { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.fuel-reading strong {
+  font-family: 'PT Mono', monospace;
+  font-size: 36px;
+  line-height: 1;
+  letter-spacing: -.05em;
+}
+.fuel-reading span { color: var(--muted); font-family: 'PT Mono', monospace; font-size: 13px; }
+.fuel-gauge {
+  position: relative;
+  height: 42px;
+  border: 2px solid var(--ink-soft);
+  border-radius: 7px;
+  background: var(--paper);
+  box-shadow: inset 0 2px 6px rgba(15, 42, 53, .08);
+  overflow: hidden;
+}
+.fuel-gauge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-left: 1px solid transparent;
+  pointer-events: none;
+}
+.fuel-gauge-fill {
+  width: var(--fuel-level);
+  height: 100%;
+  background: var(--success);
+  transition: width .45s ease;
+}
+.fuel-status-low .fuel-gauge-fill { background: var(--warning); }
+.fuel-status-critical .fuel-gauge-fill { background: var(--danger); }
+.fuel-instrument.is-inactive .fuel-gauge { border-style: dashed; opacity: .62; }
+.fuel-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  border-left: 1px solid rgba(15, 42, 53, .38);
+  color: var(--ink-soft);
+  font-family: 'PT Mono', monospace;
+  font-size: 9px;
+  line-height: 1;
+  padding: 4px 0 0 4px;
+}
+.fuel-tick-25 { left: 25%; }
+.fuel-tick-50 { left: 50%; }
+.fuel-tick-75 { left: 75%; }
+.fuel-instrument-meta { display: flex; flex-direction: column; align-items: flex-start; }
+.fuel-instrument-meta strong { font-size: 13px; }
+.fuel-instrument-meta span { color: var(--muted); font-size: 11px; }
+.fuel-instrument-meta small { margin-top: 5px; color: var(--muted); font-family: 'PT Mono', monospace; font-size: 9px; }
+.fuel-workspace {
+  display: grid;
+  grid-template-columns: minmax(280px, .8fr) minmax(360px, 1.2fr);
+  gap: 14px;
+  margin-top: 14px;
+}
+.fuel-refill-card,
+.fuel-pending-card {
+  padding: 17px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 10px;
+  background: var(--paper);
+}
+.fuel-refill-card h3,
+.fuel-card-heading h3 { margin: 0; font-size: 15px; }
+.fuel-refill-form {
+  display: grid;
+  grid-template-columns: .7fr 1.3fr;
+  gap: 10px;
+  margin-top: 14px;
+}
+.fuel-refill-form label:not(.fuel-full-toggle) { display: flex; flex-direction: column; gap: 5px; }
+.fuel-refill-form label > span { color: var(--muted); font-size: 11px; font-weight: 700; }
+.fuel-panel .fuel-refill-form input[type="text"],
+.fuel-panel .fuel-refill-form input[type="datetime-local"] { width: 100%; padding: 9px 10px; }
+.fuel-full-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: center;
+}
+.fuel-full-toggle input { width: 16px; height: 16px; margin: 0; accent-color: var(--brass-strong); }
+.fuel-panel .fuel-refill-form > button { width: 100%; }
+.fuel-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.fuel-pending-list { margin-top: 12px; border-top: 1px solid var(--hairline-soft); }
+.fuel-pending-trip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.fuel-pending-trip > div { display: flex; flex-direction: column; min-width: 0; }
+.fuel-pending-trip strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.fuel-pending-trip span { color: var(--muted); font-family: 'PT Mono', monospace; font-size: 10px; }
+.fuel-pending-trip form { display: flex; gap: 7px; margin: 0; }
+.fuel-panel .fuel-pending-trip input { width: 82px; padding: 7px 8px; }
+.fuel-panel .fuel-pending-trip button { padding: 7px 10px; }
+.fuel-empty {
+  margin-top: 12px;
+  padding: 18px;
+  border: 1px dashed var(--hairline);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+.fuel-history { margin-top: 14px; border-top: 1px solid var(--hairline-soft); }
+.fuel-history > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 0 2px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+.fuel-history > summary span {
+  min-width: 21px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--paper-alt);
+  font-family: 'PT Mono', monospace;
+  font-size: 9px;
+  text-align: center;
+}
+.fuel-history .table-scroll { margin-top: 10px; }
+.fuel-history-note { display: block; color: var(--muted); font-size: 10.5px; font-weight: 400; }
+.fuel-delta { font-family: 'PT Mono', monospace; font-weight: 700; white-space: nowrap; }
+.fuel-delta.is-positive { color: var(--success); }
+.fuel-delta.is-negative { color: var(--danger); }
+@media (max-width: 900px) {
+  .fuel-instrument { grid-template-columns: 130px minmax(180px, 1fr); }
+  .fuel-instrument-meta { grid-column: 1 / -1; }
+  .fuel-workspace { grid-template-columns: 1fr; }
+}
+@media (max-width: 620px) {
+  .fuel-panel-heading { flex-direction: column; }
+  .fuel-panel-heading .fuel-sync-form,
+  .fuel-panel-heading .fuel-sync-form button { width: 100%; }
+  .fuel-instrument { grid-template-columns: 1fr; gap: 13px; padding: 15px; }
+  .fuel-reading strong { font-size: 32px; }
+  .fuel-instrument-meta { grid-column: auto; }
+  .fuel-refill-form { grid-template-columns: 1fr; }
+  .fuel-pending-trip { grid-template-columns: 1fr; }
+  .fuel-pending-trip form { width: 100%; }
+  .fuel-panel .fuel-pending-trip input { flex: 1; width: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fuel-gauge-fill { transition: none; }
+}
 .fleet-sub-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

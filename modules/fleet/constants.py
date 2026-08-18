@@ -29,6 +29,23 @@ BOATS = [
     },
 ]
 
+# YCLIENTS uses the record/activity colour as the vessel identifier.
+BOAT_COLORS = {
+    "#03a9f4": "Ларус",
+    "#2196f3": "Ларус",
+    "#673ab7": "Бодрый Второй",
+    "#8bc34a": "Бодрый Первый",
+}
+YCLIENTS_BLOCKED_SHIFT_COLOR = "f44336"
+
+# Physical tank data and the automatic debit for one completed YCLIENTS
+# group activity. Individual bookings are always reviewed manually.
+FUEL_CONFIG = {
+    "Ларус": {"capacity_liters": 60.0, "group_trip_liters": 12.0},
+    "Бодрый Второй": {"capacity_liters": 250.0, "group_trip_liters": 10.0},
+    "Бодрый Первый": {"capacity_liters": 100.0, "group_trip_liters": 12.0},
+}
+
 CHECKLIST_TYPE_LABELS = {
     "pre": "Предрейсовый осмотр",
     "post": "Послерейсовый осмотр",

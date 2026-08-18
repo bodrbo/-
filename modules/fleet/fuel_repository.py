@@ -1,0 +1,161 @@
+"""SQL access for the vessel fuel ledger and YCLIENTS trip queue."""
+
+
+def get_state(db, boat):
+    return db.execute(
+        "SELECT * FROM boat_fuel_state WHERE boat = ?", (boat,)
+    ).fetchone()
+
+
+def activate_state(db, boat, activated_at, actor_role, actor_name, updated_at):
+    db.execute(
+        "UPDATE boat_fuel_state SET activated_at = ?, activated_by_role = ?, "
+        "activated_by_name = ?, updated_at = ? WHERE boat = ?",
+        (activated_at, actor_role, actor_name, updated_at, boat),
+    )
+
+
+def set_last_synced_at(db, boat, synced_at):
+    db.execute(
+        "UPDATE boat_fuel_state SET last_synced_at = ?, updated_at = ? WHERE boat = ?",
+        (synced_at, synced_at, boat),
+    )
+
+
+def balance_at(db, boat, occurred_at=None):
+    query = (
+        "SELECT COALESCE(SUM(liters_delta), 0) AS balance "
+        "FROM boat_fuel_transactions WHERE boat = ?"
+    )
+    params = [boat]
+    if occurred_at is not None:
+        query += " AND occurred_at <= ?"
+        params.append(occurred_at)
+    return float(db.execute(query, params).fetchone()["balance"] or 0)
+
+
+def add_transaction(
+    db,
+    boat,
+    kind,
+    liters_delta,
+    reported_liters,
+    occurred_at,
+    source_ref,
+    source_label,
+    actor_role,
+    actor_name,
+    created_at,
+):
+    cursor = db.execute(
+        "INSERT INTO boat_fuel_transactions "
+        "(boat, kind, liters_delta, reported_liters, occurred_at, source_ref, "
+        "source_label, created_by_role, created_by_name, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            boat,
+            kind,
+            liters_delta,
+            reported_liters,
+            occurred_at,
+            source_ref,
+            source_label,
+            actor_role,
+            actor_name,
+            created_at,
+        ),
+    )
+    return cursor.lastrowid
+
+
+def get_transaction_by_source(db, source_ref):
+    return db.execute(
+        "SELECT * FROM boat_fuel_transactions WHERE source_ref = ?", (source_ref,)
+    ).fetchone()
+
+
+def list_transactions(db, boat, limit=30):
+    return db.execute(
+        "SELECT * FROM boat_fuel_transactions WHERE boat = ? "
+        "ORDER BY occurred_at DESC, id DESC LIMIT ?",
+        (boat, limit),
+    ).fetchall()
+
+
+def upsert_trip_event(
+    db,
+    source_ref,
+    boat,
+    trip_kind,
+    started_at,
+    ended_at,
+    service_title,
+    last_seen_at,
+):
+    existing = get_trip_event_by_source(db, source_ref)
+    if existing is None:
+        cursor = db.execute(
+            "INSERT INTO boat_fuel_trip_events "
+            "(source_ref, boat, trip_kind, started_at, ended_at, service_title, "
+            "status, last_seen_at, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+            (
+                source_ref,
+                boat,
+                trip_kind,
+                started_at,
+                ended_at,
+                service_title,
+                last_seen_at,
+                last_seen_at,
+            ),
+        )
+        return get_trip_event(db, cursor.lastrowid)
+
+    db.execute(
+        "UPDATE boat_fuel_trip_events SET boat = ?, trip_kind = ?, started_at = ?, "
+        "ended_at = ?, service_title = ?, last_seen_at = ? WHERE source_ref = ?",
+        (
+            boat,
+            trip_kind,
+            started_at,
+            ended_at,
+            service_title,
+            last_seen_at,
+            source_ref,
+        ),
+    )
+    return get_trip_event_by_source(db, source_ref)
+
+
+def get_trip_event(db, event_id, boat=None):
+    if boat is None:
+        return db.execute(
+            "SELECT * FROM boat_fuel_trip_events WHERE id = ?", (event_id,)
+        ).fetchone()
+    return db.execute(
+        "SELECT * FROM boat_fuel_trip_events WHERE id = ? AND boat = ?",
+        (event_id, boat),
+    ).fetchone()
+
+
+def get_trip_event_by_source(db, source_ref):
+    return db.execute(
+        "SELECT * FROM boat_fuel_trip_events WHERE source_ref = ?", (source_ref,)
+    ).fetchone()
+
+
+def mark_trip_consumed(db, event_id, liters, transaction_id):
+    db.execute(
+        "UPDATE boat_fuel_trip_events SET status = 'consumed', "
+        "consumption_liters = ?, transaction_id = ? WHERE id = ?",
+        (liters, transaction_id, event_id),
+    )
+
+
+def list_pending_trip_events(db, boat):
+    return db.execute(
+        "SELECT * FROM boat_fuel_trip_events WHERE boat = ? AND trip_kind = 'individual' "
+        "AND status = 'pending' ORDER BY ended_at, id",
+        (boat,),
+    ).fetchall()

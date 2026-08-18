@@ -38,12 +38,16 @@ from io import BytesIO
 from modules.fleet import create_fleet_blueprint
 from modules.fleet.constants import (
     BOATS,
+    BOAT_COLORS,
     CHECKLIST_QUESTIONS,
     CHECKLIST_TYPE_LABELS,
     DEFECT_ASSIGNABLE_POSITIONS,
     DEFECT_STATUSES,
     DEFECT_TASK_WORK_TYPE,
+    FUEL_CONFIG,
+    YCLIENTS_BLOCKED_SHIFT_COLOR,
 )
+from modules.fleet import fuel_services
 from modules.fleet.services import (
     add_defect_plan_item as _add_defect_plan_item,
     checklist_questions_for as _checklist_questions_for,
@@ -452,20 +456,12 @@ def tbank_payment_configured():
     return bool(TBANK_API_TOKEN_PAYMENT and TBANK_ACCOUNT_NUMBER)
 
 
-# Соответствие цвета записи/события в Yclients — катеру. Значения подтверждены.
-BOAT_COLORS = {
-    "#03a9f4": "Ларус",             # синий
-    "#2196f3": "Ларус",             # синий (второй встречающийся оттенок)
-    "#673ab7": "Бодрый Второй",     # тёмно-фиолетовый
-    "#8bc34a": "Бодрый Первый",     # светло-зелёный
-}
-
 # Красная "запись-блокер": менеджер ставит её сотруднику вместо реального
 # рейса, когда его точно нельзя занимать в этот день (комментарий обычно
 # "не ставить в рейсы"). Это не рейс и не смена — такую запись нужно
 # полностью игнорировать: не создавать под неё карточку на подтверждение и
 # не считать её поводом для доплаты за смену.
-BLOCKED_SHIFT_COLOR = "f44336"
+BLOCKED_SHIFT_COLOR = YCLIENTS_BLOCKED_SHIFT_COLOR
 
 # Виды работ со стандартной ставкой и длительностью (в часах).
 # При выборе вида работы в форме ставка и часы подставятся автоматически
@@ -951,6 +947,67 @@ def init_db():
         )
         """
     )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS boat_fuel_state (
+            boat TEXT PRIMARY KEY,
+            activated_at TEXT,
+            activated_by_role TEXT,
+            activated_by_name TEXT,
+            last_synced_at TEXT,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS boat_fuel_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            boat TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            liters_delta REAL NOT NULL,
+            reported_liters REAL,
+            occurred_at TEXT NOT NULL,
+            source_ref TEXT NOT NULL UNIQUE,
+            source_label TEXT,
+            created_by_role TEXT NOT NULL,
+            created_by_name TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS boat_fuel_trip_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_ref TEXT NOT NULL UNIQUE,
+            boat TEXT NOT NULL,
+            trip_kind TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            ended_at TEXT NOT NULL,
+            service_title TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            consumption_liters REAL,
+            transaction_id INTEGER,
+            last_seen_at TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_boat_fuel_transactions_boat_time "
+        "ON boat_fuel_transactions (boat, occurred_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_boat_fuel_trip_events_boat_status "
+        "ON boat_fuel_trip_events (boat, status, ended_at)"
+    )
+    for boat_name in FUEL_CONFIG:
+        conn.execute(
+            "INSERT OR IGNORE INTO boat_fuel_state (boat, updated_at) VALUES (?, ?)",
+            (boat_name, now_str),
+        )
 
     conn.execute(
         """
@@ -6084,6 +6141,7 @@ def team_dashboard():
     boat_documents = []
     boat_current_defects = []
     boat_archived_defects = []
+    fuel = None
     diploma_url = None
     if is_captain:
         try:
@@ -6103,6 +6161,7 @@ def team_dashboard():
         ).fetchall()
         boat_current_defects = [d for d in boat_defects if d["status"] != "resolved"]
         boat_archived_defects = [d for d in boat_defects if d["status"] == "resolved"]
+        fuel = fuel_services.fuel_summary(db, selected_boat)
         diploma_url = find_diploma_url(session.get("team_username"))
 
     # "Мои задачи" — defects and tuning-order work items a captain/tuningman
@@ -6197,13 +6256,72 @@ def team_dashboard():
         avatar_url=find_avatar_url(session.get("team_username")),
         boats=BOATS, boat_index=boat_index, selected_boat=selected_boat,
         boat_documents=boat_documents, boat_current_defects=boat_current_defects,
-        boat_archived_defects=boat_archived_defects, diploma_url=diploma_url,
+        boat_archived_defects=boat_archived_defects, fuel=fuel,
+        fuel_notice=session.pop("fuel_notice", None), diploma_url=diploma_url,
         income_open="week" in request.args, fleet_open="boat_index" in request.args,
         can_have_tasks=can_have_tasks, my_tasks=my_tasks, defect_statuses=DEFECT_STATUSES,
         work_statuses=WORK_STATUSES, materials=materials,
         team_writeoff_error=session.pop("team_writeoff_error", None),
         my_supply_requests=my_supply_requests, supply_request_statuses=SUPPLY_REQUEST_STATUSES,
     )
+
+
+def _team_fuel_boat(db):
+    employee_name = session.get("team_employee_name")
+    if not _employee_has_position(db, employee_name, "Капитан"):
+        return None, None
+    try:
+        boat_index = int(request.form.get("boat_index", "0"))
+    except ValueError:
+        return None, None
+    if not (0 <= boat_index < len(BOATS)):
+        return None, None
+    return boat_index, BOATS[boat_index]["name"]
+
+
+@app.route("/team/fuel/refill", methods=["POST"])
+@team_login_required
+def team_add_fuel_refill():
+    db = get_db()
+    boat_index, boat = _team_fuel_boat(db)
+    if boat is None:
+        return redirect(url_for("team_dashboard"))
+    success, message = fuel_services.record_refill(
+        db,
+        boat,
+        request.form.get("liters", ""),
+        request.form.get("occurred_at", ""),
+        request.form.get("fill_to_full") == "1",
+        "team",
+        session.get("team_employee_name") or "Капитан",
+    )
+    session["fuel_notice"] = {
+        "type": "success" if success else "error",
+        "message": message,
+    }
+    return redirect(url_for("team_dashboard", boat_index=boat_index))
+
+
+@app.route("/team/fuel/trips/<int:event_id>/consumption", methods=["POST"])
+@team_login_required
+def team_set_manual_fuel_consumption(event_id):
+    db = get_db()
+    boat_index, boat = _team_fuel_boat(db)
+    if boat is None:
+        return redirect(url_for("team_dashboard"))
+    success, message = fuel_services.record_individual_consumption(
+        db,
+        boat,
+        event_id,
+        request.form.get("liters", ""),
+        "team",
+        session.get("team_employee_name") or "Капитан",
+    )
+    session["fuel_notice"] = {
+        "type": "success" if success else "error",
+        "message": message,
+    }
+    return redirect(url_for("team_dashboard", boat_index=boat_index))
 
 
 def _team_defect_for_employee(db, defect_id, employee_name):
@@ -8215,6 +8333,81 @@ def set_supply_request_status(request_id):
             text += f"\n\nКомментарий: {html.escape(comment)}"
         send_telegram_notification_to_employee(db, req["employee_name"], text)
     return redirect(url_for("supply_requests"))
+
+
+def _sync_fuel_from_yclients(db, now=None):
+    """Fetch an overlap window, including any gap since the last successful sync."""
+    now = now or dt.datetime.now()
+    start = now.date() - dt.timedelta(days=2)
+    cursor_row = db.execute(
+        "SELECT MIN(COALESCE(last_synced_at, activated_at)) AS sync_cursor "
+        "FROM boat_fuel_state WHERE activated_at IS NOT NULL"
+    ).fetchone()
+    if cursor_row and cursor_row["sync_cursor"]:
+        try:
+            cursor_date = dt.datetime.fromisoformat(cursor_row["sync_cursor"]).date()
+            start = min(start, cursor_date - dt.timedelta(days=1))
+        except (TypeError, ValueError):
+            pass
+    start_date = start.isoformat()
+    end_date = now.date().isoformat()
+    records = yclients_get_records(start_date, end_date)
+    activity_ids = {record["activity_id"] for record in records if record.get("activity_id")}
+    activity_colors = yclients_get_activity_colors(activity_ids)
+    return fuel_services.sync_yclients_records(db, records, activity_colors, now)
+
+
+@app.route("/fleet/fuel/sync", methods=["POST"])
+@admin_login_required
+def fuel_sync_now():
+    try:
+        boat_index = int(request.form.get("boat_index", "0"))
+    except ValueError:
+        boat_index = 0
+    if not (0 <= boat_index < len(BOATS)):
+        boat_index = 0
+
+    if not yclients_configured():
+        session["fuel_notice"] = {
+            "type": "error",
+            "message": "YCLIENTS не настроен на сервере.",
+        }
+        return redirect(url_for("fleet.boat_detail", boat_index=boat_index))
+
+    try:
+        stats = _sync_fuel_from_yclients(get_db())
+    except (requests.RequestException, RuntimeError, ValueError) as error:
+        session["fuel_notice"] = {
+            "type": "error",
+            "message": f"Не удалось обновить топливо из YCLIENTS: {error}",
+        }
+    else:
+        session["fuel_notice"] = {
+            "type": "success",
+            "message": (
+                f"YCLIENTS обновлён: автоматических списаний — {stats['automatic']}, "
+                f"индивидуальных рейсов ожидают расхода — {stats['pending']}."
+            ),
+        }
+    return redirect(url_for("fleet.boat_detail", boat_index=boat_index))
+
+
+@app.route("/internal/cron/sync-fuel")
+def cron_sync_fuel():
+    """Hourly Beget cron target for completed YCLIENTS fuel events."""
+    if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
+        return "forbidden", 403
+    if not yclients_configured():
+        return "yclients not configured", 503
+    try:
+        stats = _sync_fuel_from_yclients(get_db())
+    except (requests.RequestException, RuntimeError, ValueError) as error:
+        return f"error: {error}", 502
+    return (
+        f"ok: {stats['automatic']} automatic, {stats['pending']} pending, "
+        f"{stats['skipped']} skipped",
+        200,
+    )
 
 
 def _sync_captain_shifts_for_date(db, target_date):

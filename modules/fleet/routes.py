@@ -10,10 +10,11 @@ from flask import (
     render_template,
     request,
     send_from_directory,
+    session,
     url_for,
 )
 
-from . import repository, services
+from . import fuel_services, repository, services
 from .constants import (
     BOAT_DOCUMENT_EXTENSIONS,
     BOATS,
@@ -29,7 +30,16 @@ def create_fleet_blueprint(get_db, admin_login_required):
     @blueprint.route("/fleet")
     @admin_login_required
     def index():
-        return render_template("fleet_index.html", boats=BOATS, active_page="fleet")
+        db = get_db()
+        return render_template(
+            "fleet_index.html",
+            boats=BOATS,
+            fuel_by_boat={
+                boat["name"]: fuel_services.fuel_summary(db, boat["name"], 0)
+                for boat in BOATS
+            },
+            active_page="fleet",
+        )
 
     @blueprint.route("/fleet/<int:boat_index>")
     @admin_login_required
@@ -53,8 +63,55 @@ def create_fleet_blueprint(get_db, admin_login_required):
             open_defects_count=len(current_defects),
             assignable_employees=services.assignable_employees(db),
             checklist_type_labels=CHECKLIST_TYPE_LABELS,
+            fuel=fuel_services.fuel_summary(db, boat),
+            fuel_notice=session.pop("fuel_notice", None),
+            viewer_role="admin",
             active_page="fleet",
         )
+
+    @blueprint.route("/fleet/<int:boat_index>/fuel/refill", methods=["POST"])
+    @admin_login_required
+    def add_fuel_refill(boat_index):
+        boat = services.boat_by_index(boat_index)
+        if boat is None:
+            return redirect(url_for("fleet.index"))
+        success, message = fuel_services.record_refill(
+            get_db(),
+            boat,
+            request.form.get("liters", ""),
+            request.form.get("occurred_at", ""),
+            request.form.get("fill_to_full") == "1",
+            "admin",
+            session.get("admin_name") or "Администратор",
+        )
+        session["fuel_notice"] = {
+            "type": "success" if success else "error",
+            "message": message,
+        }
+        return redirect(url_for("fleet.boat_detail", boat_index=boat_index))
+
+    @blueprint.route(
+        "/fleet/<int:boat_index>/fuel/trips/<int:event_id>/consumption",
+        methods=["POST"],
+    )
+    @admin_login_required
+    def set_manual_fuel_consumption(boat_index, event_id):
+        boat = services.boat_by_index(boat_index)
+        if boat is None:
+            return redirect(url_for("fleet.index"))
+        success, message = fuel_services.record_individual_consumption(
+            get_db(),
+            boat,
+            event_id,
+            request.form.get("liters", ""),
+            "admin",
+            session.get("admin_name") or "Администратор",
+        )
+        session["fuel_notice"] = {
+            "type": "success" if success else "error",
+            "message": message,
+        }
+        return redirect(url_for("fleet.boat_detail", boat_index=boat_index))
 
     @blueprint.route(
         "/fleet/<int:boat_index>/defects/<int:defect_id>", methods=["GET", "POST"]

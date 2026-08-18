@@ -89,6 +89,9 @@
         <span class="captain-boat-context">{{ selected_boat }}</span>
       </form>
 
+      {% set viewer_role = 'team' %}
+      {% include '_fuel_panel.html' %}
+
       <div class="captain-fleet-grid">
         <section class="captain-fleet-card captain-checklist-card">
           <div class="captain-fleet-card-head">

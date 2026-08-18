@@ -134,7 +134,14 @@
           </svg>
         </span>
         <span class="fleet-card-name">{{ boat.name }}</span>
-        <span class="fleet-card-sub">Осмотры и документы</span>
+        {% set boat_fuel = fuel_by_boat[boat.name] %}
+        <span class="fleet-card-sub">
+          {% if boat_fuel.activated %}Топливо: {{ boat_fuel.balance_liters|round(1) }} / {{ boat_fuel.capacity_liters|round(1) }} л
+          {% else %}Топливо: учёт не запущен{% endif %}
+        </span>
+        <span class="fleet-fuel-mini fuel-mini-{{ boat_fuel.status }}" aria-hidden="true">
+          <i style="--fuel-level: {{ boat_fuel.percent }}%;"></i>
+        </span>
       </a>
       {% endfor %}
     </div>
