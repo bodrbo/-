@@ -50,7 +50,7 @@
 
 <main class="wrap defect-case-page">
   {% if viewer_role == 'admin' %}
-  <a href="{{ url_for('fleet_boat', boat_index=boat_index) }}" class="term defect-back-link">← К катеру «{{ defect.boat }}»</a>
+  <a href="{{ url_for('fleet.boat_detail', boat_index=boat_index) }}" class="term defect-back-link">← К катеру «{{ defect.boat }}»</a>
   {% else %}
   <a href="{{ url_for('team_dashboard') }}" class="term defect-back-link">← В личный кабинет</a>
   {% endif %}
@@ -119,7 +119,7 @@
         <span class="defect-plan-index">{{ loop.index }}</span>
         <span class="defect-plan-text">{{ item.description }}</span>
         {% if viewer_role == 'admin' %}
-        <form action="{{ url_for('set_boat_defect_plan_item_status', boat_index=boat_index, defect_id=defect.id, item_id=item.id) }}" method="post">
+        <form action="{{ url_for('fleet.set_defect_plan_item_status', boat_index=boat_index, defect_id=defect.id, item_id=item.id) }}" method="post">
         {% else %}
         <form action="{{ url_for('team_set_defect_plan_item_status', defect_id=defect.id, item_id=item.id) }}" method="post">
         {% endif %}
@@ -136,7 +136,7 @@
     {% endif %}
 
     {% if viewer_role == 'admin' %}
-    <form action="{{ url_for('add_boat_defect_plan_item', boat_index=boat_index, defect_id=defect.id) }}" method="post" class="defect-plan-add">
+    <form action="{{ url_for('fleet.add_defect_plan_item', boat_index=boat_index, defect_id=defect.id) }}" method="post" class="defect-plan-add">
     {% else %}
     <form action="{{ url_for('team_add_defect_plan_item', defect_id=defect.id) }}" method="post" class="defect-plan-add">
     {% endif %}

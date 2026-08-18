@@ -14,7 +14,7 @@
       <tr>
         <td>
           <a class="defect-record-link"
-             href="{{ url_for('boat_defect_detail', boat_index=boat_index, defect_id=d.id) }}">
+             href="{{ url_for('fleet.defect_detail', boat_index=boat_index, defect_id=d.id) }}">
             {{ d.description }}
           </a>
         </td>
@@ -25,7 +25,7 @@
             <span class="status-badge status-defect-{{ d.status }}">
               {{ defect_statuses|selectattr('value', 'equalto', d.status)|map(attribute='label')|first }}
             </span>
-            <form action="{{ url_for('set_boat_defect_status', boat_index=boat_index, defect_id=d.id) }}"
+            <form action="{{ url_for('fleet.set_defect_status', boat_index=boat_index, defect_id=d.id) }}"
                   method="post" class="status-select-form">
               <select name="status" onchange="this.form.submit()">
                 {% for s in defect_statuses %}
@@ -40,7 +40,7 @@
             {{ d.assignment.employee_name if d.assignment else '—' }}
           {% elif d.can_assign %}
           <button type="button" class="btn-secondary"
-                  onclick='openAssignModal({{ url_for("assign_defect", boat_index=boat_index, defect_id=d.id)|tojson }}, {{ d.description|tojson }})'>
+                  onclick='openAssignModal({{ url_for("fleet.assign_defect", boat_index=boat_index, defect_id=d.id)|tojson }}, {{ d.description|tojson }})'>
             Поручить задачу
           </button>
           {% elif d.assignment and d.assignment.assignment_status == 'pending' %}

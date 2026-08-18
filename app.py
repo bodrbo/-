@@ -35,6 +35,24 @@ from werkzeug.datastructures import MultiDict
 from werkzeug.security import check_password_hash, generate_password_hash
 from io import BytesIO
 
+from modules.fleet import create_fleet_blueprint
+from modules.fleet.constants import (
+    BOATS,
+    CHECKLIST_QUESTIONS,
+    CHECKLIST_TYPE_LABELS,
+    DEFECT_ASSIGNABLE_POSITIONS,
+    DEFECT_STATUSES,
+    DEFECT_TASK_WORK_TYPE,
+)
+from modules.fleet.services import (
+    add_defect_plan_item as _add_defect_plan_item,
+    checklist_questions_for as _checklist_questions_for,
+    defect_detail_context as _defect_detail_context,
+    get_checklist_answer_photos,
+    save_defect_case_notes as _save_defect_case_notes,
+    set_defect_plan_item_status as _set_defect_plan_item_status,
+)
+
 # reportlab (PDF generation for "Акт выполненных работ") is imported lazily,
 # inside _build_act_pdf() — it's an extra dependency on top of the site's
 # core requirements, and a missing/broken install of it must not take the
@@ -49,7 +67,9 @@ app.config["MAX_CONTENT_LENGTH"] = 15 * 1024 * 1024  # cap uploaded photos at 15
 # just logs everyone out on every restart/redeploy).
 app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workhours.db")
+DB_PATH = os.environ.get("WORKHOURS_DB_PATH") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "workhours.db"
+)
 
 
 @app.after_request
@@ -104,7 +124,6 @@ def find_diploma_url(username):
 
 
 WORK_PHOTO_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
-BOAT_DOCUMENT_EXTENSIONS = (".pdf", ".jpg", ".jpeg", ".png", ".webp", ".doc", ".docx")
 
 
 def get_work_item_photos(db, item_id):
@@ -117,21 +136,6 @@ def get_work_item_photos(db, item_id):
     return [
         {"id": r["id"], "url": url_for("static", filename=f"work_photos/{r['filename']}"),
          "comment": r["comment"]}
-        for r in rows
-    ]
-
-
-def get_checklist_answer_photos(db, answer_id):
-    """Photos attached as evidence to one checklist problem report. No
-    per-photo comment (the problem's own comment already covers it) — shaped
-    the same as get_work_item_photos so the same modal JS can show either."""
-    rows = db.execute(
-        "SELECT id, filename FROM checklist_answer_photos WHERE answer_id = ? ORDER BY id",
-        (answer_id,),
-    ).fetchall()
-    return [
-        {"id": r["id"], "url": url_for("static", filename=f"checklist_photos/{r['filename']}"),
-         "comment": None}
         for r in rows
     ]
 
@@ -568,148 +572,6 @@ YCLIENTS_SERVICE_TO_WORK_TYPE = {
 
 CUSTOM_VALUE = "__custom__"  # спец-значение для пункта "Другое..." в списках
 
-# Катера: инвестор, комиссия управляющего (%) в зависимости от канала продажи,
-# и стандартные (умолчательные) суммы топлива/стоянки за рейс — всё это можно
-# поправить вручную прямо в форме при добавлении рейса.
-# ПРЕДПОЛОЖЕНИЕ: у "Бодрый Второй" тот же инвестор, что и у "Ларус"
-# (Владимир Леонтьев) — поправьте здесь, если это не так.
-BOATS = [
-    {
-        "name": "Ларус",
-        "investor": "Владимир Леонтьев",
-        "commission_direct": 30,
-        "commission_aggregator": 30,
-        "fuel": 768,
-        "mooring": 1333,
-    },
-    {
-        "name": "Бодрый Второй",
-        "investor": "Владимир Леонтьев",
-        "commission_direct": 30,
-        "commission_aggregator": 30,
-        "fuel": 768,
-        "mooring": 1333,
-    },
-    {
-        "name": "Бодрый Первый",
-        "investor": "Андрей Жаворонков",
-        "commission_direct": 30,
-        "commission_aggregator": 39,
-        "fuel": 768,
-        "mooring": 1333,
-    },
-]
-
-# Чек-листы осмотра лодки, которые капитан проходит из личного кабинета —
-# по одному вопросу за раз, как онлайн-тест. У каждого типа осмотра есть
-# "common" — общий список вопросов, одинаковый для всех катеров, и
-# "by_boat" — вопросы, специфичные для конкретного катера (по имени, как
-# в BOATS), которые добавляются к общим. Чек-лист для катера = common +
-# by_boat[катер]. Чтобы добавить вопросы под конкретный катер, впишите их
-# в by_boat — см. пример формата чуть ниже, у каждого вопроса.
-CHECKLIST_TYPE_LABELS = {
-    "pre": "Предрейсовый осмотр",
-    "post": "Послерейсовый осмотр",
-}
-# Each question is {"title": короткий крупный заголовок или None, "text": полный
-# текст}. title is shown large, above the full text, so a captain can tell
-# what a question is about at a glance without reading the whole paragraph —
-# "post" questions are already short one-liners, so they go without a title.
-CHECKLIST_QUESTIONS = {
-    "pre": {
-        "common": [
-            {
-                "title": "Сепаратор топлива",
-                "text": "Проверьте положение резинового кольца в стакане сепаратора, плавает ли оно? "
-                "Если нет — всё в порядке, если да — слейте воду с помощью краника внизу, "
-                "нажмите на кнопку «Проблема» и сообщите в комментарии про воду в топливе",
-            },
-            {
-                "title": "Уровень масла",
-                "text": "Не поднимая мотор, снимите колпак, найдите жёлтую ручку масляного щупа — "
-                "достаньте, оботрите ветошью, вставьте обратно. После этого снова достаньте — "
-                "уровень масла должен быть между двумя отметками на щупе. Если это так — жмите "
-                "«Всё в порядке», если нет — жмите «Проблема» и опишите уровень масла в комментарии",
-            },
-            {
-                "title": "Тросы газа и реверса",
-                "text": "Внимательно осмотрите крепления тросов газа и реверса: все наконечники должны быть "
-                "зашплинтованы! Если это не так — наши соболезнования... Нажмите кнопку «Проблема» — "
-                "вдруг вам станет легче от этого?",
-            },
-            {
-                "title": "Гребной винт",
-                "text": "Поднимите мотор и осмотрите гребной винт: он должен быть без следов повреждений, "
-                "на нём не должно быть посторонних объектов (водорослей, верёвок и т. д.). "
-                "Фиксирующая гайка должна быть плотно затянута и зашплинтована. Если обнаружили "
-                "дефект — смело жмите «Проблема»",
-            },
-            {
-                "title": "Запуск мотора",
-                "text": "Неужели всё ещё всё в порядке?? Ну тогда рискнём завести мотор! Убедись, что мотор "
-                "опущен, масса включена, чека вставлена — и заводи! Обрати внимание на обороты: "
-                "держатся ли они стабильно? Нет? Ничего страшного — сейчас всё немного нестабильно, "
-                "но кнопку «Проблема» нажать в этом случае всё же стоит. Обрати внимание на посторонние "
-                "звуки, излишнее задымление, а также на ошибки, загоревшиеся на многофункциональном "
-                "приборе — если что-то из этого есть, смело жми «Проблема»",
-            },
-            {
-                "title": "Передняя и задняя передача",
-                "text": "Раз уж вы всё ещё не заглушили мотор, давайте проверим ещё кое-что: аккуратно "
-                "включите переднюю передачу — идёт ли катер вперёд? Потом попробуйте заднюю — идёт "
-                "назад? Если да, то есть шансы, что ваша смена пройдёт нормально! Если нет — вы знаете, "
-                "что делать: жмите «Проблема»",
-            },
-            {
-                "title": "Электрика и огни",
-                "text": "С мотором покончено (фигурально). Теперь проверим электрику — ходовые огни, "
-                "топовый огонь, звуковой сигнал (если есть), всё должно работать. Если что-то вдруг "
-                "не включается — жмите кнопку «Проблема»",
-            },
-            {
-                "title": "Топливо",
-                "text": "Ну дальше вообще мелочи: проверь, топлива-то тебе хватит? Если нет — нажми "
-                "«Проблема» чисто для соблюдения формальности, а вот как быть с топливом — не знаю…",
-            },
-            {
-                "title": "Спасательное оборудование",
-                "text": "Ты почти готов к походу! Ну а если у тебя турист ногу сломает и в воду упадёт? А?? "
-                "Проверь комплектность спасательного оборудования (прежде всего жилеты, круги и "
-                "аптечку). Если чего-то не хватает, жми на кнопку «Проблема» — это будет весомое "
-                "оправдание перед пострадавшим туристом!",
-            },
-            {
-                "title": "Швартовы и кранцы",
-                "text": "Ну и последнее — обязательно проверь швартово-такелажное хозяйство: швартовов "
-                "должно быть нужное количество, кранцы должны быть не сдуты, протектор на шине не "
-                "менее 1.6 мм (иначе гаишники оштрафуют). Если нашёл проблему — жми на уже знакомую "
-                "кнопку.",
-            },
-        ],
-        "by_boat": {
-            # "Ларус": [{"title": "Трюмный насос", "text": "Проверить трюмный насос"}],
-        },
-    },
-    "post": {
-        "common": [
-            {"title": None, "text": "Двигатель заглушен, приборы отключены"},
-            {"title": None, "text": "Уровень топлива и расход зафиксированы"},
-            {"title": None, "text": "Корпус осмотрен на предмет новых повреждений"},
-            {"title": None, "text": "Мусор и личные вещи пассажиров убраны с борта"},
-            {"title": None, "text": "Спасательные жилеты собраны и убраны на место"},
-            {"title": None, "text": "Швартовка выполнена, судно надёжно закреплено"},
-            {"title": None, "text": "Палуба вымыта, лодка готова к следующему рейсу"},
-        ],
-        "by_boat": {
-        },
-    },
-}
-
-
-def _checklist_questions_for(checklist_type, boat):
-    section = CHECKLIST_QUESTIONS.get(checklist_type) or {}
-    return list(section.get("common", [])) + list(section.get("by_boat", {}).get(boat, []))
-
 # Личный кабинет инвестора: (имя инвестора — должно совпадать с полем
 # "investor" в BOATS, логин, хеш пароля). Хеш добавляйте через
 # werkzeug.security.generate_password_hash(pwd, method="pbkdf2:sha256") —
@@ -780,19 +642,6 @@ WORK_STATUSES = [
 ]
 DEFAULT_WORK_STATUS = "pending"
 
-DEFECT_STATUSES = [
-    {"value": "new", "label": "Новая"},
-    {"value": "in_progress", "label": "В работе"},
-    {"value": "monitoring", "label": "На контроле"},
-    {"value": "resolved", "label": "Устранена"},
-]
-DEFAULT_DEFECT_STATUS = "new"
-
-DEFECT_PLAN_STATUSES = [
-    {"value": "pending", "label": "Не выполнено"},
-    {"value": "done", "label": "Выполнено"},
-]
-
 SUPPLY_COST_UNITS = [
     {"value": "piece", "label": "шт."},
     {"value": "sqm", "label": "м²"},
@@ -809,13 +658,6 @@ ASSIGNMENT_STATUSES = [
     {"value": "accepted", "label": "Принята"},
     {"value": "rejected", "label": "Отклонена"},
 ]
-# Positions eligible to be handed a defect as a paid task — captains know the
-# boats, tuning-center staff do the actual mechanical repairs.
-DEFECT_ASSIGNABLE_POSITIONS = ("Капитан", "Тюнингмэн")
-# Payroll work_type used for the entries row created when a captain/tuningman
-# marks their accepted task "Устранена" — see team_task_set_status.
-DEFECT_TASK_WORK_TYPE = "Устранение неисправности"
-
 # Tuning-order work items can only be handed to tuning-center staff.
 TUNING_ASSIGNABLE_POSITIONS = ("Тюнингмэн",)
 # supply_writeoffs.reason used when a tuningman writes off materials from
@@ -2990,323 +2832,7 @@ def download_trip_contract(contract_id):
 # =======================================================================
 # Флот
 # =======================================================================
-
-def _fleet_boat_checklists(db, boat):
-    """All inspection checklists for one boat, newest first, each annotated
-    with its question count and problem list (with photos) — same shape the
-    captain's own checklist-run view uses, so the same template partial
-    could render either."""
-    rows = db.execute(
-        "SELECT * FROM boat_checklists WHERE boat = ? ORDER BY started_at DESC, id DESC",
-        (boat,),
-    ).fetchall()
-    checklists = []
-    for row in rows:
-        questions = _checklist_questions_for(row["checklist_type"], row["boat"])
-        answers = db.execute(
-            "SELECT * FROM boat_checklist_answers WHERE checklist_id = ? ORDER BY question_index",
-            (row["id"],),
-        ).fetchall()
-        problems = [
-            {"question_text": a["question_text"], "comment": a["comment"],
-             "photos": get_checklist_answer_photos(db, a["id"])}
-            for a in answers if a["status"] == "problem"
-        ]
-        checklists.append({
-            "id": row["id"], "checklist_type": row["checklist_type"],
-            "employee_name": row["employee_name"], "started_at": row["started_at"],
-            "completed_at": row["completed_at"], "total": len(questions),
-            "answered": len(answers), "problems": problems,
-        })
-    return checklists
-
-
-def _boat_by_index(boat_index):
-    """Boats are looked up by their plain-ASCII position in BOATS, never by
-    name, in every /fleet/... URL — some proxy in front of the production
-    app was mangling the Cyrillic boat name once it hit the URL path (fine
-    on a bare local Werkzeug server, broken behind Beget's stack), so the
-    fix is to keep non-ASCII text out of the path entirely."""
-    if 0 <= boat_index < len(BOATS):
-        return BOATS[boat_index]["name"]
-    return None
-
-
-@app.route("/fleet")
-@admin_login_required
-def fleet_index():
-    return render_template("fleet_index.html", boats=BOATS, active_page="fleet")
-
-
-@app.route("/fleet/<int:boat_index>")
-@admin_login_required
-def fleet_boat(boat_index):
-    boat = _boat_by_index(boat_index)
-    if boat is None:
-        return redirect(url_for("fleet_index"))
-    db = get_db()
-    checklists = _fleet_boat_checklists(db, boat)
-    documents = db.execute(
-        "SELECT * FROM boat_documents WHERE boat = ? ORDER BY uploaded_at DESC, id DESC",
-        (boat,),
-    ).fetchall()
-    defects = []
-    for row in db.execute(
-        "SELECT * FROM boat_defects WHERE boat = ? ORDER BY reported_at DESC, id DESC", (boat,)
-    ).fetchall():
-        defect = dict(row)
-        assignment_row = db.execute(
-            "SELECT * FROM defect_assignments WHERE defect_id = ? ORDER BY id DESC LIMIT 1",
-            (defect["id"],),
-        ).fetchone()
-        assignment = dict(assignment_row) if assignment_row else None
-        defect["assignment"] = assignment
-        # "Поручить задачу" is only offered when nobody is actively on it —
-        # no assignment yet, the last one was declined, or the last one was
-        # already paid out (defect resolved) and this is effectively history.
-        defect["can_assign"] = (
-            assignment is None
-            or assignment["assignment_status"] == "rejected"
-            or (assignment["assignment_status"] == "accepted" and assignment["entry_id"] is not None)
-        )
-        defects.append(defect)
-    current_defects = [d for d in defects if d["status"] != "resolved"]
-    archived_defects = sorted(
-        (d for d in defects if d["status"] == "resolved"),
-        key=lambda d: (d["updated_at"], d["id"]),
-        reverse=True,
-    )
-    assignable_employees = _employees_with_any_position(db, DEFECT_ASSIGNABLE_POSITIONS)
-    return render_template(
-        "fleet_boat.html", boat=boat, boat_index=boat_index, checklists=checklists,
-        documents=documents, current_defects=current_defects, archived_defects=archived_defects,
-        defect_statuses=DEFECT_STATUSES, open_defects_count=len(current_defects),
-        assignable_employees=assignable_employees,
-        checklist_type_labels=CHECKLIST_TYPE_LABELS, active_page="fleet",
-    )
-
-
-def _defect_detail_context(db, defect, viewer_role, boat_index=None):
-    plan_items = db.execute(
-        "SELECT * FROM defect_work_plan_items WHERE defect_id = ? ORDER BY id",
-        (defect["id"],),
-    ).fetchall()
-    completed_count = sum(1 for item in plan_items if item["status"] == "done")
-    return {
-        "defect": defect,
-        "plan_items": plan_items,
-        "completed_count": completed_count,
-        "defect_statuses": DEFECT_STATUSES,
-        "plan_statuses": DEFECT_PLAN_STATUSES,
-        "viewer_role": viewer_role,
-        "boat_index": boat_index,
-        "active_page": "fleet" if viewer_role == "admin" else None,
-    }
-
-
-def _save_defect_case_notes(db, defect_id, form):
-    anamnesis = form.get("anamnesis", "").strip()
-    diagnosis = form.get("diagnosis", "").strip()
-    db.execute(
-        "UPDATE boat_defects SET anamnesis = ?, diagnosis = ?, updated_at = ? WHERE id = ?",
-        (anamnesis, diagnosis, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), defect_id),
-    )
-    db.commit()
-
-
-def _add_defect_plan_item(db, defect_id, form):
-    description = form.get("description", "").strip()
-    if not description:
-        return
-    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    db.execute(
-        "INSERT INTO defect_work_plan_items (defect_id, description, status, created_at, updated_at) "
-        "VALUES (?, ?, 'pending', ?, ?)",
-        (defect_id, description, now, now),
-    )
-    db.commit()
-
-
-def _set_defect_plan_item_status(db, defect_id, item_id, status):
-    if status not in [item["value"] for item in DEFECT_PLAN_STATUSES]:
-        return
-    db.execute(
-        "UPDATE defect_work_plan_items SET status = ?, updated_at = ? "
-        "WHERE id = ? AND defect_id = ?",
-        (status, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), item_id, defect_id),
-    )
-    db.commit()
-
-
-@app.route("/fleet/<int:boat_index>/defects/<int:defect_id>", methods=["GET", "POST"])
-@admin_login_required
-def boat_defect_detail(boat_index, defect_id):
-    boat = _boat_by_index(boat_index)
-    if boat is None:
-        return redirect(url_for("fleet_index"))
-    db = get_db()
-    defect = db.execute(
-        "SELECT * FROM boat_defects WHERE id = ? AND boat = ?", (defect_id, boat)
-    ).fetchone()
-    if defect is None:
-        return redirect(url_for("fleet_boat", boat_index=boat_index))
-    if request.method == "POST":
-        _save_defect_case_notes(db, defect_id, request.form)
-        return redirect(url_for("boat_defect_detail", boat_index=boat_index, defect_id=defect_id))
-    return render_template(
-        "defect_detail.html", **_defect_detail_context(db, defect, "admin", boat_index)
-    )
-
-
-@app.route("/fleet/<int:boat_index>/defects/<int:defect_id>/plan", methods=["POST"])
-@admin_login_required
-def add_boat_defect_plan_item(boat_index, defect_id):
-    boat = _boat_by_index(boat_index)
-    if boat is None:
-        return redirect(url_for("fleet_index"))
-    db = get_db()
-    defect = db.execute(
-        "SELECT id FROM boat_defects WHERE id = ? AND boat = ?", (defect_id, boat)
-    ).fetchone()
-    if defect is not None:
-        _add_defect_plan_item(db, defect_id, request.form)
-    return redirect(url_for("boat_defect_detail", boat_index=boat_index, defect_id=defect_id))
-
-
-@app.route(
-    "/fleet/<int:boat_index>/defects/<int:defect_id>/plan/<int:item_id>/status",
-    methods=["POST"],
-)
-@admin_login_required
-def set_boat_defect_plan_item_status(boat_index, defect_id, item_id):
-    boat = _boat_by_index(boat_index)
-    if boat is None:
-        return redirect(url_for("fleet_index"))
-    db = get_db()
-    defect = db.execute(
-        "SELECT id FROM boat_defects WHERE id = ? AND boat = ?", (defect_id, boat)
-    ).fetchone()
-    if defect is not None:
-        _set_defect_plan_item_status(db, defect_id, item_id, request.form.get("status", ""))
-    return redirect(url_for("boat_defect_detail", boat_index=boat_index, defect_id=defect_id))
-
-
-@app.route("/fleet/<int:boat_index>/documents", methods=["POST"])
-@admin_login_required
-def upload_boat_document(boat_index):
-    boat = _boat_by_index(boat_index)
-    if boat is None:
-        return redirect(url_for("fleet_index"))
-    title = request.form.get("title", "").strip()
-    file = request.files.get("document")
-    if title and file and file.filename:
-        ext = os.path.splitext(file.filename)[1].lower()
-        if ext in BOAT_DOCUMENT_EXTENSIONS:
-            docs_dir = os.path.join(app.static_folder, "boat_documents")
-            os.makedirs(docs_dir, exist_ok=True)
-            filename = f"{secrets.token_hex(8)}{ext}"
-            file.save(os.path.join(docs_dir, filename))
-            db = get_db()
-            db.execute(
-                "INSERT INTO boat_documents (boat, title, filename, original_filename, uploaded_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (boat, title, filename, file.filename, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
-            )
-            db.commit()
-    return redirect(url_for("fleet_boat", boat_index=boat_index))
-
-
-@app.route("/fleet/<int:boat_index>/documents/<int:doc_id>")
-@admin_login_required
-def download_boat_document(boat_index, doc_id):
-    boat = _boat_by_index(boat_index)
-    if boat is None:
-        return redirect(url_for("fleet_index"))
-    db = get_db()
-    doc = db.execute(
-        "SELECT * FROM boat_documents WHERE id = ? AND boat = ?", (doc_id, boat)
-    ).fetchone()
-    if doc is None:
-        return redirect(url_for("fleet_boat", boat_index=boat_index))
-    docs_dir = os.path.join(app.static_folder, "boat_documents")
-    return send_from_directory(
-        docs_dir, doc["filename"], download_name=doc["original_filename"],
-    )
-
-
-@app.route("/fleet/<int:boat_index>/documents/<int:doc_id>/delete", methods=["POST"])
-@admin_login_required
-def delete_boat_document(boat_index, doc_id):
-    boat = _boat_by_index(boat_index)
-    if boat is None:
-        return redirect(url_for("fleet_index"))
-    db = get_db()
-    doc = db.execute(
-        "SELECT * FROM boat_documents WHERE id = ? AND boat = ?", (doc_id, boat)
-    ).fetchone()
-    if doc is not None:
-        try:
-            os.remove(os.path.join(app.static_folder, "boat_documents", doc["filename"]))
-        except OSError:
-            pass
-        db.execute("DELETE FROM boat_documents WHERE id = ?", (doc_id,))
-        db.commit()
-    return redirect(url_for("fleet_boat", boat_index=boat_index))
-
-
-@app.route("/fleet/<int:boat_index>/defects/<int:defect_id>/status", methods=["POST"])
-@admin_login_required
-def set_boat_defect_status(boat_index, defect_id):
-    boat = _boat_by_index(boat_index)
-    if boat is None:
-        return redirect(url_for("fleet_index"))
-    status = request.form.get("status", "").strip()
-    if status in [s["value"] for s in DEFECT_STATUSES]:
-        db = get_db()
-        db.execute(
-            "UPDATE boat_defects SET status = ?, updated_at = ? WHERE id = ? AND boat = ?",
-            (status, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), defect_id, boat),
-        )
-        db.commit()
-    return redirect(url_for("fleet_boat", boat_index=boat_index))
-
-
-@app.route("/fleet/<int:boat_index>/defects/<int:defect_id>/assign", methods=["POST"])
-@admin_login_required
-def assign_defect(boat_index, defect_id):
-    boat = _boat_by_index(boat_index)
-    if boat is None:
-        return redirect(url_for("fleet_index"))
-    db = get_db()
-    defect = db.execute(
-        "SELECT * FROM boat_defects WHERE id = ? AND boat = ?", (defect_id, boat)
-    ).fetchone()
-    if defect is None:
-        return redirect(url_for("fleet_boat", boat_index=boat_index))
-
-    employee_name = request.form.get("employee_name", "").strip()
-    rate_raw = request.form.get("rate", "").strip().replace(",", ".")
-    hours_raw = request.form.get("norm_hours", "").strip().replace(",", ".")
-
-    valid_employees = _employees_with_any_position(db, DEFECT_ASSIGNABLE_POSITIONS)
-    rate = hours = None
-    try:
-        rate = float(rate_raw)
-    except ValueError:
-        pass
-    try:
-        hours = float(hours_raw)
-    except ValueError:
-        pass
-
-    if employee_name in valid_employees and rate is not None and rate > 0 and hours is not None and hours > 0:
-        db.execute(
-            "INSERT INTO defect_assignments (defect_id, employee_name, rate, norm_hours, "
-            "assignment_status, assigned_at) VALUES (?, ?, ?, ?, 'pending', ?)",
-            (defect_id, employee_name, rate, hours, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
-        )
-        db.commit()
-    return redirect(url_for("fleet_boat", boat_index=boat_index))
+app.register_blueprint(create_fleet_blueprint(get_db, admin_login_required))
 
 
 # =======================================================================
