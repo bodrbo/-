@@ -52,6 +52,10 @@ from modules.fleet.services import (
     save_defect_case_notes as _save_defect_case_notes,
     set_defect_plan_item_status as _set_defect_plan_item_status,
 )
+from integrations.telegram import fetch_recent_contacts as fetch_recent_telegram_contacts
+from modules.employees import create_employees_blueprint
+from modules.employees.constants import EMPLOYEES, INITIAL_EMPLOYEE_POSITIONS
+from modules.employees.services import telegram_chat_id_for_employee
 
 # reportlab (PDF generation for "Акт выполненных работ") is imported lazily,
 # inside _build_act_pdf() — it's an extra dependency on top of the site's
@@ -260,6 +264,7 @@ MODULKASSA_VAT_TAG = 1109
 # отправляются — сайт продолжает работать как обычно.
 # ---------------------------------------------------------------------
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_BOT_USERNAME = os.environ.get("TELEGRAM_BOT_USERNAME")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 TELEGRAM_APPROVAL_CHAT_ID = os.environ.get("TELEGRAM_APPROVAL_CHAT_ID") or TELEGRAM_CHAT_ID
 
@@ -364,22 +369,14 @@ def send_telegram_photo(photo_path, caption=None, chat_id=None):
 
 def send_telegram_notification_to_employee(db, employee_name, text):
     """Same fire-and-forget contract as send_telegram_notification, routed
-    to one employee's personal chat instead of a shared group — looked up
-    by team_accounts.telegram_chat_id, which only gets populated once that
-    employee has messaged the bot at least once (Telegram bots can't
-    initiate a DM) and an admin has linked the resulting chat id via
-    /internal/telegram-updates + a manual UPDATE. Does nothing (but still
-    logs it, same as a missing bot token) if the employee has no linked
-    chat id yet."""
-    row = db.execute(
-        "SELECT telegram_chat_id FROM team_accounts WHERE employee_name = ? AND telegram_chat_id IS NOT NULL",
-        (employee_name,),
-    ).fetchone()
-    if row is None:
+    to one employee's personal chat instead of a shared group. The employee
+    directory owns this link independently from team login accounts."""
+    chat_id = telegram_chat_id_for_employee(db, employee_name)
+    if chat_id is None:
         status = f"skipped: no telegram_chat_id linked for {employee_name!r}"
         _log_telegram(f"Telegram notification {status}")
         return status
-    return send_telegram_notification(text, chat_id=row["telegram_chat_id"])
+    return send_telegram_notification(text, chat_id=chat_id)
 
 
 def send_telegram_notification_to_admin(db, admin_id, text):
@@ -469,47 +466,6 @@ BOAT_COLORS = {
 # полностью игнорировать: не создавать под неё карточку на подтверждение и
 # не считать её поводом для доплаты за смену.
 BLOCKED_SHIFT_COLOR = "f44336"
-
-# ---------------------------------------------------------------------
-# СПРАВОЧНИКИ — отредактируйте под себя.
-# ---------------------------------------------------------------------
-
-# Список сотрудников для выпадающего списка.
-EMPLOYEES = [
-    "Даниил Галецкий",
-    "Дмитрий Тарусов",
-    "Кирилл Бурнасов",
-    "Эльмира Бектаева",
-    "Платон Жмаев",
-    "Михаил Вишневский",
-    "Андрей Жаворонков",
-    "Арсений Коннов",
-    "Марина Кащенко",
-    "Юрий Мороз",
-    "Игорь Севостьянов",
-    "Алексей Чабанов",
-    "Андрей Краснюков",
-]
-
-# Должности сотрудников. У одного человека может быть несколько должностей —
-# указывайте их списком. Заполняется по мере согласования; имя, не попавшее
-# сюда, просто останется без должностей в базе, ничего не сломается.
-EMPLOYEE_POSITIONS = {
-    # "Имя Фамилия": ["Должность 1", "Должность 2"],
-    "Даниил Галецкий": ["Тюнингмэн", "Гид-капитан", "Капитан"],
-    "Эльмира Бектаева": "Гид",
-    "Дмитрий Тарусов": ["Тюнингмэн", "Капитан"],
-    "Алексей Чабанов": "Тюнингмэн",
-    "Андрей Краснюков": "Тюнингмэн",
-    "Андрей Жаворонков": ["Тюнингмэн", "Капитан"],
-    "Арсений Коннов": "Гид",
-    "Платон Жмаев": ["Капитан", "Гид-капитан", "Тюнингмэн"],
-    "Кирилл Бурнасов": "Гид",
-    "Юрий Мороз": "Тюнингмэн",
-    "Михаил Вишневский": "Капитан",
-    "Марина Кащенко": "Менеджер по работе с клиентами",
-    "Игорь Севостьянов": ["Капитан", "Тюнингмэн"],
-}
 
 # Виды работ со стандартной ставкой и длительностью (в часах).
 # При выборе вида работы в форме ставка и часы подставятся автоматически
@@ -793,6 +749,9 @@ def init_db():
         )
         """
     )
+    employee_positions_is_new = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'employee_positions'"
+    ).fetchone() is None
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS employee_positions (
@@ -817,36 +776,22 @@ def init_db():
             "INSERT OR IGNORE INTO employees (name, created_at) VALUES (?, ?)",
             (name, now_str),
         )
-    # EMPLOYEE_POSITIONS is the source of truth — resync employee_positions
-    # to match it on every restart (add what's missing, drop what's no
-    # longer listed), so editing the dict and redeploying is all it takes.
-    for name, positions in EMPLOYEE_POSITIONS.items():
-        if isinstance(positions, str):
-            positions = [positions]
-        employee_row = conn.execute(
-            "SELECT id FROM employees WHERE name = ?", (name,)
-        ).fetchone()
-        if employee_row is None:
-            continue
-        employee_id = employee_row[0]
-        current_positions = {
-            r[0] for r in conn.execute(
-                "SELECT position FROM employee_positions WHERE employee_id = ?",
-                (employee_id,),
-            ).fetchall()
-        }
-        for position in positions:
-            if position not in current_positions:
+    # Positions become runtime data once the table exists: the administrator
+    # interface is the source of truth, so a restart must never undo its
+    # changes. Bootstrap defaults are only inserted for a brand-new database.
+    if employee_positions_is_new:
+        for name, positions in INITIAL_EMPLOYEE_POSITIONS.items():
+            employee_row = conn.execute(
+                "SELECT id FROM employees WHERE name = ?", (name,)
+            ).fetchone()
+            if employee_row is None:
+                continue
+            for position in positions:
                 conn.execute(
-                    "INSERT OR IGNORE INTO employee_positions (employee_id, position, created_at) "
-                    "VALUES (?, ?, ?)",
-                    (employee_id, position, now_str),
+                    "INSERT OR IGNORE INTO employee_positions "
+                    "(employee_id, position, created_at) VALUES (?, ?, ?)",
+                    (employee_row[0], position, now_str),
                 )
-        for position in current_positions - set(positions):
-            conn.execute(
-                "DELETE FROM employee_positions WHERE employee_id = ? AND position = ?",
-                (employee_id, position),
-            )
 
     conn.execute(
         """
@@ -1583,10 +1528,9 @@ def init_db():
         """
     )
     # Migration path for databases created before order-note reminders (and
-    # per-admin Telegram notifications generally) existed — same runtime
-    # linking flow as team_accounts.telegram_chat_id (see that column's own
-    # comment below): the admin has to message the bot first, then someone
-    # runs /internal/telegram-updates + a manual UPDATE.
+    # per-admin Telegram notifications generally) existed. Administrator
+    # accounts retain their legacy manual link for now; employee Telegram
+    # identities are managed separately by the employees module below.
     admin_account_cols = [row[1] for row in conn.execute("PRAGMA table_info(admin_accounts)").fetchall()]
     if "telegram_chat_id" not in admin_account_cols:
         conn.execute("ALTER TABLE admin_accounts ADD COLUMN telegram_chat_id TEXT")
@@ -1612,12 +1556,9 @@ def init_db():
         )
         """
     )
-    # Migration path for databases created before per-employee Telegram
-    # notifications existed. Deliberately NOT part of the TEAM_ACCOUNTS
-    # seed tuples below — linking a chat id is a runtime action (the
-    # employee has to message the bot first), not something to redeploy
-    # code for, and the seed loop's UPDATE only ever touches employee_name/
-    # password_hash so it won't stomp on this column.
+    # Legacy compatibility column. New personal links belong to
+    # employee_telegram_accounts, while this value is mirrored so older
+    # deployments and scripts continue to work during the transition.
     team_account_cols = [row[1] for row in conn.execute("PRAGMA table_info(team_accounts)").fetchall()]
     if "telegram_chat_id" not in team_account_cols:
         conn.execute("ALTER TABLE team_accounts ADD COLUMN telegram_chat_id TEXT")
@@ -1660,6 +1601,54 @@ def init_db():
                 "UPDATE team_accounts SET employee_name = ?, password_hash = ? WHERE username = ?",
                 (employee_name, password_hash, username),
             )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS telegram_contacts (
+            chat_id TEXT PRIMARY KEY,
+            username TEXT,
+            display_name TEXT,
+            last_text TEXT,
+            last_message_at TEXT,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS employee_telegram_accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL UNIQUE,
+            chat_id TEXT NOT NULL UNIQUE,
+            username TEXT,
+            display_name TEXT,
+            linked_at TEXT NOT NULL
+        )
+        """
+    )
+    # Preserve every personal Telegram link configured through the old
+    # team_accounts column. The new table belongs to the employee rather
+    # than to a login account, so employees without a cabinet can be linked.
+    legacy_telegram_links = conn.execute(
+        "SELECT employee_name, telegram_chat_id FROM team_accounts "
+        "WHERE telegram_chat_id IS NOT NULL AND telegram_chat_id != ''"
+    ).fetchall()
+    for employee_name, chat_id in legacy_telegram_links:
+        employee_row = conn.execute(
+            "SELECT id FROM employees WHERE name = ?", (employee_name,)
+        ).fetchone()
+        if employee_row is None:
+            continue
+        conn.execute(
+            "INSERT OR IGNORE INTO telegram_contacts "
+            "(chat_id, display_name, updated_at) VALUES (?, ?, ?)",
+            (str(chat_id), employee_name, now),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO employee_telegram_accounts "
+            "(employee_id, chat_id, display_name, linked_at) VALUES (?, ?, ?, ?)",
+            (employee_row[0], str(chat_id), employee_name, now),
+        )
     conn.commit()
     conn.close()
 
@@ -2833,6 +2822,21 @@ def download_trip_contract(contract_id):
 # Флот
 # =======================================================================
 app.register_blueprint(create_fleet_blueprint(get_db, admin_login_required))
+
+
+# =======================================================================
+# Сотрудники
+# =======================================================================
+app.register_blueprint(
+    create_employees_blueprint(
+        get_db=get_db,
+        admin_login_required=admin_login_required,
+        telegram_contacts_fetcher=lambda: fetch_recent_telegram_contacts(TELEGRAM_BOT_TOKEN),
+        telegram_sender=lambda chat_id, text: send_telegram_notification(text, chat_id=chat_id),
+        telegram_configured=lambda: bool(TELEGRAM_BOT_TOKEN),
+        telegram_bot_username=lambda: TELEGRAM_BOT_USERNAME,
+    )
+)
 
 
 # =======================================================================
@@ -8348,12 +8352,12 @@ def telegram_test():
 
 @app.route("/internal/telegram-updates")
 def telegram_updates():
-    """Visit this URL (with the right token) to see who has messaged the
-    bot recently and their numeric chat id — Telegram bots can't message a
-    user who hasn't messaged them first, so this is how you find the chat
-    id to link once an employee has sent the bot anything (even /start).
-    Once you have it: sqlite3 workhours.db "UPDATE team_accounts SET
-    telegram_chat_id = '<chat id>' WHERE username = '<team login>';" """
+    """Legacy diagnostic view of recent bot conversations.
+
+    Employee links are now managed through the authenticated /employees
+    interface; this token-protected endpoint remains useful for diagnosing
+    Telegram delivery without exposing it in the administrator workflow.
+    """
     if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
         return "forbidden", 403
     if not TELEGRAM_BOT_TOKEN:

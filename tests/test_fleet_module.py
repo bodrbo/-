@@ -1,20 +1,14 @@
 import io
 import os
-import tempfile
 import unittest
 
-os.environ.setdefault("SECRET_KEY", "fleet-module-test-key")
-TEST_DIRECTORY = tempfile.TemporaryDirectory()
-os.environ["WORKHOURS_DB_PATH"] = os.path.join(TEST_DIRECTORY.name, "fleet-tests.db")
-
-import app as application_module
+from support import TEST_DIRECTORY, application_module
 
 
 class FleetModuleIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         application_module.init_db()
-        application_module.app.config.update(TESTING=True, SECRET_KEY="fleet-module-test-key")
         cls.original_static_folder = application_module.app.static_folder
         application_module.app.static_folder = os.path.join(
             TEST_DIRECTORY.name, "static"
@@ -24,7 +18,6 @@ class FleetModuleIntegrationTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         application_module.app.static_folder = cls.original_static_folder
-        TEST_DIRECTORY.cleanup()
 
     def setUp(self):
         self.client = application_module.app.test_client()

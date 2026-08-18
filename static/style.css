@@ -98,6 +98,352 @@ body {
   line-height: 1.5;
 }
 
+/* ------------------------------------------------------------------
+   Employee directory — crew manifest + personal communication status
+   ------------------------------------------------------------------ */
+.wrap.employees-page { max-width: 1120px; }
+
+.employees-notice {
+  margin: 0 0 18px;
+  padding: 13px 16px;
+  border: 1px solid;
+  border-radius: 10px;
+  background: var(--paper);
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: var(--shadow);
+}
+.employees-notice-success { color: var(--success); border-color: rgba(47, 107, 79, .32); }
+.employees-notice-error { color: var(--danger); border-color: rgba(179, 64, 44, .32); }
+
+.panel.telegram-setup-panel {
+  display: grid;
+  grid-template-columns: minmax(230px, .85fr) minmax(420px, 1.45fr) auto;
+  align-items: center;
+  gap: 26px;
+  padding: 24px;
+  border-top: 4px solid #229ed9;
+}
+.telegram-setup-copy { display: flex; align-items: flex-start; gap: 14px; }
+.employees-page .telegram-setup-copy h2,
+.employees-page .employee-roster-heading h2 { margin: 2px 0 5px; font-size: 22px; line-height: 1.2; }
+.telegram-setup-copy p:not(.employee-eyebrow),
+.employee-roster-heading > p { margin: 0; color: var(--muted); font-size: 13px; }
+.telegram-mark,
+.telegram-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 50%;
+  background: #229ed9;
+  color: #fff;
+}
+.telegram-mark { width: 44px; height: 44px; }
+.telegram-mark svg { width: 23px; height: 23px; }
+.telegram-avatar { width: 38px; height: 38px; }
+.telegram-avatar svg { width: 20px; height: 20px; }
+
+.employee-eyebrow {
+  margin: 0;
+  color: var(--brass-strong);
+  font-family: 'PT Mono', monospace;
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.telegram-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.telegram-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.telegram-steps li > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border: 1px solid rgba(34, 158, 217, .38);
+  border-radius: 50%;
+  color: #147dad;
+  font-family: 'PT Mono', monospace;
+  font-size: 11px;
+}
+.telegram-steps strong,
+.telegram-steps small,
+.telegram-steps a { display: block; }
+.telegram-steps strong { font-size: 12px; line-height: 1.35; }
+.telegram-steps small { margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.35; }
+.telegram-steps a { margin-top: 3px; color: #147dad; font-size: 11px; font-weight: 700; }
+
+.telegram-sync-form { display: flex; flex-direction: column; align-items: stretch; gap: 5px; margin: 0; }
+.telegram-sync-form small { max-width: 190px; color: var(--danger); font-size: 10px; line-height: 1.35; }
+
+.employees-page .employee-primary-btn,
+.employees-page .employee-secondary-btn,
+.employees-page .employee-danger-btn,
+.employees-page .employee-inline-form button,
+.employees-page .employee-link-form button {
+  min-height: 38px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.employees-page .employee-primary-btn,
+.employees-page .employee-inline-form button,
+.employees-page .employee-link-form button {
+  padding: 9px 14px;
+  background: var(--brass);
+  color: var(--on-accent);
+}
+.employees-page .employee-primary-btn:hover,
+.employees-page .employee-inline-form button:hover,
+.employees-page .employee-link-form button:hover { background: var(--brass-strong); }
+.employees-page .employee-secondary-btn {
+  padding: 8px 12px;
+  background: var(--paper);
+  border-color: var(--hairline);
+  color: var(--ink-soft);
+}
+.employees-page .employee-secondary-btn:hover { border-color: var(--brass); color: var(--brass-strong); }
+.employees-page .employee-danger-btn {
+  padding: 8px 12px;
+  background: transparent;
+  border-color: rgba(179, 64, 44, .28);
+  color: var(--danger);
+}
+.employees-page .employee-danger-btn:hover { background: rgba(179, 64, 44, .06); }
+.employees-page .employee-primary-btn:disabled,
+.employees-page .employee-inline-form button:disabled,
+.employees-page .employee-link-form button:disabled,
+.employees-page .employee-link-form select:disabled {
+  opacity: .52;
+  cursor: not-allowed;
+}
+
+.employee-roster-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 30px 0 13px;
+}
+.employee-roster-heading > p { max-width: 520px; text-align: right; }
+
+.employee-roster { display: grid; gap: 12px; }
+.employee-card {
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: 0 1px 2px rgba(15, 42, 53, .04);
+}
+.employee-card-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--hairline-soft);
+  background: linear-gradient(90deg, rgba(52, 152, 219, .055), transparent 48%);
+}
+.employee-roster-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 11px 11px 11px 3px;
+  background: var(--ink);
+  color: #fff;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 20px;
+  letter-spacing: .05em;
+}
+.employee-identity { min-width: 0; }
+.employee-identity h3 { margin: 0; font-size: 17px; line-height: 1.25; }
+.employee-identity > span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+.employee-identity code,
+.telegram-identity code {
+  font-family: 'PT Mono', monospace;
+  font-size: 10px;
+}
+.connection-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.connection-badge i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #98a5b1;
+}
+.connection-badge.connected { border-color: rgba(47, 107, 79, .25); color: var(--success); }
+.connection-badge.connected i { background: #36a36d; box-shadow: 0 0 0 3px rgba(54, 163, 109, .12); }
+
+.employee-card-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, .95fr);
+}
+.employee-roles,
+.employee-telegram { min-width: 0; padding: 17px 18px 18px; }
+.employee-telegram { border-left: 1px solid var(--hairline-soft); }
+.employee-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 11px;
+}
+.employee-section-title h4 {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 11px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.employee-section-title > span {
+  min-width: 20px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--paper-alt);
+  color: var(--muted);
+  font-family: 'PT Mono', monospace;
+  font-size: 9px;
+  text-align: center;
+}
+.employee-position-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-height: 30px;
+  margin-bottom: 11px;
+}
+.employee-position-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 5px 4px 10px;
+  border: 1px solid rgba(52, 152, 219, .2);
+  border-radius: 999px;
+  background: rgba(52, 152, 219, .075);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+.employee-position-chip form { display: inline-flex; margin: 0; }
+.employees-page .employee-position-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.employees-page .employee-position-chip button:hover { background: rgba(179, 64, 44, .1); color: var(--danger); }
+.employee-empty-copy { margin: 0; color: var(--muted); font-size: 11px; }
+
+.employee-inline-form,
+.employee-link-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin: 0;
+}
+.employees-page .employee-inline-form input,
+.employees-page .employee-link-form select {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+.employees-page .employee-inline-form input:focus,
+.employees-page .employee-link-form select:focus { outline: 2px solid rgba(52, 152, 219, .22); border-color: var(--brass); }
+
+.telegram-identity { display: flex; align-items: center; gap: 10px; }
+.telegram-identity > div { display: flex; min-width: 0; flex-direction: column; }
+.telegram-identity strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.telegram-identity span { color: var(--muted); font-size: 10px; }
+.telegram-identity code { margin-top: 2px; color: var(--muted); }
+.telegram-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.telegram-actions form { margin: 0; }
+.employee-link-form { margin-top: 11px; }
+.employee-roster-empty {
+  padding: 38px;
+  border: 1px dashed var(--hairline);
+  border-radius: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+@media (max-width: 980px) {
+  .panel.telegram-setup-panel { grid-template-columns: 1fr; align-items: start; }
+  .telegram-sync-form { align-items: flex-start; }
+  .telegram-steps { max-width: 720px; }
+}
+
+@media (max-width: 700px) {
+  .panel.telegram-setup-panel { gap: 20px; padding: 19px 16px; }
+  .telegram-steps { grid-template-columns: 1fr; gap: 13px; }
+  .telegram-sync-form,
+  .telegram-sync-form .employee-primary-btn { width: 100%; }
+  .employee-roster-heading { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .employee-roster-heading > p { text-align: left; }
+  .employee-card-header { grid-template-columns: auto minmax(0, 1fr); padding: 14px; }
+  .connection-badge { grid-column: 1 / -1; justify-self: start; }
+  .employee-card-body { grid-template-columns: 1fr; }
+  .employee-roles,
+  .employee-telegram { padding: 15px 14px 16px; }
+  .employee-telegram { border-top: 1px solid var(--hairline-soft); border-left: 0; }
+  .employee-inline-form,
+  .employee-link-form { grid-template-columns: 1fr; }
+  .employees-page .employee-inline-form button,
+  .employees-page .employee-link-form button { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .employee-card *,
+  .telegram-setup-panel * { scroll-behavior: auto; transition: none !important; }
+}
+
 h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
 
 .tabular { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
