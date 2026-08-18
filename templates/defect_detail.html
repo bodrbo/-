@@ -65,6 +65,16 @@
         {{ defect_statuses|selectattr('value', 'equalto', defect.status)|map(attribute='label')|first }}
       </span>
     </div>
+    {% if viewer_role == 'admin' %}
+    <div class="defect-case-admin-actions">
+      <span>Удаление также очистит план работ и назначения. Начисления зарплаты сохранятся.</span>
+      <form action="{{ url_for('fleet.delete_defect', boat_index=boat_index, defect_id=defect.id) }}"
+            method="post"
+            onsubmit="return confirm('Удалить неисправность? Это действие нельзя отменить.');">
+        <button type="submit" class="defect-delete-button">Удалить неисправность</button>
+      </form>
+    </div>
+    {% endif %}
   </section>
 
   <form method="post" class="defect-case-form">

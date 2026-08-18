@@ -120,6 +120,27 @@ def set_defect_status(db, boat, defect_id, status, updated_at):
     db.commit()
 
 
+def delete_defect(db, defect_id, boat):
+    """Delete one scoped defect and records that cannot exist without it.
+
+    Payroll entries referenced by completed assignments deliberately remain:
+    they are accounting history and are not owned by the defect aggregate.
+    """
+    defect = get_defect(db, defect_id, boat)
+    if defect is None:
+        return False
+
+    with db:
+        db.execute(
+            "DELETE FROM defect_work_plan_items WHERE defect_id = ?", (defect_id,)
+        )
+        db.execute("DELETE FROM defect_assignments WHERE defect_id = ?", (defect_id,))
+        db.execute(
+            "DELETE FROM boat_defects WHERE id = ? AND boat = ?", (defect_id, boat)
+        )
+    return True
+
+
 def list_employees_with_positions(db, positions):
     placeholders = ",".join("?" * len(positions))
     rows = db.execute(

@@ -53,6 +53,10 @@ class FleetModuleIntegrationTests(unittest.TestCase):
         }
         self.assertEqual(fleet_rules["fleet.index"], "/fleet")
         self.assertEqual(fleet_rules["fleet.boat_detail"], "/fleet/<int:boat_index>")
+        self.assertEqual(
+            fleet_rules["fleet.delete_defect"],
+            "/fleet/<int:boat_index>/defects/<int:defect_id>/delete",
+        )
         self.assertNotIn("fleet_index", fleet_rules)
 
     def test_fleet_requires_admin_session(self):
@@ -76,6 +80,7 @@ class FleetModuleIntegrationTests(unittest.TestCase):
 
         response = self.client.get(f"/fleet/0/defects/{defect_id}")
         self.assertEqual(response.status_code, 200)
+        self.assertIn("Удалить неисправность".encode(), response.data)
 
         response = self.client.post(
             f"/fleet/0/defects/{defect_id}",
@@ -136,6 +141,69 @@ class FleetModuleIntegrationTests(unittest.TestCase):
             self.assertEqual(assignment["employee_name"], "Дмитрий Тарусов")
             self.assertEqual(assignment["rate"], 1500)
 
+    def test_admin_can_delete_defect_with_children_but_keeps_payroll_entry(self):
+        defect_id = self.create_defect()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO defect_work_plan_items "
+                "(defect_id, description, status, created_at, updated_at) "
+                "VALUES (?, 'Проверить реле', 'pending', ?, ?)",
+                (defect_id, "2026-08-18 10:05", "2026-08-18 10:05"),
+            )
+            entry_cursor = db.execute(
+                "INSERT INTO entries "
+                "(employee, work_type, rate, quantity, amount, work_date, created_at) "
+                "VALUES ('Дмитрий Тарусов', 'Ремонт', 1500, 1, 1500, ?, ?)",
+                ("2026-08-18", "2026-08-18 11:00"),
+            )
+            entry_id = entry_cursor.lastrowid
+            db.execute(
+                "INSERT INTO defect_assignments "
+                "(defect_id, employee_name, rate, norm_hours, assignment_status, "
+                "assigned_at, entry_id) VALUES (?, 'Дмитрий Тарусов', 1500, 1, "
+                "'accepted', ?, ?)",
+                (defect_id, "2026-08-18 10:10", entry_id),
+            )
+            db.commit()
+
+        response = self.client.post(f"/fleet/0/defects/{defect_id}/delete")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/admin/login"))
+
+        self.log_in_as_admin()
+        response = self.client.post(f"/fleet/1/defects/{defect_id}/delete")
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            self.assertIsNotNone(
+                application_module.get_db()
+                .execute("SELECT 1 FROM boat_defects WHERE id = ?", (defect_id,))
+                .fetchone()
+            )
+
+        response = self.client.post(f"/fleet/0/defects/{defect_id}/delete")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/fleet/0"))
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.assertIsNone(
+                db.execute("SELECT 1 FROM boat_defects WHERE id = ?", (defect_id,)).fetchone()
+            )
+            self.assertIsNone(
+                db.execute(
+                    "SELECT 1 FROM defect_work_plan_items WHERE defect_id = ?", (defect_id,)
+                ).fetchone()
+            )
+            self.assertIsNone(
+                db.execute(
+                    "SELECT 1 FROM defect_assignments WHERE defect_id = ?", (defect_id,)
+                ).fetchone()
+            )
+            self.assertIsNotNone(
+                db.execute("SELECT 1 FROM entries WHERE id = ?", (entry_id,)).fetchone()
+            )
+
     def test_document_upload_download_and_delete(self):
         self.log_in_as_admin()
         response = self.client.post(
@@ -180,6 +248,7 @@ class FleetModuleIntegrationTests(unittest.TestCase):
         response = self.client.get(f"/team/defects/{defect_id}")
         self.assertEqual(response.status_code, 200)
         self.assertIn("Тестовая неисправность".encode(), response.data)
+        self.assertNotIn("Удалить неисправность".encode(), response.data)
 
 
 if __name__ == "__main__":

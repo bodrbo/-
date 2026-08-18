@@ -149,6 +149,11 @@ def change_defect_status(db, boat, defect_id, status):
     return True
 
 
+def delete_defect(db, boat, defect_id):
+    """Remove a defect aggregate only when it belongs to the selected boat."""
+    return repository.delete_defect(db, defect_id, boat)
+
+
 def create_defect_assignment(db, defect_id, employee_name, rate_raw, hours_raw):
     valid_employees = assignable_employees(db)
     try:

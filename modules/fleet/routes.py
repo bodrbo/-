@@ -190,6 +190,17 @@ def create_fleet_blueprint(get_db, admin_login_required):
         return redirect(url_for("fleet.boat_detail", boat_index=boat_index))
 
     @blueprint.route(
+        "/fleet/<int:boat_index>/defects/<int:defect_id>/delete", methods=["POST"]
+    )
+    @admin_login_required
+    def delete_defect(boat_index, defect_id):
+        boat = services.boat_by_index(boat_index)
+        if boat is None:
+            return redirect(url_for("fleet.index"))
+        services.delete_defect(get_db(), boat, defect_id)
+        return redirect(url_for("fleet.boat_detail", boat_index=boat_index))
+
+    @blueprint.route(
         "/fleet/<int:boat_index>/defects/<int:defect_id>/assign", methods=["POST"]
     )
     @admin_login_required

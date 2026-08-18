@@ -1171,6 +1171,33 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
   letter-spacing: .06em;
   text-transform: uppercase;
 }
+.defect-case-admin-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline-soft);
+}
+.defect-case-admin-actions > span {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.defect-case-admin-actions form { margin: 0; }
+.defect-case-admin-actions button.defect-delete-button {
+  border: 1px solid rgba(179, 64, 44, .38);
+  background: transparent;
+  color: var(--danger);
+  padding: 8px 13px;
+}
+.defect-case-admin-actions button.defect-delete-button:hover {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff8f4;
+}
 .defect-case-form { display: contents; }
 .defect-case-section { margin-top: 14px; }
 .defect-section-heading {
@@ -1249,6 +1276,8 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 @media (max-width: 620px) {
   .defect-case-title { flex-direction: column; }
   .defect-case-title h2 { font-size: 21px; }
+  .defect-case-admin-actions { align-items: stretch; flex-direction: column; }
+  .defect-case-admin-actions button { width: 100%; }
   .defect-save-row { align-items: stretch; flex-direction: column; }
   .defect-save-row .hint { margin: 0; }
   .defect-plan-item { grid-template-columns: 24px minmax(0, 1fr); }
