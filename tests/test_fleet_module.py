@@ -181,6 +181,12 @@ class FleetModuleIntegrationTests(unittest.TestCase):
                 .fetchone()
             )
 
+        response = self.client.get("/fleet/0")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            f'action="/fleet/0/defects/{defect_id}/delete"'.encode(), response.data
+        )
+
         response = self.client.post(f"/fleet/0/defects/{defect_id}/delete")
         self.assertEqual(response.status_code, 302)
         self.assertTrue(response.headers["Location"].endswith("/fleet/0"))

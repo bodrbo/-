@@ -7,6 +7,7 @@
         <th>Сотрудник</th>
         <th>Статус</th>
         <th>{{ 'Исполнитель' if archive_mode else 'Задача' }}</th>
+        <th><span class="sr-only">Действия</span></th>
       </tr>
     </thead>
     <tbody>
@@ -48,6 +49,18 @@
           {% elif d.assignment and d.assignment.assignment_status == 'accepted' %}
             Исполнитель: {{ d.assignment.employee_name }}
           {% endif %}
+        </td>
+        <td class="row-actions">
+          <form action="{{ url_for('fleet.delete_defect', boat_index=boat_index, defect_id=d.id) }}"
+                method="post"
+                onsubmit="return confirm('Удалить неисправность? Это действие нельзя отменить.');">
+            <button type="submit" class="icon-btn danger" title="Удалить неисправность"
+                    aria-label="Удалить неисправность">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
+              </svg>
+            </button>
+          </form>
         </td>
       </tr>
       {% endfor %}
