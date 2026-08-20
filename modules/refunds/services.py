@@ -6,7 +6,6 @@ import re
 import secrets
 import sqlite3
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from zoneinfo import ZoneInfo
 
 import requests
 
@@ -34,6 +33,7 @@ EXPLICIT_RECORD_METADATA_KEYS = (
     "yclients_booking_id",
     "booking_id",
 )
+MOSCOW_TIMEZONE = dt.timezone(dt.timedelta(hours=3))
 
 
 def current_timestamp():
@@ -67,7 +67,11 @@ def _local_iso_datetime(raw_value):
     except ValueError:
         return raw[:19]
     if value.tzinfo is not None:
-        value = value.astimezone(ZoneInfo("Europe/Moscow"))
+        # Moscow has observed UTC+3 year-round since 2014. A fixed offset is
+        # sufficient for current excursion records and keeps this module
+        # importable on Beget Passenger installations that still use Python
+        # 3.8, where the standard-library ``zoneinfo`` module is unavailable.
+        value = value.astimezone(MOSCOW_TIMEZONE)
     return value.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M")
 
 

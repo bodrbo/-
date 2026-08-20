@@ -125,6 +125,12 @@ class RefundsModuleIntegrationTests(unittest.TestCase):
             self.assertEqual(payment["card_last4"], "4242")
             self.assertEqual(pages[0][2]["limit"], 100)
 
+    def test_remote_utc_timestamp_is_converted_to_fixed_moscow_time(self):
+        self.assertEqual(
+            services._local_iso_datetime("2026-08-20T21:30:00Z"),
+            "2026-08-21 00:30",
+        )
+
     def test_full_refund_is_idempotent_and_does_not_send_a_receipt(self):
         payment_id = self.seed_linked_payment()
         posts = []
