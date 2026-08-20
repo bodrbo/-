@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Возвраты по рейсам</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<meta name="theme-color" content="#3498db">
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+</head>
+<body>
+
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100">
+      <g fill="var(--brass)">
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/>
+      </g>
+      <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
+    </svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="topbar-top-row">
+      <div class="brand"><a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a></div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>
+      </button>
+    </div>
+    <nav class="main-nav" id="mainNav">
+      <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'payroll' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.3" y="6" width="15.4" height="8" rx="1.8"/><circle cx="10" cy="10" r="2"/></svg><span class="nav-label">Зарплаты</span>
+      </a>
+      <a href="{{ url_for('trips_index') }}" class="{{ 'active' if active_page == 'trips' }}">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="10" cy="3.8" r="1.6"/><path d="M10 5.6v10.6M6 8.4h8M4.2 11a5.8 5.8 0 0 0 11.6 0"/></svg><span class="nav-label">Рейсы и инвесторы</span>
+      </a>
+      <a href="{{ url_for('tuning_index') }}"><svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M14.7 3.3a4 4 0 0 1-5.1 5.4L4.4 13.9a1.6 1.6 0 0 0 2.3 2.3l5.2-5.2a4 4 0 0 0 5.4-5.1l-2.6 2.6-1.9-.4-.4-1.9 2.6-2.6z"/></svg><span class="nav-label">Тюнинг-центр</span></a>
+      <a href="{{ url_for('fleet.index') }}"><svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 17c1.4 1 3 1 4.4 0 1.4-1 3-1 4.4 0 1.4 1 3 1 4.4 0M5.5 17V8.5L10 3l4.5 5.5V17"/></svg><span class="nav-label">Флот</span></a>
+      <a href="{{ url_for('employees.index') }}"><svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="6" r="2.4"/><circle cx="14" cy="7" r="1.9"/><path d="M2.8 16c.3-3 1.7-5 4.2-5s4 2 4.3 5M11.2 12c.8-.8 1.7-1.2 2.8-1.2 2.1 0 3.2 1.7 3.4 4.2"/></svg><span class="nav-label">Сотрудники</span></a>
+      <a href="{{ url_for('analytics_index') }}"><svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2.5 16.5h15M5.5 16V10.5M10 16V4M14.5 16V11.5"/></svg><span class="nav-label">Аналитика</span></a>
+      <a href="{{ url_for('supply_warehouses') }}"><svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M10 2.3l7 3.5v8.4l-7 3.5-7-3.5V5.8l7-3.5zM3 5.8l7 3.5 7-3.5"/></svg><span class="nav-label">Снабжение</span></a>
+    </nav>
+    <div class="title-block"><h1>Возвраты по экскурсионным рейсам</h1></div>
+    <div class="topbar-actions">
+      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="wrap refunds-page">
+  <div class="refunds-breadcrumb"><a href="{{ url_for('trips_index') }}">← Рейсы и инвесторы</a></div>
+
+  {% if notice %}<div class="refunds-notice refunds-notice-{{ notice.type }}" role="alert">{{ notice.message }}</div>{% endif %}
+
+  <section class="panel refunds-command-panel">
+    <div class="refunds-command-copy">
+      <p class="refunds-eyebrow">YCLIENTS × ЮKassa</p>
+      <h2>Сверка бронирований и денег</h2>
+      <p>Загружайте записи за нужный период. Платёж связывается автоматически только при наличии точного ID записи в метаданных ЮKassa.</p>
+    </div>
+    <form action="{{ url_for('refunds.sync') }}" method="post" class="refunds-sync-form">
+      <label><span>Рейсы с</span><input type="date" name="start_date" value="{{ start_date }}" required></label>
+      <label><span>по</span><input type="date" name="end_date" value="{{ end_date }}" required></label>
+      <button type="submit" class="btn-primary" {{ 'disabled' if not yclients_configured or not yookassa_configured }}>Обновить сверку</button>
+    </form>
+    {% if not yclients_configured or not yookassa_configured %}
+    <div class="refunds-setup-warning">Не настроено: {{ 'YCLIENTS' if not yclients_configured }}{{ ' и ' if not yclients_configured and not yookassa_configured }}{{ 'ЮKassa' if not yookassa_configured }}.</div>
+    {% endif %}
+  </section>
+
+  <div class="refunds-ledger-strip" aria-label="Состояние сверки">
+    <div><span>Связано с рейсами</span><strong>{{ linked_count }}</strong></div>
+    <div class="{{ 'needs-attention' if unmatched_count }}"><span>Платежей без связи</span><strong>{{ unmatched_count }}</strong></div>
+    <div><span>Успешных возвратов</span><strong>{{ successful_refunds }}</strong></div>
+    <div><span>Возвращено клиентам</span><strong>{{ successful_refund_amount|money }} ₽</strong></div>
+  </div>
+
+  <form action="{{ url_for('refunds.index') }}" method="get" class="refunds-filter panel">
+    <input type="hidden" name="start_date" value="{{ start_date }}">
+    <input type="hidden" name="end_date" value="{{ end_date }}">
+    <label class="refunds-search"><span class="sr-only">Поиск</span><input type="search" name="q" value="{{ search }}" placeholder="Клиент, телефон, услуга или ID записи"></label>
+    <label><span class="sr-only">Состояние связи</span><select name="status">
+      <option value="all" {{ 'selected' if status_filter == 'all' }}>Все записи</option>
+      <option value="linked" {{ 'selected' if status_filter == 'linked' }}>С платежами</option>
+      <option value="unlinked" {{ 'selected' if status_filter == 'unlinked' }}>Без платежа</option>
+      <option value="refunded" {{ 'selected' if status_filter == 'refunded' }}>Есть возврат</option>
+    </select></label>
+    <button type="submit" class="btn-secondary">Найти</button>
+  </form>
+
+  <section class="refunds-roster">
+    <div class="refunds-section-heading"><div><p class="refunds-eyebrow">Бронирования</p><h2>Записи YCLIENTS</h2></div><span>{{ records|length }}</span></div>
+    {% if records %}
+      {% for record in records %}
+      <article class="refund-record {{ 'is-cancelled' if record.is_deleted }}">
+        <header class="refund-record-head">
+          <time datetime="{{ record.trip_at }}"><strong>{{ record.trip_at[:10]|ru_date }}</strong><span>{{ record.trip_at[11:16] }}</span></time>
+          <div class="refund-record-client">
+            <div><h3>{{ record.client_name or 'Клиент не указан' }}</h3><span>{{ record.client_phone or 'телефон не указан' }}{% if record.client_email %} · {{ record.client_email }}{% endif %}</span></div>
+            <p>{{ record.service_title }}</p>
+          </div>
+          <div class="refund-record-flags">
+            {% if record.is_deleted %}<span class="refund-flag danger">Запись удалена</span>{% endif %}
+            {% if record.paid_full %}<span class="refund-flag success">Оплачено полностью</span>{% elif record.prepaid_confirmed %}<span class="refund-flag warning">Предоплата</span>{% else %}<span class="refund-flag neutral">Оплата не подтверждена</span>{% endif %}
+            <small>YCLIENTS №{{ record.yclients_record_id }} · {{ record.expected_amount|money }} ₽</small>
+          </div>
+        </header>
+
+        <div class="refund-record-body">
+          {% if record.payments %}
+            {% for payment in record.payments %}
+            <section class="refund-payment">
+              <div class="refund-payment-head">
+                <div><span class="refunds-eyebrow">Платёж ЮKassa</span><strong>{{ payment.amount|money }} ₽</strong></div>
+                <div class="refund-payment-id"><code>{{ payment.yookassa_payment_id }}</code><span>{{ payment.payment_method or 'Способ не указан' }}{% if payment.card_last4 %} · •••• {{ payment.card_last4 }}{% endif %} · {{ payment.remote_created_at }}</span></div>
+                <form action="{{ url_for('refunds.unlink_payment', payment_id=payment.id) }}" method="post" onsubmit="return confirm('Удалить только связь платежа с этой записью? Сам платёж не изменится.');"><button class="icon-btn" title="Удалить связь" {{ 'disabled' if payment.refunds }}>×</button></form>
+              </div>
+
+              <div class="refund-money-trace" style="--returned: {{ payment.returned_percent }}%;">
+                <div class="refund-trace-labels"><span>Платёж <b>{{ payment.amount|money }} ₽</b></span><span>Возвращено <b>{{ payment.refunded_amount_effective|money }} ₽</b></span><span>Доступно <b>{{ payment.available_amount|money }} ₽</b></span></div>
+                <div class="refund-trace-bar" role="img" aria-label="Возвращено {{ payment.returned_percent }} процентов"><i></i><b></b></div>
+              </div>
+
+              {% if payment.description %}<p class="refund-payment-description">{{ payment.description }}</p>{% endif %}
+
+              {% if payment.can_refund %}
+              <form action="{{ url_for('refunds.create_refund', payment_id=payment.id) }}" method="post" class="refund-action-form" onsubmit="return confirmRefund(event, '{{ payment.available_amount|money }}');">
+                <input type="hidden" name="operation_key" value="{{ payment.operation_key }}">
+                <div class="refund-action-fields">
+                  <label><span>Сумма частичного возврата, ₽</span><input type="text" inputmode="decimal" name="amount" placeholder="Например, 1500"></label>
+                  <label><span>Email для чека</span><input type="email" name="email" value="{{ record.client_email or '' }}" placeholder="client@example.ru"></label>
+                  <label class="refund-reason"><span>Причина</span><input type="text" name="reason" maxlength="300" placeholder="Например, отмена рейса из-за погоды" required></label>
+                </div>
+                <label class="refund-confirm"><input type="checkbox" name="confirmed" value="1" required><span>Подтверждаю: ЮKassa отправит реальные деньги клиенту</span></label>
+                <div class="refund-action-buttons">
+                  <button type="submit" name="mode" value="partial" class="btn-secondary">Вернуть указанную сумму</button>
+                  <button type="submit" name="mode" value="full" class="refund-full-button">Вернуть все {{ payment.available_amount|money }} ₽</button>
+                </div>
+              </form>
+              {% elif payment.available_amount <= 0 %}
+              <div class="refund-closed-state">Платёж возвращён полностью.</div>
+              {% elif payment.has_open_refund %}
+              <div class="refund-closed-state">Возврат уже обрабатывается. Новый запрос временно заблокирован.</div>
+              {% else %}
+              <div class="refund-closed-state">ЮKassa не разрешает возврат по этому платежу. Обновите сверку или проверьте платёж в кабинете ЮKassa.</div>
+              {% endif %}
+
+              {% if payment.refunds %}
+              <div class="refund-history">
+                <h4>Журнал возвратов</h4>
+                {% for operation in payment.refunds %}
+                <div class="refund-history-row">
+                  <span class="refund-operation-status status-{{ operation.status }}">{{ operation.status_label }}</span>
+                  <strong>−{{ operation.amount|money }} ₽</strong>
+                  <span>{{ operation.created_at }} · {{ operation.created_by }}</span>
+                  <span>{{ operation.reason }}</span>
+                  {% if operation.cancellation_reason %}<small>{{ operation.cancellation_reason }}</small>{% endif %}
+                  {% if operation.error_message %}<small>{{ operation.error_message }}</small>{% endif %}
+                  {% if operation.status == 'unknown' %}<form action="{{ url_for('refunds.retry_refund', refund_id=operation.id) }}" method="post"><button class="btn-secondary">Повторить проверку</button></form>{% endif %}
+                </div>
+                {% endfor %}
+              </div>
+              {% endif %}
+            </section>
+            {% endfor %}
+          {% else %}
+          <div class="refund-unlinked-record">
+            <div><strong>Платёж пока не найден</strong><span>Укажите точный ID из кабинета ЮKassa. Система проверит статус и сумму перед связыванием.</span></div>
+            <form action="{{ url_for('refunds.attach_payment', record_id=record.yclients_record_id) }}" method="post"><label class="sr-only" for="payment-{{ record.yclients_record_id }}">ID платежа ЮKassa</label><input id="payment-{{ record.yclients_record_id }}" type="text" name="yookassa_payment_id" placeholder="2f…-000f-…" required><button class="btn-secondary">Проверить и связать</button></form>
+          </div>
+          {% endif %}
+        </div>
+      </article>
+      {% endfor %}
+    {% else %}
+    <div class="empty-state"><img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo"><div class="t">Записей за период пока нет</div><div class="s">Обновите сверку или измените даты и фильтры.</div></div>
+    {% endif %}
+  </section>
+
+  <details class="panel collapsible-panel refund-unmatched" {{ 'open' if unmatched_payments }}>
+    <summary><span>Платежи ЮKassa без связи с записью</span><span class="badge">{{ unmatched_payments|length }}</span><span class="chev"></span></summary>
+    <div class="collapsible-body">
+      <p class="hint">Система не связывает платежи только по совпадению суммы: у разных клиентов она может быть одинаковой. Проверьте описание, дату и карту, затем выберите запись вручную.</p>
+      {% if unmatched_payments %}
+      <div class="refund-unmatched-list">
+        {% for payment in unmatched_payments %}
+        <div class="refund-unmatched-row">
+          <div><strong>{{ payment.amount|money }} ₽</strong><code>{{ payment.yookassa_payment_id }}</code><span>{{ payment.remote_created_at }} · {{ payment.description or 'без описания' }}{% if payment.card_last4 %} · •••• {{ payment.card_last4 }}{% endif %}</span></div>
+          <form action="{{ url_for('refunds.link_payment', payment_id=payment.id) }}" method="post">
+            <select name="record_id" required><option value="" selected disabled>Выберите запись YCLIENTS</option>{% for option in record_options %}<option value="{{ option.yclients_record_id }}">{{ option.trip_at[:16] }} · {{ option.client_name or option.client_phone }} · №{{ option.yclients_record_id }}</option>{% endfor %}</select>
+            <button class="btn-secondary">Связать</button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}<div class="refund-closed-state">Все загруженные платежи связаны с записями.</div>{% endif %}
+    </div>
+  </details>
+</main>
+
+<script>
+function confirmRefund(event, fullAmount) {
+  var mode = event.submitter && event.submitter.value === 'full' ? 'полный' : 'частичный';
+  var amount = mode === 'полный' ? fullAmount : (event.currentTarget.querySelector('[name="amount"]').value || 'не указана');
+  return window.confirm('Подтвердить ' + mode + ' возврат на сумму ' + amount + ' ₽?\n\nОперация будет отправлена в ЮKassa и отменить её через систему нельзя.');
+}
+</script>
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+</body>
+</html>

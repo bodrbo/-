@@ -60,6 +60,8 @@ from integrations.telegram import fetch_recent_contacts as fetch_recent_telegram
 from modules.employees import create_employees_blueprint
 from modules.employees.constants import EMPLOYEES, INITIAL_EMPLOYEE_POSITIONS
 from modules.employees.services import telegram_chat_id_for_employee
+from modules.refunds import create_refunds_blueprint
+from modules.refunds import services as refund_services
 
 # reportlab (PDF generation for "Акт выполненных работ") is imported lazily,
 # inside _build_act_pdf() — it's an extra dependency on top of the site's
@@ -177,7 +179,8 @@ YCLIENTS_USER_TOKEN = os.environ.get("YCLIENTS_USER_TOKEN") or "7a61e523fd03f146
 YCLIENTS_COMPANY_ID = os.environ.get("YCLIENTS_COMPANY_ID") or "979343"
 
 # ---------------------------------------------------------------------
-# ЮKassa — приём онлайн-оплаты по заказам тюнинг-центра. В отличие от
+# ЮKassa — онлайн-оплата тюнинг-центра и возвраты по экскурсионным рейсам.
+# В отличие от
 # Yclients-токенов выше, здесь НЕТ запасного значения в коде — это платёжные
 # реквизиты, и в публичном репозитории им не место. Задайте на хостинге:
 #   YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
@@ -191,6 +194,25 @@ YOOKASSA_API_BASE = "https://api.yookassa.ru/v3"
 # платёж. Ставка НДС 5% (код 7) подтверждена владельцем бизнеса — это ставка
 # для АУСН/УСН по последней налоговой реформе.
 YOOKASSA_RECEIPT_VAT_CODE = 7
+try:
+    YOOKASSA_EXCURSION_VAT_CODE = int(
+        os.environ.get("YOOKASSA_EXCURSION_VAT_CODE") or YOOKASSA_RECEIPT_VAT_CODE
+    )
+except ValueError:
+    YOOKASSA_EXCURSION_VAT_CODE = YOOKASSA_RECEIPT_VAT_CODE
+YOOKASSA_EXCURSION_PAYMENT_MODE = os.environ.get(
+    "YOOKASSA_EXCURSION_PAYMENT_MODE", "full_prepayment"
+)
+if YOOKASSA_EXCURSION_PAYMENT_MODE not in {
+    "full_prepayment",
+    "prepayment",
+    "advance",
+    "full_payment",
+    "partial_payment",
+    "credit",
+    "credit_payment",
+}:
+    YOOKASSA_EXCURSION_PAYMENT_MODE = "full_prepayment"
 
 # ---------------------------------------------------------------------
 # Т-Банк — выгрузка выписки по расчётному счёту (раздел «Аналитика»).
@@ -1230,6 +1252,95 @@ def init_db():
             updated_at TEXT NOT NULL
         )
         """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS excursion_refund_records (
+            yclients_record_id INTEGER PRIMARY KEY,
+            activity_id INTEGER,
+            visit_id INTEGER,
+            trip_at TEXT NOT NULL,
+            service_title TEXT NOT NULL,
+            client_name TEXT,
+            client_phone TEXT,
+            client_email TEXT,
+            expected_amount REAL NOT NULL DEFAULT 0,
+            paid_full INTEGER NOT NULL DEFAULT 0,
+            prepaid INTEGER NOT NULL DEFAULT 0,
+            prepaid_confirmed INTEGER NOT NULL DEFAULT 0,
+            is_online INTEGER NOT NULL DEFAULT 0,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            raw_json TEXT NOT NULL,
+            last_synced_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS excursion_yookassa_payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            yookassa_payment_id TEXT NOT NULL UNIQUE,
+            yclients_record_id INTEGER,
+            amount REAL NOT NULL,
+            currency TEXT NOT NULL DEFAULT 'RUB',
+            refunded_amount REAL NOT NULL DEFAULT 0,
+            status TEXT NOT NULL,
+            refundable INTEGER NOT NULL DEFAULT 0,
+            description TEXT,
+            payment_method TEXT,
+            card_last4 TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            remote_created_at TEXT NOT NULL,
+            link_method TEXT,
+            linked_by TEXT,
+            linked_at TEXT,
+            last_synced_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS excursion_refunds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            payment_id INTEGER NOT NULL,
+            yookassa_refund_id TEXT UNIQUE,
+            amount REAL NOT NULL,
+            status TEXT NOT NULL,
+            refund_kind TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            receipt_email TEXT,
+            refunded_before REAL NOT NULL DEFAULT 0,
+            receipt_registration TEXT,
+            cancellation_reason TEXT,
+            error_message TEXT,
+            idempotence_key TEXT NOT NULL UNIQUE,
+            request_json TEXT NOT NULL,
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    excursion_refund_cols = [
+        row[1]
+        for row in conn.execute("PRAGMA table_info(excursion_refunds)").fetchall()
+    ]
+    if "refunded_before" not in excursion_refund_cols:
+        conn.execute(
+            "ALTER TABLE excursion_refunds "
+            "ADD COLUMN refunded_before REAL NOT NULL DEFAULT 0"
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_excursion_refund_records_trip_at "
+        "ON excursion_refund_records (trip_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_excursion_yookassa_record "
+        "ON excursion_yookassa_payments (yclients_record_id, remote_created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_excursion_refunds_payment "
+        "ON excursion_refunds (payment_id, created_at)"
     )
     conn.execute(
         """
@@ -4745,17 +4856,24 @@ def _normalize_ru_phone(phone):
     return digits
 
 
-def _yookassa_request(method, path, json_body=None, idempotence_key=None):
+def _yookassa_request(method, path, json_body=None, idempotence_key=None, params=None):
     headers = {}
     if idempotence_key:
         headers["Idempotence-Key"] = idempotence_key
     resp = requests.request(
         method, f"{YOOKASSA_API_BASE}{path}",
         auth=(YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY),
-        json=json_body, headers=headers, timeout=15,
+        json=json_body, params=params, headers=headers, timeout=15,
     )
     if not resp.ok:
-        raise RuntimeError(f"ЮKassa вернула {resp.status_code}: {resp.text[:500]}")
+        message = f"ЮKassa вернула {resp.status_code}: {resp.text[:500]}"
+        # HTTP 500 is explicitly an unknown outcome in the YooKassa API:
+        # the operation may have completed even though the answer was lost.
+        # Keep it in the RequestException branch so refund code retries only
+        # with the original idempotence key instead of permitting a new one.
+        if resp.status_code >= 500:
+            raise requests.HTTPError(message, response=resp)
+        raise RuntimeError(message)
     return resp.json()
 
 
@@ -4906,15 +5024,28 @@ def yookassa_webhook():
     # its id before recording anything, per ЮKassa's own recommendation.
     try:
         payload = request.get_json(force=True, silent=True) or {}
-        payment_id = (payload.get("object") or {}).get("id")
-        if payment_id:
+        object_id = (payload.get("object") or {}).get("id")
+        event = str(payload.get("event") or "")
+        if object_id:
             db = get_db()
-            record = db.execute(
-                "SELECT * FROM tuning_yookassa_payments WHERE yookassa_payment_id = ?",
-                (payment_id,),
-            ).fetchone()
-            if record is not None:
-                _sync_yookassa_payment(db, record)
+            if event.startswith("refund."):
+                remote_refund = _yookassa_request("GET", f"/refunds/{object_id}")
+                refund_services.apply_remote_refund(db, remote_refund)
+            else:
+                record = db.execute(
+                    "SELECT * FROM tuning_yookassa_payments WHERE yookassa_payment_id = ?",
+                    (object_id,),
+                ).fetchone()
+                if record is not None:
+                    _sync_yookassa_payment(db, record)
+                excursion_payment = db.execute(
+                    "SELECT 1 FROM excursion_yookassa_payments "
+                    "WHERE yookassa_payment_id = ?",
+                    (object_id,),
+                ).fetchone()
+                if excursion_payment is not None:
+                    remote_payment = _yookassa_request("GET", f"/payments/{object_id}")
+                    refund_services.sync_remote_payment(db, remote_payment)
     except Exception:
         pass
     return "", 200
@@ -8625,6 +8756,23 @@ def push_test():
         "🔧 Тестовый пуш с сайта", "Если вы это видите, всё настроено верно.", url="/admin",
     )
     return f"push status: {status} (admin subscriptions on file: {count})", 200
+
+
+# =======================================================================
+# Возвраты по экскурсионным рейсам
+# =======================================================================
+app.register_blueprint(
+    create_refunds_blueprint(
+        get_db=get_db,
+        admin_login_required=admin_login_required,
+        yclients_records_fetcher=yclients_get_records,
+        yclients_configured=yclients_configured,
+        yookassa_request=_yookassa_request,
+        yookassa_configured=yookassa_configured,
+        receipt_vat_code=YOOKASSA_EXCURSION_VAT_CODE,
+        receipt_payment_mode=YOOKASSA_EXCURSION_PAYMENT_MODE,
+    )
+)
 
 
 init_db()

@@ -152,6 +152,12 @@
 
 <main class="wrap">
 
+  <a href="{{ url_for('refunds.index') }}" class="refunds-entry-link">
+    <span class="refunds-entry-mark" aria-hidden="true">↩</span>
+    <span><strong>Возвраты по экскурсионным рейсам</strong><small>Сверить записи YCLIENTS с платежами ЮKassa и оформить полный или частичный возврат</small></span>
+    <b aria-hidden="true">Открыть →</b>
+  </a>
+
   {% if errors %}
     <div class="alert">
       <strong>Не удалось сохранить рейс:</strong>
