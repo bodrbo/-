@@ -995,10 +995,26 @@ def init_db():
             source_label TEXT,
             created_by_role TEXT NOT NULL,
             created_by_name TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            deleted_at TEXT,
+            deleted_by TEXT
         )
         """
     )
+    fuel_transaction_cols = [
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(boat_fuel_transactions)"
+        ).fetchall()
+    ]
+    if "deleted_at" not in fuel_transaction_cols:
+        conn.execute(
+            "ALTER TABLE boat_fuel_transactions ADD COLUMN deleted_at TEXT"
+        )
+    if "deleted_by" not in fuel_transaction_cols:
+        conn.execute(
+            "ALTER TABLE boat_fuel_transactions ADD COLUMN deleted_by TEXT"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS boat_fuel_trip_events (
@@ -1020,6 +1036,10 @@ def init_db():
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_boat_fuel_transactions_boat_time "
         "ON boat_fuel_transactions (boat, occurred_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_boat_fuel_transactions_active_time "
+        "ON boat_fuel_transactions (boat, deleted_at, occurred_at)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_boat_fuel_trip_events_boat_status "

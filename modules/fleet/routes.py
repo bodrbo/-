@@ -114,6 +114,27 @@ def create_fleet_blueprint(get_db, admin_login_required):
         return redirect(url_for("fleet.boat_detail", boat_index=boat_index))
 
     @blueprint.route(
+        "/fleet/<int:boat_index>/fuel/transactions/<int:transaction_id>/delete",
+        methods=["POST"],
+    )
+    @admin_login_required
+    def delete_fuel_transaction(boat_index, transaction_id):
+        boat = services.boat_by_index(boat_index)
+        if boat is None:
+            return redirect(url_for("fleet.index"))
+        success, message = fuel_services.delete_transaction(
+            get_db(),
+            boat,
+            transaction_id,
+            session.get("admin_name") or "Администратор",
+        )
+        session["fuel_notice"] = {
+            "type": "success" if success else "error",
+            "message": message,
+        }
+        return redirect(url_for("fleet.boat_detail", boat_index=boat_index))
+
+    @blueprint.route(
         "/fleet/<int:boat_index>/defects/<int:defect_id>", methods=["GET", "POST"]
     )
     @admin_login_required

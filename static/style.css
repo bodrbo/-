@@ -909,6 +909,21 @@ a.diag-card:hover { border-color: var(--brass); box-shadow: var(--shadow); }
 .fuel-delta { font-family: 'PT Mono', monospace; font-weight: 700; white-space: nowrap; }
 .fuel-delta.is-positive { color: var(--success); }
 .fuel-delta.is-negative { color: var(--danger); }
+.fuel-history-actions { width: 38px; padding-left: 4px !important; text-align: right; }
+.fuel-history-actions form { margin: 0; }
+.fuel-history-actions button.fuel-history-delete {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(179, 64, 44, .28);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--danger);
+  font-size: 17px;
+  line-height: 1;
+}
+.fuel-history-actions button.fuel-history-delete:hover { background: rgba(179, 64, 44, .09); border-color: var(--danger); }
+.fuel-history-actions button.fuel-history-delete:focus-visible { outline: 2px solid var(--danger); outline-offset: 2px; }
 @media (max-width: 900px) {
   .fuel-instrument { grid-template-columns: 130px minmax(180px, 1fr); }
   .fuel-instrument-meta { grid-column: 1 / -1; }

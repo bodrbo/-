@@ -204,6 +204,41 @@ def record_individual_consumption(db, boat, event_id, raw_liters, actor_role, ac
     return True, f"Расход {liters:g} л по индивидуальному рейсу сохранён."
 
 
+def delete_transaction(db, boat, transaction_id, actor_name):
+    transaction = repository.get_transaction(db, transaction_id, boat)
+    if transaction is None or transaction["deleted_at"]:
+        return False, "Запись журнала топлива не найдена."
+
+    state = repository.get_state(db, boat)
+    is_initial_calibration = (
+        transaction["kind"] == "calibration"
+        and state is not None
+        and state["activated_at"] == transaction["occurred_at"]
+    )
+    active_count = repository.count_active_transactions(db, boat)
+    if is_initial_calibration and active_count > 1:
+        return False, (
+            "Начальную заправку нельзя удалить, пока после неё есть другие операции. "
+            "Сначала удалите более поздние записи журнала."
+        )
+
+    deleted_at = format_timestamp(current_datetime())
+    with db:
+        deleted = repository.soft_delete_transaction(
+            db, transaction_id, boat, deleted_at, actor_name
+        )
+        if not deleted:
+            return False, "Запись журнала топлива уже удалена."
+        if is_initial_calibration:
+            repository.deactivate_state(db, boat, deleted_at)
+            repository.delete_trip_events(db, boat)
+
+    label = TRANSACTION_LABELS.get(transaction["kind"], "Операция")
+    if is_initial_calibration:
+        return True, "Начальная заправка удалена. Учёт топлива остановлен."
+    return True, f"Запись «{label}» удалена, остаток топлива пересчитан."
+
+
 def _normalise_color(value):
     return (value or "").strip().lower().lstrip("#")
 

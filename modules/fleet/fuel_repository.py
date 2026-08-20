@@ -25,7 +25,7 @@ def set_last_synced_at(db, boat, synced_at):
 def balance_at(db, boat, occurred_at=None):
     query = (
         "SELECT COALESCE(SUM(liters_delta), 0) AS balance "
-        "FROM boat_fuel_transactions WHERE boat = ?"
+        "FROM boat_fuel_transactions WHERE boat = ? AND deleted_at IS NULL"
     )
     params = [boat]
     if occurred_at is not None:
@@ -69,17 +69,61 @@ def add_transaction(
 
 
 def get_transaction_by_source(db, source_ref):
+    # Deleted imported rows deliberately remain discoverable by source_ref:
+    # this tombstone prevents the hourly YCLIENTS sync from recreating a
+    # canceled trip that an administrator explicitly removed from the ledger.
     return db.execute(
         "SELECT * FROM boat_fuel_transactions WHERE source_ref = ?", (source_ref,)
     ).fetchone()
 
 
+def get_transaction(db, transaction_id, boat=None):
+    if boat is None:
+        return db.execute(
+            "SELECT * FROM boat_fuel_transactions WHERE id = ?",
+            (transaction_id,),
+        ).fetchone()
+    return db.execute(
+        "SELECT * FROM boat_fuel_transactions WHERE id = ? AND boat = ?",
+        (transaction_id, boat),
+    ).fetchone()
+
+
 def list_transactions(db, boat, limit=30):
     return db.execute(
-        "SELECT * FROM boat_fuel_transactions WHERE boat = ? "
+        "SELECT * FROM boat_fuel_transactions WHERE boat = ? AND deleted_at IS NULL "
         "ORDER BY occurred_at DESC, id DESC LIMIT ?",
         (boat, limit),
     ).fetchall()
+
+
+def count_active_transactions(db, boat):
+    return db.execute(
+        "SELECT COUNT(*) AS count FROM boat_fuel_transactions "
+        "WHERE boat = ? AND deleted_at IS NULL",
+        (boat,),
+    ).fetchone()["count"]
+
+
+def soft_delete_transaction(db, transaction_id, boat, deleted_at, deleted_by):
+    cursor = db.execute(
+        "UPDATE boat_fuel_transactions SET deleted_at = ?, deleted_by = ? "
+        "WHERE id = ? AND boat = ? AND deleted_at IS NULL",
+        (deleted_at, deleted_by, transaction_id, boat),
+    )
+    return cursor.rowcount > 0
+
+
+def deactivate_state(db, boat, updated_at):
+    db.execute(
+        "UPDATE boat_fuel_state SET activated_at = NULL, activated_by_role = NULL, "
+        "activated_by_name = NULL, last_synced_at = NULL, updated_at = ? WHERE boat = ?",
+        (updated_at, boat),
+    )
+
+
+def delete_trip_events(db, boat):
+    db.execute("DELETE FROM boat_fuel_trip_events WHERE boat = ?", (boat,))
 
 
 def upsert_trip_event(

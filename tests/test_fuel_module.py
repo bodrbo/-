@@ -1,7 +1,7 @@
 import datetime as dt
 import unittest
 
-from modules.fleet import fuel_services
+from modules.fleet import fuel_repository, fuel_services
 from support import application_module
 
 
@@ -40,6 +40,16 @@ class FuelModuleIntegrationTests(unittest.TestCase):
                 "admin",
                 "Администратор теста",
             )
+
+    def completed_group_record(self):
+        return {
+            "id": 1,
+            "activity_id": 777,
+            "datetime": "2026-08-18T09:00:00+03:00",
+            "seance_length": 3600,
+            "attendance": 0,
+            "services": [{"id": 14624788, "title": "Групповой рейс"}],
+        }
 
     def test_first_full_refill_activates_known_capacity(self):
         self.assertEqual(
@@ -147,6 +157,109 @@ class FuelModuleIntegrationTests(unittest.TestCase):
             )
             self.assertEqual(summary["balance_liters"], 80.5)
             self.assertEqual(summary["pending_trips"], [])
+
+    def test_admin_can_remove_trip_from_ledger_without_sync_recreating_it(self):
+        success, _ = self.activate_boat()
+        self.assertTrue(success)
+        record = self.completed_group_record()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            stats = fuel_services.sync_yclients_records(
+                db, [record], {777: "8bc34a"}, dt.datetime(2026, 8, 18, 12, 0)
+            )
+            transaction = db.execute(
+                "SELECT * FROM boat_fuel_transactions "
+                "WHERE kind = 'group_consumption'"
+            ).fetchone()
+            self.assertEqual(stats["automatic"], 1)
+            self.assertEqual(
+                fuel_services.fuel_summary(db, "Бодрый Первый")["balance_liters"],
+                88,
+            )
+            transaction_id = transaction["id"]
+
+        response = self.client.post(
+            f"/fleet/2/fuel/transactions/{transaction_id}/delete"
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/admin/login", response.headers["Location"])
+
+        self.log_in_as_admin()
+        page = self.client.get("/fleet/2")
+        self.assertIn(
+            f"/fleet/2/fuel/transactions/{transaction_id}/delete".encode(),
+            page.data,
+        )
+        response = self.client.post(
+            f"/fleet/2/fuel/transactions/{transaction_id}/delete"
+        )
+        self.assertEqual(response.status_code, 302)
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            deleted = fuel_repository.get_transaction(db, transaction_id)
+            summary = fuel_services.fuel_summary(db, "Бодрый Первый")
+            repeated = fuel_services.sync_yclients_records(
+                db, [record], {777: "8bc34a"}, dt.datetime(2026, 8, 18, 12, 5)
+            )
+            active_group_rows = db.execute(
+                "SELECT COUNT(*) AS count FROM boat_fuel_transactions "
+                "WHERE kind = 'group_consumption' AND deleted_at IS NULL"
+            ).fetchone()["count"]
+
+            self.assertEqual(deleted["deleted_at"], "2026-08-18 12:00")
+            self.assertEqual(deleted["deleted_by"], "Администратор теста")
+            self.assertEqual(summary["balance_liters"], 100)
+            self.assertEqual(len(summary["transactions"]), 1)
+            self.assertEqual(repeated["automatic"], 0)
+            self.assertEqual(active_group_rows, 0)
+
+    def test_initial_calibration_can_only_be_removed_after_later_entries(self):
+        success, _ = self.activate_boat()
+        self.assertTrue(success)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            initial = db.execute(
+                "SELECT * FROM boat_fuel_transactions "
+                "WHERE boat = 'Бодрый Первый' AND kind = 'calibration'"
+            ).fetchone()
+            removed, message = fuel_services.delete_transaction(
+                db, "Бодрый Первый", initial["id"], "Администратор теста"
+            )
+            self.assertTrue(removed, message)
+            self.assertFalse(
+                fuel_services.fuel_summary(db, "Бодрый Первый")["activated"]
+            )
+
+            success, _ = fuel_services.record_refill(
+                db,
+                "Бодрый Первый",
+                "80",
+                "2026-08-18T08:30",
+                True,
+                "admin",
+                "Администратор теста",
+            )
+            self.assertTrue(success)
+            current_initial = db.execute(
+                "SELECT * FROM boat_fuel_transactions "
+                "WHERE boat = 'Бодрый Первый' AND deleted_at IS NULL"
+            ).fetchone()
+            fuel_services.sync_yclients_records(
+                db,
+                [self.completed_group_record()],
+                {777: "8bc34a"},
+                dt.datetime(2026, 8, 18, 12, 0),
+            )
+            removed, message = fuel_services.delete_transaction(
+                db, "Бодрый Первый", current_initial["id"], "Администратор теста"
+            )
+
+            self.assertFalse(removed)
+            self.assertIn("Сначала удалите более поздние записи", message)
+            self.assertTrue(
+                fuel_services.fuel_summary(db, "Бодрый Первый")["activated"]
+            )
 
     def test_captain_can_record_refill_but_non_captain_cannot(self):
         with self.client.session_transaction() as session:
