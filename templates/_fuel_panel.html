@@ -138,9 +138,13 @@
               {% else %}{{ '+' if transaction.liters_delta > 0 }}{{ transaction.liters_delta|round(1) }}{% endif %}
             </td>
             {% if viewer_role == 'admin' %}
-            <td class="fuel-history-actions">
+            <td class="fuel-history-actions row-actions">
               <form action="{{ url_for('fleet.delete_fuel_transaction', boat_index=boat_index, transaction_id=transaction.id) }}" method="post" onsubmit="return confirm('Удалить эту запись из журнала топлива? Остаток будет пересчитан. Для рейса YCLIENTS удалённое списание не появится снова.');">
-                <button type="submit" class="fuel-history-delete" title="Удалить запись" aria-label="Удалить запись {{ transaction.label }}">×</button>
+                <button type="submit" class="icon-btn danger" title="Удалить запись" aria-label="Удалить запись {{ transaction.label }}">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
+                  </svg>
+                </button>
               </form>
             </td>
             {% endif %}
