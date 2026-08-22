@@ -158,7 +158,8 @@ def list_employees_with_positions(db, positions):
     rows = db.execute(
         f"SELECT DISTINCT employees.name FROM employees "
         f"JOIN employee_positions ON employee_positions.employee_id = employees.id "
-        f"WHERE employee_positions.position IN ({placeholders}) ORDER BY employees.name",
+        f"WHERE employee_positions.position IN ({placeholders}) "
+        f"AND employees.deleted_at IS NULL ORDER BY employees.name",
         positions,
     ).fetchall()
     return [row["name"] for row in rows]

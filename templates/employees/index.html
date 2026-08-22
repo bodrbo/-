@@ -90,6 +90,70 @@
   <div class="employees-notice employees-notice-{{ notice.type }}" role="alert">{{ notice.message }}</div>
   {% endif %}
 
+  {% if credentials %}
+  <section class="panel employee-credentials-panel" id="employee-credentials" role="alert" aria-labelledby="employee-credentials-title">
+    <div>
+      <p class="employee-eyebrow">Данные для входа</p>
+      <h2 id="employee-credentials-title">Личный кабинет: {{ credentials.employee_name }}</h2>
+      <p>Передайте данные сотруднику сейчас. Пароль хранится только в виде защищённого хеша и после закрытия этой страницы повторно не показывается — при необходимости выпустите новый.</p>
+    </div>
+    <div class="employee-credential-fields">
+      <label>
+        <span>Логин</span>
+        <input id="employeeCredentialLogin" value="{{ credentials.username }}" readonly autocomplete="off">
+      </label>
+      <label>
+        <span>Пароль</span>
+        <input id="employeeCredentialPassword" value="{{ credentials.password }}" readonly autocomplete="off">
+      </label>
+      <button type="button" class="employee-secondary-btn employee-copy-credentials" data-login="{{ credentials.username }}" data-password="{{ credentials.password }}">Копировать данные</button>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="panel employee-create-panel" id="new-employee">
+    <div class="employee-create-heading">
+      <div>
+        <p class="employee-eyebrow">Новый член команды</p>
+        <h2>Добавить сотрудника</h2>
+      </div>
+      <p>Логин и надёжный пароль будут созданы автоматически. Доступ к разделам кабинета определяется должностями.</p>
+    </div>
+    <form action="{{ url_for('employees.create_employee') }}" method="post" class="employee-create-form">
+      <label class="employee-create-name">
+        <span>ФИО</span>
+        <input name="name" value="{{ create_values.get('name', '') }}" maxlength="120" placeholder="Например, Иван Петров" autocomplete="off" required>
+      </label>
+      <fieldset class="employee-create-positions">
+        <legend>Должности</legend>
+        <div class="employee-position-options">
+          {% for position in known_positions %}
+          <label>
+            <input type="checkbox" name="positions" value="{{ position }}" {% if position in create_values.get('positions', []) %}checked{% endif %}>
+            <span>{{ position }}</span>
+          </label>
+          {% endfor %}
+        </div>
+        <label class="employee-custom-position">
+          <span>Другая должность</span>
+          <input name="custom_position" value="{{ create_values.get('custom_position', '') }}" maxlength="80" placeholder="Если нужной нет в списке">
+        </label>
+      </fieldset>
+      <label class="employee-create-telegram">
+        <span>Telegram <small>необязательно</small></span>
+        <select name="chat_id" {% if not unlinked_telegram_contacts %}disabled{% endif %}>
+          <option value="">{% if unlinked_telegram_contacts %}Привязать позже{% else %}Нет свободных контактов — можно привязать позже{% endif %}</option>
+          {% for contact in unlinked_telegram_contacts %}
+          <option value="{{ contact.chat_id }}" {% if create_values.get('chat_id') == contact.chat_id %}selected{% endif %}>
+            {% if contact.username %}@{{ contact.username }} · {% endif %}{{ contact.display_name or 'Без имени' }} · {{ contact.chat_id }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="employee-primary-btn employee-create-submit">Добавить сотрудника</button>
+    </form>
+  </section>
+
   <section class="panel telegram-setup-panel">
     <div class="telegram-setup-copy">
       <span class="telegram-mark" aria-hidden="true">
@@ -144,11 +208,27 @@
           <h3>{{ employee.name }}</h3>
           {% if employee.login %}<span>Личный кабинет: <code>{{ employee.login }}</code></span>{% else %}<span>Без личного кабинета</span>{% endif %}
         </div>
-        {% if employee.telegram %}
-        <span class="connection-badge connected"><i></i> Telegram подключён</span>
-        {% else %}
-        <span class="connection-badge"><i></i> Нет связи</span>
-        {% endif %}
+        <div class="employee-card-actions">
+          {% if employee.telegram %}
+          <span class="connection-badge connected"><i></i> Telegram подключён</span>
+          {% else %}
+          <span class="connection-badge"><i></i> Нет связи</span>
+          {% endif %}
+          {% if employee.account_id %}
+          <form action="{{ url_for('employees.reset_password', employee_id=employee.id) }}" method="post"
+                onsubmit='return confirm({{ ("Выпустить новый пароль для " ~ employee.name ~ "? Старый пароль сразу перестанет работать.")|tojson }});'>
+            <button type="submit" class="employee-secondary-btn" title="Выпустить новый пароль">Новый пароль</button>
+          </form>
+          {% endif %}
+          <form action="{{ url_for('employees.delete_employee', employee_id=employee.id) }}" method="post" class="row-actions"
+                onsubmit='return confirm({{ ("Удалить " ~ employee.name ~ " из активного состава? Личный кабинет и Telegram будут отключены, история работ сохранится.")|tojson }});'>
+            <button type="submit" class="icon-btn danger" title="Удалить сотрудника" aria-label="Удалить сотрудника {{ employee.name }}">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
+              </svg>
+            </button>
+          </form>
+        </div>
       </header>
 
       <div class="employee-card-body">
@@ -220,5 +300,18 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+document.querySelector('.employee-copy-credentials')?.addEventListener('click', async function () {
+  const text = `Логин: ${this.dataset.login}\nПароль: ${this.dataset.password}`;
+  try {
+    await navigator.clipboard.writeText(text);
+    this.textContent = 'Скопировано';
+  } catch (error) {
+    const password = document.getElementById('employeeCredentialPassword');
+    password.focus();
+    password.select();
+  }
+});
+</script>
 </body>
 </html>

@@ -4,16 +4,175 @@
 def list_employees(db):
     return db.execute(
         "SELECT employees.*, "
+        "(SELECT id FROM team_accounts "
+        " WHERE team_accounts.employee_id = employees.id ORDER BY id LIMIT 1) AS account_id, "
         "(SELECT username FROM team_accounts "
-        " WHERE team_accounts.employee_name = employees.name ORDER BY id LIMIT 1) AS login "
-        "FROM employees ORDER BY employees.name"
+        " WHERE team_accounts.employee_id = employees.id ORDER BY id LIMIT 1) AS login "
+        "FROM employees WHERE employees.deleted_at IS NULL ORDER BY employees.name"
     ).fetchall()
 
 
 def get_employee(db, employee_id):
     return db.execute(
-        "SELECT * FROM employees WHERE id = ?", (employee_id,)
+        "SELECT * FROM employees WHERE id = ? AND deleted_at IS NULL", (employee_id,)
     ).fetchone()
+
+
+def get_employee_by_name(db, name, include_deleted=False):
+    query = "SELECT * FROM employees"
+    if not include_deleted:
+        query += " WHERE deleted_at IS NULL"
+    for employee in db.execute(query).fetchall():
+        if employee["name"].casefold() == name.casefold():
+            return employee
+    return None
+
+
+def list_active_employee_names(db):
+    return [
+        row["name"]
+        for row in db.execute(
+            "SELECT name FROM employees WHERE deleted_at IS NULL ORDER BY name"
+        ).fetchall()
+    ]
+
+
+def team_username_exists(db, username):
+    return db.execute(
+        "SELECT 1 FROM team_accounts WHERE lower(username) = lower(?)", (username,)
+    ).fetchone() is not None
+
+
+def create_employee_with_account(
+    db,
+    existing_employee,
+    name,
+    username,
+    password_hash,
+    positions,
+    telegram_contact,
+    created_at,
+):
+    """Create or reactivate an employee and provision all current access atomically."""
+    try:
+        if existing_employee is None:
+            cursor = db.execute(
+                "INSERT INTO employees (name, created_at, deleted_at) VALUES (?, ?, NULL)",
+                (name, created_at),
+            )
+            employee_id = cursor.lastrowid
+        else:
+            employee_id = existing_employee["id"]
+            db.execute(
+                "UPDATE employees SET deleted_at = NULL WHERE id = ?", (employee_id,)
+            )
+
+        db.execute("DELETE FROM employee_positions WHERE employee_id = ?", (employee_id,))
+        db.execute(
+            "DELETE FROM employee_telegram_accounts WHERE employee_id = ?",
+            (employee_id,),
+        )
+        db.execute(
+            "DELETE FROM team_accounts WHERE employee_id = ? OR employee_name = ?",
+            (employee_id, name),
+        )
+        for position in positions:
+            db.execute(
+                "INSERT INTO employee_positions (employee_id, position, created_at) "
+                "VALUES (?, ?, ?)",
+                (employee_id, position, created_at),
+            )
+
+        telegram_chat_id = telegram_contact["chat_id"] if telegram_contact else None
+        db.execute(
+            "INSERT INTO team_accounts "
+            "(employee_id, employee_name, username, password_hash, created_at, telegram_chat_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                employee_id,
+                name,
+                username,
+                password_hash,
+                created_at,
+                telegram_chat_id,
+            ),
+        )
+        if telegram_contact is not None:
+            db.execute(
+                "INSERT INTO employee_telegram_accounts "
+                "(employee_id, chat_id, username, display_name, linked_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    employee_id,
+                    telegram_contact["chat_id"],
+                    telegram_contact["username"],
+                    telegram_contact["display_name"],
+                    created_at,
+                ),
+            )
+        db.commit()
+        return employee_id
+    except Exception:
+        db.rollback()
+        raise
+
+
+def update_team_password(db, employee_id, password_hash):
+    cursor = db.execute(
+        "UPDATE team_accounts SET password_hash = ? WHERE employee_id = ?",
+        (password_hash, employee_id),
+    )
+    db.commit()
+    return cursor.rowcount > 0
+
+
+def get_team_account(db, employee_id):
+    return db.execute(
+        "SELECT * FROM team_accounts WHERE employee_id = ? ORDER BY id LIMIT 1",
+        (employee_id,),
+    ).fetchone()
+
+
+def count_open_assignments(db, employee_name):
+    query = (
+        "SELECT "
+        "(SELECT COUNT(*) FROM defect_assignments WHERE employee_name = ? "
+        " AND (assignment_status = 'pending' "
+        "      OR (assignment_status = 'accepted' AND entry_id IS NULL))) + "
+        "(SELECT COUNT(*) FROM tuning_item_assignments WHERE employee_name = ? "
+        " AND (assignment_status = 'pending' "
+        "      OR (assignment_status = 'accepted' AND entry_id IS NULL))) AS count"
+    )
+    return db.execute(query, (employee_name, employee_name)).fetchone()["count"]
+
+
+def deactivate_employee(db, employee, deleted_at, today):
+    """Remove current access while retaining name-based operational history."""
+    try:
+        db.execute(
+            "DELETE FROM employee_telegram_accounts WHERE employee_id = ?",
+            (employee["id"],),
+        )
+        db.execute(
+            "DELETE FROM employee_positions WHERE employee_id = ?",
+            (employee["id"],),
+        )
+        db.execute(
+            "DELETE FROM team_accounts WHERE employee_id = ? OR employee_name = ?",
+            (employee["id"], employee["name"]),
+        )
+        db.execute(
+            "DELETE FROM captain_shifts WHERE employee_id = ? AND shift_date >= ?",
+            (employee["id"], today),
+        )
+        db.execute(
+            "UPDATE employees SET deleted_at = ? WHERE id = ?",
+            (deleted_at, employee["id"]),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
 
 def list_employee_positions(db):
@@ -26,7 +185,9 @@ def list_known_positions(db):
     return [
         row["position"]
         for row in db.execute(
-            "SELECT DISTINCT position FROM employee_positions ORDER BY position"
+            "SELECT DISTINCT employee_positions.position FROM employee_positions "
+            "JOIN employees ON employees.id = employee_positions.employee_id "
+            "WHERE employees.deleted_at IS NULL ORDER BY employee_positions.position"
         ).fetchall()
     ]
 
@@ -186,8 +347,9 @@ def link_telegram_account(db, employee, contact, linked_at):
             (*values, employee["id"]),
         )
     db.execute(
-        "UPDATE team_accounts SET telegram_chat_id = ? WHERE employee_name = ?",
-        (contact["chat_id"], employee["name"]),
+        "UPDATE team_accounts SET telegram_chat_id = ? "
+        "WHERE employee_id = ? OR employee_name = ?",
+        (contact["chat_id"], employee["id"], employee["name"]),
     )
     db.commit()
 
@@ -198,7 +360,8 @@ def unlink_telegram_account(db, employee):
         (employee["id"],),
     )
     db.execute(
-        "UPDATE team_accounts SET telegram_chat_id = NULL WHERE employee_name = ?",
-        (employee["name"],),
+        "UPDATE team_accounts SET telegram_chat_id = NULL "
+        "WHERE employee_id = ? OR employee_name = ?",
+        (employee["id"], employee["name"]),
     )
     db.commit()

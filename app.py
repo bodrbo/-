@@ -60,7 +60,10 @@ from modules.fleet.services import (
 from integrations.telegram import fetch_recent_contacts as fetch_recent_telegram_contacts
 from modules.employees import create_employees_blueprint
 from modules.employees.constants import EMPLOYEES, INITIAL_EMPLOYEE_POSITIONS
-from modules.employees.services import telegram_chat_id_for_employee
+from modules.employees.services import (
+    active_employee_names as _active_employee_names,
+    telegram_chat_id_for_employee,
+)
 from modules.refunds import create_refunds_blueprint
 from modules.refunds import services as refund_services
 
@@ -566,11 +569,9 @@ INVESTOR_ACCOUNTS = [
      "pbkdf2:sha256:1000000$E9ffeVGhqp4SxAM7$d3439a20955fef86f35307fba7dbbd47fccfafb87935afd3753866e04f041a64"),
 ]
 
-# Личный кабинет члена команды: (имя — должно совпадать с EMPLOYEES и с
-# полем employee в entries, логин, хеш пароля). Хеш добавляйте через
-# werkzeug.security.generate_password_hash(pwd, method="pbkdf2:sha256") —
-# сам пароль в коде никогда не хранится. Добавляйте сюда новых сотрудников
-# по мере необходимости — при следующем запуске аккаунт создастся сам.
+# Первичные кабинеты исторически настроенных членов команды. Новые сотрудники
+# и их аккаунты создаются через интерфейс «Сотрудники»; этот список остаётся
+# только bootstrap-данными для новой базы и восстановления старых установок.
 TEAM_ACCOUNTS = [
     ("Эльмира Бектаева", "bektaeva",
      "pbkdf2:sha256:1000000$ay2t4C4cbVLgpxPe$0c719274a55b4bd8936b23d4ccca4d1d8d92cf0f80b46334a264be20c5026144"),
@@ -764,10 +765,14 @@ def init_db():
         CREATE TABLE IF NOT EXISTS employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            deleted_at TEXT
         )
         """
     )
+    employee_cols = [row[1] for row in conn.execute("PRAGMA table_info(employees)").fetchall()]
+    if "deleted_at" not in employee_cols:
+        conn.execute("ALTER TABLE employees ADD COLUMN deleted_at TEXT")
     employee_positions_is_new = conn.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'employee_positions'"
     ).fetchone() is None
@@ -1738,6 +1743,7 @@ def init_db():
         """
         CREATE TABLE IF NOT EXISTS team_accounts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER,
             employee_name TEXT NOT NULL,
             username TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
@@ -1749,8 +1755,15 @@ def init_db():
     # employee_telegram_accounts, while this value is mirrored so older
     # deployments and scripts continue to work during the transition.
     team_account_cols = [row[1] for row in conn.execute("PRAGMA table_info(team_accounts)").fetchall()]
+    if "employee_id" not in team_account_cols:
+        conn.execute("ALTER TABLE team_accounts ADD COLUMN employee_id INTEGER")
     if "telegram_chat_id" not in team_account_cols:
         conn.execute("ALTER TABLE team_accounts ADD COLUMN telegram_chat_id TEXT")
+    conn.execute(
+        "UPDATE team_accounts SET employee_id = "
+        "(SELECT employees.id FROM employees WHERE employees.name = team_accounts.employee_name) "
+        "WHERE employee_id IS NULL"
+    )
     # Seed the known investor/team accounts if they don't exist yet.
     # Passwords only ever exist as pbkdf2 hashes here — nothing plaintext is
     # stored in the repo. pbkdf2 (not the werkzeug default of scrypt) is
@@ -1770,25 +1783,31 @@ def init_db():
             (investor_name, username, password_hash, now),
         )
     for employee_name, username, password_hash in TEAM_ACCOUNTS:
-        # Upsert, not insert-or-ignore: editing a hash here (a password
-        # reset) has to actually take effect on restart, not just apply to
-        # brand-new accounts. Written as select-then-insert/update rather
-        # than SQLite's own "ON CONFLICT ... DO UPDATE" — that syntax needs
-        # SQLite 3.24+, which not every host's Python is built against, and
-        # this runs on every single startup so it can't afford to be wrong.
+        employee_row = conn.execute(
+            "SELECT id FROM employees WHERE name = ? AND deleted_at IS NULL",
+            (employee_name,),
+        ).fetchone()
+        if employee_row is None:
+            continue
+        employee_id = employee_row[0]
+        # These constants only bootstrap missing accounts. Runtime password
+        # resets made in «Сотрудники» are the source of truth and must survive
+        # a restart, so an existing hash is deliberately never overwritten.
         existing = conn.execute(
             "SELECT id FROM team_accounts WHERE username = ?", (username,)
         ).fetchone()
         if existing is None:
             conn.execute(
-                "INSERT INTO team_accounts (employee_name, username, password_hash, created_at) "
-                "VALUES (?, ?, ?, ?)",
-                (employee_name, username, password_hash, now),
+                "INSERT INTO team_accounts "
+                "(employee_id, employee_name, username, password_hash, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (employee_id, employee_name, username, password_hash, now),
             )
         else:
             conn.execute(
-                "UPDATE team_accounts SET employee_name = ?, password_hash = ? WHERE username = ?",
-                (employee_name, password_hash, username),
+                "UPDATE team_accounts SET employee_id = ?, employee_name = ? "
+                "WHERE username = ?",
+                (employee_id, employee_name, username),
             )
 
     conn.execute(
@@ -2036,9 +2055,9 @@ def _payroll_context(db, selected_week, selected_employee):
         ).fetchall():
             tbank_payouts.setdefault(row["employee"], dict(row))
 
-    # Employees for the filter dropdown: the configured list, plus any
-    # employee names already used but not in the list (so nothing is hidden).
-    known = list(EMPLOYEES)
+    # Keep active employees first, then append historical names from old
+    # payroll rows so deleting access never hides previously earned amounts.
+    known = _active_employee_names(db)
     for row in db.execute("SELECT DISTINCT employee FROM entries").fetchall():
         if row["employee"] not in known:
             known.append(row["employee"])
@@ -2194,7 +2213,7 @@ def index():
     return render_template(
         "index.html",
         **ctx,
-        employees_form=EMPLOYEES,
+        employees_form=_active_employee_names(db),
         work_types=WORK_TYPES,
         custom_value=CUSTOM_VALUE,
         today=dt.date.today().isoformat(),
@@ -2302,7 +2321,7 @@ def add_entry():
         return render_template(
             "index.html",
             **ctx,
-            employees_form=EMPLOYEES,
+            employees_form=_active_employee_names(db),
             work_types=WORK_TYPES,
             custom_value=CUSTOM_VALUE,
             today=dt.date.today().isoformat(),
@@ -2358,7 +2377,7 @@ def add_manager_fee():
         return render_template(
             "index.html",
             **ctx,
-            employees_form=EMPLOYEES,
+            employees_form=_active_employee_names(db),
             work_types=WORK_TYPES,
             custom_value=CUSTOM_VALUE,
             today=dt.date.today().isoformat(),
@@ -2468,9 +2487,9 @@ def _trips_list_context(db, selected_month=None, selected_boat="all"):
     )
 
 
-def _trips_common_kwargs():
+def _trips_common_kwargs(db):
     return dict(
-        employees_form=EMPLOYEES,
+        employees_form=_active_employee_names(db),
         work_types=WORK_TYPES,
         sale_channels=SALE_CHANNELS,
         custom_value=CUSTOM_VALUE,
@@ -2643,7 +2662,7 @@ def trips_index():
     selected_boat = request.args.get("boat", "all")
     ctx = _trips_list_context(db, selected_month, selected_boat)
     return render_template(
-        "trips.html", **ctx, **_trips_common_kwargs(), edit_trip=None,
+        "trips.html", **ctx, **_trips_common_kwargs(db), edit_trip=None,
         trip_expense_error=session.pop("trip_expense_error", None),
         trip_contract_error=session.pop("trip_contract_error", None),
     )
@@ -2657,7 +2676,7 @@ def add_trip():
     if errors:
         ctx = _trips_list_context(db)
         return render_template(
-            "trips.html", **ctx, **_trips_common_kwargs(),
+            "trips.html", **ctx, **_trips_common_kwargs(db),
             edit_trip=None, errors=errors, form_values=request.form,
         ), 400
 
@@ -2740,7 +2759,7 @@ def edit_trip(trip_id):
         }
         ctx = _trips_list_context(db)
         return render_template(
-            "trips.html", **ctx, **_trips_common_kwargs(),
+            "trips.html", **ctx, **_trips_common_kwargs(db),
             edit_trip=trip, form_values=form_values,
             labor_prefill=labor_prefill,
             expenses_prefill=[(e["description"], e["amount"]) for e in exps],
@@ -2750,7 +2769,7 @@ def edit_trip(trip_id):
     if errors:
         ctx = _trips_list_context(db)
         return render_template(
-            "trips.html", **ctx, **_trips_common_kwargs(),
+            "trips.html", **ctx, **_trips_common_kwargs(db),
             edit_trip=trip, errors=errors, form_values=request.form,
         ), 400
 
@@ -2849,7 +2868,7 @@ def add_trip_expense():
     except ValueError:
         amount = None
         errors.append("Сумма расхода должна быть числом.")
-    if employee and employee not in EMPLOYEES:
+    if employee and employee not in _active_employee_names(db):
         errors.append("Неизвестный сотрудник.")
 
     if errors:
@@ -5702,7 +5721,7 @@ def import_index():
     db = get_db()
     ctx = _trips_list_context(db)
     return render_template(
-        "trips.html", **ctx, **_trips_common_kwargs(),
+        "trips.html", **ctx, **_trips_common_kwargs(db),
         edit_trip=None,
         import_error=request.args.get("error"),
         open_import=True,
@@ -5837,7 +5856,7 @@ def import_review(candidate_id):
     }
     ctx = _trips_list_context(db)
     return render_template(
-        "trips.html", **ctx, **_trips_common_kwargs(),
+        "trips.html", **ctx, **_trips_common_kwargs(db),
         edit_trip=None, import_candidate=row, form_values=form_values,
         labor_prefill=payload["labor_items"],
         import_note=payload.get("note", ""),
@@ -6022,7 +6041,7 @@ def import_confirm(candidate_id):
     if errors:
         ctx = _trips_list_context(db)
         return render_template(
-            "trips.html", **ctx, **_trips_common_kwargs(),
+            "trips.html", **ctx, **_trips_common_kwargs(db),
             edit_trip=None, import_candidate=row, errors=errors, form_values=request.form,
             import_note=payload.get("note", ""),
         ), 400
@@ -6140,7 +6159,8 @@ def investor_dashboard():
 def _employee_has_position(db, employee_name, position):
     return db.execute(
         "SELECT 1 FROM employees JOIN employee_positions ON employee_positions.employee_id = employees.id "
-        "WHERE employees.name = ? AND employee_positions.position = ?",
+        "WHERE employees.name = ? AND employee_positions.position = ? "
+        "AND employees.deleted_at IS NULL",
         (employee_name, position),
     ).fetchone() is not None
 
@@ -6150,7 +6170,8 @@ def _employees_with_any_position(db, positions):
     rows = db.execute(
         f"SELECT DISTINCT employees.name FROM employees "
         f"JOIN employee_positions ON employee_positions.employee_id = employees.id "
-        f"WHERE employee_positions.position IN ({placeholders}) ORDER BY employees.name",
+        f"WHERE employee_positions.position IN ({placeholders}) "
+        f"AND employees.deleted_at IS NULL ORDER BY employees.name",
         positions,
     ).fetchall()
     return [r["name"] for r in rows]
@@ -6205,7 +6226,19 @@ def _items_by_project(db):
 def team_login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if not session.get("team_id"):
+        team_id = session.get("team_id")
+        account = None
+        if team_id:
+            account = get_db().execute(
+                "SELECT team_accounts.id FROM team_accounts "
+                "JOIN employees ON employees.id = team_accounts.employee_id "
+                "WHERE team_accounts.id = ? AND employees.deleted_at IS NULL",
+                (team_id,),
+            ).fetchone()
+        if account is None:
+            session.pop("team_id", None)
+            session.pop("team_employee_name", None)
+            session.pop("team_username", None)
             return redirect(url_for("team_login"))
         return view(*args, **kwargs)
     return wrapped
@@ -6222,7 +6255,10 @@ def team_login():
     password = request.form.get("password", "")
     db = get_db()
     row = db.execute(
-        "SELECT * FROM team_accounts WHERE username = ?", (username,)
+        "SELECT team_accounts.* FROM team_accounts "
+        "JOIN employees ON employees.id = team_accounts.employee_id "
+        "WHERE team_accounts.username = ? AND employees.deleted_at IS NULL",
+        (username,),
     ).fetchone()
     if row is None or not check_password_hash(row["password_hash"], password):
         return render_template(
@@ -8614,7 +8650,8 @@ def _sync_captain_shifts_for_date(db, target_date):
     captain_rows = db.execute(
         "SELECT employees.id, employees.name FROM employees "
         "JOIN employee_positions ON employee_positions.employee_id = employees.id "
-        "WHERE employee_positions.position = 'Капитан'"
+        "WHERE employee_positions.position = 'Капитан' "
+        "AND employees.deleted_at IS NULL"
     ).fetchall()
     captains_on_shift = [row for row in captain_rows if row["name"] in staffed_names]
 

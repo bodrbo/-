@@ -17,12 +17,15 @@ def create_employees_blueprint(
 ):
     blueprint = Blueprint("employees", __name__)
 
-    def redirect_with_notice(message, success):
+    def redirect_with_notice(message, success, anchor=None):
         session["employees_notice"] = {
             "message": message,
             "type": "success" if success else "error",
         }
-        return redirect(url_for("employees.index"))
+        location = url_for("employees.index")
+        if anchor:
+            location += f"#{anchor}"
+        return redirect(location)
 
     @blueprint.route("/employees")
     @admin_login_required
@@ -40,7 +43,55 @@ def create_employees_blueprint(
             telegram_configured=telegram_configured(),
             telegram_bot_username=(telegram_bot_username() or "").lstrip("@"),
             notice=session.pop("employees_notice", None),
+            credentials=session.pop("employee_credentials", None),
+            create_values=session.pop("employee_create_values", {}),
             active_page="employees",
+        )
+
+    @blueprint.route("/employees", methods=["POST"])
+    @admin_login_required
+    def create_employee():
+        success, message, credentials = services.create_employee(
+            get_db(),
+            request.form.get("name", ""),
+            request.form.getlist("positions"),
+            request.form.get("custom_position", ""),
+            request.form.get("chat_id", ""),
+        )
+        if success:
+            session["employee_credentials"] = credentials
+            return redirect_with_notice(message, True, "employee-credentials")
+
+        session["employee_create_values"] = {
+            "name": request.form.get("name", ""),
+            "positions": request.form.getlist("positions"),
+            "custom_position": request.form.get("custom_position", ""),
+            "chat_id": request.form.get("chat_id", ""),
+        }
+        return redirect_with_notice(message, False, "new-employee")
+
+    @blueprint.route("/employees/<int:employee_id>/delete", methods=["POST"])
+    @admin_login_required
+    def delete_employee(employee_id):
+        success, message = services.delete_employee(get_db(), employee_id)
+        return redirect_with_notice(
+            message, success, None if success else f"employee-{employee_id}"
+        )
+
+    @blueprint.route(
+        "/employees/<int:employee_id>/account/reset-password", methods=["POST"]
+    )
+    @admin_login_required
+    def reset_password(employee_id):
+        success, message, credentials = services.reset_employee_password(
+            get_db(), employee_id
+        )
+        if success:
+            session["employee_credentials"] = credentials
+        return redirect_with_notice(
+            message,
+            success,
+            "employee-credentials" if success else f"employee-{employee_id}",
         )
 
     @blueprint.route("/employees/<int:employee_id>/positions", methods=["POST"])
