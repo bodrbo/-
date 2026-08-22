@@ -65,8 +65,32 @@ def create_fleet_blueprint(get_db, admin_login_required):
             checklist_type_labels=CHECKLIST_TYPE_LABELS,
             fuel=fuel_services.fuel_summary(db, boat),
             fuel_notice=session.pop("fuel_notice", None),
+            defect_notice=session.pop("defect_notice", None),
+            defects_open=request.args.get("defects") == "open",
             viewer_role="admin",
             active_page="fleet",
+        )
+
+    @blueprint.route("/fleet/<int:boat_index>/defects", methods=["POST"])
+    @admin_login_required
+    def create_defect(boat_index):
+        boat = services.boat_by_index(boat_index)
+        if boat is None:
+            return redirect(url_for("fleet.index"))
+
+        success, message, _ = services.create_manual_defect(
+            get_db(),
+            boat,
+            request.form.get("description", ""),
+            session.get("admin_name") or "Администратор",
+        )
+        session["defect_notice"] = {
+            "type": "success" if success else "error",
+            "message": message,
+        }
+        return redirect(
+            url_for("fleet.boat_detail", boat_index=boat_index, defects="open")
+            + "#current-defects"
         )
 
     @blueprint.route("/fleet/<int:boat_index>/fuel/refill", methods=["POST"])

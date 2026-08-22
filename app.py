@@ -51,6 +51,7 @@ from modules.fleet import fuel_services
 from modules.fleet.services import (
     add_defect_plan_item as _add_defect_plan_item,
     checklist_questions_for as _checklist_questions_for,
+    create_manual_defect as _create_manual_defect,
     defect_detail_context as _defect_detail_context,
     get_checklist_answer_photos,
     save_defect_case_notes as _save_defect_case_notes,
@@ -6409,6 +6410,7 @@ def team_dashboard():
         boat_documents=boat_documents, boat_current_defects=boat_current_defects,
         boat_archived_defects=boat_archived_defects, fuel=fuel,
         fuel_notice=session.pop("fuel_notice", None), diploma_url=diploma_url,
+        defect_notice=session.pop("defect_notice", None),
         income_open="week" in request.args, fleet_open="boat_index" in request.args,
         can_have_tasks=can_have_tasks, my_tasks=my_tasks, defect_statuses=DEFECT_STATUSES,
         work_statuses=WORK_STATUSES, materials=materials,
@@ -6417,7 +6419,7 @@ def team_dashboard():
     )
 
 
-def _team_fuel_boat(db):
+def _team_selected_boat(db):
     employee_name = session.get("team_employee_name")
     if not _employee_has_position(db, employee_name, "Капитан"):
         return None, None
@@ -6430,11 +6432,45 @@ def _team_fuel_boat(db):
     return boat_index, BOATS[boat_index]["name"]
 
 
+@app.route("/team/defects", methods=["POST"])
+@team_login_required
+def team_create_defect():
+    db = get_db()
+    boat_index, boat = _team_selected_boat(db)
+    if boat is None:
+        return redirect(url_for("team_dashboard"))
+
+    employee_name = session.get("team_employee_name") or "Капитан"
+    description = request.form.get("description", "")
+    success, message, defect_id = _create_manual_defect(
+        db, boat, description, employee_name
+    )
+    session["defect_notice"] = {
+        "type": "success" if success else "error",
+        "message": message,
+    }
+    if success:
+        clean_description = description.strip()
+        send_telegram_notification(
+            f"⚠️ <b>Неисправность добавлена вручную</b> — {html.escape(boat)}\n"
+            f"Капитан: {html.escape(employee_name)}\n"
+            f"Описание: {html.escape(clean_description)}"
+        )
+        send_push_notification(
+            f"Новая неисправность — {boat}",
+            clean_description,
+            url=f"/fleet/{boat_index}/defects/{defect_id}",
+        )
+    return redirect(
+        url_for("team_dashboard", boat_index=boat_index) + "#captain-defects"
+    )
+
+
 @app.route("/team/fuel/refill", methods=["POST"])
 @team_login_required
 def team_add_fuel_refill():
     db = get_db()
-    boat_index, boat = _team_fuel_boat(db)
+    boat_index, boat = _team_selected_boat(db)
     if boat is None:
         return redirect(url_for("team_dashboard"))
     success, message = fuel_services.record_refill(
@@ -6457,7 +6493,7 @@ def team_add_fuel_refill():
 @team_login_required
 def team_set_manual_fuel_consumption(event_id):
     db = get_db()
-    boat_index, boat = _team_fuel_boat(db)
+    boat_index, boat = _team_selected_boat(db)
     if boat is None:
         return redirect(url_for("team_dashboard"))
     success, message = fuel_services.record_individual_consumption(

@@ -1,6 +1,7 @@
 import io
 import os
 import unittest
+from unittest.mock import patch
 
 from support import TEST_DIRECTORY, application_module
 
@@ -56,6 +57,10 @@ class FleetModuleIntegrationTests(unittest.TestCase):
         self.assertEqual(
             fleet_rules["fleet.delete_defect"],
             "/fleet/<int:boat_index>/defects/<int:defect_id>/delete",
+        )
+        self.assertEqual(
+            fleet_rules["fleet.create_defect"],
+            "/fleet/<int:boat_index>/defects",
         )
         self.assertNotIn("fleet_index", fleet_rules)
 
@@ -140,6 +145,111 @@ class FleetModuleIntegrationTests(unittest.TestCase):
             self.assertEqual(plan_status, "done")
             self.assertEqual(assignment["employee_name"], "Дмитрий Тарусов")
             self.assertEqual(assignment["rate"], 1500)
+
+    def test_admin_can_create_manual_defect_for_selected_boat(self):
+        self.log_in_as_admin()
+
+        response = self.client.post(
+            "/fleet/1/defects",
+            data={"description": "  Не запускается левый двигатель  "},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response.headers["Location"].endswith(
+                "/fleet/1?defects=open#current-defects"
+            )
+        )
+        with application_module.app.app_context():
+            defect = application_module.get_db().execute(
+                "SELECT * FROM boat_defects "
+                "WHERE description = 'Не запускается левый двигатель'"
+            ).fetchone()
+            self.assertIsNotNone(defect)
+            self.assertEqual(defect["boat"], "Бодрый Второй")
+            self.assertEqual(defect["employee_name"], "Администратор")
+            self.assertEqual(defect["status"], "new")
+            self.assertIsNone(defect["checklist_id"])
+            self.assertIsNone(defect["answer_id"])
+
+        page = self.client.get(response.headers["Location"])
+        self.assertIn("Неисправность добавлена в текущий список".encode(), page.data)
+        self.assertIn(
+            b'<details id="current-defects" class="panel collapsible-panel" open>',
+            page.data,
+        )
+
+    def test_admin_manual_defect_rejects_empty_description(self):
+        self.log_in_as_admin()
+        with application_module.app.app_context():
+            before = application_module.get_db().execute(
+                "SELECT COUNT(*) AS count FROM boat_defects"
+            ).fetchone()["count"]
+
+        response = self.client.post("/fleet/0/defects", data={"description": "   "})
+
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            after = application_module.get_db().execute(
+                "SELECT COUNT(*) AS count FROM boat_defects"
+            ).fetchone()["count"]
+        self.assertEqual(after, before)
+
+        page = self.client.get(response.headers["Location"])
+        self.assertIn("Опишите неисправность".encode(), page.data)
+
+    def test_only_captain_can_create_manual_defect_from_team_cabinet(self):
+        with self.client.session_transaction() as session:
+            session["team_id"] = 1
+            session["team_employee_name"] = "Эльмира Бектаева"
+
+        response = self.client.post(
+            "/team/defects",
+            data={"boat_index": "0", "description": "Не работает помпа"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/team/"))
+
+        with application_module.app.app_context():
+            self.assertIsNone(
+                application_module.get_db().execute(
+                    "SELECT 1 FROM boat_defects WHERE description = 'Не работает помпа'"
+                ).fetchone()
+            )
+
+        with self.client.session_transaction() as session:
+            session["team_id"] = 2
+            session["team_employee_name"] = "Дмитрий Тарусов"
+
+        with patch.object(
+            application_module, "send_telegram_notification"
+        ) as send_telegram, patch.object(
+            application_module, "send_push_notification"
+        ) as send_push:
+            response = self.client.post(
+                "/team/defects",
+                data={"boat_index": "0", "description": " Не работает помпа "},
+            )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response.headers["Location"].endswith(
+                "/team/?boat_index=0#captain-defects"
+            )
+        )
+        with application_module.app.app_context():
+            defect = application_module.get_db().execute(
+                "SELECT * FROM boat_defects WHERE description = 'Не работает помпа'"
+            ).fetchone()
+            self.assertIsNotNone(defect)
+            self.assertEqual(defect["boat"], "Ларус")
+            self.assertEqual(defect["employee_name"], "Дмитрий Тарусов")
+            self.assertEqual(defect["status"], "new")
+        send_telegram.assert_called_once()
+        send_push.assert_called_once_with(
+            "Новая неисправность — Ларус",
+            "Не работает помпа",
+            url=f"/fleet/0/defects/{defect['id']}",
+        )
 
     def test_admin_can_delete_defect_with_children_but_keeps_payroll_entry(self):
         defect_id = self.create_defect()

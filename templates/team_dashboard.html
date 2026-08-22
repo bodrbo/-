@@ -145,7 +145,7 @@
           {% endif %}
         </section>
 
-        <section class="captain-fleet-card captain-defects-card">
+        <section id="captain-defects" class="captain-fleet-card captain-defects-card">
           <div class="captain-fleet-card-head">
             <span class="captain-fleet-card-icon captain-fleet-alert">!</span>
             <div>
@@ -153,6 +153,18 @@
               <p>Текущих: {{ boat_current_defects|length }} · В архиве: {{ boat_archived_defects|length }}</p>
             </div>
           </div>
+          {% if defect_notice %}
+          <div class="defect-notice defect-notice-{{ defect_notice.type }}" role="alert">{{ defect_notice.message }}</div>
+          {% endif %}
+          <form action="{{ url_for('team_create_defect') }}" method="post" class="manual-defect-form manual-defect-form-compact">
+            <input type="hidden" name="boat_index" value="{{ boat_index }}">
+            <label for="team-defect-description">Добавить неисправность вручную</label>
+            <div class="manual-defect-controls">
+              <textarea id="team-defect-description" name="description" rows="2" maxlength="1000"
+                        placeholder="Опишите обнаруженную проблему" required></textarea>
+              <button type="submit">Добавить</button>
+            </div>
+          </form>
           {% if boat_current_defects %}
           <div class="captain-defect-list">
             {% for defect in boat_current_defects %}

@@ -71,6 +71,18 @@ def get_defect(db, defect_id, boat=None):
     ).fetchone()
 
 
+def add_defect(db, boat, description, employee_name, reported_at):
+    cursor = db.execute(
+        "INSERT INTO boat_defects "
+        "(boat, checklist_id, answer_id, description, employee_name, status, "
+        "reported_at, updated_at) "
+        "VALUES (?, NULL, NULL, ?, ?, 'new', ?, ?)",
+        (boat, description, employee_name, reported_at, reported_at),
+    )
+    db.commit()
+    return cursor.lastrowid
+
+
 def get_latest_assignment(db, defect_id):
     return db.execute(
         "SELECT * FROM defect_assignments WHERE defect_id = ? ORDER BY id DESC LIMIT 1",

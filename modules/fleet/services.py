@@ -14,6 +14,9 @@ from .constants import (
 )
 
 
+DEFECT_DESCRIPTION_MAX_LENGTH = 1000
+
+
 def current_timestamp():
     return dt.datetime.now().strftime("%Y-%m-%d %H:%M")
 
@@ -88,6 +91,37 @@ def defects_for_boat(db, boat):
         )
         defects.append(defect)
     return defects
+
+
+def create_manual_defect(db, boat, description, reported_by):
+    """Create a current defect reported outside a checklist.
+
+    Both the administrator and captain interfaces use this operation so the
+    validation and initial state cannot drift between the two entry points.
+    """
+    valid_boats = {item["name"] for item in BOATS}
+    description = (description or "").strip()
+    reported_by = (reported_by or "").strip()
+
+    if boat not in valid_boats:
+        return False, "Не удалось определить судно.", None
+    if not description:
+        return False, "Опишите неисправность.", None
+    if len(description) > DEFECT_DESCRIPTION_MAX_LENGTH:
+        return (
+            False,
+            f"Описание должно быть не длиннее {DEFECT_DESCRIPTION_MAX_LENGTH} символов.",
+            None,
+        )
+
+    defect_id = repository.add_defect(
+        db,
+        boat,
+        description,
+        reported_by or "Не указано",
+        current_timestamp(),
+    )
+    return True, "Неисправность добавлена в текущий список.", defect_id
 
 
 def split_defects(defects):

@@ -124,13 +124,25 @@
 
   {% include '_fuel_panel.html' %}
 
-  <details class="panel collapsible-panel">
+  <details id="current-defects" class="panel collapsible-panel"{{ ' open' if defects_open }}>
     <summary>
       <span>Текущие неисправности</span>
       {% if open_defects_count %}<span class="badge">{{ open_defects_count }}</span>{% endif %}
       <span class="chev" aria-hidden="true"></span>
     </summary>
     <div class="collapsible-body">
+      {% if defect_notice %}
+      <div class="defect-notice defect-notice-{{ defect_notice.type }}" role="alert">{{ defect_notice.message }}</div>
+      {% endif %}
+      <form action="{{ url_for('fleet.create_defect', boat_index=boat_index) }}" method="post" class="manual-defect-form">
+        <label for="admin-defect-description">Добавить неисправность вручную</label>
+        <div class="manual-defect-controls">
+          <textarea id="admin-defect-description" name="description" rows="2" maxlength="1000"
+                    placeholder="Кратко опишите обнаруженную проблему" required></textarea>
+          <button type="submit">Добавить неисправность</button>
+        </div>
+        <p class="hint">Новая запись получит статус «Новая». Анамнез, диагноз и план работ можно заполнить в её карточке.</p>
+      </form>
       {% if current_defects %}
       {% set defect_rows = current_defects %}
       {% set archive_mode = false %}

@@ -1369,6 +1369,48 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 }
 .defect-record-link:hover { color: var(--brass-strong); }
 
+.defect-notice {
+  margin: 0 0 14px;
+  padding: 10px 13px;
+  border: 1px solid;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.defect-notice-success {
+  color: var(--success);
+  border-color: rgba(47, 107, 79, .3);
+  background: rgba(47, 107, 79, .07);
+}
+.defect-notice-error {
+  color: var(--danger);
+  border-color: rgba(179, 64, 44, .3);
+  background: rgba(179, 64, 44, .07);
+}
+.manual-defect-form {
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 10px;
+  background: var(--paper-alt);
+}
+.manual-defect-form > label { display: block; margin-bottom: 7px; color: var(--ink-soft); font-size: 13px; }
+.manual-defect-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+.manual-defect-controls textarea { width: 100%; min-height: 70px; line-height: 1.45; }
+.manual-defect-controls button { min-height: 43px; white-space: nowrap; }
+.manual-defect-form .hint { margin-top: 8px; }
+.manual-defect-form-compact { margin-bottom: 14px; }
+
+@media (max-width: 620px) {
+  .manual-defect-controls { grid-template-columns: 1fr; }
+  .manual-defect-controls button { width: 100%; }
+}
+
 /* Defect case file: three clinical stages turn an unstructured fault report
    into a diagnosis and a concrete repair sequence. */
 .defect-case-page { max-width: 900px; }
