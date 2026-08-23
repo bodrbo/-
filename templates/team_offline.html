@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Судовой журнал — офлайн</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<meta name="theme-color" content="#0f2a35">
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+</head>
+<body class="offline-body">
+
+<header class="topbar offline-topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <a href="{{ url_for('team_dashboard') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a>
+    </div>
+    <div class="title-block">
+      <h1>Судовой журнал</h1>
+    </div>
+  </div>
+</header>
+
+<main class="wrap offline-page" id="offlineWorkspace" data-employee="{{ employee_name }}">
+  <section class="offline-radio-bar" aria-live="polite">
+    <div class="offline-radio-state">
+      <span class="offline-signal-dot" id="offlineSignalDot"></span>
+      <span>
+        <strong id="offlineConnectionLabel">Проверяем связь…</strong>
+        <small id="offlineSnapshotLabel">Загружаем судовой журнал</small>
+      </span>
+    </div>
+    <div class="offline-radio-queue">
+      <span class="offline-queue-number" id="offlinePendingCount">0</span>
+      <span>ждут отправки</span>
+    </div>
+    <button type="button" class="btn-secondary offline-sync-button" id="offlineSyncButton">Синхронизировать</button>
+  </section>
+
+  <div class="offline-toast hidden" id="offlineToast" role="status"></div>
+
+  <div class="offline-heading">
+    <div>
+      <span class="offline-eyebrow">Вахта · {{ employee_name }}</span>
+      <h2>Работа без связи</h2>
+      <p>Ответы и фотографии сначала сохраняются на этом устройстве. Отправка начнётся автоматически после восстановления интернета.</p>
+    </div>
+    <a href="{{ url_for('team_dashboard') }}" class="btn-secondary">В личный кабинет</a>
+  </div>
+
+  <section class="panel offline-boat-panel">
+    <label for="offlineBoatSelect">Судно</label>
+    <select id="offlineBoatSelect">
+      {% for boat in boats %}
+      <option value="{{ loop.index0 }}">{{ boat.name }}</option>
+      {% endfor %}
+    </select>
+    <span class="offline-boat-callout" id="offlineBoatCallout">Данные готовятся…</span>
+  </section>
+
+  <div class="offline-module-grid" id="offlineModules">
+    <section class="panel offline-module offline-checklist-module">
+      <div class="offline-module-head">
+        <span class="offline-module-mark">✓</span>
+        <div>
+          <h3>Осмотр судна</h3>
+          <p>Чек-лист полностью работает без интернета.</p>
+        </div>
+      </div>
+      <div class="offline-action-stack">
+        <button type="button" class="btn-primary" data-start-checklist="pre">Предрейсовый осмотр</button>
+        <button type="button" class="btn-secondary" data-start-checklist="post">Послерейсовый осмотр</button>
+      </div>
+      <div class="offline-drafts" id="offlineDrafts"></div>
+    </section>
+
+    <section class="panel offline-module offline-documents-module">
+      <div class="offline-module-head">
+        <span class="offline-module-mark">≡</span>
+        <div>
+          <h3>Документы</h3>
+          <p id="offlineDocumentSummary">Проверяем локальные копии.</p>
+        </div>
+      </div>
+      <button type="button" class="btn-secondary" id="offlineDownloadDocuments">Скачать документы на устройство</button>
+      <div class="offline-document-list" id="offlineDocumentList"></div>
+    </section>
+
+    <section class="panel offline-module offline-defect-module">
+      <div class="offline-module-head">
+        <span class="offline-module-mark offline-module-alert">!</span>
+        <div>
+          <h3>Новая неисправность</h3>
+          <p>Сообщение попадёт администратору после синхронизации.</p>
+        </div>
+      </div>
+      <form id="offlineDefectForm">
+        <label for="offlineDefectDescription">Что обнаружено</label>
+        <textarea id="offlineDefectDescription" rows="4" maxlength="1000" required placeholder="Опишите неисправность"></textarea>
+        <button type="submit" class="btn-primary">Сохранить неисправность</button>
+      </form>
+    </section>
+  </div>
+
+  <section class="panel offline-checklist-run hidden" id="offlineChecklistRun" aria-live="polite">
+    <div class="offline-checklist-toolbar">
+      <div>
+        <span class="offline-eyebrow" id="offlineChecklistLabel"></span>
+        <h2 id="offlineChecklistBoat"></h2>
+      </div>
+      <button type="button" class="btn-secondary offline-cancel-draft" id="offlineCancelChecklist">Удалить черновик</button>
+    </div>
+
+    <div id="offlineQuestionPanel">
+      <div class="offline-question-progress">
+        <span id="offlineQuestionCounter"></span>
+        <span class="offline-progress-track"><span id="offlineProgressValue"></span></span>
+      </div>
+      <h3 id="offlineQuestionTitle"></h3>
+      <p class="offline-question-text" id="offlineQuestionText"></p>
+      <div class="offline-answer-actions" id="offlineAnswerActions">
+        <button type="button" class="checklist-answer-btn ok" id="offlineAnswerOk">Всё в порядке</button>
+        <button type="button" class="checklist-answer-btn problem" id="offlineShowProblem">Проблема</button>
+      </div>
+      <form class="offline-problem-form hidden" id="offlineProblemForm">
+        <label for="offlineProblemComment">Опишите проблему</label>
+        <textarea id="offlineProblemComment" rows="3" maxlength="3000" required></textarea>
+        <label for="offlineProblemPhotos">Фотографии</label>
+        <input type="file" id="offlineProblemPhotos" accept="image/*" multiple>
+        <small>Фотографии будут уменьшены и сохранены на устройстве до отправки.</small>
+        <div class="offline-problem-buttons">
+          <button type="button" class="btn-secondary" id="offlineProblemBack">Назад</button>
+          <button type="submit" class="checklist-answer-btn problem">Сохранить проблему</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="offline-checklist-finish hidden" id="offlineChecklistFinish">
+      <h3>Осмотр заполнен</h3>
+      <p id="offlineChecklistResult"></p>
+      <label for="offlineExtraDefects">Другие неисправности</label>
+      <textarea id="offlineExtraDefects" rows="4" maxlength="6000" placeholder="Каждую неисправность укажите с новой строки"></textarea>
+      <button type="button" class="btn-primary" id="offlineFinishChecklist">Сохранить осмотр</button>
+    </div>
+  </section>
+
+  <section class="panel offline-outbox-panel">
+    <div class="offline-module-head">
+      <span class="offline-module-mark">↥</span>
+      <div>
+        <h3>Ожидают отправки</h3>
+        <p>Эти данные уже сохранены на устройстве и не потеряются при закрытии страницы.</p>
+      </div>
+    </div>
+    <div id="offlineOutbox"></div>
+  </section>
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script src="{{ url_for('static', filename='offline.js') }}"></script>
+</body>
+</html>

@@ -66,6 +66,7 @@ from modules.employees.services import (
 )
 from modules.refunds import create_refunds_blueprint
 from modules.refunds import services as refund_services
+from modules.offline import create_offline_blueprint, init_schema as init_offline_schema
 
 # reportlab (PDF generation for "Акт выполненных работ") is imported lazily,
 # inside _build_act_pdf() — it's an extra dependency on top of the site's
@@ -1865,6 +1866,7 @@ def init_db():
             "(employee_id, chat_id, display_name, linked_at) VALUES (?, ?, ?, ?)",
             (employee_row[0], str(chat_id), employee_name, now),
         )
+    init_offline_schema(conn)
     conn.commit()
     conn.close()
 
@@ -8998,6 +9000,74 @@ def push_test():
         "🔧 Тестовый пуш с сайта", "Если вы это видите, всё настроено верно.", url="/admin",
     )
     return f"push status: {status} (admin subscriptions on file: {count})", 200
+
+
+def _notify_offline_fleet_events(events):
+    """Send the same alerts as online captain forms, once after replay."""
+    for event in events:
+        boat = event["boat"]
+        employee_name = event["employee_name"]
+        boat_index = next(
+            (index for index, item in enumerate(BOATS) if item["name"] == boat),
+            None,
+        )
+        if event["kind"] == "checklist_problem":
+            checklist_label = CHECKLIST_TYPE_LABELS.get(
+                event["checklist_type"], event["checklist_type"]
+            )
+            comment = event.get("comment") or ""
+            send_telegram_notification(
+                f"⚠️ <b>{html.escape(checklist_label)}</b> — {html.escape(boat)}\n"
+                f"Капитан: {html.escape(employee_name)}\n"
+                f"Пункт: {html.escape(event['question'])}\n"
+                f"Комментарий: {html.escape(comment) if comment else '—'}"
+            )
+            push_title = f"{checklist_label} — {boat}"
+            push_body = event["question"] + (f": {comment}" if comment else "")
+        else:
+            description = event["description"]
+            if event["kind"] == "extra_defect":
+                checklist_label = CHECKLIST_TYPE_LABELS.get(
+                    event["checklist_type"], event["checklist_type"]
+                )
+                send_telegram_notification(
+                    f"⚠️ <b>Неисправность вне чек-листа</b> — {html.escape(boat)}\n"
+                    f"Капитан: {html.escape(employee_name)}\n"
+                    f"Осмотр: {html.escape(checklist_label)}\n"
+                    f"Описание: {html.escape(description)}"
+                )
+            else:
+                send_telegram_notification(
+                    f"⚠️ <b>Неисправность добавлена офлайн</b> — {html.escape(boat)}\n"
+                    f"Капитан: {html.escape(employee_name)}\n"
+                    f"Описание: {html.escape(description)}"
+                )
+            push_title = f"Новая неисправность — {boat}"
+            push_body = description
+
+        for photo_path in event.get("photo_paths") or []:
+            send_telegram_photo(photo_path)
+        send_push_notification(
+            push_title,
+            push_body,
+            url=(
+                f"/fleet/{boat_index}/defects/{event['record_id']}"
+                if boat_index is not None
+                else "/fleet"
+            ),
+        )
+
+
+app.register_blueprint(
+    create_offline_blueprint(
+        get_db=get_db,
+        team_login_required=team_login_required,
+        employee_has_position=_employee_has_position,
+        checklist_questions_for=_checklist_questions_for,
+        notify_events=_notify_offline_fleet_events,
+        allowed_photo_extensions=WORK_PHOTO_EXTENSIONS,
+    )
+)
 
 
 # =======================================================================

@@ -65,7 +65,7 @@
       {% endif %}
       <span class="investor-name">{{ employee_name }}</span>
     </div>
-    <form action="{{ url_for('team_logout') }}" method="post">
+    <form action="{{ url_for('team_logout') }}" method="post" data-offline-logout>
       <button type="submit" class="btn-secondary">Выйти</button>
     </form>
   </div>
@@ -78,6 +78,16 @@
       <span class="chev" aria-hidden="true"></span>
     </summary>
     <div class="collapsible-body">
+      <div class="offline-dashboard-strip">
+        <div class="offline-dashboard-state">
+          <span class="offline-signal-dot" id="offlineDashboardSignal"></span>
+          <span>
+            <strong data-offline-ready>Подготавливаем офлайн-режим…</strong>
+            <small><span data-offline-connection>Проверяем связь</span> · <span data-offline-pending>Проверяем очередь</span></small>
+          </span>
+        </div>
+        <a href="{{ url_for('offline.workspace') }}" class="btn-secondary">Открыть судовой журнал</a>
+      </div>
       <form method="get" action="{{ url_for('team_dashboard') }}" class="captain-boat-picker">
         <input type="hidden" name="week" value="{{ selected_week }}">
         <label for="boat_index">Выберите судно</label>
@@ -644,6 +654,7 @@ document.addEventListener('keydown', function (e) {
 </script>
 {% endif %}
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+{% if is_captain %}<script src="{{ url_for('static', filename='offline.js') }}"></script>{% endif %}
 
 </body>
 </html>
