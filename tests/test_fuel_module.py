@@ -305,18 +305,17 @@ class FuelModuleIntegrationTests(unittest.TestCase):
 
     def test_fuel_cron_requires_secret_and_is_safe_to_trigger(self):
         original_secret = application_module.CRON_SECRET
-        original_sync = application_module._sync_fuel_from_yclients
+        original_sync = application_module._sync_hourly_yclients
         application_module.CRON_SECRET = "fuel-secret"
-        application_module._sync_fuel_from_yclients = lambda db: {
-            "automatic": 2,
-            "pending": 1,
-            "skipped": 0,
+        application_module._sync_hourly_yclients = lambda db: {
+            "trips": {"imported": 3, "pending": 1},
+            "fuel": {"automatic": 2, "pending": 1, "skipped": 0},
         }
         self.addCleanup(setattr, application_module, "CRON_SECRET", original_secret)
         self.addCleanup(
             setattr,
             application_module,
-            "_sync_fuel_from_yclients",
+            "_sync_hourly_yclients",
             original_sync,
         )
 
@@ -324,6 +323,7 @@ class FuelModuleIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         response = self.client.get("/internal/cron/sync-fuel?token=fuel-secret")
         self.assertEqual(response.status_code, 200)
+        self.assertIn(b"3 trips imported", response.data)
         self.assertIn(b"2 automatic", response.data)
 
     def test_sync_recovers_the_gap_after_an_interruption(self):

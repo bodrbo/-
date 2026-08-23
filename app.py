@@ -1137,6 +1137,14 @@ def init_db():
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS yclients_sync_state (
+            sync_key TEXT PRIMARY KEY,
+            last_success_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS import_candidates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             yclients_ref TEXT NOT NULL,
@@ -5711,6 +5719,111 @@ def merge_pending_candidates(db):
     return merged_away
 
 
+def _import_yclients_trip_records(
+    db,
+    records,
+    activity_colors,
+    start_date,
+    end_date,
+    *,
+    now=None,
+    prune_stale=False,
+):
+    """Import one already-fetched YCLIENTS window, safely on repeated runs.
+
+    The manual form and the hourly cron intentionally share this path so
+    both create identical trips, payroll entries and investor calculations.
+    Invalid or ambiguous records remain in ``import_candidates`` for an
+    administrator instead of being discarded by the background job.
+    """
+    already = {
+        row["yclients_ref"]: row["trip_id"]
+        for row in db.execute("SELECT yclients_ref, trip_id FROM yclients_imports").fetchall()
+    }
+    existing_candidates = {
+        row["yclients_ref"]
+        for row in db.execute("SELECT yclients_ref FROM import_candidates").fetchall()
+    }
+    candidates = build_import_candidates(records, activity_colors)
+
+    if prune_stale:
+        # A corrected color/time changes the generated ref. During an
+        # explicit period refresh, remove an old queued version that no
+        # longer exists in YCLIENTS. The hourly job deliberately does not
+        # prune: its completed-only input excludes today's future records.
+        fetched_refs = {candidate["yclients_ref"] for candidate in candidates}
+        for row in db.execute(
+            "SELECT id, yclients_ref, payload FROM import_candidates"
+        ).fetchall():
+            if row["yclients_ref"] in fetched_refs:
+                continue
+            trip_date = json.loads(row["payload"]).get("trip_date", "")
+            if start_date <= trip_date <= end_date:
+                db.execute("DELETE FROM import_candidates WHERE id = ?", (row["id"],))
+        db.commit()
+
+    created_at = (now or dt.datetime.now()).strftime("%Y-%m-%d %H:%M")
+    added = 0
+    for candidate in candidates:
+        ref = candidate["yclients_ref"]
+        if ref in already:
+            review_row = _yclients_collision_review_row(
+                db, candidate, already, existing_candidates
+            )
+            if review_row is not None:
+                db.execute(
+                    "INSERT INTO import_candidates (yclients_ref, summary, payload, created_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (
+                        review_row["yclients_ref"],
+                        review_row["summary"],
+                        json.dumps(review_row["payload"], ensure_ascii=False),
+                        created_at,
+                    ),
+                )
+                existing_candidates.add(review_row["yclients_ref"])
+                added += 1
+            continue
+        if ref in existing_candidates:
+            continue
+        db.execute(
+            "INSERT INTO import_candidates (yclients_ref, summary, payload, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                ref,
+                candidate["summary"],
+                json.dumps(candidate["payload"], ensure_ascii=False),
+                created_at,
+            ),
+        )
+        existing_candidates.add(ref)
+        added += 1
+    db.commit()
+
+    merged = merge_pending_candidates(db)
+    imported = 0
+    pending = db.execute("SELECT * FROM import_candidates ORDER BY id ASC").fetchall()
+    for row in pending:
+        if _try_auto_import_candidate(db, row):
+            imported += 1
+
+    # Run only after trips have landed in entries, otherwise a shift can get
+    # a temporary top-up before its actual trip pay is taken into account.
+    topups_changed = apply_minimum_shift_rate(db, records)
+    pending_total = db.execute(
+        "SELECT COUNT(*) AS count FROM import_candidates"
+    ).fetchone()["count"]
+    return {
+        "fetched": len(records),
+        "candidates": len(candidates),
+        "added": added,
+        "merged": merged,
+        "imported": imported,
+        "pending": pending_total,
+        "topups_changed": topups_changed,
+    }
+
+
 @app.route("/trips/import", methods=["GET"])
 @admin_login_required
 def import_index():
@@ -5760,75 +5873,14 @@ def import_fetch():
     except requests.RequestException as e:
         return redirect(url_for("import_index", error=f"Ошибка при запросе групповых событий: {e}"))
 
-    already = {
-        row["yclients_ref"]: row["trip_id"]
-        for row in db.execute("SELECT yclients_ref, trip_id FROM yclients_imports").fetchall()
-    }
-    existing_candidates = {
-        row["yclients_ref"]
-        for row in db.execute("SELECT yclients_ref FROM import_candidates").fetchall()
-    }
-
-    candidates = build_import_candidates(records, activity_colors)
-
-    # A pending candidate's yclients_ref is built from its color + time (see
-    # _yclients_group_key) — so fixing a wrongly-set color on Yclients' side
-    # for a record that's already sitting in the queue produces a *new* ref
-    # on the next fetch, not an update to the old one. Without this, the
-    # corrected trip imports fine under its new ref while the stale old
-    # ref/candidate lingers forever, unresolved, right alongside it. Prune
-    # any queued candidate whose trip falls inside the period we just
-    # re-fetched but whose ref didn't come back at all this time — Yclients'
-    # current data no longer produces it, so it's stale. (If this was a
-    # fluke — Yclients briefly omitted a still-valid record — the next
-    # fetch just re-adds it; nothing is lost for good.)
-    fetched_refs = {c["yclients_ref"] for c in candidates}
-    for row in db.execute("SELECT id, yclients_ref, payload FROM import_candidates").fetchall():
-        if row["yclients_ref"] in fetched_refs:
-            continue
-        trip_date = json.loads(row["payload"]).get("trip_date", "")
-        if start_date <= trip_date <= end_date:
-            db.execute("DELETE FROM import_candidates WHERE id = ?", (row["id"],))
-    db.commit()
-
-    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    added = 0
-    for c in candidates:
-        if c["yclients_ref"] in already:
-            review_row = _yclients_collision_review_row(db, c, already, existing_candidates)
-            if review_row is not None:
-                db.execute(
-                    "INSERT INTO import_candidates (yclients_ref, summary, payload, created_at) "
-                    "VALUES (?, ?, ?, ?)",
-                    (review_row["yclients_ref"], review_row["summary"],
-                     json.dumps(review_row["payload"], ensure_ascii=False), now),
-                )
-                added += 1
-            continue
-        if c["yclients_ref"] in existing_candidates:
-            continue
-        db.execute(
-            "INSERT INTO import_candidates (yclients_ref, summary, payload, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (c["yclients_ref"], c["summary"], json.dumps(c["payload"], ensure_ascii=False), now),
-        )
-        added += 1
-    db.commit()
-    merge_pending_candidates(db)
-    db.commit()
-
-    # Auto-confirm: candidates with a resolved boat and valid numbers go
-    # straight into the trip tables, no manual review needed. Anything that
-    # fails validation (most commonly an unresolved boat color) is left
-    # behind in the queue below for a human to sort out.
-    pending = db.execute("SELECT * FROM import_candidates ORDER BY id ASC").fetchall()
-    for row in pending:
-        _try_auto_import_candidate(db, row)
-
-    # Must run after the auto-import loop above, once this fetch's trips are
-    # actually in `entries` — otherwise a shift would look short and get a
-    # top-up moments before its real trips land and cover it anyway.
-    apply_minimum_shift_rate(db, records)
+    _import_yclients_trip_records(
+        db,
+        records,
+        activity_colors,
+        start_date,
+        end_date,
+        prune_stale=True,
+    )
 
     return redirect(url_for("import_index"))
 
@@ -8558,9 +8610,8 @@ def set_supply_request_status(request_id):
     return redirect(url_for("supply_requests"))
 
 
-def _sync_fuel_from_yclients(db, now=None):
-    """Fetch an overlap window, including any gap since the last successful sync."""
-    now = now or dt.datetime.now()
+def _fuel_sync_start_date(db, now):
+    """Start of the fuel recovery window, including interrupted cron runs."""
     start = now.date() - dt.timedelta(days=2)
     cursor_row = db.execute(
         "SELECT MIN(COALESCE(last_synced_at, activated_at)) AS sync_cursor "
@@ -8572,12 +8623,106 @@ def _sync_fuel_from_yclients(db, now=None):
             start = min(start, cursor_date - dt.timedelta(days=1))
         except (TypeError, ValueError):
             pass
-    start_date = start.isoformat()
+    return start
+
+
+def _trip_sync_start_date(db, now):
+    """Start of the trip-import window with overlap and outage recovery."""
+    start = now.date() - dt.timedelta(days=7)
+    row = db.execute(
+        "SELECT last_success_at FROM yclients_sync_state WHERE sync_key = ?",
+        ("trip_import",),
+    ).fetchone()
+    if row and row["last_success_at"]:
+        try:
+            cursor_date = dt.datetime.fromisoformat(row["last_success_at"]).date()
+            start = min(
+                now.date() - dt.timedelta(days=2),
+                cursor_date - dt.timedelta(days=1),
+            )
+        except (TypeError, ValueError):
+            pass
+    return start
+
+
+def _yclients_record_has_finished(record, now):
+    """Whether a booking has ended in the branch-local YCLIENTS clock."""
+    raw = _yclients_record_datetime(record)
+    try:
+        started = dt.datetime.fromisoformat(raw)
+        duration = int(record.get("seance_length") or record.get("length") or 0)
+    except (TypeError, ValueError):
+        return False
+    if started.tzinfo is not None:
+        # Match fuel accounting: timestamps from YCLIENTS represent the
+        # branch wall clock. Do not let the production server timezone move
+        # a trip across the completion boundary.
+        started = started.replace(tzinfo=None)
+    local_now = now.replace(tzinfo=None) if now.tzinfo is not None else now
+    return duration > 0 and started + dt.timedelta(seconds=duration) <= local_now
+
+
+def _yclients_completed_records(records, now):
+    """Records eligible for automatic income import at this exact run."""
+    completed = []
+    for record in records:
+        try:
+            no_show = int(record.get("attendance")) == -1
+        except (TypeError, ValueError):
+            no_show = False
+        if record.get("deleted") or no_show or _yclients_record_is_blocker(record):
+            continue
+        if _yclients_record_has_finished(record, now):
+            completed.append(record)
+    return completed
+
+
+def _sync_fuel_from_yclients(db, now=None):
+    """Fetch an overlap window, including any gap since the last successful sync."""
+    now = now or dt.datetime.now()
+    start_date = _fuel_sync_start_date(db, now).isoformat()
     end_date = now.date().isoformat()
     records = yclients_get_records(start_date, end_date)
     activity_ids = {record["activity_id"] for record in records if record.get("activity_id")}
     activity_colors = yclients_get_activity_colors(activity_ids)
     return fuel_services.sync_yclients_records(db, records, activity_colors, now)
+
+
+def _sync_hourly_yclients(db, now=None):
+    """Synchronize completed trips/income and fuel with one YCLIENTS fetch."""
+    now = (now or dt.datetime.now()).replace(second=0, microsecond=0)
+    start = min(_trip_sync_start_date(db, now), _fuel_sync_start_date(db, now))
+    start_date = start.isoformat()
+    end_date = now.date().isoformat()
+    records = yclients_get_records(start_date, end_date)
+    activity_ids = {record["activity_id"] for record in records if record.get("activity_id")}
+    activity_colors = yclients_get_activity_colors(activity_ids)
+
+    completed_records = _yclients_completed_records(records, now)
+    trip_stats = _import_yclients_trip_records(
+        db,
+        completed_records,
+        activity_colors,
+        start_date,
+        end_date,
+        now=now,
+        prune_stale=False,
+    )
+    fuel_stats = fuel_services.sync_yclients_records(
+        db, records, activity_colors, now
+    )
+    db.execute(
+        "INSERT INTO yclients_sync_state (sync_key, last_success_at) VALUES (?, ?) "
+        "ON CONFLICT(sync_key) DO UPDATE SET last_success_at = excluded.last_success_at",
+        ("trip_import", now.strftime("%Y-%m-%d %H:%M")),
+    )
+    db.commit()
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "trips": trip_stats,
+        "fuel": fuel_stats,
+    }
 
 
 @app.route("/fleet/fuel/sync", methods=["POST"])
@@ -8617,18 +8762,22 @@ def fuel_sync_now():
 
 @app.route("/internal/cron/sync-fuel")
 def cron_sync_fuel():
-    """Hourly Beget cron target for completed YCLIENTS fuel events."""
+    """Hourly Beget cron target for trips, live income and fuel."""
     if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
         return "forbidden", 403
     if not yclients_configured():
         return "yclients not configured", 503
     try:
-        stats = _sync_fuel_from_yclients(get_db())
+        stats = _sync_hourly_yclients(get_db())
     except (requests.RequestException, RuntimeError, ValueError) as error:
         return f"error: {error}", 502
+    trip_stats = stats["trips"]
+    fuel_stats = stats["fuel"]
     return (
-        f"ok: {stats['automatic']} automatic, {stats['pending']} pending, "
-        f"{stats['skipped']} skipped",
+        f"ok: {trip_stats['imported']} trips imported, "
+        f"{trip_stats['pending']} trips pending review; "
+        f"fuel: {fuel_stats['automatic']} automatic, "
+        f"{fuel_stats['pending']} pending, {fuel_stats['skipped']} skipped",
         200,
     )
 

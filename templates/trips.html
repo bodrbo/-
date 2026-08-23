@@ -325,6 +325,7 @@
 
       <div>
         <h3>Загрузить данные за период</h3>
+        <p class="hint">Завершённые рейсы автоматически загружаются каждый час. Ручная загрузка нужна для повторной проверки выбранного периода.</p>
         <form action="{{ url_for('import_fetch') }}" method="post" class="entry-form">
           <div class="field field-narrow">
             <label for="import_start_date">С даты</label>
@@ -372,7 +373,7 @@
         <div class="empty-state">
           <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
           <div class="t">Нет записей, ожидающих подтверждения</div>
-          <div class="s">Загрузите период выше, чтобы найти новые рейсы.</div>
+          <div class="s">Новые завершённые рейсы появятся автоматически; период выше можно проверить вручную.</div>
         </div>
         {% endif %}
       </div>
