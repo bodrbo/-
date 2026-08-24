@@ -693,6 +693,85 @@ class YclientsHourlyImportTests(unittest.TestCase):
         self.assertEqual(restored["imported"], 1)
         self.assertEqual(trip_count_after_restore, 1)
 
+    def test_missing_record_removes_old_trip_and_keeps_current_slot(self):
+        old_record = self.record(
+            1924724769,
+            "15",
+            staff_name="Андрей Жаворонков",
+            color="673ab7",
+        )
+        old_record["datetime"] = "2026-08-23T15:00:00+03:00"
+        old_record["services"] = [
+            {
+                "id": 14624830,
+                "title": "Индивидуальная аренда 1 час",
+                "cost": 9000,
+            }
+        ]
+        current_record = self.record(
+            1924724769,
+            "14:30",
+            staff_name="Андрей Жаворонков",
+            color="673ab7",
+        )
+        current_record["datetime"] = "2026-08-23T14:30:00+03:00"
+        current_record["seance_length"] = 7200
+        current_record["services"] = [
+            {
+                "id": 14624850,
+                "title": "Индивидуальная аренда 2 часа",
+                "cost": 16000,
+            }
+        ]
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            first = application_module._import_yclients_trip_records(
+                db,
+                [old_record],
+                {},
+                "2026-08-23",
+                "2026-08-23",
+            )
+            refreshed = application_module._import_yclients_trip_records(
+                db,
+                [current_record],
+                {},
+                "2026-08-23",
+                "2026-08-23",
+                reconciliation_records=[current_record],
+                reconcile_missing=True,
+            )
+            trips = db.execute(
+                "SELECT trip_time, work_type, revenue FROM trips ORDER BY id"
+            ).fetchall()
+            refs = db.execute(
+                "SELECT yclients_ref FROM yclients_imports ORDER BY yclients_ref"
+            ).fetchall()
+            repeated = application_module._import_yclients_trip_records(
+                db,
+                [current_record],
+                {},
+                "2026-08-23",
+                "2026-08-23",
+                reconciliation_records=[current_record],
+                reconcile_missing=True,
+            )
+
+        self.assertEqual(first["imported"], 1)
+        self.assertEqual(refreshed["deleted"], 1)
+        self.assertEqual(refreshed["imported"], 1)
+        self.assertEqual(repeated["deleted"], 0)
+        self.assertEqual(repeated["imported"], 0)
+        self.assertEqual(
+            [(row["trip_time"], row["work_type"], row["revenue"]) for row in trips],
+            [("14:30", "Индивидуальная аренда 2 часа", 16000)],
+        )
+        self.assertEqual(
+            [row["yclients_ref"] for row in refs],
+            ["slot:673ab7:2026-08-23T14:30"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

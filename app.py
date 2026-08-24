@@ -6121,23 +6121,10 @@ def _imported_trip_for_cancelled_group(db, group_key, records):
     return matches[0]["id"] if len(matches) == 1 else None
 
 
-def _remove_cancelled_imported_trips(db, records, activity_colors):
-    """Remove trips that were marked red after an earlier import."""
-    trip_ids = set()
-    cancelled_groups = _cancelled_yclients_groups(records, activity_colors)
-    fuel_source_refs = set(cancelled_groups)
-    for group_key, grouped_records in cancelled_groups.items():
-        db.execute(
-            "DELETE FROM import_candidates WHERE yclients_ref = ?",
-            (group_key,),
-        )
-        trip_id = _imported_trip_for_cancelled_group(
-            db, group_key, grouped_records
-        )
-        if trip_id is not None:
-            trip_ids.add(trip_id)
-
+def _remove_imported_trip_ids(db, trip_ids, extra_source_refs=()):
+    """Remove imported trips and release all external-source references."""
     removed = 0
+    fuel_source_refs = set(extra_source_refs)
     for trip_id in trip_ids:
         source_refs = [
             row["yclients_ref"]
@@ -6158,6 +6145,55 @@ def _remove_cancelled_imported_trips(db, records, activity_colors):
     return removed
 
 
+def _remove_cancelled_imported_trips(db, records, activity_colors):
+    """Remove trips that were marked red after an earlier import."""
+    trip_ids = set()
+    cancelled_groups = _cancelled_yclients_groups(records, activity_colors)
+    for group_key, grouped_records in cancelled_groups.items():
+        db.execute(
+            "DELETE FROM import_candidates WHERE yclients_ref = ?",
+            (group_key,),
+        )
+        trip_id = _imported_trip_for_cancelled_group(
+            db, group_key, grouped_records
+        )
+        if trip_id is not None:
+            trip_ids.add(trip_id)
+    return _remove_imported_trip_ids(
+        db, trip_ids, extra_source_refs=cancelled_groups
+    )
+
+
+def _remove_missing_imported_trips(db, records, start_date, end_date):
+    """Remove imported trips whose YCLIENTS sources disappeared entirely.
+
+    The records endpoint is paginated to completion, so within the requested
+    date range its source refs form an authoritative snapshot. A trip may be
+    backed by several refs (for example an activity plus a guide placeholder)
+    and is removed only when none of those refs remains in the snapshot.
+    """
+    present_refs = {
+        _yclients_group_key(record)
+        for record in records
+        if not record.get("deleted")
+    }
+    imported_rows = db.execute(
+        "SELECT trips.id AS trip_id, yclients_imports.yclients_ref "
+        "FROM trips JOIN yclients_imports ON yclients_imports.trip_id = trips.id "
+        "WHERE trips.trip_date BETWEEN ? AND ?",
+        (start_date, end_date),
+    ).fetchall()
+    refs_by_trip = {}
+    for row in imported_rows:
+        refs_by_trip.setdefault(row["trip_id"], set()).add(row["yclients_ref"])
+    missing_trip_ids = {
+        trip_id
+        for trip_id, source_refs in refs_by_trip.items()
+        if source_refs.isdisjoint(present_refs)
+    }
+    return _remove_imported_trip_ids(db, missing_trip_ids)
+
+
 def _import_yclients_trip_records(
     db,
     records,
@@ -6173,6 +6209,7 @@ def _import_yclients_trip_records(
     schedule_end_date=None,
     minimum_shift_records=None,
     reconciliation_records=None,
+    reconcile_missing=False,
 ):
     """Import one already-fetched YCLIENTS window, safely on repeated runs.
 
@@ -6182,10 +6219,20 @@ def _import_yclients_trip_records(
     administrator instead of being discarded by the background job.
     """
     activity_colors = activity_colors or {}
+    current_records = (
+        records if reconciliation_records is None else reconciliation_records
+    )
     cancelled = _remove_cancelled_imported_trips(
         db,
-        records if reconciliation_records is None else reconciliation_records,
+        current_records,
         activity_colors,
+    )
+    deleted = (
+        _remove_missing_imported_trips(
+            db, current_records, start_date, end_date
+        )
+        if reconcile_missing
+        else 0
     )
     already = {
         row["yclients_ref"]: row["trip_id"]
@@ -6317,6 +6364,7 @@ def _import_yclients_trip_records(
         "fetched": len(records),
         "candidates": len(candidates),
         "cancelled": cancelled,
+        "deleted": deleted,
         "added": added,
         "merged": merged,
         "imported": imported,
@@ -6414,6 +6462,7 @@ def import_fetch():
         schedule_end_date=payroll_schedule["end_date"],
         minimum_shift_records=records,
         reconciliation_records=records,
+        reconcile_missing=True,
     )
 
     if schedule_warning:
@@ -9365,6 +9414,7 @@ def _sync_hourly_yclients(db, now=None):
         schedule_end_date=payroll_schedule["end_date"],
         minimum_shift_records=records,
         reconciliation_records=records,
+        reconcile_missing=True,
     )
     fuel_stats = fuel_services.sync_yclients_records(
         db, records, activity_colors, now
@@ -9446,6 +9496,7 @@ def cron_sync_fuel():
     return (
         f"ok: {trip_stats['imported']} trips imported, "
         f"{trip_stats.get('cancelled', 0)} cancelled trips removed, "
+        f"{trip_stats.get('deleted', 0)} deleted trips removed, "
         f"{trip_stats.get('payroll_updated', 0)} payroll assignments updated, "
         f"{trip_stats.get('topups_changed', 0)} minimum-rate top-ups updated, "
         f"{trip_stats['pending']} trips pending review; "
