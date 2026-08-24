@@ -5766,25 +5766,23 @@ def _import_yclients_trip_records(
 
     created_at = (now or dt.datetime.now()).strftime("%Y-%m-%d %H:%M")
     added = 0
+    payroll_updated = 0
     for candidate in candidates:
         ref = candidate["yclients_ref"]
         if ref in already:
-            review_row = _yclients_collision_review_row(
-                db, candidate, already, existing_candidates
-            )
-            if review_row is not None:
+            trip_id = already[ref]
+            if trip_id is not None:
+                if _sync_imported_trip_labor(db, trip_id, candidate["payload"]):
+                    payroll_updated += 1
+                # Versions before automatic payroll reconciliation created a
+                # manual "recheck" card for this exact collision. It is no
+                # longer actionable once the confirmed trip has been synced.
+                review_ref = f"recheck:{trip_id}:{ref}"
                 db.execute(
-                    "INSERT INTO import_candidates (yclients_ref, summary, payload, created_at) "
-                    "VALUES (?, ?, ?, ?)",
-                    (
-                        review_row["yclients_ref"],
-                        review_row["summary"],
-                        json.dumps(review_row["payload"], ensure_ascii=False),
-                        created_at,
-                    ),
+                    "DELETE FROM import_candidates WHERE yclients_ref = ?",
+                    (review_ref,),
                 )
-                existing_candidates.add(review_row["yclients_ref"])
-                added += 1
+                existing_candidates.discard(review_ref)
             continue
         if ref in existing_candidates:
             continue
@@ -5821,6 +5819,7 @@ def _import_yclients_trip_records(
         "added": added,
         "merged": merged,
         "imported": imported,
+        "payroll_updated": payroll_updated,
         "pending": pending_total,
         "topups_changed": topups_changed,
     }
@@ -5917,63 +5916,116 @@ def import_review(candidate_id):
     )
 
 
-def _trip_staff_names(db, trip_id):
-    """Employee names currently on a confirmed trip's labor entries."""
-    return {
-        row["employee"] for row in db.execute(
-            "SELECT entries.employee FROM trip_labor "
-            "JOIN entries ON entries.id = trip_labor.entry_id "
-            "WHERE trip_labor.trip_id = ?", (trip_id,)
-        ).fetchall()
-    }
+def _sync_imported_trip_labor(db, trip_id, payload):
+    """Make an imported trip's payroll match the latest YCLIENTS crew.
 
+    A booking can be reassigned after its trip was already imported. The
+    YCLIENTS reference still points to the same physical/revenue trip, so a
+    second trip must not be created; instead its linked ``entries`` are the
+    mutable part. The candidate contains the complete current crew for the
+    slot, therefore employees absent from it are removed and every current
+    employee is recreated with the rate appropriate for the new crew size.
+    Returns whether any payroll or derived trip total changed.
+    """
+    trip = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
+    if trip is None:
+        return False
 
-def _yclients_collision_review_row(db, candidate, already, existing_candidates):
-    """A fetched candidate's ref already points at a confirmed trip —
-    normally there's nothing to do. But if two crew members' records
-    started out at accidentally different times (e.g. captain vs guide),
-    each got imported as its own one-person trip under a different ref;
-    fixing the time on Yclients' side later makes both records collapse
-    into a single group again, under the ref of whichever one was imported
-    first. The extra crew member then has nowhere to go: their name is
-    missing from the trip already on file, and this ref match makes them
-    silently vanish from the queue forever instead of surfacing as new
-    work to review.
+    labor_items = []
+    for item in payload.get("labor_items") or []:
+        employee = str(item.get("employee") or "").strip()
+        work_type = str(item.get("work_type") or "").strip()
+        try:
+            quantity = float(item.get("quantity"))
+            rate = float(item.get("rate"))
+        except (TypeError, ValueError):
+            return False
+        if not employee or not work_type or quantity < 0 or rate < 0:
+            return False
+        labor_items.append({
+            "employee": employee,
+            "work_type": work_type,
+            "quantity": quantity,
+            "rate": rate,
+            "amount": quantity * rate,
+        })
+    if not labor_items:
+        return False
 
-    Returns a dict with yclients_ref/summary/payload ready to insert into
-    import_candidates for manual review, or None if there's genuinely
-    nothing new here (including: the ref was explicitly skipped before,
-    which is the admin's considered decision already and not a stale-key
-    collision; or the trip on file already has everyone this group
-    names)."""
-    trip_id = already[candidate["yclients_ref"]]
-    if trip_id is None:
-        return None
-    candidate_staff = {
-        item["employee"] for item in candidate["payload"].get("labor_items", []) if item.get("employee")
-    }
-    missing_staff = candidate_staff - _trip_staff_names(db, trip_id)
-    if not missing_staff:
-        return None
-    review_ref = f"recheck:{trip_id}:{candidate['yclients_ref']}"
-    if review_ref in already or review_ref in existing_candidates:
-        return None
-    note = (
-        f"Не подтверждайте как новый рейс — выручка уже учтена в рейсе №{trip_id}. "
-        f"В свежих данных Yclients у этой смены появился ещё участник "
-        f"({', '.join(sorted(missing_staff))}), которого в рейсе №{trip_id} нет — вероятно, "
-        "у одной из записей задним числом поправили время старта, и она перестала считаться "
-        f"отдельным рейсом. Откройте рейс №{trip_id} и добавьте туда этого человека вручную, "
-        "затем нажмите «Пропустить» на этой карточке."
+    linked_rows = db.execute(
+        "SELECT entries.id, entries.employee, entries.work_type, "
+        "entries.quantity, entries.rate FROM trip_labor "
+        "JOIN entries ON entries.id = trip_labor.entry_id "
+        "WHERE trip_labor.trip_id = ? ORDER BY trip_labor.id",
+        (trip_id,),
+    ).fetchall()
+    old_entry_ids = {row["id"] for row in linked_rows}
+    if trip["entry_id"] and trip["entry_id"] not in old_entry_ids:
+        legacy = db.execute(
+            "SELECT id, employee, work_type, quantity, rate FROM entries WHERE id = ?",
+            (trip["entry_id"],),
+        ).fetchone()
+        if legacy is not None:
+            linked_rows = [*linked_rows, legacy]
+            old_entry_ids.add(legacy["id"])
+
+    # The hourly YCLIENTS job owns assignments, not manual pay corrections:
+    # if the employee roster did not change, preserve any hours/rates an
+    # administrator may have adjusted on the trip card.
+    if sorted(row["employee"] for row in linked_rows) == sorted(
+        item["employee"] for item in labor_items
+    ):
+        return False
+
+    old_staff = {row["employee"] for row in linked_rows}
+    new_staff = {item["employee"] for item in labor_items}
+
+    db.execute("DELETE FROM trip_labor WHERE trip_id = ?", (trip_id,))
+    for entry_id in old_entry_ids:
+        db.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
+
+    # A removed employee may still have a top-up produced by an earlier
+    # import of this shift. Drop it now; apply_minimum_shift_rate() below
+    # recreates the correct amount if that person still works another
+    # YCLIENTS trip on the same date.
+    for employee in old_staff - new_staff:
+        db.execute(
+            "DELETE FROM entries WHERE employee = ? AND work_date = ? AND work_type = ?",
+            (employee, trip["trip_date"], MIN_SHIFT_TOPUP_WORK_TYPE),
+        )
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    entry_ids = []
+    for item in labor_items:
+        cur = db.execute(
+            "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                item["employee"], item["work_type"], item["rate"],
+                item["quantity"], item["amount"], trip["trip_date"], now,
+            ),
+        )
+        entry_ids.append(cur.lastrowid)
+        db.execute(
+            "INSERT INTO trip_labor (trip_id, entry_id) VALUES (?, ?)",
+            (trip_id, cur.lastrowid),
+        )
+
+    labor_cost = sum(item["amount"] for item in labor_items)
+    remainder = (
+        trip["revenue"] - trip["commission_amount"] - labor_cost
+        - trip["fuel_cost"] - trip["mooring_cost"] - trip["extra_total"]
     )
-    review_payload = dict(candidate["payload"])
-    review_payload["note"] = note
-    review_payload["needs_review"] = True
-    return {
-        "yclients_ref": review_ref,
-        "summary": f"{candidate['summary']} ⚠ {note}",
-        "payload": review_payload,
-    }
+    work_types = list(dict.fromkeys(item["work_type"] for item in labor_items))
+    db.execute(
+        "UPDATE trips SET work_type = ?, entry_id = ?, labor_cost = ?, remainder = ?, "
+        "investor_payout = ?, my_share = ? WHERE id = ?",
+        (
+            " + ".join(work_types), entry_ids[0], labor_cost, remainder,
+            remainder / 2, trip["commission_amount"] + remainder / 2, trip_id,
+        ),
+    )
+    return True
 
 
 def _mark_yclients_refs_imported(db, refs, trip_id):
@@ -8777,6 +8829,7 @@ def cron_sync_fuel():
     fuel_stats = stats["fuel"]
     return (
         f"ok: {trip_stats['imported']} trips imported, "
+        f"{trip_stats.get('payroll_updated', 0)} payroll assignments updated, "
         f"{trip_stats['pending']} trips pending review; "
         f"fuel: {fuel_stats['automatic']} automatic, "
         f"{fuel_stats['pending']} pending, {fuel_stats['skipped']} skipped",
