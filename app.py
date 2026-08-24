@@ -6125,6 +6125,7 @@ def _remove_cancelled_imported_trips(db, records, activity_colors):
     """Remove trips that were marked red after an earlier import."""
     trip_ids = set()
     cancelled_groups = _cancelled_yclients_groups(records, activity_colors)
+    fuel_source_refs = set(cancelled_groups)
     for group_key, grouped_records in cancelled_groups.items():
         db.execute(
             "DELETE FROM import_candidates WHERE yclients_ref = ?",
@@ -6145,6 +6146,7 @@ def _remove_cancelled_imported_trips(db, records, activity_colors):
                 (trip_id,),
             ).fetchall()
         ]
+        fuel_source_refs.update(source_refs)
         for source_ref in source_refs:
             db.execute(
                 "DELETE FROM import_candidates WHERE yclients_ref IN (?, ?)",
@@ -6152,6 +6154,7 @@ def _remove_cancelled_imported_trips(db, records, activity_colors):
             )
         if _delete_trip_data(db, trip_id, release_yclients_refs=True):
             removed += 1
+    fuel_services.remove_cancelled_yclients_trips(db, fuel_source_refs)
     return removed
 
 

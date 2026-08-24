@@ -301,6 +301,14 @@ def _boat_for_group(source_ref, records, activity_colors):
     return None
 
 
+def remove_cancelled_yclients_trips(db, source_refs):
+    """Remove fuel events/debits for cancelled YCLIENTS source references."""
+    return sum(
+        repository.delete_yclients_trip_by_source(db, source_ref)
+        for source_ref in set(source_refs)
+    )
+
+
 def sync_yclients_records(db, records, activity_colors=None, now=None):
     """Create idempotent fuel events from completed, non-cancelled records."""
     activity_colors = activity_colors or {}
@@ -318,9 +326,8 @@ def sync_yclients_records(db, records, activity_colors=None, now=None):
             == YCLIENTS_CANCELLED_COLOR
         )
     }
-    cancelled = sum(
-        repository.delete_yclients_trip_by_source(db, source_ref)
-        for source_ref in cancelled_source_refs
+    cancelled = remove_cancelled_yclients_trips(
+        db, cancelled_source_refs
     )
 
     groups = {}

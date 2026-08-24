@@ -636,6 +636,22 @@ class YclientsHourlyImportTests(unittest.TestCase):
                 "2026-08-19",
                 "2026-08-19",
             )
+            activated, message = application_module.fuel_services.record_refill(
+                db,
+                "Бодрый Первый",
+                "70",
+                "2026-08-19T08:00",
+                True,
+                "admin",
+                "Администратор теста",
+            )
+            self.assertTrue(activated, message)
+            application_module.fuel_services.sync_yclients_records(
+                db,
+                [record],
+                {48521964: "#8bc34a"},
+                dt.datetime(2026, 8, 19, 13, 0),
+            )
             cancelled = application_module._import_yclients_trip_records(
                 db,
                 [record],
@@ -653,6 +669,9 @@ class YclientsHourlyImportTests(unittest.TestCase):
             refs_after_cancel = db.execute(
                 "SELECT COUNT(*) AS count FROM yclients_imports"
             ).fetchone()["count"]
+            fuel_balance_after_cancel = application_module.fuel_services.fuel_summary(
+                db, "Бодрый Первый"
+            )["balance_liters"]
 
             restored = application_module._import_yclients_trip_records(
                 db,
@@ -670,6 +689,7 @@ class YclientsHourlyImportTests(unittest.TestCase):
         self.assertEqual(trip_count_after_cancel, 0)
         self.assertEqual(trip_pay_after_cancel, 0)
         self.assertEqual(refs_after_cancel, 0)
+        self.assertEqual(fuel_balance_after_cancel, 100)
         self.assertEqual(restored["imported"], 1)
         self.assertEqual(trip_count_after_restore, 1)
 
