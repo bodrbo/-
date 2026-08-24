@@ -5958,10 +5958,31 @@ def _trip_labor_payload(db, trip_id):
 
 
 def _combined_imported_trip_payload(db, trip_id, associated_candidates):
-    """Build one authoritative crew payload from every current YCLIENTS ref."""
+    """Build one authoritative payload from every current YCLIENTS ref.
+
+    Financial fields may only come from a reference that is already linked
+    to this trip and still carries a real sale. A late zero-revenue crew
+    placeholder is useful for updating payroll, but must never zero out the
+    revenue of the previously imported booking.
+    """
     has_known_ref = any(is_known_ref for _candidate, is_known_ref in associated_candidates)
     labor_items = [] if has_known_ref else _trip_labor_payload(db, trip_id)
-    base_payload = dict(associated_candidates[0][0]["payload"])
+    known_sales = [
+        candidate
+        for candidate, is_known_ref in associated_candidates
+        if is_known_ref and (candidate["payload"].get("revenue") or 0) > 0
+    ]
+    financial_source = max(
+        known_sales,
+        key=lambda candidate: candidate["payload"].get("revenue") or 0,
+        default=None,
+    )
+    base_candidate = financial_source or max(
+        (candidate for candidate, _is_known_ref in associated_candidates),
+        key=lambda candidate: candidate["payload"].get("revenue") or 0,
+    )
+    base_payload = dict(base_candidate["payload"])
+    base_payload["_sync_financials"] = financial_source is not None
 
     for candidate, _is_known_ref in associated_candidates:
         labor_items.extend(candidate["payload"].get("labor_items") or [])
@@ -6288,15 +6309,14 @@ def import_review(candidate_id):
 
 
 def _sync_imported_trip_labor(db, trip_id, payload):
-    """Make an imported trip's payroll match the latest YCLIENTS crew.
+    """Make an imported trip match the latest mutable YCLIENTS fields.
 
-    A booking can be reassigned after its trip was already imported. The
-    YCLIENTS reference still points to the same physical/revenue trip, so a
-    second trip must not be created; instead its linked ``entries`` are the
-    mutable part. The candidate contains the complete current crew for the
-    slot, therefore employees absent from it are removed and every current
-    employee is recreated with the rate appropriate for the new crew size.
-    Returns whether any payroll or derived trip total changed.
+    A booking can be reassigned, shortened or moved to another service after
+    its first import. The YCLIENTS reference still points to the same trip,
+    so update its crew, work type, duration and current sale amount instead
+    of creating a duplicate. Manual trips have no YCLIENTS reference and
+    never pass through this function. Returns whether any stored value
+    changed.
     """
     trip = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
     if trip is None:
@@ -6340,60 +6360,100 @@ def _sync_imported_trip_labor(db, trip_id, payload):
             linked_rows = [*linked_rows, legacy]
             old_entry_ids.add(legacy["id"])
 
-    # The hourly YCLIENTS job owns assignments, not manual pay corrections:
-    # if the employee roster did not change, preserve any hours/rates an
-    # administrator may have adjusted on the trip card.
-    if sorted(row["employee"] for row in linked_rows) == sorted(
-        item["employee"] for item in labor_items
-    ):
+    old_labor_signature = sorted(
+        (
+            row["employee"],
+            row["work_type"],
+            round(float(row["quantity"]), 6),
+            round(float(row["rate"]), 6),
+        )
+        for row in linked_rows
+    )
+    new_labor_signature = sorted(
+        (
+            item["employee"],
+            item["work_type"],
+            round(item["quantity"], 6),
+            round(item["rate"], 6),
+        )
+        for item in labor_items
+    )
+    labor_changed = old_labor_signature != new_labor_signature
+
+    revenue = float(trip["revenue"])
+    sale_channel = trip["sale_channel"]
+    commission_pct = float(trip["commission_pct"])
+    if payload.get("_sync_financials"):
+        try:
+            revenue = float(payload.get("revenue"))
+            commission_pct = float(payload.get("commission_pct"))
+        except (TypeError, ValueError):
+            return False
+        candidate_channel = str(payload.get("sale_channel") or "").strip()
+        if candidate_channel in {channel["value"] for channel in SALE_CHANNELS}:
+            sale_channel = candidate_channel
+
+    commission_amount = revenue * commission_pct / 100
+    financial_changed = any((
+        abs(float(trip["revenue"]) - revenue) > 0.01,
+        trip["sale_channel"] != sale_channel,
+        abs(float(trip["commission_pct"]) - commission_pct) > 0.01,
+        abs(float(trip["commission_amount"]) - commission_amount) > 0.01,
+    ))
+    if not labor_changed and not financial_changed:
         return False
 
     old_staff = {row["employee"] for row in linked_rows}
     new_staff = {item["employee"] for item in labor_items}
 
-    db.execute("DELETE FROM trip_labor WHERE trip_id = ?", (trip_id,))
-    for entry_id in old_entry_ids:
-        db.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
+    if labor_changed:
+        db.execute("DELETE FROM trip_labor WHERE trip_id = ?", (trip_id,))
+        for entry_id in old_entry_ids:
+            db.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
 
-    # A removed employee may still have a top-up produced by an earlier
-    # import of this shift. Drop it now; apply_minimum_shift_rate() below
-    # recreates the correct amount if that person still works another
-    # YCLIENTS trip on the same date.
-    for employee in old_staff - new_staff:
-        db.execute(
-            "DELETE FROM entries WHERE employee = ? AND work_date = ? AND work_type = ?",
-            (employee, trip["trip_date"], MIN_SHIFT_TOPUP_WORK_TYPE),
-        )
+        # A removed employee may still have a top-up produced by an earlier
+        # import of this shift. Drop it now; apply_minimum_shift_rate() below
+        # recreates the correct amount if that person still works another
+        # YCLIENTS trip on the same date.
+        for employee in old_staff - new_staff:
+            db.execute(
+                "DELETE FROM entries WHERE employee = ? AND work_date = ? AND work_type = ?",
+                (employee, trip["trip_date"], MIN_SHIFT_TOPUP_WORK_TYPE),
+            )
 
-    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    entry_ids = []
-    for item in labor_items:
-        cur = db.execute(
-            "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                item["employee"], item["work_type"], item["rate"],
-                item["quantity"], item["amount"], trip["trip_date"], now,
-            ),
-        )
-        entry_ids.append(cur.lastrowid)
-        db.execute(
-            "INSERT INTO trip_labor (trip_id, entry_id) VALUES (?, ?)",
-            (trip_id, cur.lastrowid),
-        )
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        entry_ids = []
+        for item in labor_items:
+            cur = db.execute(
+                "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    item["employee"], item["work_type"], item["rate"],
+                    item["quantity"], item["amount"], trip["trip_date"], now,
+                ),
+            )
+            entry_ids.append(cur.lastrowid)
+            db.execute(
+                "INSERT INTO trip_labor (trip_id, entry_id) VALUES (?, ?)",
+                (trip_id, cur.lastrowid),
+            )
+    else:
+        entry_ids = [row["id"] for row in linked_rows]
 
     labor_cost = sum(item["amount"] for item in labor_items)
     remainder = (
-        trip["revenue"] - trip["commission_amount"] - labor_cost
+        revenue - commission_amount - labor_cost
         - trip["fuel_cost"] - trip["mooring_cost"] - trip["extra_total"]
     )
     work_types = list(dict.fromkeys(item["work_type"] for item in labor_items))
     db.execute(
-        "UPDATE trips SET work_type = ?, entry_id = ?, labor_cost = ?, remainder = ?, "
+        "UPDATE trips SET work_type = ?, entry_id = ?, revenue = ?, sale_channel = ?, "
+        "commission_pct = ?, commission_amount = ?, labor_cost = ?, remainder = ?, "
         "investor_payout = ?, my_share = ? WHERE id = ?",
         (
-            " + ".join(work_types), entry_ids[0], labor_cost, remainder,
-            remainder / 2, trip["commission_amount"] + remainder / 2, trip_id,
+            " + ".join(work_types), entry_ids[0], revenue, sale_channel,
+            commission_pct, commission_amount, labor_cost, remainder,
+            remainder / 2, commission_amount + remainder / 2, trip_id,
         ),
     )
     return True

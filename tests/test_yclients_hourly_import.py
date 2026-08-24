@@ -501,6 +501,114 @@ class YclientsHourlyImportTests(unittest.TestCase):
             [("Даниил Галецкий", 1100), ("Эльмира Бектаева", 1100)],
         )
 
+    def test_existing_trip_updates_when_service_duration_changes(self):
+        primary = self.record(
+            1921209114,
+            "11",
+            staff_name="Андрей Жаворонков",
+            color="2196f3",
+        )
+        primary["datetime"] = "2026-08-22T11:00:00+03:00"
+        primary["seance_length"] = 7200
+        primary["services"] = [
+            {
+                "id": 14624850,
+                "title": "Индивидуальная аренда 2 часа",
+                "cost": 16000,
+            }
+        ]
+        primary["comment"] = "индивидуальная обзорная"
+        guide = self.record(
+            1908721986,
+            "11",
+            staff_name="Эльмира Бектаева",
+            color="2196f3",
+        )
+        guide["datetime"] = "2026-08-22T11:00:00+03:00"
+        guide["seance_length"] = 7200
+        guide["services"] = []
+        guide["comment"] = "Гидом на Ларус"
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            first = application_module._import_yclients_trip_records(
+                db,
+                [primary, guide],
+                {},
+                "2026-08-22",
+                "2026-08-22",
+            )
+
+            primary["seance_length"] = 3600
+            primary["services"] = [
+                {
+                    "id": 14624830,
+                    "title": "Индивидуальная аренда 1 час",
+                    "cost": 9000,
+                }
+            ]
+            guide["seance_length"] = 3600
+            second = application_module._import_yclients_trip_records(
+                db,
+                [primary, guide],
+                {},
+                "2026-08-22",
+                "2026-08-22",
+            )
+
+            trip = db.execute("SELECT * FROM trips").fetchone()
+            labor = db.execute(
+                "SELECT entries.employee, entries.work_type, entries.quantity, "
+                "entries.rate, entries.amount FROM trip_labor "
+                "JOIN entries ON entries.id = trip_labor.entry_id "
+                "ORDER BY entries.employee"
+            ).fetchall()
+            topups = db.execute(
+                "SELECT employee, amount FROM entries WHERE work_type = ? "
+                "ORDER BY employee",
+                (application_module.MIN_SHIFT_TOPUP_WORK_TYPE,),
+            ).fetchall()
+
+            third = application_module._import_yclients_trip_records(
+                db,
+                [primary, guide],
+                {},
+                "2026-08-22",
+                "2026-08-22",
+            )
+
+        self.assertEqual(first["imported"], 1)
+        self.assertEqual(second["imported"], 0)
+        self.assertEqual(second["payroll_updated"], 1)
+        self.assertEqual(third["payroll_updated"], 0)
+        self.assertEqual(trip["work_type"], "Индивидуальная аренда 1 час")
+        self.assertEqual(trip["revenue"], 9000)
+        self.assertEqual(trip["commission_amount"], 2700)
+        self.assertEqual(trip["labor_cost"], 2200)
+        self.assertEqual(trip["remainder"], 1999)
+        self.assertEqual(trip["investor_payout"], 999.5)
+        self.assertEqual(trip["my_share"], 3699.5)
+        self.assertEqual(
+            [
+                (
+                    row["employee"],
+                    row["work_type"],
+                    row["quantity"],
+                    row["rate"],
+                    row["amount"],
+                )
+                for row in labor
+            ],
+            [
+                ("Андрей Жаворонков", "Индивидуальная аренда 1 час", 1, 1100, 1100),
+                ("Эльмира Бектаева", "Индивидуальная аренда 1 час", 1, 1100, 1100),
+            ],
+        )
+        self.assertEqual(
+            [(row["employee"], row["amount"]) for row in topups],
+            [("Андрей Жаворонков", 1900), ("Эльмира Бектаева", 1900)],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
