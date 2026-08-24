@@ -5903,6 +5903,106 @@ def merge_pending_candidates(db):
     return merged_away
 
 
+def _imported_trip_for_candidate_slot(db, payload):
+    """Find one already-imported physical trip in the candidate's slot.
+
+    YCLIENTS can represent one crew as an activity record and another crew
+    member as a plain record with a different reference. If one reference was
+    imported before the other appeared, the late record must join the
+    confirmed trip rather than remain an invalid zero-revenue candidate.
+    """
+    boat = payload.get("boat") or ""
+    trip_date = payload.get("trip_date") or ""
+    trip_time = payload.get("trip_time") or "00:00"
+    if not boat or not trip_date:
+        return None
+    rows = db.execute(
+        "SELECT DISTINCT trips.id FROM trips "
+        "JOIN yclients_imports ON yclients_imports.trip_id = trips.id "
+        "WHERE trips.boat = ? AND trips.trip_date = ? "
+        "AND COALESCE(trips.trip_time, '00:00') = ?",
+        (boat, trip_date, trip_time),
+    ).fetchall()
+    return rows[0]["id"] if len(rows) == 1 else None
+
+
+def _trip_labor_payload(db, trip_id):
+    """Return the currently linked labor rows in import-payload form."""
+    trip = db.execute("SELECT entry_id FROM trips WHERE id = ?", (trip_id,)).fetchone()
+    if trip is None:
+        return []
+    rows = db.execute(
+        "SELECT entries.id, entries.employee, entries.work_type, "
+        "entries.quantity, entries.rate FROM trip_labor "
+        "JOIN entries ON entries.id = trip_labor.entry_id "
+        "WHERE trip_labor.trip_id = ? ORDER BY trip_labor.id",
+        (trip_id,),
+    ).fetchall()
+    seen_entry_ids = {row["id"] for row in rows}
+    if trip["entry_id"] and trip["entry_id"] not in seen_entry_ids:
+        legacy = db.execute(
+            "SELECT id, employee, work_type, quantity, rate FROM entries WHERE id = ?",
+            (trip["entry_id"],),
+        ).fetchone()
+        if legacy is not None:
+            rows = [*rows, legacy]
+    return [
+        {
+            "employee": row["employee"],
+            "work_type": row["work_type"],
+            "quantity": row["quantity"],
+            "rate": row["rate"],
+        }
+        for row in rows
+    ]
+
+
+def _combined_imported_trip_payload(db, trip_id, associated_candidates):
+    """Build one authoritative crew payload from every current YCLIENTS ref."""
+    has_known_ref = any(is_known_ref for _candidate, is_known_ref in associated_candidates)
+    labor_items = [] if has_known_ref else _trip_labor_payload(db, trip_id)
+    base_payload = dict(associated_candidates[0][0]["payload"])
+
+    for candidate, _is_known_ref in associated_candidates:
+        labor_items.extend(candidate["payload"].get("labor_items") or [])
+
+    deduplicated = []
+    seen_employees = set()
+    for item in labor_items:
+        employee = str(item.get("employee") or "").strip()
+        if not employee or employee in seen_employees:
+            continue
+        seen_employees.add(employee)
+        deduplicated.append(dict(item))
+    labor_items = deduplicated
+
+    if len(labor_items) > 1:
+        ref_title = next(
+            (str(item.get("work_type") or "").strip() for item in labor_items if item.get("work_type")),
+            "",
+        )
+        if not ref_title:
+            existing = _trip_labor_payload(db, trip_id)
+            ref_title = next(
+                (str(item.get("work_type") or "").strip() for item in existing if item.get("work_type")),
+                "",
+            )
+        ref_work_type = next(
+            (work_type for work_type in WORK_TYPES if work_type["name"] == ref_title),
+            None,
+        )
+        for item in labor_items:
+            if ref_title:
+                item["work_type"] = ref_title
+            if ref_work_type:
+                item["rate"] = ref_work_type["rate"]
+                if not _is_number(item.get("quantity")):
+                    item["quantity"] = ref_work_type["hours"]
+
+    base_payload["labor_items"] = labor_items
+    return base_payload
+
+
 def _import_yclients_trip_records(
     db,
     records,
@@ -5954,23 +6054,67 @@ def _import_yclients_trip_records(
     created_at = (now or dt.datetime.now()).strftime("%Y-%m-%d %H:%M")
     added = 0
     payroll_updated = 0
+    associated_by_trip = {}
+    unassociated = []
     for candidate in candidates:
         ref = candidate["yclients_ref"]
         if ref in already:
             trip_id = already[ref]
-            if trip_id is not None:
-                if _sync_imported_trip_labor(db, trip_id, candidate["payload"]):
-                    payroll_updated += 1
-                # Versions before automatic payroll reconciliation created a
-                # manual "recheck" card for this exact collision. It is no
-                # longer actionable once the confirmed trip has been synced.
-                review_ref = f"recheck:{trip_id}:{ref}"
+            if trip_id is None:
+                # Older versions offered the zero-revenue secondary crew
+                # record as an invalid standalone card, so an administrator
+                # may reasonably have skipped it. If it now matches exactly
+                # one imported physical trip, heal that old tombstone and
+                # attach the employee; never revive a skipped paying record.
+                if not (candidate["payload"].get("revenue") or 0):
+                    trip_id = _imported_trip_for_candidate_slot(
+                        db, candidate["payload"]
+                    )
+                    if trip_id is not None:
+                        db.execute(
+                            "UPDATE yclients_imports SET trip_id = ? "
+                            "WHERE yclients_ref = ? AND trip_id IS NULL",
+                            (trip_id, ref),
+                        )
+                        already[ref] = trip_id
+                if trip_id is None:
+                    continue  # an intentional skip unrelated to a known trip
+            associated_by_trip.setdefault(trip_id, []).append((candidate, True))
+            continue
+        trip_id = _imported_trip_for_candidate_slot(db, candidate["payload"])
+        if trip_id is not None:
+            associated_by_trip.setdefault(trip_id, []).append((candidate, False))
+            continue
+        unassociated.append(candidate)
+
+    for trip_id, associated_candidates in associated_by_trip.items():
+        combined_payload = _combined_imported_trip_payload(
+            db, trip_id, associated_candidates
+        )
+        if _sync_imported_trip_labor(db, trip_id, combined_payload):
+            payroll_updated += 1
+        for candidate, is_known_ref in associated_candidates:
+            refs = [
+                candidate["yclients_ref"],
+                *candidate["payload"].get("merged_refs", []),
+            ]
+            if not is_known_ref:
+                _mark_yclients_refs_imported(db, refs, trip_id)
+            for source_ref in refs:
+                db.execute(
+                    "DELETE FROM import_candidates WHERE yclients_ref = ?",
+                    (source_ref,),
+                )
+                existing_candidates.discard(source_ref)
+                review_ref = f"recheck:{trip_id}:{source_ref}"
                 db.execute(
                     "DELETE FROM import_candidates WHERE yclients_ref = ?",
                     (review_ref,),
                 )
                 existing_candidates.discard(review_ref)
-            continue
+
+    for candidate in unassociated:
+        ref = candidate["yclients_ref"]
         if ref in existing_candidates:
             continue
         db.execute(

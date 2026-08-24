@@ -393,6 +393,114 @@ class YclientsHourlyImportTests(unittest.TestCase):
         self.assertEqual(new_payroll, 3000)
         self.assertEqual(pending, 0)
 
+    def test_late_plain_crew_record_joins_existing_activity_trip(self):
+        daniil = self.record(
+            1911819555,
+            "16",
+            activity_id=49006044,
+            staff_name="Даниил Галецкий",
+            color="",
+        )
+        daniil["datetime"] = "2026-08-18T16:00:00+03:00"
+        daniil["seance_length"] = 9000
+        daniil["services"] = [
+            {
+                "id": 14624702,
+                "title": "Форты Кронштадта - большой тур",
+                "cost": 7400,
+            }
+        ]
+        elmira = self.record(
+            1911826743,
+            "16",
+            activity_id=0,
+            staff_name="Эльмира Бектаева",
+            color="673ab7",
+        )
+        elmira["datetime"] = "2026-08-18T16:00:00+03:00"
+        elmira["seance_length"] = 9000
+        elmira["services"] = []
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            first = application_module._import_yclients_trip_records(
+                db,
+                [daniil],
+                {49006044: "#673ab7"},
+                "2026-08-18",
+                "2026-08-18",
+            )
+            solo_rate = db.execute(
+                "SELECT entries.rate FROM trip_labor "
+                "JOIN entries ON entries.id = trip_labor.entry_id"
+            ).fetchone()["rate"]
+            # Simulate an administrator skipping the old invalid standalone
+            # zero-revenue card before this repair existed.
+            db.execute(
+                "INSERT INTO yclients_imports (yclients_ref, trip_id) VALUES (?, NULL)",
+                ("slot:673ab7:2026-08-18T16:00",),
+            )
+            db.commit()
+
+            second = application_module._import_yclients_trip_records(
+                db,
+                [daniil, elmira],
+                {49006044: "#673ab7"},
+                "2026-08-18",
+                "2026-08-18",
+            )
+            labor_after_second = db.execute(
+                "SELECT entries.employee, entries.rate, entries.quantity "
+                "FROM trip_labor JOIN entries ON entries.id = trip_labor.entry_id "
+                "ORDER BY entries.employee"
+            ).fetchall()
+            trip = db.execute("SELECT * FROM trips").fetchone()
+            trip_count = db.execute(
+                "SELECT COUNT(*) AS count FROM trips"
+            ).fetchone()["count"]
+            imported_refs = db.execute(
+                "SELECT COUNT(*) AS count FROM yclients_imports WHERE trip_id = ?",
+                (trip["id"],),
+            ).fetchone()["count"]
+            pending = db.execute(
+                "SELECT COUNT(*) AS count FROM import_candidates"
+            ).fetchone()["count"]
+
+            third = application_module._import_yclients_trip_records(
+                db,
+                [daniil, elmira],
+                {49006044: "#673ab7"},
+                "2026-08-18",
+                "2026-08-18",
+            )
+            labor_after_third = db.execute(
+                "SELECT entries.employee, entries.rate FROM trip_labor "
+                "JOIN entries ON entries.id = trip_labor.entry_id "
+                "ORDER BY entries.employee"
+            ).fetchall()
+
+        self.assertEqual(first["imported"], 1)
+        self.assertEqual(solo_rate, 1870)
+        self.assertEqual(second["imported"], 0)
+        self.assertEqual(second["payroll_updated"], 1)
+        self.assertEqual(trip_count, 1)
+        self.assertEqual(trip["revenue"], 7400)
+        self.assertEqual(trip["labor_cost"], 5500)
+        self.assertEqual(imported_refs, 2)
+        self.assertEqual(pending, 0)
+        self.assertEqual(
+            [(row["employee"], row["rate"], row["quantity"]) for row in labor_after_second],
+            [
+                ("Даниил Галецкий", 1100, 2.5),
+                ("Эльмира Бектаева", 1100, 2.5),
+            ],
+        )
+        self.assertEqual(third["payroll_updated"], 0)
+        self.assertEqual(
+            [(row["employee"], row["rate"]) for row in labor_after_third],
+            [("Даниил Галецкий", 1100), ("Эльмира Бектаева", 1100)],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
