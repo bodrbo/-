@@ -5154,27 +5154,40 @@ def yclients_get_records(start_date, end_date):
 
 
 def yclients_get_staff():
-    """Return the current YCLIENTS staff directory for this branch."""
-    resp = requests.get(
-        f"{YCLIENTS_API_BASE}/staff/{YCLIENTS_COMPANY_ID}",
-        headers=_yclients_headers(),
-        timeout=20,
-    )
-    if not resp.ok:
-        raise RuntimeError(
-            f"Yclients вернул {resp.status_code} при загрузке сотрудников. "
-            f"Ответ сервера: {resp.text[:500]}"
-        )
-    body = resp.json()
-    if not body.get("success"):
-        raise RuntimeError(
-            "Yclients API вернул success=false при загрузке сотрудников: "
-            + json.dumps(body)[:300]
-        )
-    staff = body.get("data") or []
-    if not isinstance(staff, list):
-        raise RuntimeError("Yclients API вернул некорректный список сотрудников.")
-    return staff
+    """Return the current YCLIENTS staff directory for this branch.
+
+    The endpoint is occasionally slow even when the records endpoint is
+    healthy. One immediate retry prevents an otherwise successful import
+    from losing every schedule-only minimum-rate top-up.
+    """
+    last_error = None
+    for attempt in range(2):
+        try:
+            resp = requests.get(
+                f"{YCLIENTS_API_BASE}/staff/{YCLIENTS_COMPANY_ID}",
+                headers=_yclients_headers(),
+                timeout=20,
+            )
+            if not resp.ok:
+                raise RuntimeError(
+                    f"Yclients вернул {resp.status_code} при загрузке сотрудников. "
+                    f"Ответ сервера: {resp.text[:500]}"
+                )
+            body = resp.json()
+            if not body.get("success"):
+                raise RuntimeError(
+                    "Yclients API вернул success=false при загрузке сотрудников: "
+                    + json.dumps(body)[:300]
+                )
+            staff = body.get("data") or []
+            if not isinstance(staff, list):
+                raise RuntimeError("Yclients API вернул некорректный список сотрудников.")
+            return staff
+        except (requests.RequestException, RuntimeError, ValueError) as error:
+            last_error = error
+            if attempt == 0:
+                time.sleep(0.25)
+    raise last_error
 
 
 def yclients_get_working_staff_days(employee_names, start_date, end_date):
@@ -5198,44 +5211,66 @@ def yclients_get_working_staff_days(employee_names, start_date, end_date):
             staff_matches.append((staff["id"], local_name))
 
     if not staff_matches:
-        return {"staffed_days": set(), "checked_employees": set()}
+        return {
+            "staffed_days": set(),
+            "checked_employees": set(),
+            "failed_employees": [],
+        }
 
     def fetch_one(match):
         staff_id, local_name = match
-        resp = session.get(
-            f"{YCLIENTS_API_BASE}/schedule/{YCLIENTS_COMPANY_ID}/{staff_id}/"
-            f"{start_date}/{end_date}",
-            timeout=20,
-        )
-        if not resp.ok:
-            raise RuntimeError(
-                f"Yclients вернул {resp.status_code} для графика сотрудника "
-                f"«{local_name}». Ответ сервера: {resp.text[:300]}"
-            )
-        body = resp.json()
-        if not body.get("success") or not isinstance(body.get("data"), list):
-            raise RuntimeError(
-                f"Yclients вернул некорректный график сотрудника «{local_name}»."
-            )
-        working_dates = set()
-        for day in body["data"]:
-            work_date = str(day.get("date") or "")[:10]
-            is_working = str(day.get("is_working") or "0").strip().lower()
-            if start_date <= work_date <= end_date and is_working in {"1", "true", "yes"}:
-                working_dates.add(work_date)
-        return local_name, working_dates
+        last_error = None
+        for attempt in range(2):
+            try:
+                resp = session.get(
+                    f"{YCLIENTS_API_BASE}/schedule/{YCLIENTS_COMPANY_ID}/{staff_id}/"
+                    f"{start_date}/{end_date}",
+                    timeout=20,
+                )
+                if not resp.ok:
+                    raise RuntimeError(
+                        f"HTTP {resp.status_code}: {resp.text[:200]}"
+                    )
+                body = resp.json()
+                if not body.get("success") or not isinstance(body.get("data"), list):
+                    raise RuntimeError("некорректный ответ API")
+                working_dates = set()
+                for day in body["data"]:
+                    work_date = str(day.get("date") or "")[:10]
+                    is_working = str(day.get("is_working") or "0").strip().lower()
+                    if (
+                        start_date <= work_date <= end_date
+                        and is_working in {"1", "true", "yes"}
+                    ):
+                        working_dates.add(work_date)
+                return local_name, working_dates, None
+            except (requests.RequestException, RuntimeError, ValueError) as error:
+                last_error = error
+                if attempt == 0:
+                    time.sleep(0.25)
+        return local_name, set(), str(last_error)
 
     staffed_days = set()
     checked_employees = set()
+    failed_employees = []
     with requests.Session() as session:
         session.headers.update(_yclients_headers())
         with ThreadPoolExecutor(max_workers=min(10, len(staff_matches))) as pool:
-            for employee, working_dates in pool.map(fetch_one, staff_matches):
+            for employee, working_dates, error in pool.map(fetch_one, staff_matches):
+                if error is not None:
+                    failed_employees.append(employee)
+                    print(
+                        f"YCLIENTS schedule failed for {employee}: {error}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    continue
                 checked_employees.add(employee)
                 staffed_days.update((employee, work_date) for work_date in working_dates)
     return {
         "staffed_days": staffed_days,
         "checked_employees": checked_employees,
+        "failed_employees": sorted(failed_employees),
     }
 
 
@@ -5667,6 +5702,7 @@ def _yclients_payroll_schedule(db, start_date, end_date, today=None):
         return {
             "staffed_days": set(),
             "checked_employees": set(),
+            "failed_employees": [],
             "start_date": None,
             "end_date": None,
         }
@@ -5996,6 +6032,7 @@ def import_index():
         "trips.html", **ctx, **_trips_common_kwargs(db),
         edit_trip=None,
         import_error=request.args.get("error"),
+        import_warning=request.args.get("warning"),
         open_import=True,
     )
 
@@ -6035,14 +6072,26 @@ def import_fetch():
     payroll_schedule = {
         "staffed_days": set(),
         "checked_employees": set(),
+        "failed_employees": [],
         "start_date": None,
         "end_date": None,
     }
+    schedule_warning = None
     try:
         payroll_schedule = _yclients_payroll_schedule(db, start_date, end_date)
+        if payroll_schedule.get("failed_employees"):
+            schedule_warning = (
+                "Не удалось проверить: "
+                + ", ".join(payroll_schedule["failed_employees"])
+                + ". Их существующие доплаты не изменены; остальные сотрудники пересчитаны."
+            )
     except (requests.RequestException, RuntimeError, ValueError) as error:
         # A schedule outage must not block trip/revenue import. Existing
         # top-ups are left untouched until a later successful check.
+        schedule_warning = (
+            "График смен YCLIENTS временно недоступен. Рейсы загружены, "
+            "существующие доплаты не изменены."
+        )
         print(f"YCLIENTS payroll schedule sync failed: {error}", file=sys.stderr, flush=True)
 
     _import_yclients_trip_records(
@@ -6059,6 +6108,8 @@ def import_fetch():
         minimum_shift_records=records,
     )
 
+    if schedule_warning:
+        return redirect(url_for("import_index", warning=schedule_warning))
     return redirect(url_for("import_index"))
 
 
@@ -8931,6 +8982,7 @@ def _sync_hourly_yclients(db, now=None):
     payroll_schedule = {
         "staffed_days": set(),
         "checked_employees": set(),
+        "failed_employees": [],
         "start_date": None,
         "end_date": None,
     }
@@ -8939,6 +8991,11 @@ def _sync_hourly_yclients(db, now=None):
         payroll_schedule = _yclients_payroll_schedule(
             db, start_date, end_date, today=now.date()
         )
+        if payroll_schedule.get("failed_employees"):
+            schedule_error = (
+                "график получен не для всех сотрудников: "
+                + ", ".join(payroll_schedule["failed_employees"])
+            )
     except (requests.RequestException, RuntimeError, ValueError) as error:
         # Keep income/fuel live even if the separate schedule endpoint is
         # temporarily unavailable. Crucially, without an authoritative
@@ -8978,6 +9035,7 @@ def _sync_hourly_yclients(db, now=None):
         "schedule": {
             "staffed_days": len(payroll_schedule["staffed_days"]),
             "checked_employees": len(payroll_schedule["checked_employees"]),
+            "failed_employees": len(payroll_schedule.get("failed_employees") or []),
             "error": schedule_error,
         },
     }

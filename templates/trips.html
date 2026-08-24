@@ -314,6 +314,9 @@
       {% if import_error %}
       <div class="alert"><strong>Не удалось загрузить данные:</strong> {{ import_error }}</div>
       {% endif %}
+      {% if import_warning %}
+      <div class="alert"><strong>Рейсы загружены, но график смен обновлён не полностью:</strong> {{ import_warning }}</div>
+      {% endif %}
 
       {% if not import_configured %}
       <div class="alert">

@@ -1,5 +1,6 @@
 import datetime as dt
 import unittest
+from unittest import mock
 
 from support import application_module
 
@@ -258,6 +259,76 @@ class YclientsHourlyImportTests(unittest.TestCase):
             ).fetchone()["count"]
 
         self.assertEqual(topups, 0)
+
+    def test_one_failed_schedule_does_not_discard_other_employees(self):
+        attempts = {}
+
+        class FakeResponse:
+            ok = True
+            status_code = 200
+            text = ""
+
+            @staticmethod
+            def json():
+                return {
+                    "success": True,
+                    "data": [{"date": "2026-08-23", "is_working": 1, "slots": []}],
+                }
+
+        class FakeSession:
+            def __init__(self):
+                self.headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return False
+
+            @staticmethod
+            def get(url, timeout):
+                staff_id = 2 if "/schedule/979343/2/" in url else 1
+                attempts[staff_id] = attempts.get(staff_id, 0) + 1
+                if staff_id == 1 and attempts[staff_id] == 1:
+                    raise application_module.requests.Timeout("first attempt timeout")
+                if "/schedule/979343/2/" in url:
+                    raise application_module.requests.Timeout("temporary timeout")
+                return FakeResponse()
+
+        staff = [
+            {"id": 1, "name": "Платон Жмаев", "fired": 0},
+            {"id": 2, "name": "Дмитрий Тарусов", "fired": 0},
+        ]
+        with mock.patch.object(application_module, "yclients_get_staff", return_value=staff), \
+                mock.patch.object(application_module.requests, "Session", FakeSession):
+            result = self.original_working_days(
+                ["Платон Жмаев", "Дмитрий Тарусов"],
+                "2026-08-23",
+                "2026-08-23",
+            )
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            changed = application_module.apply_minimum_shift_rate(
+                db,
+                [],
+                scheduled_staff_days=result["staffed_days"],
+                checked_schedule_employees=result["checked_employees"],
+                schedule_start_date="2026-08-23",
+                schedule_end_date="2026-08-23",
+            )
+            rows = db.execute(
+                "SELECT employee, amount FROM entries WHERE work_type = ?",
+                (application_module.MIN_SHIFT_TOPUP_WORK_TYPE,),
+            ).fetchall()
+
+        self.assertEqual(result["checked_employees"], {"Платон Жмаев"})
+        self.assertEqual(result["failed_employees"], ["Дмитрий Тарусов"])
+        self.assertEqual(attempts, {1: 2, 2: 2})
+        self.assertEqual(changed, 1)
+        self.assertEqual([(row["employee"], row["amount"]) for row in rows], [
+            ("Платон Жмаев", 3000),
+        ])
 
     def test_reassigned_trip_moves_payroll_without_duplicate_revenue(self):
         old_record = self.record(10, "09", staff_name="Старый капитан")
