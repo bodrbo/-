@@ -609,6 +609,70 @@ class YclientsHourlyImportTests(unittest.TestCase):
             [("Андрей Жаворонков", 1900), ("Эльмира Бектаева", 1900)],
         )
 
+    def test_activity_marked_red_after_import_removes_existing_trip(self):
+        record = self.record(
+            1898319087,
+            "10",
+            activity_id=48521964,
+            staff_name="Андрей Жаворонков",
+            color="",
+        )
+        record["datetime"] = "2026-08-19T10:00:00+03:00"
+        record["seance_length"] = 9000
+        record["services"] = [
+            {
+                "id": 14624702,
+                "title": "Форты Кронштадта - большой тур",
+                "cost": 14800,
+            }
+        ]
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            first = application_module._import_yclients_trip_records(
+                db,
+                [record],
+                {48521964: "#8bc34a"},
+                "2026-08-19",
+                "2026-08-19",
+            )
+            cancelled = application_module._import_yclients_trip_records(
+                db,
+                [record],
+                {48521964: "#f44336"},
+                "2026-08-19",
+                "2026-08-19",
+            )
+            trip_count_after_cancel = db.execute(
+                "SELECT COUNT(*) AS count FROM trips"
+            ).fetchone()["count"]
+            trip_pay_after_cancel = db.execute(
+                "SELECT COUNT(*) AS count FROM entries "
+                "WHERE work_type = 'Большой тур'"
+            ).fetchone()["count"]
+            refs_after_cancel = db.execute(
+                "SELECT COUNT(*) AS count FROM yclients_imports"
+            ).fetchone()["count"]
+
+            restored = application_module._import_yclients_trip_records(
+                db,
+                [record],
+                {48521964: "#8bc34a"},
+                "2026-08-19",
+                "2026-08-19",
+            )
+            trip_count_after_restore = db.execute(
+                "SELECT COUNT(*) AS count FROM trips"
+            ).fetchone()["count"]
+
+        self.assertEqual(first["imported"], 1)
+        self.assertEqual(cancelled["cancelled"], 1)
+        self.assertEqual(trip_count_after_cancel, 0)
+        self.assertEqual(trip_pay_after_cancel, 0)
+        self.assertEqual(refs_after_cancel, 0)
+        self.assertEqual(restored["imported"], 1)
+        self.assertEqual(trip_count_after_restore, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

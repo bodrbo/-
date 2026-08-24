@@ -36,7 +36,12 @@ BOAT_COLORS = {
     "#673ab7": "Бодрый Второй",
     "#8bc34a": "Бодрый Первый",
 }
-YCLIENTS_BLOCKED_SHIFT_COLOR = "f44336"
+
+# YCLIENTS red: a trip/activity marked with this colour is cancelled. The
+# same colour is also used for staff "do not schedule" placeholders, which
+# are likewise excluded from trip import.
+YCLIENTS_CANCELLED_COLOR = "f44336"
+YCLIENTS_BLOCKED_SHIFT_COLOR = YCLIENTS_CANCELLED_COLOR
 
 # Physical tank data and the automatic debit for one completed YCLIENTS
 # group activity. Individual bookings are always reviewed manually.

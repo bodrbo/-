@@ -158,6 +158,49 @@ class FuelModuleIntegrationTests(unittest.TestCase):
             self.assertEqual(summary["balance_liters"], 80.5)
             self.assertEqual(summary["pending_trips"], [])
 
+    def test_red_activity_removes_previous_automatic_fuel_debit(self):
+        success, _ = self.activate_boat()
+        self.assertTrue(success)
+        record = self.completed_group_record()
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            first = fuel_services.sync_yclients_records(
+                db,
+                [record],
+                {777: "#8bc34a"},
+                dt.datetime(2026, 8, 18, 12, 0),
+            )
+            cancelled = fuel_services.sync_yclients_records(
+                db,
+                [record],
+                {777: "#f44336"},
+                dt.datetime(2026, 8, 18, 12, 5),
+            )
+            balance_after_cancel = fuel_services.fuel_summary(
+                db, "Бодрый Первый"
+            )["balance_liters"]
+            event_count = db.execute(
+                "SELECT COUNT(*) AS count FROM boat_fuel_trip_events"
+            ).fetchone()["count"]
+
+            restored = fuel_services.sync_yclients_records(
+                db,
+                [record],
+                {777: "#8bc34a"},
+                dt.datetime(2026, 8, 18, 12, 10),
+            )
+            balance_after_restore = fuel_services.fuel_summary(
+                db, "Бодрый Первый"
+            )["balance_liters"]
+
+        self.assertEqual(first["automatic"], 1)
+        self.assertEqual(cancelled["cancelled"], 1)
+        self.assertEqual(balance_after_cancel, 100)
+        self.assertEqual(event_count, 0)
+        self.assertEqual(restored["automatic"], 1)
+        self.assertEqual(balance_after_restore, 88)
+
     def test_admin_can_remove_trip_from_ledger_without_sync_recreating_it(self):
         success, _ = self.activate_boat()
         self.assertTrue(success)

@@ -189,6 +189,23 @@ def get_trip_event_by_source(db, source_ref):
     ).fetchone()
 
 
+def delete_yclients_trip_by_source(db, source_ref):
+    """Remove fuel rows for a trip that YCLIENTS now marks as cancelled.
+
+    These rows are hard-deleted so reversing the cancellation can recreate
+    the event and its debit on a later synchronization.
+    """
+    transaction = db.execute(
+        "DELETE FROM boat_fuel_transactions WHERE source_ref = ?",
+        (f"fuel-trip:{source_ref}",),
+    )
+    event = db.execute(
+        "DELETE FROM boat_fuel_trip_events WHERE source_ref = ?",
+        (source_ref,),
+    )
+    return transaction.rowcount > 0 or event.rowcount > 0
+
+
 def mark_trip_consumed(db, event_id, liters, transaction_id):
     db.execute(
         "UPDATE boat_fuel_trip_events SET status = 'consumed', "

@@ -46,6 +46,7 @@ from modules.fleet.constants import (
     DEFECT_TASK_WORK_TYPE,
     FUEL_CONFIG,
     YCLIENTS_BLOCKED_SHIFT_COLOR,
+    YCLIENTS_CANCELLED_COLOR,
 )
 from modules.fleet import fuel_services
 from modules.fleet.services import (
@@ -489,6 +490,7 @@ def tbank_payment_configured():
 # полностью игнорировать: не создавать под неё карточку на подтверждение и
 # не считать её поводом для доплаты за смену.
 BLOCKED_SHIFT_COLOR = YCLIENTS_BLOCKED_SHIFT_COLOR
+CANCELLED_TRIP_COLOR = YCLIENTS_CANCELLED_COLOR
 
 # Виды работ со стандартной ставкой и длительностью (в часах).
 # При выборе вида работы в форме ставка и часы подставятся автоматически
@@ -2829,23 +2831,38 @@ def edit_trip(trip_id):
     return redirect(url_for("trips_index"))
 
 
+def _delete_trip_data(db, trip_id, *, release_yclients_refs=False):
+    """Delete a trip and its owned rows.
+
+    A manual deletion keeps YCLIENTS references as tombstones so the next
+    hourly job does not recreate the trip against the administrator's will.
+    A YCLIENTS cancellation releases those references: if the cancellation
+    is later reversed, the booking may be imported again normally.
+    """
+    trip = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
+    if trip is None:
+        return False
+    labor_links = db.execute(
+        "SELECT entry_id FROM trip_labor WHERE trip_id = ?", (trip_id,)
+    ).fetchall()
+    entry_ids = {link["entry_id"] for link in labor_links}
+    if trip["entry_id"]:
+        entry_ids.add(trip["entry_id"])
+    for entry_id in entry_ids:
+        db.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
+    db.execute("DELETE FROM trip_labor WHERE trip_id = ?", (trip_id,))
+    db.execute("DELETE FROM trip_expenses WHERE trip_id = ?", (trip_id,))
+    if release_yclients_refs:
+        db.execute("DELETE FROM yclients_imports WHERE trip_id = ?", (trip_id,))
+    db.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
+    return True
+
+
 @app.route("/trips/delete/<int:trip_id>", methods=["POST"])
 @admin_login_required
 def delete_trip(trip_id):
     db = get_db()
-    trip = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
-    if trip is not None:
-        labor_links = db.execute(
-            "SELECT entry_id FROM trip_labor WHERE trip_id = ?", (trip_id,)
-        ).fetchall()
-        entry_ids = {l["entry_id"] for l in labor_links}
-        if trip["entry_id"]:
-            entry_ids.add(trip["entry_id"])
-        for eid in entry_ids:
-            db.execute("DELETE FROM entries WHERE id = ?", (eid,))
-        db.execute("DELETE FROM trip_labor WHERE trip_id = ?", (trip_id,))
-        db.execute("DELETE FROM trip_expenses WHERE trip_id = ?", (trip_id,))
-        db.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
+    if _delete_trip_data(db, trip_id):
         db.commit()
     return redirect(url_for("trips_index"))
 
@@ -5366,6 +5383,31 @@ def _yclients_group_key(rec):
     return f"record:{rec.get('id')}"
 
 
+def _yclients_activity_color(activity_id, activity_colors):
+    """Return a normalized activity colour for either string or numeric ids."""
+    color = activity_colors.get(activity_id)
+    activity_id_raw = str(activity_id or "")
+    if color is None:
+        color = activity_colors.get(activity_id_raw)
+    if color is None and activity_id_raw.isdigit():
+        color = activity_colors.get(int(activity_id_raw))
+    return _normalize_color(color)
+
+
+def _yclients_group_is_cancelled(group_key, records, activity_colors):
+    """YCLIENTS marks cancelled trips/activities with its red colour."""
+    if group_key.startswith("activity:"):
+        activity_id = group_key.split(":", 1)[1]
+        return (
+            _yclients_activity_color(activity_id, activity_colors)
+            == CANCELLED_TRIP_COLOR
+        )
+    return any(
+        _yclients_record_color(record) == CANCELLED_TRIP_COLOR
+        for record in records
+    )
+
+
 def _yclients_record_date(rec):
     raw = rec.get("date") or (rec.get("datetime") or "")[:10]
     try:
@@ -5421,6 +5463,8 @@ def build_import_candidates(records, activity_colors=None):
 
     candidates = []
     for key, recs in groups.items():
+        if _yclients_group_is_cancelled(key, recs, activity_colors):
+            continue
         is_activity_group = key.startswith("activity:")
         trip_date = _yclients_record_date(recs[0])
         trip_time = _yclients_record_time(recs[0])
@@ -5432,10 +5476,7 @@ def build_import_candidates(records, activity_colors=None):
         raw_color_seen = ""
         if is_activity_group:
             activity_id_raw = key.split(":", 1)[1]
-            color_raw = activity_colors.get(activity_id_raw)
-            if color_raw is None and activity_id_raw.isdigit():
-                color_raw = activity_colors.get(int(activity_id_raw))
-            color = _normalize_color(color_raw)
+            color = _yclients_activity_color(activity_id_raw, activity_colors)
             raw_color_seen = color
             for c, b in BOAT_COLORS.items():
                 if _normalize_color(c) == color:
@@ -5452,11 +5493,6 @@ def build_import_candidates(records, activity_colors=None):
                         break
                 if boat:
                     break
-
-        if raw_color_seen == BLOCKED_SHIFT_COLOR:
-            # A manager's "не ставить в рейсы" marker, not a trip — skip it
-            # entirely rather than surfacing it as a candidate needing review.
-            continue
 
         # The booked service only ever lives on ONE record per trip — usually
         # whichever one carries the price (e.g. the captain's) — a second
@@ -6024,6 +6060,101 @@ def _combined_imported_trip_payload(db, trip_id, associated_candidates):
     return base_payload
 
 
+def _cancelled_yclients_groups(records, activity_colors):
+    groups = {}
+    for record in records:
+        if record.get("deleted"):
+            continue
+        group_key = _yclients_group_key(record)
+        groups.setdefault(group_key, []).append(record)
+    return {
+        group_key: grouped_records
+        for group_key, grouped_records in groups.items()
+        if _yclients_group_is_cancelled(
+            group_key, grouped_records, activity_colors
+        )
+    }
+
+
+def _imported_trip_for_cancelled_group(db, group_key, records):
+    """Resolve a previously imported trip that is now red in YCLIENTS.
+
+    Activity ids are stable, so group trips resolve directly through
+    ``yclients_imports``. A plain booking's reference contains its colour;
+    once it turns red that reference changes, so use an intentionally strict
+    fallback: same date/time, a service-bearing record and exactly one
+    imported trip linked to one of the same employees.
+    """
+    imported = db.execute(
+        "SELECT trip_id FROM yclients_imports "
+        "WHERE yclients_ref = ? AND trip_id IS NOT NULL",
+        (group_key,),
+    ).fetchall()
+    trip_ids = {row["trip_id"] for row in imported}
+    if len(trip_ids) == 1:
+        return next(iter(trip_ids))
+    if trip_ids or group_key.startswith("activity:"):
+        return None
+    if not any(record.get("services") for record in records):
+        return None  # a staff blocker, not a cancelled client booking
+
+    trip_date = _yclients_record_date(records[0])
+    trip_time = _yclients_record_time(records[0]) or "00:00"
+    employees = sorted({
+        str((record.get("staff") or {}).get("name") or "").strip()
+        for record in records
+        if str((record.get("staff") or {}).get("name") or "").strip()
+    })
+    if not employees:
+        return None
+    placeholders = ",".join("?" for _employee in employees)
+    matches = db.execute(
+        "SELECT DISTINCT trips.id FROM trips "
+        "JOIN yclients_imports ON yclients_imports.trip_id = trips.id "
+        "JOIN trip_labor ON trip_labor.trip_id = trips.id "
+        "JOIN entries ON entries.id = trip_labor.entry_id "
+        "WHERE trips.trip_date = ? "
+        "AND COALESCE(trips.trip_time, '00:00') = ? "
+        f"AND entries.employee IN ({placeholders})",
+        (trip_date, trip_time, *employees),
+    ).fetchall()
+    return matches[0]["id"] if len(matches) == 1 else None
+
+
+def _remove_cancelled_imported_trips(db, records, activity_colors):
+    """Remove trips that were marked red after an earlier import."""
+    trip_ids = set()
+    cancelled_groups = _cancelled_yclients_groups(records, activity_colors)
+    for group_key, grouped_records in cancelled_groups.items():
+        db.execute(
+            "DELETE FROM import_candidates WHERE yclients_ref = ?",
+            (group_key,),
+        )
+        trip_id = _imported_trip_for_cancelled_group(
+            db, group_key, grouped_records
+        )
+        if trip_id is not None:
+            trip_ids.add(trip_id)
+
+    removed = 0
+    for trip_id in trip_ids:
+        source_refs = [
+            row["yclients_ref"]
+            for row in db.execute(
+                "SELECT yclients_ref FROM yclients_imports WHERE trip_id = ?",
+                (trip_id,),
+            ).fetchall()
+        ]
+        for source_ref in source_refs:
+            db.execute(
+                "DELETE FROM import_candidates WHERE yclients_ref IN (?, ?)",
+                (source_ref, f"recheck:{trip_id}:{source_ref}"),
+            )
+        if _delete_trip_data(db, trip_id, release_yclients_refs=True):
+            removed += 1
+    return removed
+
+
 def _import_yclients_trip_records(
     db,
     records,
@@ -6038,6 +6169,7 @@ def _import_yclients_trip_records(
     schedule_start_date=None,
     schedule_end_date=None,
     minimum_shift_records=None,
+    reconciliation_records=None,
 ):
     """Import one already-fetched YCLIENTS window, safely on repeated runs.
 
@@ -6046,6 +6178,12 @@ def _import_yclients_trip_records(
     Invalid or ambiguous records remain in ``import_candidates`` for an
     administrator instead of being discarded by the background job.
     """
+    activity_colors = activity_colors or {}
+    cancelled = _remove_cancelled_imported_trips(
+        db,
+        records if reconciliation_records is None else reconciliation_records,
+        activity_colors,
+    )
     already = {
         row["yclients_ref"]: row["trip_id"]
         for row in db.execute("SELECT yclients_ref, trip_id FROM yclients_imports").fetchall()
@@ -6175,6 +6313,7 @@ def _import_yclients_trip_records(
     return {
         "fetched": len(records),
         "candidates": len(candidates),
+        "cancelled": cancelled,
         "added": added,
         "merged": merged,
         "imported": imported,
@@ -6271,6 +6410,7 @@ def import_fetch():
         schedule_start_date=payroll_schedule["start_date"],
         schedule_end_date=payroll_schedule["end_date"],
         minimum_shift_records=records,
+        reconciliation_records=records,
     )
 
     if schedule_warning:
@@ -9148,7 +9288,7 @@ def _yclients_record_has_finished(record, now):
 
 
 def _yclients_completed_records(records, now):
-    """Records eligible for automatic income import at this exact run."""
+    """Finished records eligible for automatic income import at this run."""
     completed = []
     for record in records:
         try:
@@ -9221,6 +9361,7 @@ def _sync_hourly_yclients(db, now=None):
         schedule_start_date=payroll_schedule["start_date"],
         schedule_end_date=payroll_schedule["end_date"],
         minimum_shift_records=records,
+        reconciliation_records=records,
     )
     fuel_stats = fuel_services.sync_yclients_records(
         db, records, activity_colors, now
@@ -9301,11 +9442,13 @@ def cron_sync_fuel():
     )
     return (
         f"ok: {trip_stats['imported']} trips imported, "
+        f"{trip_stats.get('cancelled', 0)} cancelled trips removed, "
         f"{trip_stats.get('payroll_updated', 0)} payroll assignments updated, "
         f"{trip_stats.get('topups_changed', 0)} minimum-rate top-ups updated, "
         f"{trip_stats['pending']} trips pending review; "
         f"schedule: {schedule_summary}; "
         f"fuel: {fuel_stats['automatic']} automatic, "
+        f"{fuel_stats.get('cancelled', 0)} cancelled removed, "
         f"{fuel_stats['pending']} pending, {fuel_stats['skipped']} skipped",
         200,
     )

@@ -9,6 +9,7 @@ from .constants import (
     BOAT_COLORS,
     FUEL_CONFIG,
     YCLIENTS_BLOCKED_SHIFT_COLOR,
+    YCLIENTS_CANCELLED_COLOR,
 )
 
 
@@ -274,13 +275,19 @@ def _slot_key(record):
     return f"record:{record.get('id')}"
 
 
+def _activity_color(source_ref, activity_colors):
+    if not source_ref.startswith("activity:"):
+        return ""
+    activity_raw = source_ref.split(":", 1)[1]
+    color = activity_colors.get(activity_raw)
+    if color is None and activity_raw.isdigit():
+        color = activity_colors.get(int(activity_raw))
+    return _normalise_color(color)
+
+
 def _boat_for_group(source_ref, records, activity_colors):
     if source_ref.startswith("activity:"):
-        activity_raw = source_ref.split(":", 1)[1]
-        color = activity_colors.get(activity_raw)
-        if color is None and activity_raw.isdigit():
-            color = activity_colors.get(int(activity_raw))
-        normalised = _normalise_color(color)
+        normalised = _activity_color(source_ref, activity_colors)
         return next(
             (boat for raw_color, boat in BOAT_COLORS.items() if _normalise_color(raw_color) == normalised),
             None,
@@ -302,15 +309,38 @@ def sync_yclients_records(db, records, activity_colors=None, now=None):
         now = now.replace(tzinfo=None)
     synced_at = format_timestamp(now)
 
+    cancelled_source_refs = {
+        _slot_key(record)
+        for record in records
+        if (
+            _record_color(record) == YCLIENTS_CANCELLED_COLOR
+            or _activity_color(_slot_key(record), activity_colors)
+            == YCLIENTS_CANCELLED_COLOR
+        )
+    }
+    cancelled = sum(
+        repository.delete_yclients_trip_by_source(db, source_ref)
+        for source_ref in cancelled_source_refs
+    )
+
     groups = {}
     for record in records:
         if record.get("deleted") or _is_no_show(record):
             continue
-        if _record_color(record) == YCLIENTS_BLOCKED_SHIFT_COLOR:
+        source_ref = _slot_key(record)
+        if (
+            _record_color(record) == YCLIENTS_BLOCKED_SHIFT_COLOR
+            or source_ref in cancelled_source_refs
+        ):
             continue
-        groups.setdefault(_slot_key(record), []).append(record)
+        groups.setdefault(source_ref, []).append(record)
 
-    stats = {"automatic": 0, "pending": 0, "skipped": 0}
+    stats = {
+        "automatic": 0,
+        "pending": 0,
+        "skipped": 0,
+        "cancelled": cancelled,
+    }
     for source_ref, grouped_records in groups.items():
         boat = _boat_for_group(source_ref, grouped_records, activity_colors)
         config = FUEL_CONFIG.get(boat)
