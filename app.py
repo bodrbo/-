@@ -5153,6 +5153,92 @@ def yclients_get_records(start_date, end_date):
     return all_records
 
 
+def yclients_get_staff():
+    """Return the current YCLIENTS staff directory for this branch."""
+    resp = requests.get(
+        f"{YCLIENTS_API_BASE}/staff/{YCLIENTS_COMPANY_ID}",
+        headers=_yclients_headers(),
+        timeout=20,
+    )
+    if not resp.ok:
+        raise RuntimeError(
+            f"Yclients вернул {resp.status_code} при загрузке сотрудников. "
+            f"Ответ сервера: {resp.text[:500]}"
+        )
+    body = resp.json()
+    if not body.get("success"):
+        raise RuntimeError(
+            "Yclients API вернул success=false при загрузке сотрудников: "
+            + json.dumps(body)[:300]
+        )
+    staff = body.get("data") or []
+    if not isinstance(staff, list):
+        raise RuntimeError("Yclients API вернул некорректный список сотрудников.")
+    return staff
+
+
+def yclients_get_working_staff_days(employee_names, start_date, end_date):
+    """Read real work schedules, including shifts that have zero bookings.
+
+    ``records`` cannot reveal an entirely empty shift. The schedule endpoint
+    is queried for every active local employee whose name exists in the
+    YCLIENTS staff directory. Requests are independent and run concurrently.
+    The result uses canonical local names so payroll entries remain linked to
+    the employee directory even if YCLIENTS differs only in letter case.
+    """
+    local_names = {
+        name.strip().casefold(): name.strip() for name in employee_names if name.strip()
+    }
+    staff_matches = []
+    for staff in yclients_get_staff():
+        yclients_name = str(staff.get("name") or "").strip()
+        local_name = local_names.get(yclients_name.casefold())
+        fired = str(staff.get("fired") or "0").strip().lower() in {"1", "true", "yes"}
+        if local_name and staff.get("id") is not None and not fired:
+            staff_matches.append((staff["id"], local_name))
+
+    if not staff_matches:
+        return {"staffed_days": set(), "checked_employees": set()}
+
+    def fetch_one(match):
+        staff_id, local_name = match
+        resp = session.get(
+            f"{YCLIENTS_API_BASE}/schedule/{YCLIENTS_COMPANY_ID}/{staff_id}/"
+            f"{start_date}/{end_date}",
+            timeout=20,
+        )
+        if not resp.ok:
+            raise RuntimeError(
+                f"Yclients вернул {resp.status_code} для графика сотрудника "
+                f"«{local_name}». Ответ сервера: {resp.text[:300]}"
+            )
+        body = resp.json()
+        if not body.get("success") or not isinstance(body.get("data"), list):
+            raise RuntimeError(
+                f"Yclients вернул некорректный график сотрудника «{local_name}»."
+            )
+        working_dates = set()
+        for day in body["data"]:
+            work_date = str(day.get("date") or "")[:10]
+            is_working = str(day.get("is_working") or "0").strip().lower()
+            if start_date <= work_date <= end_date and is_working in {"1", "true", "yes"}:
+                working_dates.add(work_date)
+        return local_name, working_dates
+
+    staffed_days = set()
+    checked_employees = set()
+    with requests.Session() as session:
+        session.headers.update(_yclients_headers())
+        with ThreadPoolExecutor(max_workers=min(10, len(staff_matches))) as pool:
+            for employee, working_dates in pool.map(fetch_one, staff_matches):
+                checked_employees.add(employee)
+                staffed_days.update((employee, work_date) for work_date in working_dates)
+    return {
+        "staffed_days": staffed_days,
+        "checked_employees": checked_employees,
+    }
+
+
 def yclients_get_activity_colors(activity_ids):
     """Group events (activities) carry their own color on the event object
     itself, not on each individual record inside it — fetch each distinct
@@ -5473,28 +5559,66 @@ def build_import_candidates(records, activity_colors=None):
     return candidates
 
 
-def apply_minimum_shift_rate(db, records):
+def apply_minimum_shift_rate(
+    db,
+    records,
+    scheduled_staff_days=None,
+    checked_schedule_employees=None,
+    schedule_start_date=None,
+    schedule_end_date=None,
+):
     """Every crew member has a guaranteed minimum of MIN_SHIFT_RATE per
-    shift. "Staffed" comes straight from the raw Yclients records — any
-    non-deleted record with a staff name counts, regardless of whether it
-    ever turns into a confirmed trip — compared against what they actually
-    earned that day per our own `entries` (from any source: manual entry,
-    a confirmed trip, or an earlier top-up). Shortfalls get a top-up entry.
+    shift. "Staffed" is the union of real YCLIENTS work schedules and raw
+    records. The schedule source is essential for employees whose shift has
+    zero bookings; records remain a fallback and also cover names outside the
+    local employee directory. Earnings come from our own ``entries`` and a
+    shortfall receives a top-up.
 
     Self-correcting: run again after trips for that day change and an
-    existing top-up shrinks, grows, or disappears to match — it never just
-    accumulates. Returns how many top-up entries were added/changed/removed.
+    existing top-up shrinks, grows, or disappears to match. When a complete
+    schedule range was fetched, top-ups for locally checked employees who are
+    no longer scheduled are removed too. Returns how many top-up entries were
+    added/changed/removed.
     """
-    staffed_days = set()
+    staffed_days = set(scheduled_staff_days or ())
+    real_record_days = set()
+    blocked_days = set()
     for r in records:
-        if r.get("deleted") or _yclients_record_is_blocker(r):
+        if r.get("deleted"):
             continue
         name = (r.get("staff") or {}).get("name", "").strip()
         if not name:
             continue
-        staffed_days.add((name, _yclients_record_date(r)))
+        pair = (name, _yclients_record_date(r))
+        if _yclients_record_is_blocker(r):
+            blocked_days.add(pair)
+            continue
+        real_record_days.add(pair)
+        staffed_days.add(pair)
+
+    # A red "не ставить в рейсы" marker overrides a nominal schedule day
+    # only when there is no genuine record proving that the person actually
+    # worked that date.
+    staffed_days.difference_update(blocked_days - real_record_days)
 
     changed = 0
+    checked_schedule_employees = set(checked_schedule_employees or ())
+    if (
+        checked_schedule_employees
+        and schedule_start_date
+        and schedule_end_date
+    ):
+        existing_topups = db.execute(
+            "SELECT id, employee, work_date FROM entries WHERE work_type = ? "
+            "AND work_date BETWEEN ? AND ?",
+            (MIN_SHIFT_TOPUP_WORK_TYPE, schedule_start_date, schedule_end_date),
+        ).fetchall()
+        for topup in existing_topups:
+            pair = (topup["employee"], topup["work_date"])
+            if topup["employee"] in checked_schedule_employees and pair not in staffed_days:
+                db.execute("DELETE FROM entries WHERE id = ?", (topup["id"],))
+                changed += 1
+
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     for employee, work_date in staffed_days:
         earned = db.execute(
@@ -5532,6 +5656,28 @@ def apply_minimum_shift_rate(db, records):
 
     db.commit()
     return changed
+
+
+def _yclients_payroll_schedule(db, start_date, end_date, today=None):
+    """Fetch the authoritative non-future schedule window for payroll."""
+    today = today or dt.date.today()
+    start = dt.date.fromisoformat(start_date)
+    end = min(dt.date.fromisoformat(end_date), today)
+    if start > end:
+        return {
+            "staffed_days": set(),
+            "checked_employees": set(),
+            "start_date": None,
+            "end_date": None,
+        }
+    result = yclients_get_working_staff_days(
+        _active_employee_names(db), start.isoformat(), end.isoformat()
+    )
+    return {
+        **result,
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+    }
 
 
 def _is_number(value):
@@ -5730,6 +5876,11 @@ def _import_yclients_trip_records(
     *,
     now=None,
     prune_stale=False,
+    scheduled_staff_days=None,
+    checked_schedule_employees=None,
+    schedule_start_date=None,
+    schedule_end_date=None,
+    minimum_shift_records=None,
 ):
     """Import one already-fetched YCLIENTS window, safely on repeated runs.
 
@@ -5809,7 +5960,14 @@ def _import_yclients_trip_records(
 
     # Run only after trips have landed in entries, otherwise a shift can get
     # a temporary top-up before its actual trip pay is taken into account.
-    topups_changed = apply_minimum_shift_rate(db, records)
+    topups_changed = apply_minimum_shift_rate(
+        db,
+        records if minimum_shift_records is None else minimum_shift_records,
+        scheduled_staff_days=scheduled_staff_days,
+        checked_schedule_employees=checked_schedule_employees,
+        schedule_start_date=schedule_start_date,
+        schedule_end_date=schedule_end_date,
+    )
     pending_total = db.execute(
         "SELECT COUNT(*) AS count FROM import_candidates"
     ).fetchone()["count"]
@@ -5874,6 +6032,19 @@ def import_fetch():
     except requests.RequestException as e:
         return redirect(url_for("import_index", error=f"Ошибка при запросе групповых событий: {e}"))
 
+    payroll_schedule = {
+        "staffed_days": set(),
+        "checked_employees": set(),
+        "start_date": None,
+        "end_date": None,
+    }
+    try:
+        payroll_schedule = _yclients_payroll_schedule(db, start_date, end_date)
+    except (requests.RequestException, RuntimeError, ValueError) as error:
+        # A schedule outage must not block trip/revenue import. Existing
+        # top-ups are left untouched until a later successful check.
+        print(f"YCLIENTS payroll schedule sync failed: {error}", file=sys.stderr, flush=True)
+
     _import_yclients_trip_records(
         db,
         records,
@@ -5881,6 +6052,11 @@ def import_fetch():
         start_date,
         end_date,
         prune_stale=True,
+        scheduled_staff_days=payroll_schedule["staffed_days"],
+        checked_schedule_employees=payroll_schedule["checked_employees"],
+        schedule_start_date=payroll_schedule["start_date"],
+        schedule_end_date=payroll_schedule["end_date"],
+        minimum_shift_records=records,
     )
 
     return redirect(url_for("import_index"))
@@ -8752,6 +8928,24 @@ def _sync_hourly_yclients(db, now=None):
     activity_ids = {record["activity_id"] for record in records if record.get("activity_id")}
     activity_colors = yclients_get_activity_colors(activity_ids)
 
+    payroll_schedule = {
+        "staffed_days": set(),
+        "checked_employees": set(),
+        "start_date": None,
+        "end_date": None,
+    }
+    schedule_error = None
+    try:
+        payroll_schedule = _yclients_payroll_schedule(
+            db, start_date, end_date, today=now.date()
+        )
+    except (requests.RequestException, RuntimeError, ValueError) as error:
+        # Keep income/fuel live even if the separate schedule endpoint is
+        # temporarily unavailable. Crucially, without an authoritative
+        # response we do not delete any existing minimum-rate top-ups.
+        schedule_error = str(error)
+        print(f"YCLIENTS payroll schedule sync failed: {error}", file=sys.stderr, flush=True)
+
     completed_records = _yclients_completed_records(records, now)
     trip_stats = _import_yclients_trip_records(
         db,
@@ -8761,6 +8955,11 @@ def _sync_hourly_yclients(db, now=None):
         end_date,
         now=now,
         prune_stale=False,
+        scheduled_staff_days=payroll_schedule["staffed_days"],
+        checked_schedule_employees=payroll_schedule["checked_employees"],
+        schedule_start_date=payroll_schedule["start_date"],
+        schedule_end_date=payroll_schedule["end_date"],
+        minimum_shift_records=records,
     )
     fuel_stats = fuel_services.sync_yclients_records(
         db, records, activity_colors, now
@@ -8776,6 +8975,11 @@ def _sync_hourly_yclients(db, now=None):
         "end_date": end_date,
         "trips": trip_stats,
         "fuel": fuel_stats,
+        "schedule": {
+            "staffed_days": len(payroll_schedule["staffed_days"]),
+            "checked_employees": len(payroll_schedule["checked_employees"]),
+            "error": schedule_error,
+        },
     }
 
 
@@ -8827,10 +9031,18 @@ def cron_sync_fuel():
         return f"error: {error}", 502
     trip_stats = stats["trips"]
     fuel_stats = stats["fuel"]
+    schedule_stats = stats.get("schedule") or {}
+    schedule_summary = (
+        "schedule unavailable"
+        if schedule_stats.get("error")
+        else f"{schedule_stats.get('staffed_days', 0)} scheduled staff-days"
+    )
     return (
         f"ok: {trip_stats['imported']} trips imported, "
         f"{trip_stats.get('payroll_updated', 0)} payroll assignments updated, "
+        f"{trip_stats.get('topups_changed', 0)} minimum-rate top-ups updated, "
         f"{trip_stats['pending']} trips pending review; "
+        f"schedule: {schedule_summary}; "
         f"fuel: {fuel_stats['automatic']} automatic, "
         f"{fuel_stats['pending']} pending, {fuel_stats['skipped']} skipped",
         200,

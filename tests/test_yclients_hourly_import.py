@@ -27,6 +27,13 @@ class YclientsHourlyImportTests(unittest.TestCase):
 
         self.original_records = application_module.yclients_get_records
         self.original_colors = application_module.yclients_get_activity_colors
+        self.original_working_days = application_module.yclients_get_working_staff_days
+        application_module.yclients_get_working_staff_days = (
+            lambda employee_names, start_date, end_date: {
+                "staffed_days": set(),
+                "checked_employees": set(),
+            }
+        )
         self.addCleanup(
             setattr,
             application_module,
@@ -39,6 +46,12 @@ class YclientsHourlyImportTests(unittest.TestCase):
             "yclients_get_activity_colors",
             self.original_colors,
         )
+        self.addCleanup(
+            setattr,
+            application_module,
+            "yclients_get_working_staff_days",
+            self.original_working_days,
+        )
 
     @staticmethod
     def record(
@@ -49,6 +62,7 @@ class YclientsHourlyImportTests(unittest.TestCase):
         deleted=False,
         activity_id=None,
         staff_name="Дмитрий Тарусов",
+        color="8bc34a",
     ):
         return {
             "id": record_id,
@@ -57,7 +71,7 @@ class YclientsHourlyImportTests(unittest.TestCase):
             "seance_length": 3600,
             "attendance": attendance,
             "deleted": deleted,
-            "custom_color": "8bc34a",
+            "custom_color": color,
             "staff": {"name": staff_name},
             "services": [
                 {
@@ -163,6 +177,87 @@ class YclientsHourlyImportTests(unittest.TestCase):
             ).fetchone()["last_success_at"]
 
         self.assertEqual(cursor, "2026-08-10 11:00")
+
+    def test_empty_scheduled_shift_receives_full_minimum_and_self_corrects(self):
+        application_module.yclients_get_records = lambda start, end: []
+        application_module.yclients_get_activity_colors = lambda ids: {}
+        application_module.yclients_get_working_staff_days = (
+            lambda employee_names, start_date, end_date: {
+                "staffed_days": {("Платон Жмаев", "2026-08-23")},
+                "checked_employees": {"Платон Жмаев"},
+            }
+        )
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            first = application_module._sync_hourly_yclients(
+                db, dt.datetime(2026, 8, 23, 12, 0)
+            )
+            topup = db.execute(
+                "SELECT amount FROM entries WHERE employee = ? AND work_date = ? "
+                "AND work_type = ?",
+                (
+                    "Платон Жмаев",
+                    "2026-08-23",
+                    application_module.MIN_SHIFT_TOPUP_WORK_TYPE,
+                ),
+            ).fetchone()
+
+            application_module.yclients_get_working_staff_days = (
+                lambda employee_names, start_date, end_date: {
+                    "staffed_days": set(),
+                    "checked_employees": {"Платон Жмаев"},
+                }
+            )
+            second = application_module._sync_hourly_yclients(
+                db, dt.datetime(2026, 8, 23, 13, 0)
+            )
+            remaining = db.execute(
+                "SELECT COUNT(*) AS count FROM entries WHERE employee = ? AND work_date = ? "
+                "AND work_type = ?",
+                (
+                    "Платон Жмаев",
+                    "2026-08-23",
+                    application_module.MIN_SHIFT_TOPUP_WORK_TYPE,
+                ),
+            ).fetchone()["count"]
+
+        self.assertIsNotNone(topup)
+        self.assertEqual(topup["amount"], 3000)
+        self.assertEqual(first["trips"]["topups_changed"], 1)
+        self.assertEqual(first["schedule"]["staffed_days"], 1)
+        self.assertEqual(second["trips"]["topups_changed"], 1)
+        self.assertEqual(remaining, 0)
+
+    def test_blocked_schedule_day_does_not_receive_minimum_without_real_trip(self):
+        application_module.yclients_get_records = lambda start, end: [
+            self.record(
+                20,
+                "09",
+                staff_name="Платон Жмаев",
+                color=application_module.BLOCKED_SHIFT_COLOR,
+            )
+        ]
+        application_module.yclients_get_activity_colors = lambda ids: {}
+        application_module.yclients_get_working_staff_days = (
+            lambda employee_names, start_date, end_date: {
+                "staffed_days": {("Платон Жмаев", "2026-08-23")},
+                "checked_employees": {"Платон Жмаев"},
+            }
+        )
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            application_module._sync_hourly_yclients(
+                db, dt.datetime(2026, 8, 23, 12, 0)
+            )
+            topups = db.execute(
+                "SELECT COUNT(*) AS count FROM entries WHERE employee = ? "
+                "AND work_type = ?",
+                ("Платон Жмаев", application_module.MIN_SHIFT_TOPUP_WORK_TYPE),
+            ).fetchone()["count"]
+
+        self.assertEqual(topups, 0)
 
     def test_reassigned_trip_moves_payroll_without_duplicate_revenue(self):
         old_record = self.record(10, "09", staff_name="Старый капитан")
