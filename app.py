@@ -259,6 +259,12 @@ CRON_SECRET = os.environ.get("CRON_SECRET")
 TILDA_WEBHOOK_SECRET = os.environ.get("TILDA_WEBHOOK_SECRET")
 
 # ---------------------------------------------------------------------
+# Server-to-server webhook for leads from tuning.bodrbo.ru. The secret is
+# deliberately environment-only; without it the JSON API stays unavailable.
+# ---------------------------------------------------------------------
+TUNING_SITE_WEBHOOK_SECRET = os.environ.get("TUNING_SITE_WEBHOOK_SECRET")
+
+# ---------------------------------------------------------------------
 # МодульКасса — автоматическая фискализация чека при записи оплаты по
 # заказу вручную (см. add_tuning_payment). MODULKASSA_USERNAME/PASSWORD —
 # НЕ пароль от личного кабинета МодульКассы, а логин/пароль, которые
@@ -3185,11 +3191,13 @@ def _process_tuning_form(form):
 def _get_or_create_client(db, phone, client_name, boat_model):
     """Find the client cabinet for this phone number, refreshing their name
     and boat, or create one with a fresh unique link if none exists yet."""
-    row = db.execute("SELECT id FROM clients WHERE phone = ?", (phone,)).fetchone()
+    row = db.execute(
+        "SELECT id, boat_model FROM clients WHERE phone = ?", (phone,)
+    ).fetchone()
     if row:
         db.execute(
             "UPDATE clients SET client_name = ?, boat_model = ? WHERE id = ?",
-            (client_name, boat_model, row["id"]),
+            (client_name, boat_model or row["boat_model"], row["id"]),
         )
         return row["id"]
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -4142,6 +4150,150 @@ def add_tuning_order():
     )
     db.commit()
     return redirect(url_for("tuning_index"))
+
+
+# Fixed JSON contract for the standalone tuning.bodrbo.ru site. Keeping
+# these limits here makes the public boundary explicit and prevents an
+# accidental multi-megabyte lead from being copied into orders/notes.
+_TUNING_LEAD_TEXT_LIMITS = {
+    "request_id": 128,
+    "name": 200,
+    "phone": 64,
+    "boat_model": 200,
+    "message": 5000,
+    "source_url": 2048,
+    "submitted_at": 100,
+}
+_TUNING_LEAD_REQUIRED_FIELDS = ("request_id", "name", "phone")
+
+
+def _tuning_lead_json_error(status, error, message):
+    return jsonify(ok=False, error=error, message=message), status
+
+
+def _validate_tuning_lead_payload(payload):
+    """Validate and normalize the public tuning-site lead contract."""
+    if not isinstance(payload, dict):
+        return None, "Тело запроса должно быть JSON-объектом."
+
+    data = {}
+    for field, limit in _TUNING_LEAD_TEXT_LIMITS.items():
+        value = payload.get(field)
+        if value is None and field not in _TUNING_LEAD_REQUIRED_FIELDS:
+            value = ""
+        if not isinstance(value, str):
+            return None, f"Поле «{field}» должно быть строкой."
+        value = value.strip()
+        if field in _TUNING_LEAD_REQUIRED_FIELDS and not value:
+            return None, f"Поле «{field}» обязательно."
+        if len(value) > limit:
+            return None, f"Поле «{field}» длиннее допустимых {limit} символов."
+        data[field] = value
+    return data, None
+
+
+def _tuning_site_token_is_valid(authorization):
+    scheme, separator, supplied = (authorization or "").partition(" ")
+    token = supplied.strip() if separator and scheme.lower() == "bearer" else ""
+    # Compare bytes so arbitrary non-ASCII input cannot make compare_digest
+    # raise; the comparison itself remains constant-time for the supplied
+    # byte strings.
+    return secrets.compare_digest(
+        token.encode("utf-8"), TUNING_SITE_WEBHOOK_SECRET.encode("utf-8")
+    )
+
+
+@app.route("/api/integrations/tuning-leads", methods=["POST"])
+def tuning_site_lead_webhook():
+    """Create one tuning-center lead from tuning.bodrbo.ru JSON."""
+    if not TUNING_SITE_WEBHOOK_SECRET:
+        return _tuning_lead_json_error(
+            503,
+            "integration_not_configured",
+            "Интеграция с сайтом тюнинга не настроена.",
+        )
+    if not _tuning_site_token_is_valid(request.headers.get("Authorization", "")):
+        response, status = _tuning_lead_json_error(
+            401, "unauthorized", "Неверный токен авторизации."
+        )
+        response.headers["WWW-Authenticate"] = "Bearer"
+        return response, status
+
+    payload = request.get_json(silent=True) if request.is_json else None
+    data, validation_error = _validate_tuning_lead_payload(payload)
+    if validation_error:
+        return _tuning_lead_json_error(
+            400, "invalid_payload", validation_error
+        )
+
+    db = get_db()
+    source_ref = f"tuning_site:{data['request_id']}"
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    try:
+        # Serializing this short check/create transaction makes request_id
+        # idempotent even when the site retries concurrently.
+        db.execute("BEGIN IMMEDIATE")
+        existing = db.execute(
+            "SELECT id FROM tuning_orders WHERE source_ref = ?", (source_ref,)
+        ).fetchone()
+        if existing is not None:
+            db.commit()
+            return jsonify(
+                ok=True, duplicate=True, order_id=existing["id"]
+            ), 200
+
+        client_id = _get_or_create_client(
+            db, data["phone"], data["name"], data["boat_model"]
+        )
+        cursor = db.execute(
+            "INSERT INTO tuning_orders "
+            "(client_id, client_name, boat_model, sale_channel, phone, "
+            "discount_pct, discount_type, discount_value, subtotal, total, "
+            "status, source, source_ref, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'direct', ?, 0, 'percent', 0, 0, 0, "
+            "'new_request', 'tuning_site', ?, ?, ?)",
+            (
+                client_id,
+                data["name"],
+                data["boat_model"],
+                data["phone"],
+                source_ref,
+                now,
+                now,
+            ),
+        )
+        order_id = cursor.lastrowid
+        db.execute(
+            "INSERT INTO projects (name, tuning_order_id, created_at) "
+            "VALUES (?, ?, ?)",
+            (f"Заказ №{order_id}", order_id, now),
+        )
+
+        note_lines = ["Заявка с tuning.bodrbo.ru."]
+        if data["message"]:
+            note_lines.append(f"Сообщение: {data['message']}")
+        if data["source_url"]:
+            note_lines.append(f"Страница отправки: {data['source_url']}")
+        note_lines.append(
+            "Время отправки: " + (data["submitted_at"] or now)
+        )
+        db.execute(
+            "INSERT INTO tuning_order_notes "
+            "(order_id, author_admin_id, text, created_at) "
+            "VALUES (?, NULL, ?, ?)",
+            (order_id, "\n".join(note_lines), now),
+        )
+        db.commit()
+    except sqlite3.Error:
+        db.rollback()
+        app.logger.exception("Failed to create tuning-site lead")
+        return _tuning_lead_json_error(
+            503,
+            "service_unavailable",
+            "Не удалось сохранить заявку. Повторите запрос позже.",
+        )
+
+    return jsonify(ok=True, order_id=order_id), 201
 
 
 # Field names in a Tilda webhook payload are whatever the site's form

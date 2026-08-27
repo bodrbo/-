@@ -115,6 +115,16 @@
 Заявки с сайта на Tilda могут автоматически создавать новые заказы со
 статусом «Новая заявка».
 
+Отдельный сайт `tuning.bodrbo.ru` использует server-to-server endpoint
+`POST /api/integrations/tuning-leads`. Запрос передаётся в JSON и
+авторизуется заголовком `Authorization: Bearer <TUNING_SITE_WEBHOOK_SECRET>`.
+Обязательные строковые поля: `request_id`, `name`, `phone`; необязательные:
+`boat_model`, `message`, `source_url`, `submitted_at`. `request_id` сохраняется
+с префиксом `tuning_site:` и делает повторную доставку идемпотентной. Новая
+заявка создаёт клиента, заказ со статусом `new_request`, связанный финансовый
+проект и заметку с исходными данными. Реальный секрет хранится только в
+серверном `.env`.
+
 ### Оплаты и чеки
 
 - ручная регистрация платежей по заказу;
@@ -304,6 +314,7 @@ python app.py
 | Переменная | Назначение |
 | --- | --- |
 | `TILDA_WEBHOOK_SECRET` | Проверка webhook от Tilda |
+| `TUNING_SITE_WEBHOOK_SECRET` | Server-to-server заявки с `tuning.bodrbo.ru` |
 | `TELEGRAM_BOT_TOKEN` | Токен Telegram-бота |
 | `TELEGRAM_BOT_USERNAME` | Необязательное имя бота без `@` для ссылки из раздела сотрудников |
 | `TELEGRAM_CHAT_ID` | Основной административный чат |
@@ -320,6 +331,7 @@ YCLIENTS_PARTNER_TOKEN=...
 YCLIENTS_USER_TOKEN=...
 YCLIENTS_COMPANY_ID=...
 CRON_SECRET=...
+TUNING_SITE_WEBHOOK_SECRET=...
 YOOKASSA_SHOP_ID=...
 YOOKASSA_SECRET_KEY=...
 YOOKASSA_EXCURSION_VAT_CODE=7
