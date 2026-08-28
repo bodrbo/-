@@ -755,12 +755,27 @@ def tuning_equipment_label(order):
         motor_model = (order["motor_model"] or "").strip()
     except (KeyError, IndexError):
         motor_model = ""
+    try:
+        boat_registration_number = (order["boat_registration_number"] or "").strip()
+    except (KeyError, IndexError):
+        boat_registration_number = ""
+    try:
+        motor_serial_number = (order["motor_serial_number"] or "").strip()
+    except (KeyError, IndexError):
+        motor_serial_number = ""
 
     if equipment_type == "motor":
-        return motor_model or "Мотор"
-    if boat_model and motor_model:
-        return f"{boat_model} · мотор {motor_model}"
-    return boat_model or "Лодка"
+        label = motor_model or "Мотор"
+        if motor_serial_number:
+            label += f" · серийный № {motor_serial_number}"
+        return label
+
+    label = boat_model or "Лодка"
+    if boat_registration_number:
+        label += f" · бортовой № {boat_registration_number}"
+    if motor_model:
+        label += f" · мотор {motor_model}"
+    return label
 
 
 app.add_template_filter(tuning_equipment_label, "tuning_equipment_label")
@@ -1266,7 +1281,9 @@ def init_db():
             client_name TEXT NOT NULL,
             equipment_type TEXT NOT NULL DEFAULT 'boat',
             boat_model TEXT NOT NULL,
+            boat_registration_number TEXT NOT NULL DEFAULT '',
             motor_model TEXT NOT NULL DEFAULT '',
+            motor_serial_number TEXT NOT NULL DEFAULT '',
             sale_channel TEXT NOT NULL,
             phone TEXT NOT NULL,
             discount_pct REAL NOT NULL DEFAULT 0,
@@ -1783,6 +1800,16 @@ def init_db():
             "ALTER TABLE tuning_orders "
             "ADD COLUMN motor_model TEXT NOT NULL DEFAULT ''"
         )
+    if "boat_registration_number" not in tuning_cols:
+        conn.execute(
+            "ALTER TABLE tuning_orders "
+            "ADD COLUMN boat_registration_number TEXT NOT NULL DEFAULT ''"
+        )
+    if "motor_serial_number" not in tuning_cols:
+        conn.execute(
+            "ALTER TABLE tuning_orders "
+            "ADD COLUMN motor_serial_number TEXT NOT NULL DEFAULT ''"
+        )
     _sync_tuning_boat_profiles(conn)
     conn.execute(
         """
@@ -2194,8 +2221,10 @@ def _payroll_context(db, selected_week, selected_employee):
     projects = db.execute(
         "SELECT projects.*, tuning_orders.client_name AS client_name, "
         "tuning_orders.boat_model AS boat_model, "
+        "tuning_orders.boat_registration_number AS boat_registration_number, "
         "tuning_orders.equipment_type AS equipment_type, "
-        "tuning_orders.motor_model AS motor_model "
+        "tuning_orders.motor_model AS motor_model, "
+        "tuning_orders.motor_serial_number AS motor_serial_number "
         "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
         "ORDER BY projects.created_at DESC, projects.id DESC"
     ).fetchall()
@@ -3207,11 +3236,19 @@ def _process_tuning_form(form):
     if equipment_type not in {item["value"] for item in EQUIPMENT_TYPES}:
         equipment_type = "boat"
     boat_model = form.get("boat_model", "").strip()
+    boat_registration_number = form.get("boat_registration_number", "").strip()
     motor_model = form.get("motor_model", "").strip()
+    motor_serial_number = form.get("motor_serial_number", "").strip()
     if equipment_type == "motor":
         # A motor-only order must never create or join a boat profile even
         # if a stale hidden boat input was submitted by the browser.
         boat_model = ""
+        boat_registration_number = ""
+    else:
+        # A serial number belongs to a motor-only order. A boat order may
+        # still name its installed motor, but that does not make the motor
+        # a separate catalog entity or carry over a stale serial number.
+        motor_serial_number = ""
     phone = form.get("phone", "").strip()
     sale_channel = form.get("sale_channel", "direct").strip()
     if sale_channel not in [c["value"] for c in SALE_CHANNELS]:
@@ -3302,7 +3339,8 @@ def _process_tuning_form(form):
 
     data = dict(
         client_name=client_name, equipment_type=equipment_type,
-        boat_model=boat_model, motor_model=motor_model, phone=phone,
+        boat_model=boat_model, boat_registration_number=boat_registration_number,
+        motor_model=motor_model, motor_serial_number=motor_serial_number, phone=phone,
         sale_channel=sale_channel, discount_type=discount_type, discount_value=discount_value,
         # discount_pct is kept only for older code/rows that still read it —
         # 0 when the discount is a fixed amount, since it isn't a percent.
@@ -4463,11 +4501,12 @@ def add_tuning_order():
     client_id = _get_or_create_client(db, data["phone"], data["client_name"], data["boat_model"])
     cur = db.execute(
         "INSERT INTO tuning_orders (client_id, client_name, equipment_type, boat_model, "
-        "motor_model, sale_channel, phone, "
+        "boat_registration_number, motor_model, motor_serial_number, sale_channel, phone, "
         "discount_pct, discount_type, discount_value, subtotal, total, status, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (client_id, data["client_name"], data["equipment_type"], data["boat_model"],
-         data["motor_model"], data["sale_channel"], data["phone"],
+         data["boat_registration_number"], data["motor_model"],
+         data["motor_serial_number"], data["sale_channel"], data["phone"],
          data["discount_pct"], data["discount_type"], data["discount_value"],
          data["subtotal"], data["total"], DEFAULT_ORDER_STATUS, now, now),
     )
@@ -4816,7 +4855,10 @@ def edit_tuning_order(order_id):
         form_values = {
             "client_name": order["client_name"],
             "equipment_type": order["equipment_type"],
-            "boat_model": order["boat_model"], "motor_model": order["motor_model"],
+            "boat_model": order["boat_model"],
+            "boat_registration_number": order["boat_registration_number"],
+            "motor_model": order["motor_model"],
+            "motor_serial_number": order["motor_serial_number"],
             "sale_channel": order["sale_channel"], "phone": order["phone"],
             "discount_type": order["discount_type"], "discount_value": order["discount_value"],
         }
@@ -4874,10 +4916,11 @@ def edit_tuning_order(order_id):
     client_id = _get_or_create_client(db, data["phone"], data["client_name"], data["boat_model"])
     db.execute(
         "UPDATE tuning_orders SET client_id=?, client_name=?, equipment_type=?, boat_model=?, "
-        "motor_model=?, sale_channel=?, phone=?, "
+        "boat_registration_number=?, motor_model=?, motor_serial_number=?, sale_channel=?, phone=?, "
         "discount_pct=?, discount_type=?, discount_value=?, subtotal=?, total=?, updated_at=? WHERE id=?",
         (client_id, data["client_name"], data["equipment_type"], data["boat_model"],
-         data["motor_model"], data["sale_channel"], data["phone"],
+         data["boat_registration_number"], data["motor_model"],
+         data["motor_serial_number"], data["sale_channel"], data["phone"],
          data["discount_pct"], data["discount_type"], data["discount_value"],
          data["subtotal"], data["total"], now, order_id),
     )
@@ -5357,7 +5400,8 @@ def client_approve_item(token, item_id):
         return redirect(url_for("home"))
     item = db.execute(
         "SELECT toi.id, toi.status, toi.work_name, o.client_name, "
-        "o.equipment_type, o.boat_model, o.motor_model "
+        "o.equipment_type, o.boat_model, o.boat_registration_number, "
+        "o.motor_model, o.motor_serial_number "
         "FROM tuning_order_items toi "
         "JOIN tuning_orders o ON o.id = toi.order_id "
         "WHERE toi.id = ? AND o.client_id = ?",
@@ -7607,8 +7651,10 @@ def team_dashboard():
         tuning_tasks = db.execute(
             "SELECT ta.*, ti.work_name AS item_work_name, ti.status AS item_status, "
             "tord.client_name AS order_client_name, tord.boat_model AS order_boat_model, "
+            "tord.boat_registration_number AS order_boat_registration_number, "
             "tord.equipment_type AS order_equipment_type, "
             "tord.motor_model AS order_motor_model, "
+            "tord.motor_serial_number AS order_motor_serial_number, "
             "tord.id AS tuning_order_id "
             "FROM tuning_item_assignments ta "
             "JOIN tuning_order_items ti ON ti.id = ta.item_id "
@@ -7622,7 +7668,9 @@ def team_dashboard():
             task["equipment_label"] = tuning_equipment_label({
                 "equipment_type": task["order_equipment_type"],
                 "boat_model": task["order_boat_model"],
+                "boat_registration_number": task["order_boat_registration_number"],
                 "motor_model": task["order_motor_model"],
+                "motor_serial_number": task["order_motor_serial_number"],
             })
             materials = db.execute(
                 "SELECT sw.*, sp.name AS product_name "
@@ -8639,8 +8687,10 @@ def _transactions_table_context(db):
     projects = db.execute(
         "SELECT projects.*, tuning_orders.client_name AS client_name, "
         "tuning_orders.boat_model AS boat_model, "
+        "tuning_orders.boat_registration_number AS boat_registration_number, "
         "tuning_orders.equipment_type AS equipment_type, "
-        "tuning_orders.motor_model AS motor_model "
+        "tuning_orders.motor_model AS motor_model, "
+        "tuning_orders.motor_serial_number AS motor_serial_number "
         "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
         "ORDER BY projects.created_at DESC, projects.id DESC"
     ).fetchall()
@@ -8847,8 +8897,10 @@ def analytics_projects():
     rows = db.execute(
         "SELECT projects.*, tuning_orders.client_name AS client_name, "
         "tuning_orders.boat_model AS boat_model, "
+        "tuning_orders.boat_registration_number AS boat_registration_number, "
         "tuning_orders.equipment_type AS equipment_type, "
-        "tuning_orders.motor_model AS motor_model "
+        "tuning_orders.motor_model AS motor_model, "
+        "tuning_orders.motor_serial_number AS motor_serial_number "
         "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
         "ORDER BY projects.created_at DESC, projects.id DESC"
     ).fetchall()
@@ -8858,7 +8910,9 @@ def analytics_projects():
         projects.append({
             "id": p["id"], "name": p["name"], "tuning_order_id": p["tuning_order_id"],
             "client_name": p["client_name"], "boat_model": p["boat_model"],
+            "boat_registration_number": p["boat_registration_number"],
             "equipment_type": p["equipment_type"], "motor_model": p["motor_model"],
+            "motor_serial_number": p["motor_serial_number"],
             "income": income, "expense": expense, "profit": profit,
         })
 
@@ -9100,8 +9154,10 @@ def transaction_split(transaction_id):
     projects = db.execute(
         "SELECT projects.*, tuning_orders.client_name AS client_name, "
         "tuning_orders.boat_model AS boat_model, "
+        "tuning_orders.boat_registration_number AS boat_registration_number, "
         "tuning_orders.equipment_type AS equipment_type, "
-        "tuning_orders.motor_model AS motor_model "
+        "tuning_orders.motor_model AS motor_model, "
+        "tuning_orders.motor_serial_number AS motor_serial_number "
         "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
         "ORDER BY projects.created_at DESC, projects.id DESC"
     ).fetchall()
@@ -10106,7 +10162,8 @@ def cron_send_note_reminders():
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     due = db.execute(
         "SELECT r.*, n.order_id, n.text AS note_text, o.client_name, "
-        "o.equipment_type, o.boat_model, o.motor_model "
+        "o.equipment_type, o.boat_model, o.boat_registration_number, "
+        "o.motor_model, o.motor_serial_number "
         "FROM tuning_order_note_reminders r "
         "JOIN tuning_order_notes n ON n.id = r.note_id "
         "JOIN tuning_orders o ON o.id = n.order_id "

@@ -2505,10 +2505,13 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   color: var(--muted);
   font-size: 9px;
 }
-#boatModelField[hidden] { display: none; }
+#boatModelField[hidden],
+#boatRegistrationNumberField[hidden],
+#motorSerialNumberField[hidden] { display: none; }
 .equipment-kind,
 .equipment-model,
-.equipment-motor { display: block; }
+.equipment-motor,
+.equipment-number { display: block; }
 .equipment-kind {
   margin-bottom: 2px;
   color: var(--muted);
@@ -2518,7 +2521,8 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   text-transform: uppercase;
 }
 .equipment-model { color: var(--ink); font-weight: 700; }
-.equipment-motor { margin-top: 2px; color: var(--muted); font-size: 10px; }
+.equipment-motor,
+.equipment-number { margin-top: 2px; color: var(--muted); font-size: 10px; }
 .boat-profile-page .alert.success {
   border-color: rgba(47,107,79,.28);
   background: rgba(47,107,79,.08);

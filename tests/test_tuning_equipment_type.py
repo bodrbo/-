@@ -37,12 +37,20 @@ class TuningEquipmentTypeTests(unittest.TestCase):
             session["admin_name"] = "Администратор теста"
 
     @staticmethod
-    def valid_form(equipment_type="boat", boat_model="Salute 585 HT", motor_model=""):
+    def valid_form(
+        equipment_type="boat",
+        boat_model="Salute 585 HT",
+        motor_model="",
+        boat_registration_number="",
+        motor_serial_number="",
+    ):
         return MultiDict([
             ("client_name", "Иван Петров"),
             ("equipment_type", equipment_type),
             ("boat_model", boat_model),
+            ("boat_registration_number", boat_registration_number),
             ("motor_model", motor_model),
+            ("motor_serial_number", motor_serial_number),
             ("phone", "+7 900 000-00-00"),
             ("sale_channel", "direct"),
             ("discount_type", "percent"),
@@ -55,20 +63,34 @@ class TuningEquipmentTypeTests(unittest.TestCase):
 
     def test_form_normalizes_boat_and_motor_orders(self):
         boat_errors, boat = application_module._process_tuning_form(
-            self.valid_form(motor_model="Yamaha F150")
+            self.valid_form(
+                motor_model="Yamaha F150",
+                boat_registration_number="Р 12-34 ЛО",
+                motor_serial_number="STALE-MOTOR-SERIAL",
+            )
         )
         motor_errors, motor = application_module._process_tuning_form(
-            self.valid_form("motor", boat_model="Скрытое старое значение", motor_model="Suzuki DF200")
+            self.valid_form(
+                "motor",
+                boat_model="Скрытое старое значение",
+                motor_model="Suzuki DF200",
+                boat_registration_number="STALE-BOAT-NUMBER",
+                motor_serial_number="SN-200-77",
+            )
         )
 
         self.assertEqual(boat_errors, [])
         self.assertEqual(boat["equipment_type"], "boat")
         self.assertEqual(boat["boat_model"], "Salute 585 HT")
+        self.assertEqual(boat["boat_registration_number"], "Р 12-34 ЛО")
         self.assertEqual(boat["motor_model"], "Yamaha F150")
+        self.assertEqual(boat["motor_serial_number"], "")
         self.assertEqual(motor_errors, [])
         self.assertEqual(motor["equipment_type"], "motor")
         self.assertEqual(motor["boat_model"], "")
+        self.assertEqual(motor["boat_registration_number"], "")
         self.assertEqual(motor["motor_model"], "Suzuki DF200")
+        self.assertEqual(motor["motor_serial_number"], "SN-200-77")
 
     def test_conditional_model_validation(self):
         boat_errors, _ = application_module._process_tuning_form(
@@ -86,7 +108,11 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         response = self.client.post(
             "/tuning/add",
             data=self.valid_form(
-                "motor", boat_model="Не должна сохраниться", motor_model="Mercury F200"
+                "motor",
+                boat_model="Не должна сохраниться",
+                motor_model="Mercury F200",
+                boat_registration_number="Не должен сохраниться",
+                motor_serial_number="MRC-200-001",
             ),
         )
 
@@ -96,7 +122,9 @@ class TuningEquipmentTypeTests(unittest.TestCase):
             order = db.execute("SELECT * FROM tuning_orders").fetchone()
             self.assertEqual(order["equipment_type"], "motor")
             self.assertEqual(order["boat_model"], "")
+            self.assertEqual(order["boat_registration_number"], "")
             self.assertEqual(order["motor_model"], "Mercury F200")
+            self.assertEqual(order["motor_serial_number"], "MRC-200-001")
             order_id = order["id"]
 
         orders_page = self.client.get("/tuning")
@@ -104,12 +132,14 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         catalog = self.client.get("/tuning/boats")
 
         self.assertIn("Mercury F200", orders_html)
+        self.assertIn("MRC-200-001", orders_html)
         self.assertIn("Мотор", orders_html)
         self.assertNotIn("Mercury F200", catalog.get_data(as_text=True))
         edit_page = self.client.get(f"/tuning/edit/{order_id}")
         edit_html = edit_page.get_data(as_text=True)
         self.assertIn('name="equipment_type" value="motor"', edit_html)
         self.assertIn('value="Mercury F200"', edit_html)
+        self.assertIn('value="MRC-200-001"', edit_html)
         self.assertNotIn("Открыть профиль ↗", edit_html)
 
     def test_boat_profile_keeps_motor_on_order_not_on_model_identity(self):
@@ -117,7 +147,10 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         response = self.client.post(
             "/tuning/add",
             data=self.valid_form(
-                "boat", boat_model="Salute 585 HT", motor_model="Yamaha F150"
+                "boat",
+                boat_model="Salute 585 HT",
+                motor_model="Yamaha F150",
+                boat_registration_number="Р 55-85 ЛО",
             ),
         )
         self.assertEqual(response.status_code, 302)
@@ -132,6 +165,7 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertEqual(len(profiles), 1)
         self.assertEqual(profiles[0]["model_name"], "Salute 585 HT")
         self.assertEqual(order["motor_model"], "Yamaha F150")
+        self.assertEqual(order["boat_registration_number"], "Р 55-85 ЛО")
         self.assertIn("Salute 585 HT", catalog_html)
         self.assertNotIn("Yamaha F150", catalog_html)
 
@@ -139,6 +173,43 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         profile_html = profile.get_data(as_text=True)
         self.assertIn("Salute 585 HT", profile_html)
         self.assertIn("Yamaha F150", profile_html)
+        self.assertIn("Р 55-85 ЛО", profile_html)
+
+    def test_edit_switches_identifier_fields_with_equipment_type(self):
+        self.login()
+        self.client.post(
+            "/tuning/add",
+            data=self.valid_form(
+                "motor",
+                motor_model="Honda BF150",
+                motor_serial_number="HONDA-OLD-150",
+            ),
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            order_id = db.execute("SELECT id FROM tuning_orders").fetchone()["id"]
+            item_id = db.execute(
+                "SELECT id FROM tuning_order_items WHERE order_id = ?", (order_id,)
+            ).fetchone()["id"]
+
+        updated_form = self.valid_form(
+            "boat",
+            boat_model="Бодрый 600",
+            motor_model="Honda BF150",
+            boat_registration_number="Р 60-00 ЛО",
+            motor_serial_number="STALE-SERIAL",
+        )
+        updated_form.setlist("item_id[]", [str(item_id)])
+        response = self.client.post(f"/tuning/edit/{order_id}", data=updated_form)
+
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            order = application_module.get_db().execute(
+                "SELECT * FROM tuning_orders WHERE id = ?", (order_id,)
+            ).fetchone()
+            self.assertEqual(order["equipment_type"], "boat")
+            self.assertEqual(order["boat_registration_number"], "Р 60-00 ЛО")
+            self.assertEqual(order["motor_serial_number"], "")
 
     def test_existing_schema_migrates_orders_to_boat_type(self):
         handle, database_path = tempfile.mkstemp(suffix=".db")
@@ -165,14 +236,15 @@ class TuningEquipmentTypeTests(unittest.TestCase):
 
         migrated = sqlite3.connect(database_path)
         row = migrated.execute(
-            "SELECT equipment_type, boat_model, motor_model FROM tuning_orders"
+            "SELECT equipment_type, boat_model, boat_registration_number, "
+            "motor_model, motor_serial_number FROM tuning_orders"
         ).fetchone()
         profile = migrated.execute(
             "SELECT model_name FROM tuning_boat_profiles"
         ).fetchone()
         migrated.close()
 
-        self.assertEqual(row, ("boat", "Legacy Boat", ""))
+        self.assertEqual(row, ("boat", "Legacy Boat", "", "", ""))
         self.assertEqual(profile[0], "Legacy Boat")
 
 

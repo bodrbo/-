@@ -194,6 +194,11 @@
               {% if o.equipment_type == 'boat' and o.motor_model %}
               <span class="equipment-motor">Мотор: {{ o.motor_model }}</span>
               {% endif %}
+              {% if o.equipment_type == 'boat' and o.boat_registration_number %}
+              <span class="equipment-number">Бортовой №: {{ o.boat_registration_number }}</span>
+              {% elif o.equipment_type == 'motor' and o.motor_serial_number %}
+              <span class="equipment-number">Серийный №: {{ o.motor_serial_number }}</span>
+              {% endif %}
             </td>
             <td class="muted">{{ 'Напрямую' if o.sale_channel == 'direct' else ('Агрегатор' if o.sale_channel == 'aggregator' else 'Смешанно') }}</td>
             <td class="muted">{{ o.phone }}</td>
@@ -358,13 +363,14 @@
       {% if profile_orders %}
       <div class="table-scroll">
         <table class="records">
-          <thead><tr><th>Заказ</th><th>Дата</th><th>Клиент</th><th>Мотор</th><th>Выполненные работы</th><th>Сумма</th><th>Статус</th></tr></thead>
+          <thead><tr><th>Заказ</th><th>Дата</th><th>Клиент</th><th>Бортовой номер</th><th>Мотор</th><th>Выполненные работы</th><th>Сумма</th><th>Статус</th></tr></thead>
           <tbody>
             {% for order in profile_orders %}
             <tr>
               <td><a href="{{ url_for('edit_tuning_order', order_id=order.id) }}" class="term">№{{ order.id }}</a></td>
               <td class="muted">{{ order.created_at[:10]|ru_date }}</td>
               <td>{{ order.client_name }}</td>
+              <td>{{ order.boat_registration_number or '—' }}</td>
               <td>{{ order.motor_model or '—' }}</td>
               <td class="boat-order-works">{{ order.work_names or 'Работы пока не добавлены' }}</td>
               <td class="amount">{{ order.total|money }}</td>
