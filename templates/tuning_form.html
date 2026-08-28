@@ -622,7 +622,13 @@
                  value="{{ form_values.client_name if form_values else '' }}" required>
         </div>
         <div class="field">
-          <label for="boat_model">Модель лодки</label>
+          <div class="field-label-with-link">
+            <label for="boat_model">Модель лодки</label>
+            {% if boat_profile_id %}
+            <a href="{{ url_for('tuning_boat_profile', profile_id=boat_profile_id) }}"
+               class="tuning-boat-profile-link">Открыть профиль ↗</a>
+            {% endif %}
+          </div>
           <input type="text" id="boat_model" name="boat_model"
                  value="{{ form_values.boat_model if form_values else '' }}" required>
         </div>

@@ -2429,6 +2429,30 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   text-decoration: none;
 }
 .boat-profile-back:hover { text-decoration: underline; }
+.tuning-boat-profile-link {
+  color: var(--brass-strong);
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: rgba(46,134,193,.32);
+  text-underline-offset: 3px;
+}
+.tuning-boat-profile-link:hover { text-decoration-color: currentColor; }
+.tuning-boat-profile-link:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+.field-label-with-link {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.field-label-with-link .tuning-boat-profile-link {
+  flex: none;
+  font-size: 10px;
+  white-space: nowrap;
+}
 .boat-profile-page .alert.success {
   border-color: rgba(47,107,79,.28);
   background: rgba(47,107,79,.08);

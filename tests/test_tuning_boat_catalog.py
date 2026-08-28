@@ -97,6 +97,18 @@ class TuningBoatCatalogTests(unittest.TestCase):
             self.assertEqual(len(profiles), 1)
             profile_id = profiles[0]["id"]
 
+        orders_page = self.client.get("/tuning")
+        orders_html = orders_page.get_data(as_text=True)
+        profile_href = f'href="/tuning/boats/{profile_id}"'
+        self.assertEqual(orders_page.status_code, 200)
+        self.assertEqual(orders_html.count(profile_href), 2)
+
+        order_page = self.client.get(f"/tuning/edit/{older_id}")
+        order_html = order_page.get_data(as_text=True)
+        self.assertEqual(order_page.status_code, 200)
+        self.assertIn(profile_href, order_html)
+        self.assertIn("Открыть профиль ↗", order_html)
+
         profile = self.client.get(f"/tuning/boats/{profile_id}")
         profile_html = profile.get_data(as_text=True)
 

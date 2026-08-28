@@ -182,6 +182,16 @@ def _tuning_boat_photo_url(profile):
     )
 
 
+def _tuning_boat_profile_id(db, model_name):
+    model_key = _normalize_tuning_boat_model(model_name)
+    if not model_key:
+        return None
+    row = db.execute(
+        "SELECT id FROM tuning_boat_profiles WHERE model_key = ?", (model_key,)
+    ).fetchone()
+    return row[0] if row else None
+
+
 def get_work_item_photos(db, item_id):
     """All photos attached to a tuning_order_items row, oldest first, each
     with its own comment — {id, url, comment}."""
@@ -4042,11 +4052,26 @@ def tuning_order_handover_pdf(order_id):
 @admin_login_required
 def tuning_index():
     db = get_db()
-    orders = db.execute(
+    _sync_tuning_boat_profiles(db)
+    db.commit()
+    order_rows = db.execute(
         "SELECT o.*, c.token AS client_token FROM tuning_orders o "
         "LEFT JOIN clients c ON c.id = o.client_id "
         "ORDER BY o.created_at DESC, o.id DESC"
     ).fetchall()
+    profile_ids_by_model = {
+        row["model_key"]: row["id"]
+        for row in db.execute(
+            "SELECT id, model_key FROM tuning_boat_profiles"
+        ).fetchall()
+    }
+    orders = []
+    for row in order_rows:
+        order = dict(row)
+        order["boat_profile_id"] = profile_ids_by_model.get(
+            _normalize_tuning_boat_model(order["boat_model"])
+        )
+        orders.append(order)
     grand_total = sum(o["total"] for o in orders)
     return render_template(
         "tuning_index.html", orders=orders, grand_total=grand_total,
@@ -4664,6 +4689,9 @@ def edit_tuning_order(order_id):
     order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
     if order is None:
         return redirect(url_for("tuning_index"))
+    _sync_tuning_boat_profiles(db)
+    db.commit()
+    boat_profile_id = _tuning_boat_profile_id(db, order["boat_model"])
 
     if request.method == "GET":
         items = []
@@ -4725,6 +4753,7 @@ def edit_tuning_order(order_id):
             goods=goods, goods_subtotal=goods_subtotal, catalog_products=catalog_products,
             cost_units=SUPPLY_COST_UNITS,
             notes=notes, admins=admins,
+            boat_profile_id=boat_profile_id,
             modulkassa_configured=_modulkassa_configured(),
         )
 
@@ -4748,6 +4777,7 @@ def edit_tuning_order(order_id):
             yookassa_payments=yookassa_payments, yookassa_configured=yookassa_configured(),
             yookassa_error=None,
             hull_sheets=hull_sheets, available_hull_sheets=available_hull_sheets,
+            boat_profile_id=boat_profile_id,
             modulkassa_configured=_modulkassa_configured(),
         ), 400
 

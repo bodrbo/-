@@ -181,7 +181,14 @@
               {{ o.client_name }}
               {% endif %}
             </td>
-            <td>{{ o.boat_model }}</td>
+            <td>
+              {% if o.boat_profile_id %}
+              <a href="{{ url_for('tuning_boat_profile', profile_id=o.boat_profile_id) }}"
+                 class="tuning-boat-profile-link">{{ o.boat_model }}</a>
+              {% else %}
+              {{ o.boat_model }}
+              {% endif %}
+            </td>
             <td class="muted">{{ 'Напрямую' if o.sale_channel == 'direct' else ('Агрегатор' if o.sale_channel == 'aggregator' else 'Смешанно') }}</td>
             <td class="muted">{{ o.phone }}</td>
             <td>{{ (o.discount_value|float|round(1)|string ~ '%') if o.discount_type != 'amount' else (o.discount_value|money ~ ' ₽') }}</td>
