@@ -3953,6 +3953,14 @@ def tuning_index():
     )
 
 
+@app.route("/tuning/boats")
+@admin_login_required
+def tuning_boat_catalog():
+    return render_template(
+        "tuning_index.html", active_page="tuning", sub_page="boat_catalog"
+    )
+
+
 @app.route("/tuning/diagnostics/hull")
 @admin_login_required
 def tuning_diagnostics():

@@ -229,5 +229,24 @@ class TuningSiteIntegrationTests(unittest.TestCase):
         self.assertEqual(response.get_data(as_text=True), "ok")
         self.assertEqual(order["source_ref"], "tilda-unchanged-1")
 
+    def test_empty_boat_catalog_is_available_from_tuning_navigation(self):
+        anonymous = self.client.get("/tuning/boats")
+        self.assertEqual(anonymous.status_code, 302)
+        self.assertIn("/admin/login", anonymous.headers["Location"])
+
+        with self.client.session_transaction() as session:
+            session["admin_id"] = 1
+            session["admin_name"] = "Администратор теста"
+        response = self.client.get("/tuning/boats")
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("<title>Каталог лодок</title>", html)
+        self.assertIn(
+            'href="/tuning/boats" class="active">Каталог лодок</a>', html
+        )
+        self.assertNotIn("Заказов всего", html)
+
+
 if __name__ == "__main__":
     unittest.main()

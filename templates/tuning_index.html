@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Тюнинг-центр</title>
+<title>{{ 'Каталог лодок' if sub_page == 'boat_catalog' else 'Тюнинг-центр' }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
@@ -98,7 +98,7 @@
       </a>
     </nav>
     <div class="title-block">
-      <h1>Тюнинг-центр</h1>
+      <h1>{{ 'Каталог лодок' if sub_page == 'boat_catalog' else 'Тюнинг-центр' }}</h1>
     </div>
     <div class="topbar-actions">
       <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
@@ -122,8 +122,10 @@
   <nav class="sub-tabs">
     <a href="{{ url_for('tuning_index') }}" class="{{ 'active' if sub_page == 'orders' }}">Заказы</a>
     <a href="{{ url_for('tuning_diagnostics') }}" class="{{ 'active' if sub_page == 'diagnostics' }}">Диагностика лодок</a>
+    <a href="{{ url_for('tuning_boat_catalog') }}" class="{{ 'active' if sub_page == 'boat_catalog' }}">Каталог лодок</a>
   </nav>
 
+  {% if sub_page == 'orders' %}
   <div class="totals-grid">
     <div class="panel total-card total-card-grand">
       <span class="k">Заказов всего</span>
@@ -214,6 +216,7 @@
     </div>
     {% endif %}
   </section>
+  {% endif %}
 
 </main>
 
