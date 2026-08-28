@@ -2597,11 +2597,37 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   white-space: nowrap;
 }
 .boat-profile-stats span { margin-top: 3px; color: var(--muted); font-size: 9px; }
-.boat-profile-specifications > label {
-  display: block;
-  margin-bottom: 7px;
+.boat-profile-specifications h3 { margin: 0 0 10px; font-size: 15px; }
+.boat-specification-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 9px;
+  background: var(--hairline-soft);
+}
+.boat-specification-grid > div { min-width: 0; padding: 10px 12px; background: var(--paper-alt); }
+.boat-specification-grid dt { color: var(--muted); font-size: 9px; font-weight: 700; }
+.boat-specification-grid dd { margin: 3px 0 0; color: var(--ink); font-size: 12px; line-height: 1.4; }
+.boat-specification-empty { margin: 0; color: var(--muted); font-size: 12px; }
+.boat-specification-source { margin: 10px 0 0; color: var(--muted); font-size: 10px; }
+.boat-specification-source a { color: var(--brass-dark); font-weight: 700; }
+.boat-specification-editor { margin-top: 13px; border-top: 1px solid var(--hairline-soft); }
+.boat-specification-editor summary {
+  padding: 11px 0 4px;
   color: var(--ink-soft);
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.boat-specification-editor > label,
+.boat-specification-source-fields label {
+  display: block;
+  margin: 7px 0;
+  color: var(--ink-soft);
+  font-size: 10px;
   font-weight: 700;
 }
 .boat-profile-specifications textarea {
@@ -2618,6 +2644,23 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   line-height: 1.55;
   resize: vertical;
 }
+.boat-specification-source-fields {
+  display: grid;
+  grid-template-columns: minmax(0, .75fr) minmax(0, 1.25fr);
+  gap: 10px;
+}
+.boat-specification-source-fields input {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  padding: 9px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--paper-alt);
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+}
 .boat-profile-specifications textarea:focus {
   outline: 3px solid rgba(52,152,219,.16);
   border-color: var(--brass);
@@ -2631,6 +2674,10 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 }
 .boat-profile-form-footer > span { color: var(--muted); font-size: 10px; }
 .boat-profile-form-footer button { flex: none; padding: 9px 15px; font-size: 12px; }
+@media (max-width: 700px) {
+  .boat-specification-grid,
+  .boat-specification-source-fields { grid-template-columns: 1fr; }
+}
 .panel.boat-profile-orders { padding: 0; }
 .boat-profile-orders-heading {
   display: flex;

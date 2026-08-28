@@ -68,6 +68,7 @@ from modules.employees.services import (
 from modules.refunds import create_refunds_blueprint
 from modules.refunds import services as refund_services
 from modules.offline import create_offline_blueprint, init_schema as init_offline_schema
+from modules.tuning_boat_specs import boat_specification_for, format_parameters
 
 # reportlab (PDF generation for "Акт выполненных работ") is imported lazily,
 # inside _build_act_pdf() — it's an extra dependency on top of the site's
@@ -142,6 +143,8 @@ def find_diploma_url(username):
 WORK_PHOTO_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 TUNING_BOAT_PHOTO_EXTENSIONS = WORK_PHOTO_EXTENSIONS
 TUNING_BOAT_SPECIFICATIONS_LIMIT = 8000
+TUNING_BOAT_SOURCE_NAME_LIMIT = 250
+TUNING_BOAT_SOURCE_URL_LIMIT = 2048
 
 
 def _normalize_tuning_boat_model(model_name):
@@ -173,6 +176,59 @@ def _sync_tuning_boat_profiles(db):
             "VALUES (?, ?, '', ?, ?)",
             (model_key, model_name, now, now),
         )
+    _seed_tuning_boat_profile_specifications(db)
+
+
+def _seed_tuning_boat_profile_specifications(db):
+    """Fill empty known profiles from the reviewed public catalog.
+
+    Administrator-entered specifications are intentionally never replaced.
+    """
+    columns = {
+        row[1] for row in db.execute("PRAGMA table_info(tuning_boat_profiles)")
+    }
+    if not {
+        "specifications_source_url", "specifications_source_name"
+    }.issubset(columns):
+        return 0
+
+    updated = 0
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    for profile in db.execute(
+        "SELECT id, model_name, specifications FROM tuning_boat_profiles"
+    ).fetchall():
+        profile_id, model_name, specifications = profile
+        if (specifications or "").strip():
+            continue
+        record = boat_specification_for(model_name)
+        if not record:
+            continue
+        db.execute(
+            "UPDATE tuning_boat_profiles SET specifications = ?, "
+            "specifications_source_url = ?, specifications_source_name = ?, "
+            "updated_at = ? WHERE id = ? AND TRIM(specifications) = ''",
+            (
+                format_parameters(record), record["source_url"],
+                record["source_name"], now, profile_id,
+            ),
+        )
+        updated += 1
+    return updated
+
+
+def _parse_boat_specifications(specifications):
+    """Turn the editable ``Name: value`` format into display parameters."""
+    items = []
+    for raw_line in (specifications or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if ":" in line:
+            name, value = line.split(":", 1)
+            items.append({"name": name.strip(), "value": value.strip()})
+        else:
+            items.append({"name": "Примечание", "value": line})
+    return items
 
 
 def _tuning_boat_photo_url(profile):
@@ -1303,6 +1359,8 @@ def init_db():
             model_name TEXT NOT NULL,
             photo_filename TEXT,
             specifications TEXT NOT NULL DEFAULT '',
+            specifications_source_url TEXT NOT NULL DEFAULT '',
+            specifications_source_name TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
@@ -1809,6 +1867,20 @@ def init_db():
         conn.execute(
             "ALTER TABLE tuning_orders "
             "ADD COLUMN motor_serial_number TEXT NOT NULL DEFAULT ''"
+        )
+    boat_profile_cols = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(tuning_boat_profiles)").fetchall()
+    }
+    if "specifications_source_url" not in boat_profile_cols:
+        conn.execute(
+            "ALTER TABLE tuning_boat_profiles ADD COLUMN "
+            "specifications_source_url TEXT NOT NULL DEFAULT ''"
+        )
+    if "specifications_source_name" not in boat_profile_cols:
+        conn.execute(
+            "ALTER TABLE tuning_boat_profiles ADD COLUMN "
+            "specifications_source_name TEXT NOT NULL DEFAULT ''"
         )
     _sync_tuning_boat_profiles(conn)
     conn.execute(
@@ -4246,6 +4318,9 @@ def tuning_boat_profile(profile_id):
 
     profile = dict(profile_row)
     profile["photo_url"] = _tuning_boat_photo_url(profile)
+    profile["specification_items"] = _parse_boat_specifications(
+        profile["specifications"]
+    )
     orders = []
     for row in db.execute(
         "SELECT o.*, "
@@ -4283,10 +4358,23 @@ def update_tuning_boat_profile(profile_id):
         return redirect(url_for("tuning_boat_catalog"))
 
     specifications = request.form.get("specifications", "").strip()
+    source_url = request.form.get("specifications_source_url", "").strip()
+    source_name = request.form.get("specifications_source_name", "").strip()
     if len(specifications) > TUNING_BOAT_SPECIFICATIONS_LIMIT:
         session["boat_profile_error"] = (
             "Характеристики не должны превышать "
             f"{TUNING_BOAT_SPECIFICATIONS_LIMIT} символов."
+        )
+        return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
+    if len(source_url) > TUNING_BOAT_SOURCE_URL_LIMIT or (
+        source_url and not source_url.startswith(("https://", "http://"))
+    ):
+        session["boat_profile_error"] = "Укажите корректную ссылку на источник."
+        return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
+    if len(source_name) > TUNING_BOAT_SOURCE_NAME_LIMIT:
+        session["boat_profile_error"] = (
+            "Название источника не должно превышать "
+            f"{TUNING_BOAT_SOURCE_NAME_LIMIT} символов."
         )
         return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
 
@@ -4307,8 +4395,10 @@ def update_tuning_boat_profile(profile_id):
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
         "UPDATE tuning_boat_profiles "
-        "SET specifications = ?, photo_filename = ?, updated_at = ? WHERE id = ?",
-        (specifications, photo_filename, now, profile_id),
+        "SET specifications = ?, specifications_source_url = ?, "
+        "specifications_source_name = ?, photo_filename = ?, updated_at = ? "
+        "WHERE id = ?",
+        (specifications, source_url, source_name, photo_filename, now, profile_id),
     )
     db.commit()
     session["boat_profile_notice"] = "Профиль лодки обновлён."

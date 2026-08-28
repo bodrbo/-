@@ -140,6 +140,8 @@ class TuningBoatCatalogTests(unittest.TestCase):
             f"/tuning/boats/{profile_id}/edit",
             data={
                 "specifications": "Длина: 9,18 м\nМатериал корпуса: стеклопластик",
+                "specifications_source_name": "Официальный каталог",
+                "specifications_source_url": "https://example.com/axopar",
                 "photo": (io.BytesIO(b"test-image-content"), "axopar.webp"),
             },
             content_type="multipart/form-data",
@@ -157,6 +159,10 @@ class TuningBoatCatalogTests(unittest.TestCase):
                 "Длина: 9,18 м\nМатериал корпуса: стеклопластик",
             )
             self.assertTrue(profile["photo_filename"].endswith(".webp"))
+            self.assertEqual(
+                profile["specifications_source_url"],
+                "https://example.com/axopar",
+            )
             self.assertTrue(
                 os.path.exists(
                     os.path.join(
@@ -168,8 +174,47 @@ class TuningBoatCatalogTests(unittest.TestCase):
             )
 
         page = self.client.get(f"/tuning/boats/{profile_id}")
-        self.assertIn("Длина: 9,18 м", page.get_data(as_text=True))
-        self.assertIn("Профиль лодки обновлён.", page.get_data(as_text=True))
+        page_html = page.get_data(as_text=True)
+        self.assertIn("<dt>Длина</dt>", page_html)
+        self.assertIn("<dd>9,18 м</dd>", page_html)
+        self.assertIn("Официальный каталог ↗", page_html)
+        self.assertIn("Профиль лодки обновлён.", page_html)
+
+    def test_known_models_are_seeded_without_overwriting_manual_data(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.create_order(
+                db, "BRP Utopia 205", "Клиент", 1000, "2026-08-24 10:00"
+            )
+            self.create_order(
+                db, "Bayliner 192", "Клиент", 1000, "2026-08-24 11:00"
+            )
+            self.create_order(
+                db, "Неизвестная лодка", "Клиент", 1000, "2026-08-24 12:00"
+            )
+            application_module._sync_tuning_boat_profiles(db)
+            db.execute(
+                "UPDATE tuning_boat_profiles SET specifications = 'Ручное значение' "
+                "WHERE model_key = 'bayliner 192'"
+            )
+            application_module._sync_tuning_boat_profiles(db)
+            db.commit()
+
+            profiles = {
+                row["model_key"]: row
+                for row in db.execute("SELECT * FROM tuning_boat_profiles").fetchall()
+            }
+            self.assertIn("Длина: 6,05 м", profiles["brp utopia 205"]["specifications"])
+            self.assertIn(
+                "sea-doo.brp.com",
+                profiles["brp utopia 205"]["specifications_source_url"],
+            )
+            self.assertEqual(
+                profiles["bayliner 192"]["specifications"], "Ручное значение"
+            )
+            self.assertEqual(
+                profiles["неизвестная лодка"]["specifications"], ""
+            )
 
     def test_profile_rejects_oversized_characteristics_and_wrong_photo_type(self):
         with application_module.app.app_context():

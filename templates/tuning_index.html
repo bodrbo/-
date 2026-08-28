@@ -341,13 +341,49 @@
         </div>
 
         <div class="boat-profile-specifications">
-          <label for="boatSpecifications">Характеристики лодки</label>
-          <textarea id="boatSpecifications" name="specifications" maxlength="8000"
-                    placeholder="Например: длина, ширина, материал корпуса, двигатель, год выпуска…">{{ boat_profile.specifications }}</textarea>
-          <div class="boat-profile-form-footer">
-            <span>Характеристики можно дополнять по мере работы с моделью.</span>
-            <button type="submit">Сохранить профиль</button>
-          </div>
+          <h3>Характеристики лодки</h3>
+          {% if boat_profile.specification_items %}
+          <dl class="boat-specification-grid">
+            {% for item in boat_profile.specification_items %}
+            <div>
+              <dt>{{ item.name }}</dt>
+              <dd>{{ item.value }}</dd>
+            </div>
+            {% endfor %}
+          </dl>
+          {% else %}
+          <p class="boat-specification-empty">Подтверждённые характеристики этой модели пока не найдены.</p>
+          {% endif %}
+
+          {% if boat_profile.specifications_source_url %}
+          <p class="boat-specification-source">
+            Источник:
+            <a href="{{ boat_profile.specifications_source_url }}" target="_blank" rel="noopener noreferrer">
+              {{ boat_profile.specifications_source_name or boat_profile.specifications_source_url }} ↗
+            </a>
+          </p>
+          {% endif %}
+
+          <details class="boat-specification-editor"{% if not boat_profile.specification_items %} open{% endif %}>
+            <summary>Редактировать характеристики</summary>
+            <label for="boatSpecifications">По одному параметру на строку в формате «Название: значение»</label>
+            <textarea id="boatSpecifications" name="specifications" maxlength="8000"
+                      placeholder="Например: Длина: 5,85 м">{{ boat_profile.specifications }}</textarea>
+            <div class="boat-specification-source-fields">
+              <label>Название источника
+                <input type="text" name="specifications_source_name" maxlength="250"
+                       value="{{ boat_profile.specifications_source_name }}" placeholder="Например, официальный каталог производителя">
+              </label>
+              <label>Ссылка на источник
+                <input type="url" name="specifications_source_url" maxlength="2048"
+                       value="{{ boat_profile.specifications_source_url }}" placeholder="https://…">
+              </label>
+            </div>
+            <div class="boat-profile-form-footer">
+              <span>Ручные изменения не заменяются автоматическим справочником.</span>
+              <button type="submit">Сохранить профиль</button>
+            </div>
+          </details>
         </div>
       </div>
     </form>
