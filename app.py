@@ -3496,6 +3496,29 @@ def _register_act_fonts():
 
 COMPANY_NAME = 'ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "БОДРЫЙ БОЦМАН"'
 COMPANY_ADDRESS = "197762, Россия, г Санкт-Петербург, г Кронштадт, ул Мануильского, 20 литера а, 2"
+# Search context, coordinates and zoom from the shared Yandex URL are omitted:
+# the organisation id and add-review flag identify the same target while keeping
+# the printed QR substantially less dense and easier for phones to scan.
+TUNING_REVIEW_URL = (
+    "https://yandex.ru/maps/org/bodry_botsman/15778336383/reviews/"
+    "?add-review=true"
+)
+
+
+def _build_tuning_review_qr(size):
+    """Create a vector QR so it remains sharp in printed acts and PDFs."""
+    from reportlab.graphics.barcode import qr
+    from reportlab.graphics.shapes import Drawing
+
+    qr_code = qr.QrCodeWidget(
+        TUNING_REVIEW_URL,
+        barWidth=size,
+        barHeight=size,
+        barBorder=1,
+    )
+    drawing = Drawing(size, size)
+    drawing.add(qr_code)
+    return drawing
 
 
 def _build_act_pdf(order, items, goods=()):
@@ -3528,6 +3551,7 @@ def _build_act_pdf(order, items, goods=()):
                                  spaceAfter=4)
     style_section = ParagraphStyle("section", fontName="OpenSans-Bold", fontSize=11.5, leading=15,
                                     spaceBefore=4, spaceAfter=8)
+    style_review = ParagraphStyle("review", fontName="OpenSans", fontSize=10, leading=14)
 
     try:
         order_date = dt.date.fromisoformat(order["created_at"][:10]).strftime("%d.%m.%Y")
@@ -3618,7 +3642,31 @@ def _build_act_pdf(order, items, goods=()):
     flow.append(Spacer(1, 14))
     flow.append(Paragraph("Работы выполнены качественно и в срок, полностью оплачены", style_bold))
     flow.append(Paragraph("Стороны претензий друг к другу не имеют", style_bold))
-    flow.append(Spacer(1, 46))
+
+    review_qr_size = 30 * mm
+    review_table = Table(
+        [[
+            _build_tuning_review_qr(review_qr_size),
+            Paragraph(
+                "<b>Понравилась наша работа?</b><br/>"
+                "Отсканируйте QR-код и оставьте отзыв о тюнинг-центре "
+                "«Бодрый Боцман» на Яндекс Картах.",
+                style_review,
+            ),
+        ]],
+        colWidths=[36 * mm, 134 * mm],
+    )
+    review_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (0, 0), 6),
+        ("RIGHTPADDING", (1, 0), (1, 0), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    flow.append(Spacer(1, 18))
+    flow.append(review_table)
+    flow.append(Spacer(1, 34))
 
     sig_table = Table(
         [["Заказчик " + "_" * 28, "Исполнитель" + "_" * 24]],
