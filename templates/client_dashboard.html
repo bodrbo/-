@@ -54,8 +54,8 @@
 
   <div class="totals-grid">
     <div class="panel total-card">
-      <span class="k">Лодка</span>
-      <span class="v" style="font-size:20px;">{{ client.boat_model }}</span>
+      <span class="k">Техника</span>
+      <span class="v" style="font-size:20px;">{{ primary_equipment }}</span>
     </div>
     <div class="panel total-card">
       <span class="k">Заказов</span>
@@ -84,7 +84,7 @@
         <summary>
           <span class="oc-num">№{{ o.id }}</span>
           <span class="oc-date">{{ o.created_at[:10]|ru_date }}</span>
-          <span class="oc-boat">{{ o.boat_model }}</span>
+          <span class="oc-boat">{{ o|tuning_equipment_label }}</span>
           <span class="status-badge status-{{ o.status }}">{{ o.status|order_status_label }}</span>
           <span class="oc-total">{{ o.total|money }} ₽</span>
           {% if o.remaining <= 0 %}

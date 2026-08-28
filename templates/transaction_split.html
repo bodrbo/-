@@ -40,7 +40,7 @@
   <select name="target[]" class="split-project">
     <option value="" disabled {{ 'selected' if not row or not row.target }}>Выберите проект или работу</option>
     {% for p in projects %}
-    <optgroup label="{{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.boat_model %} ({{ p.boat_model }}){% endif %}">
+    <optgroup label="{{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.tuning_order_id %} ({{ p|tuning_equipment_label }}){% endif %}">
       <option value="p{{ p.id }}" {{ 'selected' if row and row.target == ('p' ~ p.id) }}>Весь проект</option>
       {% for it in items_by_project.get(p.id, []) %}
       <option value="i{{ it.id }}" {{ 'selected' if row and row.target == ('i' ~ it.id) }}>— {{ it.work_name }}</option>

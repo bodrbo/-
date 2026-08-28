@@ -187,7 +187,7 @@
           <option value="" {{ 'selected' if not form_values or not form_values.project_id }}>— без проекта —</option>
           {% for p in projects %}
           <option value="{{ p.id }}" {{ 'selected' if form_values and form_values.project_id == p.id|string }}>
-            {{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.boat_model %} ({{ p.boat_model }}){% endif %}
+            {{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.tuning_order_id %} ({{ p|tuning_equipment_label }}){% endif %}
           </option>
           {% endfor %}
         </select>

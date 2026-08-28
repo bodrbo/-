@@ -159,7 +159,8 @@ def _sync_tuning_boat_profiles(db):
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     for row in db.execute(
         "SELECT boat_model FROM tuning_orders "
-        "WHERE TRIM(boat_model) != '' ORDER BY id DESC"
+        "WHERE equipment_type = 'boat' AND TRIM(boat_model) != '' "
+        "ORDER BY id DESC"
     ).fetchall():
         model_name = " ".join(row[0].split())
         model_key = _normalize_tuning_boat_model(model_name)
@@ -658,6 +659,11 @@ SALE_CHANNELS = [
     {"value": "mixed", "label": "Смешанно / другое (укажу комиссию сам)"},
 ]
 
+EQUIPMENT_TYPES = [
+    {"value": "boat", "label": "Лодка"},
+    {"value": "motor", "label": "Мотор"},
+]
+
 ORDER_STATUSES = [
     {"value": "new_request", "label": "Новая заявка"},
     {"value": "estimate", "label": "Предварительный расчёт"},
@@ -729,6 +735,35 @@ def order_status_label(value):
         if s["value"] == value:
             return s["label"]
     return value
+
+
+def tuning_equipment_label(order):
+    """Human-readable equipment identity for templates, PDFs and notices.
+
+    Missing new columns are tolerated for older test fixtures and utility
+    callers that still pass a minimal dict containing only boat_model.
+    """
+    try:
+        equipment_type = order["equipment_type"] or "boat"
+    except (KeyError, IndexError):
+        equipment_type = "boat"
+    try:
+        boat_model = (order["boat_model"] or "").strip()
+    except (KeyError, IndexError):
+        boat_model = ""
+    try:
+        motor_model = (order["motor_model"] or "").strip()
+    except (KeyError, IndexError):
+        motor_model = ""
+
+    if equipment_type == "motor":
+        return motor_model or "Мотор"
+    if boat_model and motor_model:
+        return f"{boat_model} · мотор {motor_model}"
+    return boat_model or "Лодка"
+
+
+app.add_template_filter(tuning_equipment_label, "tuning_equipment_label")
 
 
 def work_status_label(value):
@@ -1229,7 +1264,9 @@ def init_db():
         CREATE TABLE IF NOT EXISTS tuning_orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             client_name TEXT NOT NULL,
+            equipment_type TEXT NOT NULL DEFAULT 'boat',
             boat_model TEXT NOT NULL,
+            motor_model TEXT NOT NULL DEFAULT '',
             sale_channel TEXT NOT NULL,
             phone TEXT NOT NULL,
             discount_pct REAL NOT NULL DEFAULT 0,
@@ -1254,7 +1291,6 @@ def init_db():
         )
         """
     )
-    _sync_tuning_boat_profiles(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tuning_order_items (
@@ -1737,6 +1773,17 @@ def init_db():
         # duplicate order.
         conn.execute("ALTER TABLE tuning_orders ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
         conn.execute("ALTER TABLE tuning_orders ADD COLUMN source_ref TEXT")
+    if "equipment_type" not in tuning_cols:
+        conn.execute(
+            "ALTER TABLE tuning_orders "
+            "ADD COLUMN equipment_type TEXT NOT NULL DEFAULT 'boat'"
+        )
+    if "motor_model" not in tuning_cols:
+        conn.execute(
+            "ALTER TABLE tuning_orders "
+            "ADD COLUMN motor_model TEXT NOT NULL DEFAULT ''"
+        )
+    _sync_tuning_boat_profiles(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tilda_webhook_log (
@@ -2146,7 +2193,9 @@ def _payroll_context(db, selected_week, selected_employee):
 
     projects = db.execute(
         "SELECT projects.*, tuning_orders.client_name AS client_name, "
-        "tuning_orders.boat_model AS boat_model "
+        "tuning_orders.boat_model AS boat_model, "
+        "tuning_orders.equipment_type AS equipment_type, "
+        "tuning_orders.motor_model AS motor_model "
         "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
         "ORDER BY projects.created_at DESC, projects.id DESC"
     ).fetchall()
@@ -3154,7 +3203,15 @@ def _process_tuning_form(form):
     errors = []
 
     client_name = form.get("client_name", "").strip()
+    equipment_type = form.get("equipment_type", "boat").strip()
+    if equipment_type not in {item["value"] for item in EQUIPMENT_TYPES}:
+        equipment_type = "boat"
     boat_model = form.get("boat_model", "").strip()
+    motor_model = form.get("motor_model", "").strip()
+    if equipment_type == "motor":
+        # A motor-only order must never create or join a boat profile even
+        # if a stale hidden boat input was submitted by the browser.
+        boat_model = ""
     phone = form.get("phone", "").strip()
     sale_channel = form.get("sale_channel", "direct").strip()
     if sale_channel not in [c["value"] for c in SALE_CHANNELS]:
@@ -3162,8 +3219,10 @@ def _process_tuning_form(form):
 
     if not client_name:
         errors.append("Укажите ФИО клиента.")
-    if not boat_model:
+    if equipment_type == "boat" and not boat_model:
         errors.append("Укажите модель лодки.")
+    if equipment_type == "motor" and not motor_model:
+        errors.append("Укажите модель мотора.")
     if not phone:
         errors.append("Укажите номер телефона.")
 
@@ -3242,7 +3301,8 @@ def _process_tuning_form(form):
     total = subtotal - discount_amount
 
     data = dict(
-        client_name=client_name, boat_model=boat_model, phone=phone,
+        client_name=client_name, equipment_type=equipment_type,
+        boat_model=boat_model, motor_model=motor_model, phone=phone,
         sale_channel=sale_channel, discount_type=discount_type, discount_value=discount_value,
         # discount_pct is kept only for older code/rows that still read it —
         # 0 when the discount is a fixed amount, since it isn't a percent.
@@ -3632,7 +3692,10 @@ def _build_act_pdf(order, items, goods=()):
     flow.append(Paragraph("Акт выполненных работ", style_title))
     flow.append(Paragraph(f"По заказу № {order['id']} от {order_date}", style_subtitle))
 
-    flow.append(Paragraph(f"Заказчик {order['client_name']} ({order['boat_model']})", style_client))
+    flow.append(Paragraph(
+        f"Заказчик {order['client_name']} ({tuning_equipment_label(order)})",
+        style_client,
+    ))
     flow.append(HRFlowable(width="100%", thickness=0.6, color=colors.black,
                             spaceBefore=2, spaceAfter=18))
 
@@ -3826,7 +3889,10 @@ def _build_handover_act_pdf(order, items, goods=()):
     flow.append(Paragraph("Акт приёма-передачи", style_title))
     flow.append(Paragraph(f"По заказу № {order['id']} от {order_date}", style_subtitle))
 
-    flow.append(Paragraph(f"Заказчик {order['client_name']} ({order['boat_model']})", style_client))
+    flow.append(Paragraph(
+        f"Заказчик {order['client_name']} ({tuning_equipment_label(order)})",
+        style_client,
+    ))
     flow.append(HRFlowable(width="100%", thickness=0.6, color=colors.black,
                             spaceBefore=2, spaceAfter=18))
 
@@ -4068,8 +4134,12 @@ def tuning_index():
     orders = []
     for row in order_rows:
         order = dict(row)
-        order["boat_profile_id"] = profile_ids_by_model.get(
-            _normalize_tuning_boat_model(order["boat_model"])
+        order["boat_profile_id"] = (
+            profile_ids_by_model.get(
+                _normalize_tuning_boat_model(order["boat_model"])
+            )
+            if order["equipment_type"] == "boat"
+            else None
         )
         orders.append(order)
     grand_total = sum(o["total"] for o in orders)
@@ -4091,7 +4161,8 @@ def tuning_boat_catalog():
         "SELECT o.*, "
         "(SELECT GROUP_CONCAT(i.work_name, ' · ') FROM tuning_order_items i "
         " WHERE i.order_id = o.id AND i.status != 'removed') AS work_names "
-        "FROM tuning_orders o WHERE TRIM(o.boat_model) != '' "
+        "FROM tuning_orders o WHERE o.equipment_type = 'boat' "
+        "AND TRIM(o.boat_model) != '' "
         "ORDER BY o.created_at DESC, o.id DESC"
     ).fetchall()
     orders_by_model = {}
@@ -4142,7 +4213,8 @@ def tuning_boat_profile(profile_id):
         "SELECT o.*, "
         "(SELECT GROUP_CONCAT(i.work_name, ' · ') FROM tuning_order_items i "
         " WHERE i.order_id = o.id AND i.status != 'removed') AS work_names "
-        "FROM tuning_orders o WHERE TRIM(o.boat_model) != '' "
+        "FROM tuning_orders o WHERE o.equipment_type = 'boat' "
+        "AND TRIM(o.boat_model) != '' "
         "ORDER BY o.created_at DESC, o.id DESC"
     ).fetchall():
         if _normalize_tuning_boat_model(row["boat_model"]) == profile["model_key"]:
@@ -4326,6 +4398,8 @@ def create_and_link_hull_sheet(order_id):
     order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
     if order is None:
         return redirect(url_for("tuning_index"))
+    if order["equipment_type"] != "boat":
+        return redirect(url_for("edit_tuning_order", order_id=order_id))
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     cur = db.execute(
         "INSERT INTO hull_diagnostic_sheets (boat_name, created_at, tuning_order_id) VALUES (?, ?, ?)",
@@ -4339,6 +4413,13 @@ def create_and_link_hull_sheet(order_id):
 @admin_login_required
 def link_hull_sheet(order_id):
     db = get_db()
+    order = db.execute(
+        "SELECT equipment_type FROM tuning_orders WHERE id = ?", (order_id,)
+    ).fetchone()
+    if order is None:
+        return redirect(url_for("tuning_index"))
+    if order["equipment_type"] != "boat":
+        return redirect(url_for("edit_tuning_order", order_id=order_id))
     sheet_id = request.form.get("sheet_id", "").strip()
     if sheet_id.isdigit():
         db.execute(
@@ -4381,10 +4462,12 @@ def add_tuning_order():
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     client_id = _get_or_create_client(db, data["phone"], data["client_name"], data["boat_model"])
     cur = db.execute(
-        "INSERT INTO tuning_orders (client_id, client_name, boat_model, sale_channel, phone, "
+        "INSERT INTO tuning_orders (client_id, client_name, equipment_type, boat_model, "
+        "motor_model, sale_channel, phone, "
         "discount_pct, discount_type, discount_value, subtotal, total, status, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (client_id, data["client_name"], data["boat_model"], data["sale_channel"], data["phone"],
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (client_id, data["client_name"], data["equipment_type"], data["boat_model"],
+         data["motor_model"], data["sale_channel"], data["phone"],
          data["discount_pct"], data["discount_type"], data["discount_value"],
          data["subtotal"], data["total"], DEFAULT_ORDER_STATUS, now, now),
     )
@@ -4691,7 +4774,11 @@ def edit_tuning_order(order_id):
         return redirect(url_for("tuning_index"))
     _sync_tuning_boat_profiles(db)
     db.commit()
-    boat_profile_id = _tuning_boat_profile_id(db, order["boat_model"])
+    boat_profile_id = (
+        _tuning_boat_profile_id(db, order["boat_model"])
+        if order["equipment_type"] == "boat"
+        else None
+    )
 
     if request.method == "GET":
         items = []
@@ -4727,7 +4814,9 @@ def edit_tuning_order(order_id):
             "SELECT * FROM tuning_yookassa_payments WHERE order_id = ? ORDER BY id DESC", (order_id,)
         ).fetchall()
         form_values = {
-            "client_name": order["client_name"], "boat_model": order["boat_model"],
+            "client_name": order["client_name"],
+            "equipment_type": order["equipment_type"],
+            "boat_model": order["boat_model"], "motor_model": order["motor_model"],
             "sale_channel": order["sale_channel"], "phone": order["phone"],
             "discount_type": order["discount_type"], "discount_value": order["discount_value"],
         }
@@ -4784,9 +4873,11 @@ def edit_tuning_order(order_id):
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     client_id = _get_or_create_client(db, data["phone"], data["client_name"], data["boat_model"])
     db.execute(
-        "UPDATE tuning_orders SET client_id=?, client_name=?, boat_model=?, sale_channel=?, phone=?, "
+        "UPDATE tuning_orders SET client_id=?, client_name=?, equipment_type=?, boat_model=?, "
+        "motor_model=?, sale_channel=?, phone=?, "
         "discount_pct=?, discount_type=?, discount_value=?, subtotal=?, total=?, updated_at=? WHERE id=?",
-        (client_id, data["client_name"], data["boat_model"], data["sale_channel"], data["phone"],
+        (client_id, data["client_name"], data["equipment_type"], data["boat_model"],
+         data["motor_model"], data["sale_channel"], data["phone"],
          data["discount_pct"], data["discount_type"], data["discount_value"],
          data["subtotal"], data["total"], now, order_id),
     )
@@ -5250,6 +5341,10 @@ def client_dashboard(token):
     return render_template(
         "client_dashboard.html", client=client, orders=orders, grand_total=grand_total,
         paid_total=paid_total, remaining_total=remaining_total,
+        primary_equipment=(
+            tuning_equipment_label(orders[0])
+            if orders else (client["boat_model"] or "—")
+        ),
         work_photos_by_item=work_photos_by_item, cost_units=SUPPLY_COST_UNITS,
     )
 
@@ -5261,7 +5356,8 @@ def client_approve_item(token, item_id):
     if client is None:
         return redirect(url_for("home"))
     item = db.execute(
-        "SELECT toi.id, toi.status, toi.work_name, o.client_name, o.boat_model "
+        "SELECT toi.id, toi.status, toi.work_name, o.client_name, "
+        "o.equipment_type, o.boat_model, o.motor_model "
         "FROM tuning_order_items toi "
         "JOIN tuning_orders o ON o.id = toi.order_id "
         "WHERE toi.id = ? AND o.client_id = ?",
@@ -5270,15 +5366,16 @@ def client_approve_item(token, item_id):
     if item is not None and item["status"] == "pending":
         db.execute("UPDATE tuning_order_items SET status = 'approved' WHERE id = ?", (item_id,))
         db.commit()
+        equipment_label = tuning_equipment_label(item)
         send_telegram_notification(
             f"✅ Клиент согласовал работу\n"
-            f"Клиент: {html.escape(item['client_name'])} ({html.escape(item['boat_model'])})\n"
+            f"Клиент: {html.escape(item['client_name'])} ({html.escape(equipment_label)})\n"
             f"Работа: {html.escape(item['work_name'])}",
             chat_id=TELEGRAM_APPROVAL_CHAT_ID,
         )
         send_push_notification(
             "Клиент согласовал работу",
-            f"{item['client_name']} ({item['boat_model']}) — {item['work_name']}",
+            f"{item['client_name']} ({equipment_label}) — {item['work_name']}",
             url="/tuning",
         )
     return redirect(url_for("client_dashboard", token=token))
@@ -7510,6 +7607,8 @@ def team_dashboard():
         tuning_tasks = db.execute(
             "SELECT ta.*, ti.work_name AS item_work_name, ti.status AS item_status, "
             "tord.client_name AS order_client_name, tord.boat_model AS order_boat_model, "
+            "tord.equipment_type AS order_equipment_type, "
+            "tord.motor_model AS order_motor_model, "
             "tord.id AS tuning_order_id "
             "FROM tuning_item_assignments ta "
             "JOIN tuning_order_items ti ON ti.id = ta.item_id "
@@ -7520,6 +7619,11 @@ def team_dashboard():
         tuning_task_dicts = []
         for t in tuning_tasks:
             task = dict(t, kind="tuning")
+            task["equipment_label"] = tuning_equipment_label({
+                "equipment_type": task["order_equipment_type"],
+                "boat_model": task["order_boat_model"],
+                "motor_model": task["order_motor_model"],
+            })
             materials = db.execute(
                 "SELECT sw.*, sp.name AS product_name "
                 "FROM supply_writeoffs sw JOIN supply_products sp ON sp.id = sw.product_id "
@@ -8534,7 +8638,9 @@ def _transactions_table_context(db):
     transactions, splits_by_transaction = _fetch_filtered_transactions(db, filter_start, filter_end)
     projects = db.execute(
         "SELECT projects.*, tuning_orders.client_name AS client_name, "
-        "tuning_orders.boat_model AS boat_model "
+        "tuning_orders.boat_model AS boat_model, "
+        "tuning_orders.equipment_type AS equipment_type, "
+        "tuning_orders.motor_model AS motor_model "
         "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
         "ORDER BY projects.created_at DESC, projects.id DESC"
     ).fetchall()
@@ -8740,7 +8846,9 @@ def analytics_projects():
     db = get_db()
     rows = db.execute(
         "SELECT projects.*, tuning_orders.client_name AS client_name, "
-        "tuning_orders.boat_model AS boat_model "
+        "tuning_orders.boat_model AS boat_model, "
+        "tuning_orders.equipment_type AS equipment_type, "
+        "tuning_orders.motor_model AS motor_model "
         "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
         "ORDER BY projects.created_at DESC, projects.id DESC"
     ).fetchall()
@@ -8750,6 +8858,7 @@ def analytics_projects():
         projects.append({
             "id": p["id"], "name": p["name"], "tuning_order_id": p["tuning_order_id"],
             "client_name": p["client_name"], "boat_model": p["boat_model"],
+            "equipment_type": p["equipment_type"], "motor_model": p["motor_model"],
             "income": income, "expense": expense, "profit": profit,
         })
 
@@ -8990,7 +9099,9 @@ def transaction_split(transaction_id):
 
     projects = db.execute(
         "SELECT projects.*, tuning_orders.client_name AS client_name, "
-        "tuning_orders.boat_model AS boat_model "
+        "tuning_orders.boat_model AS boat_model, "
+        "tuning_orders.equipment_type AS equipment_type, "
+        "tuning_orders.motor_model AS motor_model "
         "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
         "ORDER BY projects.created_at DESC, projects.id DESC"
     ).fetchall()
@@ -9994,7 +10105,8 @@ def cron_send_note_reminders():
     db = get_db()
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     due = db.execute(
-        "SELECT r.*, n.order_id, n.text AS note_text, o.client_name, o.boat_model "
+        "SELECT r.*, n.order_id, n.text AS note_text, o.client_name, "
+        "o.equipment_type, o.boat_model, o.motor_model "
         "FROM tuning_order_note_reminders r "
         "JOIN tuning_order_notes n ON n.id = r.note_id "
         "JOIN tuning_orders o ON o.id = n.order_id "
@@ -10004,9 +10116,10 @@ def cron_send_note_reminders():
 
     sent = 0
     for r in due:
+        equipment_label = tuning_equipment_label(r)
         text = (
             f"⏰ <b>Напоминание по заказу №{r['order_id']}</b>\n"
-            f"Клиент: {html.escape(r['client_name'])} ({html.escape(r['boat_model'])})\n\n"
+            f"Клиент: {html.escape(r['client_name'])} ({html.escape(equipment_label)})\n\n"
             f"{html.escape(r['note_text'])}"
         )
         send_telegram_notification_to_admin(db, r["remind_admin_id"], text)

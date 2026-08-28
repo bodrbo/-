@@ -53,7 +53,7 @@
             <select name="target" class="project-select" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()">
               <option value="">— без проекта —</option>
               {% for p in projects %}
-              <optgroup label="{{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.boat_model %} ({{ p.boat_model }}){% endif %}">
+              <optgroup label="{{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.tuning_order_id %} ({{ p|tuning_equipment_label }}){% endif %}">
                 <option value="p{{ p.id }}" {{ 'selected' if t.project_id == p.id and not t.item_id }}>Весь проект</option>
                 {% for it in items_by_project.get(p.id, []) %}
                 <option value="i{{ it.id }}" {{ 'selected' if t.item_id == it.id }}>— {{ it.work_name }}</option>

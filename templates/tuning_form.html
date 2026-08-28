@@ -183,7 +183,7 @@
   <section class="panel">
     <h2>Документы</h2>
 
-    {% if hull_sheets %}
+    {% if edit_order.equipment_type == 'boat' and hull_sheets %}
     <div class="doc-list">
       {% for hs in hull_sheets %}
       <div class="doc-item">
@@ -207,13 +207,14 @@
       </div>
       {% endfor %}
     </div>
-    {% else %}
+    {% elif edit_order.equipment_type == 'boat' %}
     <p class="hint" style="margin-top:0;">К заказу пока не привязано ни одного документа.</p>
     {% endif %}
 
     <details class="doc-add">
       <summary class="btn-add">Добавить документ</summary>
       <div class="doc-type-list">
+        {% if edit_order.equipment_type == 'boat' %}
         <details class="doc-type">
           <summary>Диагностический лист корпуса</summary>
           <div class="doc-type-body">
@@ -232,6 +233,7 @@
             </form>
           </div>
         </details>
+        {% endif %}
         <a href="{{ url_for('tuning_order_act_pdf', order_id=edit_order.id) }}" target="_blank" class="doc-type-link">
           Акт выполненных работ
         </a>
@@ -612,6 +614,7 @@
     <h2>{{ 'Редактировать заказ' if edit_order else 'Новый заказ в тюнинг-центр' }}</h2>
     <form action="{{ url_for('edit_tuning_order', order_id=edit_order.id) if edit_order else url_for('add_tuning_order') }}"
           method="post" class="entry-form" id="tuning-form">
+      {% set selected_equipment_type = form_values.equipment_type if form_values and form_values.equipment_type else 'boat' %}
 
       <div class="form-group">
         <div class="form-group-label"><span class="n">1</span>Клиент</div>
@@ -621,16 +624,40 @@
           <input type="text" id="client_name" name="client_name"
                  value="{{ form_values.client_name if form_values else '' }}" required>
         </div>
-        <div class="field">
+        <fieldset class="field equipment-type-field">
+          <legend>Тип техники</legend>
+          <div class="equipment-type-switch">
+            <label>
+              <input type="radio" name="equipment_type" value="boat"
+                     {{ 'checked' if selected_equipment_type == 'boat' }} onchange="updateEquipmentFields()">
+              <span>Лодка</span>
+            </label>
+            <label>
+              <input type="radio" name="equipment_type" value="motor"
+                     {{ 'checked' if selected_equipment_type == 'motor' }} onchange="updateEquipmentFields()">
+              <span>Мотор</span>
+            </label>
+          </div>
+        </fieldset>
+        <div class="field" id="boatModelField">
           <div class="field-label-with-link">
             <label for="boat_model">Модель лодки</label>
-            {% if boat_profile_id %}
+            {% if boat_profile_id and selected_equipment_type == 'boat' %}
             <a href="{{ url_for('tuning_boat_profile', profile_id=boat_profile_id) }}"
                class="tuning-boat-profile-link">Открыть профиль ↗</a>
             {% endif %}
           </div>
           <input type="text" id="boat_model" name="boat_model"
-                 value="{{ form_values.boat_model if form_values else '' }}" required>
+                 value="{{ form_values.boat_model if form_values else '' }}"
+                 {{ 'required' if selected_equipment_type == 'boat' }}>
+        </div>
+        <div class="field" id="motorModelField">
+          <label for="motor_model" id="motorModelLabel">{{ 'Модель мотора' if selected_equipment_type == 'motor' else 'Мотор' }}</label>
+          <input type="text" id="motor_model" name="motor_model"
+                 value="{{ form_values.motor_model if form_values else '' }}"
+                 placeholder="Например: Yamaha F150"
+                 {{ 'required' if selected_equipment_type == 'motor' }}>
+          <span class="field-context" id="motorModelContext">{{ '' if selected_equipment_type == 'motor' else 'Необязательно' }}</span>
         </div>
         <div class="field field-narrow">
           <label for="phone">Телефон</label>
@@ -916,7 +943,25 @@ function updateOrderTotal() {
   document.getElementById('order-total').textContent = total.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
 }
 
+function updateEquipmentFields() {
+  var selected = document.querySelector('input[name="equipment_type"]:checked');
+  var motorOnly = selected && selected.value === 'motor';
+  var boatField = document.getElementById('boatModelField');
+  var boatInput = document.getElementById('boat_model');
+  var motorInput = document.getElementById('motor_model');
+  var motorLabel = document.getElementById('motorModelLabel');
+  var motorContext = document.getElementById('motorModelContext');
+  if (!boatField || !boatInput || !motorInput) return;
+
+  boatField.hidden = motorOnly;
+  boatInput.required = !motorOnly;
+  motorInput.required = motorOnly;
+  motorLabel.textContent = motorOnly ? 'Модель мотора' : 'Мотор';
+  motorContext.textContent = motorOnly ? '' : 'Необязательно';
+}
+
 document.addEventListener('DOMContentLoaded', updateOrderTotal);
+document.addEventListener('DOMContentLoaded', updateEquipmentFields);
 
 // "Выставить счёт" (ЮKassa) stays disabled until the amount field holds a
 // real positive number — clicking it with an empty/zero amount used to just

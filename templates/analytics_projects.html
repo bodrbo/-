@@ -152,7 +152,7 @@
           <tr>
             <th>Проект</th>
             <th>Клиент</th>
-            <th>Лодка</th>
+            <th>Техника</th>
             <th>Доходы</th>
             <th>Расходы</th>
             <th>Прибыль</th>
@@ -163,7 +163,7 @@
           <tr>
             <td><a href="{{ url_for('project_detail', project_id=p.id) }}" class="term">{{ p.name }}</a></td>
             <td>{{ p.client_name or '—' }}</td>
-            <td>{{ p.boat_model or '—' }}</td>
+            <td>{{ p|tuning_equipment_label if p.tuning_order_id else '—' }}</td>
             <td class="amount">{{ p.income|money }}</td>
             <td>{{ p.expense|money }}</td>
             <td class="amount" style="{{ 'color:var(--danger);' if p.profit < 0 }}">{{ p.profit|money }}</td>
