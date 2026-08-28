@@ -140,6 +140,46 @@ def find_diploma_url(username):
 
 
 WORK_PHOTO_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+TUNING_BOAT_PHOTO_EXTENSIONS = WORK_PHOTO_EXTENSIONS
+TUNING_BOAT_SPECIFICATIONS_LIMIT = 8000
+
+
+def _normalize_tuning_boat_model(model_name):
+    """Stable identity for one model despite case or repeated spaces."""
+    return " ".join((model_name or "").split()).casefold()
+
+
+def _sync_tuning_boat_profiles(db):
+    """Ensure every non-empty model ever used by an order has a profile.
+
+    Newest spelling wins when a model does not have a profile yet; once a
+    profile exists its display name and manually entered data stay stable.
+    """
+    seen_keys = set()
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    for row in db.execute(
+        "SELECT boat_model FROM tuning_orders "
+        "WHERE TRIM(boat_model) != '' ORDER BY id DESC"
+    ).fetchall():
+        model_name = " ".join(row[0].split())
+        model_key = _normalize_tuning_boat_model(model_name)
+        if not model_key or model_key in seen_keys:
+            continue
+        seen_keys.add(model_key)
+        db.execute(
+            "INSERT OR IGNORE INTO tuning_boat_profiles "
+            "(model_key, model_name, specifications, created_at, updated_at) "
+            "VALUES (?, ?, '', ?, ?)",
+            (model_key, model_name, now, now),
+        )
+
+
+def _tuning_boat_photo_url(profile):
+    if not profile.get("photo_filename"):
+        return None
+    return url_for(
+        "static", filename=f"tuning_boats/{profile['photo_filename']}"
+    )
 
 
 def get_work_item_photos(db, item_id):
@@ -1191,6 +1231,20 @@ def init_db():
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tuning_boat_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            model_key TEXT NOT NULL UNIQUE,
+            model_name TEXT NOT NULL,
+            photo_filename TEXT,
+            specifications TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    _sync_tuning_boat_profiles(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tuning_order_items (
@@ -4004,9 +4058,126 @@ def tuning_index():
 @app.route("/tuning/boats")
 @admin_login_required
 def tuning_boat_catalog():
+    db = get_db()
+    _sync_tuning_boat_profiles(db)
+    db.commit()
+
+    order_rows = db.execute(
+        "SELECT o.*, "
+        "(SELECT GROUP_CONCAT(i.work_name, ' · ') FROM tuning_order_items i "
+        " WHERE i.order_id = o.id AND i.status != 'removed') AS work_names "
+        "FROM tuning_orders o WHERE TRIM(o.boat_model) != '' "
+        "ORDER BY o.created_at DESC, o.id DESC"
+    ).fetchall()
+    orders_by_model = {}
+    for row in order_rows:
+        orders_by_model.setdefault(
+            _normalize_tuning_boat_model(row["boat_model"]), []
+        ).append(row)
+
+    profiles = []
+    for row in db.execute(
+        "SELECT * FROM tuning_boat_profiles ORDER BY model_name COLLATE NOCASE"
+    ).fetchall():
+        profile_orders = orders_by_model.get(row["model_key"], [])
+        if not profile_orders:
+            continue
+        profile = dict(row)
+        profile["photo_url"] = _tuning_boat_photo_url(profile)
+        profile["order_count"] = len(profile_orders)
+        profile["orders_total"] = sum(order["total"] for order in profile_orders)
+        profile["last_order_at"] = profile_orders[0]["created_at"]
+        profiles.append(profile)
+
     return render_template(
-        "tuning_index.html", active_page="tuning", sub_page="boat_catalog"
+        "tuning_index.html",
+        active_page="tuning",
+        sub_page="boat_catalog",
+        catalog_view="list",
+        page_title="Каталог лодок",
+        boat_profiles=profiles,
+        catalog_order_count=sum(profile["order_count"] for profile in profiles),
     )
+
+
+@app.route("/tuning/boats/<int:profile_id>")
+@admin_login_required
+def tuning_boat_profile(profile_id):
+    db = get_db()
+    profile_row = db.execute(
+        "SELECT * FROM tuning_boat_profiles WHERE id = ?", (profile_id,)
+    ).fetchone()
+    if profile_row is None:
+        return redirect(url_for("tuning_boat_catalog"))
+
+    profile = dict(profile_row)
+    profile["photo_url"] = _tuning_boat_photo_url(profile)
+    orders = []
+    for row in db.execute(
+        "SELECT o.*, "
+        "(SELECT GROUP_CONCAT(i.work_name, ' · ') FROM tuning_order_items i "
+        " WHERE i.order_id = o.id AND i.status != 'removed') AS work_names "
+        "FROM tuning_orders o WHERE TRIM(o.boat_model) != '' "
+        "ORDER BY o.created_at DESC, o.id DESC"
+    ).fetchall():
+        if _normalize_tuning_boat_model(row["boat_model"]) == profile["model_key"]:
+            orders.append(row)
+
+    return render_template(
+        "tuning_index.html",
+        active_page="tuning",
+        sub_page="boat_catalog",
+        catalog_view="profile",
+        page_title=profile["model_name"],
+        boat_profile=profile,
+        profile_orders=orders,
+        profile_orders_total=sum(order["total"] for order in orders),
+        profile_notice=session.pop("boat_profile_notice", None),
+        profile_error=session.pop("boat_profile_error", None),
+    )
+
+
+@app.route("/tuning/boats/<int:profile_id>/edit", methods=["POST"])
+@admin_login_required
+def update_tuning_boat_profile(profile_id):
+    db = get_db()
+    profile = db.execute(
+        "SELECT * FROM tuning_boat_profiles WHERE id = ?", (profile_id,)
+    ).fetchone()
+    if profile is None:
+        return redirect(url_for("tuning_boat_catalog"))
+
+    specifications = request.form.get("specifications", "").strip()
+    if len(specifications) > TUNING_BOAT_SPECIFICATIONS_LIMIT:
+        session["boat_profile_error"] = (
+            "Характеристики не должны превышать "
+            f"{TUNING_BOAT_SPECIFICATIONS_LIMIT} символов."
+        )
+        return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
+
+    photo_filename = profile["photo_filename"]
+    photo = request.files.get("photo")
+    if photo and photo.filename:
+        extension = os.path.splitext(photo.filename)[1].lower()
+        if extension not in TUNING_BOAT_PHOTO_EXTENSIONS:
+            session["boat_profile_error"] = (
+                "Фотография должна быть в формате JPG, PNG или WebP."
+            )
+            return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
+        photos_dir = os.path.join(app.static_folder, "tuning_boats")
+        os.makedirs(photos_dir, exist_ok=True)
+        photo_filename = f"{profile_id}-{secrets.token_hex(6)}{extension}"
+        photo.save(os.path.join(photos_dir, photo_filename))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "UPDATE tuning_boat_profiles "
+        "SET specifications = ?, photo_filename = ?, updated_at = ? WHERE id = ?",
+        (specifications, photo_filename, now, profile_id),
+    )
+    db.commit()
+    session["boat_profile_notice"] = "Профиль лодки обновлён."
+    return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
 
 
 @app.route("/tuning/diagnostics/hull")
