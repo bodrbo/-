@@ -65,6 +65,14 @@ from modules.employees.services import (
     active_employee_names as _active_employee_names,
     telegram_chat_id_for_employee,
 )
+from modules.notifications import (
+    EVENT_FLEET_CHECKLIST_PROBLEM,
+    EVENT_FLEET_DEFECT_CREATED,
+    EVENT_FLEET_EXTRA_DEFECT,
+    EVENT_TUNING_WORK_APPROVED,
+    dispatch_notification,
+    dispatch_photos,
+)
 from modules.refunds import create_refunds_blueprint
 from modules.refunds import services as refund_services
 from modules.offline import create_offline_blueprint, init_schema as init_offline_schema
@@ -5666,11 +5674,14 @@ def client_approve_item(token, item_id):
         db.execute("UPDATE tuning_order_items SET status = 'approved' WHERE id = ?", (item_id,))
         db.commit()
         equipment_label = tuning_equipment_label(item)
-        send_telegram_notification(
+        dispatch_notification(
+            db,
+            EVENT_TUNING_WORK_APPROVED,
             f"✅ Клиент согласовал работу\n"
             f"Клиент: {html.escape(item['client_name'])} ({html.escape(equipment_label)})\n"
             f"Работа: {html.escape(item['work_name'])}",
-            chat_id=TELEGRAM_APPROVAL_CHAT_ID,
+            send_telegram_notification,
+            fallback_chat_id=TELEGRAM_APPROVAL_CHAT_ID,
         )
         send_push_notification(
             "Клиент согласовал работу",
@@ -8053,10 +8064,13 @@ def team_create_defect():
     }
     if success:
         clean_description = description.strip()
-        send_telegram_notification(
+        dispatch_notification(
+            db,
+            EVENT_FLEET_DEFECT_CREATED,
             f"⚠️ <b>Неисправность добавлена вручную</b> — {html.escape(boat)}\n"
             f"Капитан: {html.escape(employee_name)}\n"
-            f"Описание: {html.escape(clean_description)}"
+            f"Описание: {html.escape(clean_description)}",
+            send_telegram_notification,
         )
         send_push_notification(
             f"Новая неисправность — {boat}",
@@ -8579,14 +8593,20 @@ def team_checklist_answer(checklist_id):
             checklist_label = CHECKLIST_TYPE_LABELS.get(
                 checklist["checklist_type"], checklist["checklist_type"]
             )
-            send_telegram_notification(
+            telegram_dispatch = dispatch_notification(
+                db,
+                EVENT_FLEET_CHECKLIST_PROBLEM,
                 f"⚠️ <b>{html.escape(checklist_label)}</b> — {html.escape(checklist['boat'])}\n"
                 f"Капитан: {html.escape(employee_name)}\n"
                 f"Пункт: {html.escape(question_label)}\n"
-                f"Комментарий: {html.escape(comment) if comment else '—'}"
+                f"Комментарий: {html.escape(comment) if comment else '—'}",
+                send_telegram_notification,
             )
-            for photo_path in saved_photo_paths:
-                send_telegram_photo(photo_path)
+            dispatch_photos(
+                telegram_dispatch,
+                saved_photo_paths,
+                send_telegram_photo,
+            )
             boat_index = next((i for i, b in enumerate(BOATS) if b["name"] == checklist["boat"]), None)
             send_push_notification(
                 f"{checklist_label} — {checklist['boat']}",
@@ -8622,11 +8642,14 @@ def team_checklist_add_defects(checklist_id):
     db.commit()
     if descriptions:
         checklist_label = CHECKLIST_TYPE_LABELS.get(checklist["checklist_type"], checklist["checklist_type"])
-        send_telegram_notification(
+        dispatch_notification(
+            db,
+            EVENT_FLEET_EXTRA_DEFECT,
             f"⚠️ <b>Неисправность вне чек-листа</b> — {html.escape(checklist['boat'])}\n"
             f"Капитан: {html.escape(employee_name)}\n"
             f"Осмотр: {html.escape(checklist_label)}\n"
-            f"Описание: {html.escape('; '.join(descriptions))}"
+            f"Описание: {html.escape('; '.join(descriptions))}",
+            send_telegram_notification,
         )
         boat_index = next((i for i, b in enumerate(BOATS) if b["name"] == checklist["boat"]), None)
         send_push_notification(
@@ -10584,6 +10607,7 @@ def push_test():
 
 def _notify_offline_fleet_events(events):
     """Send the same alerts as online captain forms, once after replay."""
+    db = get_db()
     for event in events:
         boat = event["boat"]
         employee_name = event["employee_name"]
@@ -10596,11 +10620,14 @@ def _notify_offline_fleet_events(events):
                 event["checklist_type"], event["checklist_type"]
             )
             comment = event.get("comment") or ""
-            send_telegram_notification(
+            telegram_dispatch = dispatch_notification(
+                db,
+                EVENT_FLEET_CHECKLIST_PROBLEM,
                 f"⚠️ <b>{html.escape(checklist_label)}</b> — {html.escape(boat)}\n"
                 f"Капитан: {html.escape(employee_name)}\n"
                 f"Пункт: {html.escape(event['question'])}\n"
-                f"Комментарий: {html.escape(comment) if comment else '—'}"
+                f"Комментарий: {html.escape(comment) if comment else '—'}",
+                send_telegram_notification,
             )
             push_title = f"{checklist_label} — {boat}"
             push_body = event["question"] + (f": {comment}" if comment else "")
@@ -10610,23 +10637,32 @@ def _notify_offline_fleet_events(events):
                 checklist_label = CHECKLIST_TYPE_LABELS.get(
                     event["checklist_type"], event["checklist_type"]
                 )
-                send_telegram_notification(
+                telegram_dispatch = dispatch_notification(
+                    db,
+                    EVENT_FLEET_EXTRA_DEFECT,
                     f"⚠️ <b>Неисправность вне чек-листа</b> — {html.escape(boat)}\n"
                     f"Капитан: {html.escape(employee_name)}\n"
                     f"Осмотр: {html.escape(checklist_label)}\n"
-                    f"Описание: {html.escape(description)}"
+                    f"Описание: {html.escape(description)}",
+                    send_telegram_notification,
                 )
             else:
-                send_telegram_notification(
+                telegram_dispatch = dispatch_notification(
+                    db,
+                    EVENT_FLEET_DEFECT_CREATED,
                     f"⚠️ <b>Неисправность добавлена офлайн</b> — {html.escape(boat)}\n"
                     f"Капитан: {html.escape(employee_name)}\n"
-                    f"Описание: {html.escape(description)}"
+                    f"Описание: {html.escape(description)}",
+                    send_telegram_notification,
                 )
             push_title = f"Новая неисправность — {boat}"
             push_body = description
 
-        for photo_path in event.get("photo_paths") or []:
-            send_telegram_photo(photo_path)
+        dispatch_photos(
+            telegram_dispatch,
+            event.get("photo_paths") or [],
+            send_telegram_photo,
+        )
         send_push_notification(
             push_title,
             push_body,
