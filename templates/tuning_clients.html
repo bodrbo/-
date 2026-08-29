@@ -96,8 +96,10 @@
           <tr>
             <td><a href="{{ url_for('admin_client_dashboard', client_id=client.id) }}" class="tuning-client-name">{{ client.client_name }}</a><span class="tuning-client-id">ID {{ client.id }}</span></td>
             <td>
-              <form action="{{ url_for('update_tuning_client_status', client_id=client.id) }}" method="post" class="tuning-client-status-form">
-                <select name="status" class="tuning-client-status tuning-client-status-{{ client.status }}" aria-label="Статус клиента {{ client.client_name }}" onchange="this.form.submit()">
+              <form action="{{ url_for('update_tuning_client_status', client_id=client.id) }}" method="post" class="status-badge status-client-{{ client.status }} tuning-client-status-form">
+                <span class="tuning-client-status-label">{{ {'satisfied': 'Довольный', 'neutral': 'Нейтральный', 'dissatisfied': 'Недовольный', 'blacklisted': 'Чёрный список'}.get(client.status, 'Нейтральный') }}</span>
+                <svg class="tuning-client-status-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg>
+                <select name="status" class="tuning-client-status" aria-label="Статус клиента {{ client.client_name }}" onchange="this.form.submit()">
                   {% for status in client_statuses %}
                   <option value="{{ status.value }}" {{ 'selected' if client.status == status.value }}>{{ status.label }}</option>
                   {% endfor %}

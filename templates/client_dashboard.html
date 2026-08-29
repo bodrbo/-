@@ -55,7 +55,7 @@
       <span class="client-admin-eyebrow">Служебный режим</span>
       <div class="client-admin-mode-heading">
         <h2 id="client-admin-mode-title">Вы смотрите кабинет как администратор</h2>
-        <span class="client-status-pill client-status-pill-{{ client.status }}">
+        <span class="status-badge status-client-{{ client.status }}">
           {{ {'satisfied': 'Довольный', 'neutral': 'Нейтральный', 'dissatisfied': 'Недовольный', 'blacklisted': 'Чёрный список'}.get(client.status, 'Нейтральный') }}
         </span>
       </div>

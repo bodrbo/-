@@ -1743,6 +1743,22 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .status-badge.status-waiting_for_capture::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232e86c1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='M8 4.8V8l2.4 1.4'/%3E%3C/svg%3E");
 }
+.status-badge.status-client-satisfied { background: rgba(47, 107, 79, 0.16); color: var(--success); }
+.status-badge.status-client-satisfied::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232f6b4f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5'/%3E%3C/svg%3E");
+}
+.status-badge.status-client-neutral { background: rgba(212, 141, 74, 0.2); color: var(--warning); }
+.status-badge.status-client-neutral::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23a9682b' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='M8 4.8V8l2.4 1.4'/%3E%3C/svg%3E");
+}
+.status-badge.status-client-dissatisfied { background: rgba(179, 64, 44, 0.14); color: var(--danger); }
+.status-badge.status-client-dissatisfied::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23b3402c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 4l8 8M12 4l-8 8'/%3E%3C/svg%3E");
+}
+.status-badge.status-client-blacklisted { background: #080b0d; color: #ffffff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .16); }
+.status-badge.status-client-blacklisted::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23ffffff' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='M4 12L12 4'/%3E%3C/svg%3E");
+}
 /* Boat defect tracker (Флот → Неисправности) — deliberately distinct
    modifier names from status-in_progress/status-done above: those are
    already blue/green for unrelated things (order & work-item statuses),
@@ -4636,21 +4652,7 @@ button.captain-command-alert:hover {
 .client-admin-toolbar p { max-width: 690px; margin: 0; color: #b9cad5; font-size: 12px; }
 .client-admin-mode-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
 .client-admin-mode-heading h2 { margin-right: 2px; }
-.client-status-pill {
-  display: inline-flex;
-  align-items: center;
-  min-height: 25px;
-  padding: 4px 9px;
-  border: 1px solid;
-  border-radius: 999px;
-  font-family: 'PT Mono', monospace;
-  font-size: 9px;
-  font-weight: 700;
-}
-.client-status-pill-satisfied { border-color: #69bb8f; background: rgba(63, 159, 106, .18); color: #98e0b8; }
-.client-status-pill-neutral { border-color: #d6aa50; background: rgba(214, 170, 80, .17); color: #f0cd82; }
-.client-status-pill-dissatisfied { border-color: #d06a59; background: rgba(208, 106, 89, .17); color: #f1a294; }
-.client-status-pill-blacklisted { border-color: #89949b; background: #080b0d; color: #ffffff; }
+.client-admin-mode-heading .status-badge { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .16); }
 .client-admin-eyebrow {
   color: #c4a7ef;
   font-family: 'PT Mono', monospace;
@@ -4910,23 +4912,23 @@ button.captain-command-alert:hover {
 }
 .tuning-client-phone { color: var(--ink-soft); white-space: nowrap; }
 .tuning-client-equipment { display: block; margin-top: 4px; min-width: 150px; font-weight: 700; }
-.tuning-client-status-form { margin: 0; }
-.tuning-client-status {
-  min-width: 124px;
-  min-height: 36px;
-  padding: 7px 27px 7px 10px;
-  border: 1px solid;
-  border-radius: 999px;
-  font: inherit;
-  font-size: 10.5px;
-  font-weight: 700;
+.tuning-client-status-form {
+  position: relative;
+  margin: 0;
+  border: 0;
   cursor: pointer;
 }
-.tuning-client-status:focus-visible { outline: 2px solid rgba(52, 152, 219, .28); outline-offset: 2px; }
-.tuning-client-status-satisfied { border-color: rgba(47, 107, 79, .32); background: #e9f6ef; color: var(--success); }
-.tuning-client-status-neutral { border-color: rgba(179, 126, 24, .32); background: #fff5d9; color: #8b6111; }
-.tuning-client-status-dissatisfied { border-color: rgba(179, 64, 44, .32); background: #fbece8; color: var(--danger); }
-.tuning-client-status-blacklisted { border-color: #080b0d; background: #080b0d; color: #ffffff; }
+.tuning-client-status-label { pointer-events: none; }
+.tuning-client-status-chevron { width: 10px; height: 10px; flex: none; pointer-events: none; }
+.tuning-client-status {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.tuning-client-status-form:focus-within { outline: 2px solid rgba(52, 152, 219, .28); outline-offset: 2px; }
 .tuning-client-paid { color: var(--success); }
 .tuning-client-debt { color: var(--danger); }
 .tuning-client-open {

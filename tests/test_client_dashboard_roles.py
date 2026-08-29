@@ -243,7 +243,7 @@ class ClientDashboardRoleTests(unittest.TestCase):
             'href="/admin/clients" class="active"', html
         )
         self.assertIn("Статус", html)
-        self.assertIn("tuning-client-status-neutral", html)
+        self.assertIn("status-badge status-client-neutral", html)
         self.assertIn('<option value="neutral" selected>Нейтральный</option>', html)
 
     def test_admin_can_update_client_status_and_invalid_value_is_ignored(self):
@@ -266,9 +266,9 @@ class ClientDashboardRoleTests(unittest.TestCase):
         cabinet = self.client.get(
             f"/admin/clients/{self.client_id}/cabinet"
         ).get_data(as_text=True)
-        self.assertIn("tuning-client-status-satisfied", directory)
+        self.assertIn("status-badge status-client-satisfied", directory)
         self.assertIn('<option value="satisfied" selected>Довольный</option>', directory)
-        self.assertIn("client-status-pill-satisfied", cabinet)
+        self.assertIn("status-badge status-client-satisfied", cabinet)
         self.assertIn("Довольный", cabinet)
 
         invalid = self.client.post(
@@ -294,12 +294,12 @@ class ClientDashboardRoleTests(unittest.TestCase):
         cabinet = self.client.get(
             f"/admin/clients/{self.client_id}/cabinet"
         ).get_data(as_text=True)
-        self.assertIn("tuning-client-status-blacklisted", directory)
+        self.assertIn("status-badge status-client-blacklisted", directory)
         self.assertIn(
             '<option value="blacklisted" selected>Чёрный список</option>',
             directory,
         )
-        self.assertIn("client-status-pill-blacklisted", cabinet)
+        self.assertIn("status-badge status-client-blacklisted", cabinet)
         self.assertIn("Чёрный список", cabinet)
 
 
