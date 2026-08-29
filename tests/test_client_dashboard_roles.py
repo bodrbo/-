@@ -282,6 +282,26 @@ class ClientDashboardRoleTests(unittest.TestCase):
             ).fetchone()["status"]
         self.assertEqual(status_after_invalid, "satisfied")
 
+    def test_admin_can_blacklist_client(self):
+        self.login()
+        response = self.client.post(
+            f"/admin/clients/{self.client_id}/status",
+            data={"status": "blacklisted"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        directory = self.client.get("/admin/clients").get_data(as_text=True)
+        cabinet = self.client.get(
+            f"/admin/clients/{self.client_id}/cabinet"
+        ).get_data(as_text=True)
+        self.assertIn("tuning-client-status-blacklisted", directory)
+        self.assertIn(
+            '<option value="blacklisted" selected>Чёрный список</option>',
+            directory,
+        )
+        self.assertIn("client-status-pill-blacklisted", cabinet)
+        self.assertIn("Чёрный список", cabinet)
+
 
 if __name__ == "__main__":
     unittest.main()

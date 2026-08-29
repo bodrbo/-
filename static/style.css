@@ -4650,6 +4650,7 @@ button.captain-command-alert:hover {
 .client-status-pill-satisfied { border-color: #69bb8f; background: rgba(63, 159, 106, .18); color: #98e0b8; }
 .client-status-pill-neutral { border-color: #d6aa50; background: rgba(214, 170, 80, .17); color: #f0cd82; }
 .client-status-pill-dissatisfied { border-color: #d06a59; background: rgba(208, 106, 89, .17); color: #f1a294; }
+.client-status-pill-blacklisted { border-color: #89949b; background: #080b0d; color: #ffffff; }
 .client-admin-eyebrow {
   color: #c4a7ef;
   font-family: 'PT Mono', monospace;
@@ -4925,6 +4926,7 @@ button.captain-command-alert:hover {
 .tuning-client-status-satisfied { border-color: rgba(47, 107, 79, .32); background: #e9f6ef; color: var(--success); }
 .tuning-client-status-neutral { border-color: rgba(179, 126, 24, .32); background: #fff5d9; color: #8b6111; }
 .tuning-client-status-dissatisfied { border-color: rgba(179, 64, 44, .32); background: #fbece8; color: var(--danger); }
+.tuning-client-status-blacklisted { border-color: #080b0d; background: #080b0d; color: #ffffff; }
 .tuning-client-paid { color: var(--success); }
 .tuning-client-debt { color: var(--danger); }
 .tuning-client-open {

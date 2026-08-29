@@ -745,6 +745,7 @@ CLIENT_STATUSES = [
     {"value": "satisfied", "label": "Довольный"},
     {"value": "neutral", "label": "Нейтральный"},
     {"value": "dissatisfied", "label": "Недовольный"},
+    {"value": "blacklisted", "label": "Чёрный список"},
 ]
 DEFAULT_CLIENT_STATUS = "neutral"
 
