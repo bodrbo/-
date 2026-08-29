@@ -4248,9 +4248,7 @@ def tuning_index():
     _sync_tuning_boat_profiles(db)
     db.commit()
     order_rows = db.execute(
-        "SELECT o.*, c.token AS client_token FROM tuning_orders o "
-        "LEFT JOIN clients c ON c.id = o.client_id "
-        "ORDER BY o.created_at DESC, o.id DESC"
+        "SELECT * FROM tuning_orders ORDER BY created_at DESC, id DESC"
     ).fetchall()
     profile_ids_by_model = {
         row["model_key"]: row["id"]
@@ -5442,14 +5440,23 @@ def remove_tuning_order_product(order_id, row_id):
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
-@app.route("/client/<token>")
-def client_dashboard(token):
-    db = get_db()
-    client = db.execute("SELECT * FROM clients WHERE token = ?", (token,)).fetchone()
-    if client is None:
-        return redirect(url_for("home"))
+def _render_client_dashboard(db, client, viewer_role):
+    """Build the shared cabinet while keeping admin-only data server-side.
+
+    The public token route always calls this with ``client``.  Only the
+    admin-authenticated route may request ``admin`` and load cost prices,
+    payment rows, internal notes and source metadata into the response.
+    """
+    is_admin_view = viewer_role == "admin"
+    order_columns = (
+        "id, equipment_type, boat_model, boat_registration_number, motor_model, "
+        "motor_serial_number, discount_type, discount_value, total, status, created_at"
+    )
+    if is_admin_view:
+        order_columns += ", sale_channel, updated_at, source, source_ref"
     order_rows = db.execute(
-        "SELECT * FROM tuning_orders WHERE client_id = ? ORDER BY created_at DESC, id DESC",
+        f"SELECT {order_columns} FROM tuning_orders "
+        "WHERE client_id = ? ORDER BY created_at DESC, id DESC",
         (client["id"],),
     ).fetchall()
 
@@ -5457,14 +5464,32 @@ def client_dashboard(token):
     paid_total = 0.0
     remaining_total = 0.0
     for o in order_rows:
-        _, paid_amount, remaining = _order_payment_totals(db, o["id"], o["total"])
+        if is_admin_view:
+            payments, paid_amount, remaining = _order_payment_totals(
+                db, o["id"], o["total"]
+            )
+        else:
+            payment_total = db.execute(
+                "SELECT COALESCE(SUM(amount), 0) AS total "
+                "FROM tuning_payments WHERE order_id = ?",
+                (o["id"],),
+            ).fetchone()
+            payments = []
+            paid_amount = payment_total["total"]
+            remaining = max(0.0, o["total"] - paid_amount)
+        item_columns = "id, work_name, price, status"
+        if is_admin_view:
+            item_columns += ", cost_price, multiplier"
         items = db.execute(
-            "SELECT id, work_name, price, status FROM tuning_order_items "
+            f"SELECT {item_columns} FROM tuning_order_items "
             "WHERE order_id = ? ORDER BY id",
             (o["id"],),
         ).fetchall()
+        goods_columns = "id, product_name, quantity, unit_price, unit"
+        if is_admin_view:
+            goods_columns += ", cost_price"
         goods_items = db.execute(
-            "SELECT id, product_name, quantity, unit_price, unit FROM tuning_order_products "
+            f"SELECT {goods_columns} FROM tuning_order_products "
             "WHERE order_id = ? ORDER BY id",
             (o["id"],),
         ).fetchall()
@@ -5476,20 +5501,33 @@ def client_dashboard(token):
         order["hull_sheets"] = db.execute(
             "SELECT * FROM hull_diagnostic_sheets WHERE tuning_order_id = ? ORDER BY id", (o["id"],)
         ).fetchall()
+        if is_admin_view:
+            active_items = [item for item in items if item["status"] != "removed"]
+            internal_cost = sum(item["cost_price"] for item in active_items)
+            internal_cost += sum(
+                item["quantity"] * item["cost_price"] for item in goods_items
+            )
+            order["internal_cost"] = internal_cost
+            order["gross_margin"] = o["total"] - internal_cost
+            order["payments"] = payments
+            order["internal_notes"] = _order_notes(db, o["id"])
         orders.append(order)
         paid_total += paid_amount
         remaining_total += remaining
 
     grand_total = sum(o["total"] for o in order_rows)
 
-    # Attach each order's most recent unpaid ЮKassa payment link, if any,
-    # so the client can pay online straight from their cabinet.
+    # Payment URLs are client actions, so the administrative view does not
+    # even load them; it exposes only the recorded payment history instead.
     for order in orders:
-        pending = db.execute(
-            "SELECT * FROM tuning_yookassa_payments WHERE order_id = ? AND status != 'succeeded' "
-            "ORDER BY id DESC LIMIT 1",
-            (order["id"],),
-        ).fetchone()
+        pending = None
+        if not is_admin_view:
+            pending = db.execute(
+                "SELECT amount, confirmation_url FROM tuning_yookassa_payments "
+                "WHERE order_id = ? AND status != 'succeeded' "
+                "ORDER BY id DESC LIMIT 1",
+                (order["id"],),
+            ).fetchone()
         order["yookassa_pending"] = pending
 
     work_photos_by_item = {}
@@ -5505,7 +5543,31 @@ def client_dashboard(token):
             if orders else (client["boat_model"] or "—")
         ),
         work_photos_by_item=work_photos_by_item, cost_units=SUPPLY_COST_UNITS,
+        viewer_role=viewer_role,
+        admin_name=session.get("admin_name") if is_admin_view else None,
     )
+
+
+@app.route("/client/<token>")
+def client_dashboard(token):
+    db = get_db()
+    client = db.execute(
+        "SELECT id, client_name, boat_model, token FROM clients WHERE token = ?",
+        (token,),
+    ).fetchone()
+    if client is None:
+        return redirect(url_for("home"))
+    return _render_client_dashboard(db, client, "client")
+
+
+@app.route("/admin/clients/<int:client_id>/cabinet")
+@admin_login_required
+def admin_client_dashboard(client_id):
+    db = get_db()
+    client = db.execute("SELECT * FROM clients WHERE id = ?", (client_id,)).fetchone()
+    if client is None:
+        return redirect(url_for("tuning_index"))
+    return _render_client_dashboard(db, client, "admin")
 
 
 @app.route("/client/<token>/item/<int:item_id>/approve", methods=["POST"])

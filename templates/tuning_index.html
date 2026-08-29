@@ -175,8 +175,8 @@
             <td><a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="term">№{{ o.id }}</a></td>
             <td class="muted">{{ o.created_at[:10]|ru_date }}</td>
             <td>
-              {% if o.client_token %}
-              <a href="{{ url_for('client_dashboard', token=o.client_token) }}">{{ o.client_name }}</a>
+              {% if o.client_id %}
+              <a href="{{ url_for('admin_client_dashboard', client_id=o.client_id) }}">{{ o.client_name }}</a>
               {% else %}
               {{ o.client_name }}
               {% endif %}

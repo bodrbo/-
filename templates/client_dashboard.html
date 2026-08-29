@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <html lang="ru">
+{% set is_admin_view = viewer_role == 'admin' %}
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Личный кабинет клиента</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<title>{{ 'ЛК клиента — режим администратора' if is_admin_view else 'Личный кабинет клиента' }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260829-client-roles">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
 <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
@@ -14,7 +15,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Боцман">
 </head>
-<body>
+<body class="client-dashboard-body{{ ' client-dashboard-admin' if is_admin_view }}">
 
 <div class="page-loader" id="pageLoader" aria-hidden="true">
   <div class="loader-body">
@@ -41,12 +42,35 @@
       <a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo brand-logo-large"></a>
     </div>
     <div class="title-block">
-      <h1>Личный кабинет клиента</h1>
+      <h1>{{ 'ЛК клиента · администратор' if is_admin_view else 'Личный кабинет клиента' }}</h1>
     </div>
   </div>
 </header>
 
 <main class="wrap">
+
+  {% if is_admin_view %}
+  <section class="client-admin-toolbar" aria-labelledby="client-admin-mode-title">
+    <div>
+      <span class="client-admin-eyebrow">Служебный режим</span>
+      <h2 id="client-admin-mode-title">Вы смотрите кабинет как администратор</h2>
+      <p>Клиент не видит эту панель, внутреннюю экономику, заметки и служебные данные заказов.</p>
+    </div>
+    <div class="client-admin-toolbar-actions">
+      <a href="{{ url_for('tuning_index') }}" class="client-admin-link">← К заказам</a>
+      <a href="{{ url_for('client_dashboard', token=client.token) }}" target="_blank" rel="noopener" class="client-admin-preview-link">Открыть версию клиента</a>
+    </div>
+  </section>
+
+  <section class="panel client-admin-profile" aria-label="Служебные данные клиента">
+    <dl>
+      <div><dt>Клиент в базе</dt><dd>№{{ client.id }}</dd></div>
+      <div><dt>Телефон</dt><dd>{{ client.phone }}</dd></div>
+      <div><dt>Создан</dt><dd>{{ client.created_at[:10]|ru_date }}</dd></div>
+      <div><dt>Администратор</dt><dd>{{ admin_name or '—' }}</dd></div>
+    </dl>
+  </section>
+  {% endif %}
 
   <div class="investor-bar">
     <span class="investor-name">{{ client.client_name }}</span>
@@ -99,11 +123,15 @@
           {% if o.work_items %}
           <div class="table-scroll">
             <table class="records">
-              <thead><tr><th>Работа</th><th>Цена, ₽</th><th>Статус</th><th></th></tr></thead>
+              <thead><tr><th>Работа</th>{% if is_admin_view %}<th>Себестоимость, ₽</th><th>Коэффициент</th>{% endif %}<th>Цена, ₽</th><th>Статус</th><th></th></tr></thead>
               <tbody>
                 {% for item in o.work_items %}
                 <tr class="{{ 'row-pending' if item.status == 'pending' else 'row-removed' if item.status == 'removed' }}">
                   <td>{{ item.work_name }}</td>
+                  {% if is_admin_view %}
+                  <td class="amount client-admin-cost">{{ item.cost_price|money }}</td>
+                  <td class="client-admin-multiplier">× {{ item.multiplier|float|round(2) }}</td>
+                  {% endif %}
                   <td class="amount">{{ item.price|money }}</td>
                   <td><span class="status-badge status-{{ item.status }}">{{ item.status|work_status_label }}</span></td>
                   <td class="row-actions">
@@ -117,7 +145,7 @@
                       </svg>
                     </button>
                     {% endif %}
-                    {% if item.status == 'pending' %}
+                    {% if item.status == 'pending' and not is_admin_view %}
                     <form action="{{ url_for('client_approve_item', token=client.token, item_id=item.id) }}" method="post">
                       <button type="submit" class="icon-btn approve" title="Согласовать работу">
                         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -140,12 +168,13 @@
           <h3 style="margin-top:18px;">Товары по заказу</h3>
           <div class="table-scroll">
             <table class="records">
-              <thead><tr><th>Товар</th><th>Кол-во</th><th>Цена, ₽</th><th>Сумма, ₽</th></tr></thead>
+              <thead><tr><th>Товар</th><th>Кол-во</th>{% if is_admin_view %}<th>Себестоимость, ₽</th>{% endif %}<th>Цена, ₽</th><th>Сумма, ₽</th></tr></thead>
               <tbody>
                 {% for g in o.goods_items %}
                 <tr>
                   <td>{{ g.product_name }}</td>
                   <td class="amount">{{ g.quantity|float|round(2) }} {{ cost_units|selectattr('value', 'equalto', g.unit)|map(attribute='label')|first }}</td>
+                  {% if is_admin_view %}<td class="amount client-admin-cost">{{ g.cost_price|money }}</td>{% endif %}
                   <td class="amount">{{ g.unit_price|money }}</td>
                   <td class="amount">{{ (g.quantity * g.unit_price)|money }}</td>
                 </tr>
@@ -159,10 +188,61 @@
             Скидка {{ (o.discount_value|float|round(1)|string ~ '%') if o.discount_type != 'amount' else (o.discount_value|money ~ ' ₽') }} · Оплачено {{ o.paid_amount|money }} ₽ ·
             К доплате {{ o.remaining|money }} ₽
           </p>
-          {% if o.yookassa_pending and o.remaining > 0 %}
+          {% if o.yookassa_pending and o.remaining > 0 and not is_admin_view %}
           <a href="{{ o.yookassa_pending.confirmation_url }}" target="_blank" rel="noopener" class="btn-pay" style="margin-top:6px;">
             Оплатить онлайн {{ o.yookassa_pending.amount|money }} ₽
           </a>
+          {% endif %}
+
+          {% if is_admin_view %}
+          <aside class="client-admin-order-panel" aria-label="Внутренние данные заказа №{{ o.id }}">
+            <div class="client-admin-order-heading">
+              <div>
+                <span class="client-admin-eyebrow">Только для сотрудников</span>
+                <h3>Внутренние данные заказа</h3>
+              </div>
+              <a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="client-admin-edit-link">Редактировать заказ</a>
+            </div>
+            <dl class="client-admin-order-facts">
+              <div><dt>Источник</dt><dd>{{ {'manual': 'Создан вручную', 'tilda': 'Заявка Tilda', 'tuning_site': 'Сайт тюнинга'}.get(o.source, o.source or '—') }}</dd></div>
+              <div><dt>Канал продажи</dt><dd>{{ 'Напрямую' if o.sale_channel == 'direct' else ('Агрегатор' if o.sale_channel == 'aggregator' else 'Смешанный') }}</dd></div>
+              <div><dt>Внутренняя себестоимость</dt><dd>{{ o.internal_cost|money }} ₽</dd></div>
+              <div><dt>Расчётная маржа</dt><dd class="{{ 'is-negative' if o.gross_margin < 0 else 'is-positive' }}">{{ o.gross_margin|money }} ₽</dd></div>
+              <div><dt>Обновлён</dt><dd>{{ o.updated_at }}</dd></div>
+              {% if o.source_ref %}<div><dt>Код источника</dt><dd class="client-admin-source-ref">{{ o.source_ref }}</dd></div>{% endif %}
+            </dl>
+
+            <div class="client-admin-private-grid">
+              <details class="client-admin-private-block">
+                <summary>Служебные заметки <span>{{ o.internal_notes|length }}</span></summary>
+                {% if o.internal_notes %}
+                <div class="client-admin-note-list">
+                  {% for note in o.internal_notes %}
+                  <article>
+                    <p>{{ note.text }}</p>
+                    <small>{{ note.author_name or 'Система' }} · {{ note.created_at }}</small>
+                  </article>
+                  {% endfor %}
+                </div>
+                {% else %}
+                <p class="hint">Служебных заметок пока нет.</p>
+                {% endif %}
+              </details>
+
+              <details class="client-admin-private-block">
+                <summary>Платежи <span>{{ o.payments|length }}</span></summary>
+                {% if o.payments %}
+                <div class="client-admin-payment-list">
+                  {% for payment in o.payments %}
+                  <div><strong>{{ payment.amount|money }} ₽</strong><span>{{ payment.paid_at }}</span></div>
+                  {% endfor %}
+                </div>
+                {% else %}
+                <p class="hint">Платежей по заказу пока нет.</p>
+                {% endif %}
+              </details>
+            </div>
+          </aside>
           {% endif %}
           {% for hs in o.hull_sheets %}
           <a href="{{ url_for('client_hull_diagnostic_sheet', token=client.token, sheet_id=hs.id) }}" class="term" style="display:inline-block; margin-top:10px;">
