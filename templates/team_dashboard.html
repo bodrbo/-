@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Личный кабинет сотрудника</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<title>{{ 'Кабинет капитана' if is_captain else 'Личный кабинет сотрудника' }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260829-captain-dashboard">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
 <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
@@ -14,7 +14,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Боцман">
 </head>
-<body>
+<body class="team-dashboard-body{{ ' is-captain' if is_captain }}">
 
 <div class="page-loader" id="pageLoader" aria-hidden="true">
   <div class="loader-body">
@@ -43,18 +43,18 @@
 </div>
 {% endmacro %}
 
-<header class="topbar">
+<header class="topbar team-topbar">
   <div class="topbar-inner">
     <div class="brand">
       <a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a>
     </div>
     <div class="title-block">
-      <h1>Личный кабинет сотрудника</h1>
+      <h1>{{ 'Кабинет капитана' if is_captain else 'Личный кабинет сотрудника' }}</h1>
     </div>
   </div>
 </header>
 
-<main class="wrap">
+<main class="wrap team-dashboard-page">
 
   <div class="investor-bar">
     <div class="employee-id">
@@ -71,26 +71,16 @@
   </div>
 
   {% if is_captain %}
-  <details class="panel collapsible-panel captain-fleet-panel"{{ ' open' if fleet_open }}>
+  <details id="captain-fleet" class="panel collapsible-panel captain-fleet-panel"{{ ' open' if fleet_open }}>
     <summary>
       <span>Флот</span>
       {% if boat_current_defects %}<span class="badge">{{ boat_current_defects|length }}</span>{% endif %}
       <span class="chev" aria-hidden="true"></span>
     </summary>
-    <div class="collapsible-body">
-      <div class="offline-dashboard-strip">
-        <div class="offline-dashboard-state">
-          <span class="offline-signal-dot" id="offlineDashboardSignal"></span>
-          <span>
-            <strong data-offline-ready>Подготавливаем офлайн-режим…</strong>
-            <small><span data-offline-connection>Проверяем связь</span> · <span data-offline-pending>Проверяем очередь</span></small>
-          </span>
-        </div>
-        <a href="{{ url_for('offline.workspace') }}" class="btn-secondary">Открыть судовой журнал</a>
-      </div>
+    <div class="collapsible-body captain-fleet-body">
       <form method="get" action="{{ url_for('team_dashboard') }}" class="captain-boat-picker">
         <input type="hidden" name="week" value="{{ selected_week }}">
-        <label for="boat_index">Выберите судно</label>
+        <label for="boat_index">Судно на смене</label>
         <select id="boat_index" name="boat_index" onchange="this.form.submit()">
           {% for b in boats %}
           <option value="{{ loop.index0 }}" {{ 'selected' if loop.index0 == boat_index }}>{{ b.name }}</option>
@@ -99,28 +89,99 @@
         <span class="captain-boat-context">{{ selected_boat }}</span>
       </form>
 
-      {% set viewer_role = 'team' %}
-      {% include '_fuel_panel.html' %}
+      <section class="captain-command-deck" aria-labelledby="captain-command-title">
+        <div class="captain-command-heading">
+          <div>
+            <span class="captain-section-eyebrow">Перед выходом</span>
+            <h2 id="captain-command-title">Что нужно сделать?</h2>
+          </div>
+          <span class="captain-command-boat">{{ selected_boat }}</span>
+        </div>
+        <div class="captain-command-actions">
+          {% for checklist_type, label, note in [
+            ('pre', 'Предрейсовый осмотр', 'Проверить катер до выхода'),
+            ('post', 'Послерейсовый осмотр', 'Зафиксировать состояние после рейса')
+          ] %}
+          <form action="{{ url_for('team_checklist_start', checklist_type=checklist_type) }}" method="post">
+            <input type="hidden" name="boat" value="{{ selected_boat }}">
+            <button type="submit" class="captain-command-button">
+              <span class="captain-command-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M8 4h8M9 3v3m6-3v3M6 5.5h12a1.5 1.5 0 011.5 1.5v13H4.5V7A1.5 1.5 0 016 5.5z"/>
+                  <path d="M8 12l2.2 2.2L16 9"/>
+                </svg>
+              </span>
+              <span><strong>{{ label }}</strong><small>{{ note }}</small></span>
+              <span class="captain-command-arrow" aria-hidden="true">→</span>
+            </button>
+          </form>
+          {% endfor %}
+          <button type="button" class="captain-command-button captain-command-alert" onclick="openCaptainDefectForm()">
+            <span class="captain-command-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3.5l9 16H3l9-16z"/><path d="M12 9v4.5M12 17h.01"/>
+              </svg>
+            </span>
+            <span><strong>Добавить неисправность</strong><small>Сообщить о проблеме на борту</small></span>
+            <span class="captain-command-arrow" aria-hidden="true">→</span>
+          </button>
+        </div>
+      </section>
 
-      <div class="captain-fleet-grid">
-        <section class="captain-fleet-card captain-checklist-card">
-          <div class="captain-fleet-card-head">
-            <span class="captain-fleet-card-icon">✓</span>
-            <div>
-              <h3>Пройти чек-лист</h3>
-              <p>Начать осмотр выбранного судна.</p>
+      <section class="captain-status-board fuel-status-{{ fuel.status }}" aria-labelledby="captain-status-title">
+        <div class="captain-status-heading">
+          <div>
+            <span class="captain-section-eyebrow">{{ selected_boat }}</span>
+            <h2 id="captain-status-title">Состояние сейчас</h2>
+          </div>
+          {% if fuel.activated %}<span class="captain-status-updated">Расчётный остаток</span>{% endif %}
+        </div>
+        <div class="captain-status-grid">
+          <div class="captain-status-cell captain-status-fuel">
+            <span class="captain-status-label">В баке</span>
+            <div class="captain-status-value">
+              {% if fuel.activated %}<strong>{{ fuel.balance_liters|round(1) }}</strong>{% else %}<strong>—</strong>{% endif %}
+              <span>/ {{ fuel.capacity_liters|round(1) }} л</span>
+            </div>
+            <div class="captain-fuel-track" role="progressbar" aria-label="Уровень топлива" aria-valuemin="0" aria-valuemax="{{ fuel.capacity_liters }}"{% if fuel.activated %} aria-valuenow="{{ fuel.gauge_liters }}"{% endif %}>
+              <span style="--fuel-level: {{ fuel.percent }}%;"></span>
             </div>
           </div>
-          <div class="captain-checklist-actions">
-            {% for checklist_type, label in [('pre', 'Предрейсовый'), ('post', 'Послерейсовый')] %}
-            <form action="{{ url_for('team_checklist_start', checklist_type=checklist_type) }}" method="post">
-              <input type="hidden" name="boat" value="{{ selected_boat }}">
-              <button type="submit" class="btn-primary">{{ label }}</button>
-            </form>
-            {% endfor %}
+          <div class="captain-status-cell">
+            <span class="captain-status-label">В канистрах</span>
+            <div class="captain-status-value"><strong>{{ fuel.reserve_liters|round(1) }}</strong><span>л в резерве</span></div>
           </div>
-        </section>
+          <a href="#captain-defects" class="captain-status-cell captain-status-link" onclick="openCaptainSection('captain-fleet')">
+            <span class="captain-status-label">Неисправности</span>
+            <div class="captain-status-value"><strong>{{ boat_current_defects|length }}</strong><span>текущих</span></div>
+          </a>
+          <a href="{{ url_for('offline.workspace') }}" class="captain-status-cell captain-status-link captain-offline-status">
+            <span class="offline-signal-dot" id="offlineDashboardSignal" aria-hidden="true"></span>
+            <span>
+              <strong data-offline-ready>Готовим судовой журнал…</strong>
+              <small><span data-offline-connection>Проверяем связь</span> · <span data-offline-pending>Проверяем очередь</span></small>
+            </span>
+            <span class="captain-command-arrow" aria-hidden="true">→</span>
+          </a>
+        </div>
+      </section>
 
+      <details class="captain-utility-disclosure captain-fuel-details"{{ ' open' if fuel_notice }}>
+        <summary>
+          <span>
+            <strong>Топливо: операции и журнал</strong>
+            <small>Заправка бака и канистр, ручной расход по рейсам</small>
+          </span>
+          {% if fuel.pending_trips %}<span class="badge">{{ fuel.pending_trips|length }}</span>{% endif %}
+          <span class="chev" aria-hidden="true"></span>
+        </summary>
+        <div class="captain-utility-body">
+          {% set viewer_role = 'team' %}
+          {% include '_fuel_panel.html' %}
+        </div>
+      </details>
+
+      <div class="captain-fleet-grid">
         <section class="captain-fleet-card">
           <div class="captain-fleet-card-head">
             <span class="captain-fleet-card-icon">≡</span>
@@ -166,15 +227,21 @@
           {% if defect_notice %}
           <div class="defect-notice defect-notice-{{ defect_notice.type }}" role="alert">{{ defect_notice.message }}</div>
           {% endif %}
-          <form action="{{ url_for('team_create_defect') }}" method="post" class="manual-defect-form manual-defect-form-compact">
-            <input type="hidden" name="boat_index" value="{{ boat_index }}">
-            <label for="team-defect-description">Добавить неисправность вручную</label>
-            <div class="manual-defect-controls">
-              <textarea id="team-defect-description" name="description" rows="2" maxlength="1000"
-                        placeholder="Опишите обнаруженную проблему" required></textarea>
-              <button type="submit">Добавить</button>
-            </div>
-          </form>
+          <details id="captain-defect-form" class="manual-defect-disclosure"{{ ' open' if defect_notice and defect_notice.type == 'error' }}>
+            <summary>
+              <span>Добавить неисправность</span>
+              <span class="manual-defect-plus" aria-hidden="true">+</span>
+            </summary>
+            <form action="{{ url_for('team_create_defect') }}" method="post" class="manual-defect-form manual-defect-form-compact">
+              <input type="hidden" name="boat_index" value="{{ boat_index }}">
+              <label for="team-defect-description">Что обнаружено на судне?</label>
+              <div class="manual-defect-controls">
+                <textarea id="team-defect-description" name="description" rows="2" maxlength="1000"
+                          placeholder="Кратко опишите симптомы или проблему" required></textarea>
+                <button type="submit">Добавить</button>
+              </div>
+            </form>
+          </details>
           {% if boat_current_defects %}
           <div class="captain-defect-list">
             {% for defect in boat_current_defects %}
@@ -207,7 +274,7 @@
     </div>
   </details>
 
-  <details class="panel collapsible-panel">
+  <details id="team-documents" class="panel collapsible-panel"{{ ' open' if documents_open }}>
     <summary>
       <span>Мои документы</span>
       <span class="chev" aria-hidden="true"></span>
@@ -223,7 +290,7 @@
   </details>
   {% endif %}
 
-  <details class="panel collapsible-panel"{{ ' open' if income_open }}>
+  <details id="team-income" class="panel collapsible-panel"{{ ' open' if income_open }}>
     <summary>
       <span>Мой доход</span>
       <span class="chev" aria-hidden="true"></span>
@@ -231,6 +298,7 @@
     <div class="collapsible-body">
       <form action="{{ url_for('team_dashboard') }}" method="get" class="filter-form">
         {% if is_captain %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
+        <input type="hidden" name="section" value="income">
         <div class="field">
           <label for="week">Неделя</label>
           <select id="week" name="week" onchange="this.form.submit()">
@@ -260,7 +328,7 @@
 
       <h3>Записи за период</h3>
       {% if entries %}
-      <div class="table-scroll">
+      <div class="table-scroll team-income-table">
         <table class="records">
           <thead>
             <tr>
@@ -284,6 +352,21 @@
           </tbody>
         </table>
       </div>
+      <div class="team-income-cards">
+        {% for e in entries %}
+        <article class="team-income-card">
+          <div class="team-income-card-head">
+            <time>{{ e.work_date|ru_date }}{% if e.trip_time %} · {{ e.trip_time }}{% endif %}</time>
+            <strong>{{ e.amount|money }} ₽</strong>
+          </div>
+          <h4>{{ e.work_type }}</h4>
+          <dl>
+            <div><dt>Часы / кол-во</dt><dd>{{ e.quantity|float|round(2) }}</dd></div>
+            <div><dt>Ставка</dt><dd>{{ e.rate|float|round(2) }} ₽</dd></div>
+          </dl>
+        </article>
+        {% endfor %}
+      </div>
       {% else %}
       <div class="empty-state">
         <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
@@ -295,7 +378,7 @@
   </details>
 
   {% if can_have_tasks %}
-  <details class="panel collapsible-panel">
+  <details id="team-tasks" class="panel collapsible-panel"{{ ' open' if tasks_open }}>
     <summary>
       <span>Мои задачи</span>
       <span class="chev" aria-hidden="true"></span>
@@ -323,22 +406,25 @@
         {% if task.assignment_status == 'pending' %}
         <div class="task-card-actions">
           <form action="{{ url_for('team_task_respond' if task.kind == 'defect' else 'team_tuning_task_respond', assignment_id=task.id) }}" method="post">
+            {% if is_captain %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
             <input type="hidden" name="response" value="accepted">
             <button type="submit" class="btn-accept">Принять</button>
           </form>
           <form action="{{ url_for('team_task_respond' if task.kind == 'defect' else 'team_tuning_task_respond', assignment_id=task.id) }}" method="post">
+            {% if is_captain %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
             <input type="hidden" name="response" value="rejected">
             <button type="submit" class="btn-reject">Отклонить</button>
           </form>
         </div>
         {% elif task.assignment_status == 'accepted' %}
-        <div style="display:flex; align-items:center; gap:10px;">
+        <div class="team-task-status-row">
           {% if task.kind == 'defect' %}
           <span class="status-badge status-defect-{{ task.defect_status }}">
             {{ defect_statuses|selectattr('value', 'equalto', task.defect_status)|map(attribute='label')|first }}
           </span>
           <form action="{{ url_for('team_task_set_status', assignment_id=task.id) }}"
                 method="post" class="status-select-form">
+            {% if is_captain %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
             <select name="status" onchange="this.form.submit()">
               {% for s in defect_statuses %}
               <option value="{{ s.value }}" {{ 'selected' if task.defect_status == s.value }}>{{ s.label }}</option>
@@ -351,6 +437,7 @@
           </span>
           <form action="{{ url_for('team_tuning_task_set_status', assignment_id=task.id) }}"
                 method="post" class="status-select-form">
+            {% if is_captain %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
             <select name="status" onchange="this.form.submit()">
               {% for s in work_statuses %}
               <option value="{{ s.value }}" {{ 'selected' if task.item_status == s.value }}
@@ -361,7 +448,7 @@
           {% endif %}
         </div>
         {% if task.kind == 'tuning' %}
-        <div style="margin-top:8px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div class="team-task-material-row">
           <button type="button" class="btn-secondary"
                   onclick='openMaterialModal({{ url_for("team_tuning_task_writeoff_material", assignment_id=task.id)|tojson }})'>
             Списать материалы
@@ -397,6 +484,7 @@
         </svg>
       </button>
       <form id="material-form" method="post" class="assign-modal-card">
+        {% if is_captain %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
         <h3>Списать материалы</h3>
         <div class="field">
           <label for="material-select">Материал и склад</label>
@@ -416,13 +504,13 @@
     </div>
   </div>
 
-  <details class="panel collapsible-panel">
+  <details id="team-supply" class="panel collapsible-panel"{{ ' open' if supply_open }}>
     <summary>
       <span>Заявки на снабжение</span>
       <span class="chev" aria-hidden="true"></span>
     </summary>
     <div class="collapsible-body">
-      <button type="button" class="btn-add" onclick="openSupplyRequestModal()" style="margin-bottom:14px;">
+      <button type="button" class="btn-add team-supply-create" onclick="openSupplyRequestModal()">
         Создать заявку на особое снабжение
       </button>
       {% if my_supply_requests %}
@@ -456,6 +544,7 @@
         </svg>
       </button>
       <form id="supply-request-form" method="post" action="{{ url_for('team_create_supply_request') }}" class="assign-modal-card">
+        {% if is_captain %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
         <h3>Заявка на особое снабжение</h3>
         <div id="supply-request-container">
           {{ supply_request_row() }}
@@ -518,6 +607,29 @@
 
 </main>
 
+{% if is_captain %}
+<nav class="team-mobile-nav" aria-label="Разделы личного кабинета">
+  <a href="#captain-fleet" data-dashboard-target>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 14l3 5h12l3-5-9-4-9 4zM7 14V7h7l3 5"/></svg>
+    <span>Флот</span>
+  </a>
+  {% if can_have_tasks %}
+  <a href="#team-tasks" data-dashboard-target>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4h8M9 3v3m6-3v3M6 5.5h12a1.5 1.5 0 011.5 1.5v13H4.5V7A1.5 1.5 0 016 5.5z"/><path d="M8 12l2 2 5-5"/></svg>
+    <span>Задачи</span>
+  </a>
+  {% endif %}
+  <a href="#team-income" data-dashboard-target>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16v11H4zM7 7V5h10v2M8 12h8M8 15h5"/></svg>
+    <span>Доход</span>
+  </a>
+  <a href="#team-documents" data-dashboard-target>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v5h4M9 13h6M9 17h6"/></svg>
+    <span>Документы</span>
+  </a>
+</nav>
+{% endif %}
+
 {% if can_have_tasks %}
 <script>
 function openMaterialModal(actionUrl) {
@@ -573,6 +685,31 @@ document.addEventListener('keydown', function (e) {
 
 {% if is_captain %}
 <script>
+function openCaptainSection(sectionId) {
+  var section = document.getElementById(sectionId);
+  if (section && section.tagName === 'DETAILS') section.open = true;
+}
+
+function openCaptainDefectForm() {
+  openCaptainSection('captain-fleet');
+  var formDetails = document.getElementById('captain-defect-form');
+  if (!formDetails) return;
+  formDetails.open = true;
+  window.requestAnimationFrame(function () {
+    var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    formDetails.scrollIntoView({behavior: reducedMotion ? 'auto' : 'smooth', block: 'center'});
+    var field = document.getElementById('team-defect-description');
+    if (field) field.focus({preventScroll: true});
+  });
+}
+
+document.querySelectorAll('[data-dashboard-target]').forEach(function (link) {
+  link.addEventListener('click', function () {
+    var target = document.querySelector(link.getAttribute('href'));
+    if (target && target.tagName === 'DETAILS') target.open = true;
+  });
+});
+
 // Images reuse the existing photo modal (openPhotoModal below); a PDF can't
 // go in an <img>, so it gets its own tiny iframe-based modal instead — no
 // modal for .doc/.docx, browsers can't render those inline at all, so those

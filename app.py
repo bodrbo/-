@@ -7678,6 +7678,7 @@ def team_logout():
 def team_dashboard():
     db = get_db()
     employee_name = session.get("team_employee_name")
+    active_section = request.args.get("section", "").strip()
 
     weeks, current_monday = build_week_options(db)
     selected_week = request.args.get("week", current_monday.isoformat())
@@ -7853,7 +7854,16 @@ def team_dashboard():
         boat_archived_defects=boat_archived_defects, fuel=fuel,
         fuel_notice=session.pop("fuel_notice", None), diploma_url=diploma_url,
         defect_notice=session.pop("defect_notice", None),
-        income_open="week" in request.args, fleet_open="boat_index" in request.args,
+        income_open=(
+            active_section == "income"
+            or ("week" in request.args and "boat_index" not in request.args)
+        ),
+        fleet_open=is_captain and active_section not in {
+            "income", "tasks", "supply", "documents",
+        },
+        documents_open=active_section == "documents",
+        tasks_open=active_section == "tasks",
+        supply_open=active_section == "supply",
         can_have_tasks=can_have_tasks, my_tasks=my_tasks, defect_statuses=DEFECT_STATUSES,
         work_statuses=WORK_STATUSES, materials=materials,
         team_writeoff_error=session.pop("team_writeoff_error", None),
@@ -7872,6 +7882,17 @@ def _team_selected_boat(db):
     if not (0 <= boat_index < len(BOATS)):
         return None, None
     return boat_index, BOATS[boat_index]["name"]
+
+
+def _team_dashboard_section_redirect(section):
+    """Return to the same cabinet context after an inline dashboard action."""
+    params = {"section": section}
+    boat_index_raw = request.form.get("boat_index", "").strip()
+    if boat_index_raw.isdigit():
+        boat_index = int(boat_index_raw)
+        if 0 <= boat_index < len(BOATS):
+            params["boat_index"] = boat_index
+    return redirect(url_for("team_dashboard", **params) + f"#team-{section}")
 
 
 @app.route("/team/defects", methods=["POST"])
@@ -8027,7 +8048,7 @@ def team_task_respond(assignment_id):
         (assignment_id, employee_name),
     ).fetchone()
     if assignment is None or assignment["assignment_status"] != "pending":
-        return redirect(url_for("team_dashboard"))
+        return _team_dashboard_section_redirect("tasks")
     response = request.form.get("response", "").strip()
     if response in ("accepted", "rejected"):
         db.execute(
@@ -8035,7 +8056,7 @@ def team_task_respond(assignment_id):
             (response, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), assignment_id),
         )
         db.commit()
-    return redirect(url_for("team_dashboard"))
+    return _team_dashboard_section_redirect("tasks")
 
 
 @app.route("/team/tasks/<int:assignment_id>/status", methods=["POST"])
@@ -8055,10 +8076,10 @@ def team_task_set_status(assignment_id):
         (assignment_id, employee_name),
     ).fetchone()
     if assignment is None or assignment["assignment_status"] != "accepted":
-        return redirect(url_for("team_dashboard"))
+        return _team_dashboard_section_redirect("tasks")
     status = request.form.get("status", "").strip()
     if status not in [s["value"] for s in DEFECT_STATUSES]:
-        return redirect(url_for("team_dashboard"))
+        return _team_dashboard_section_redirect("tasks")
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
@@ -8078,7 +8099,7 @@ def team_task_set_status(assignment_id):
             (cur.lastrowid, assignment_id),
         )
     db.commit()
-    return redirect(url_for("team_dashboard"))
+    return _team_dashboard_section_redirect("tasks")
 
 
 @app.route("/team/tuning-tasks/<int:assignment_id>/respond", methods=["POST"])
@@ -8091,7 +8112,7 @@ def team_tuning_task_respond(assignment_id):
         (assignment_id, employee_name),
     ).fetchone()
     if assignment is None or assignment["assignment_status"] != "pending":
-        return redirect(url_for("team_dashboard"))
+        return _team_dashboard_section_redirect("tasks")
     response = request.form.get("response", "").strip()
     if response in ("accepted", "rejected"):
         db.execute(
@@ -8099,7 +8120,7 @@ def team_tuning_task_respond(assignment_id):
             (response, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), assignment_id),
         )
         db.commit()
-    return redirect(url_for("team_dashboard"))
+    return _team_dashboard_section_redirect("tasks")
 
 
 @app.route("/team/tuning-tasks/<int:assignment_id>/status", methods=["POST"])
@@ -8116,18 +8137,18 @@ def team_tuning_task_set_status(assignment_id):
         (assignment_id, employee_name),
     ).fetchone()
     if assignment is None or assignment["assignment_status"] != "accepted":
-        return redirect(url_for("team_dashboard"))
+        return _team_dashboard_section_redirect("tasks")
     status = request.form.get("status", "").strip()
     # "Задача снята" takes the work out of the order's total — an admin-only
     # call, not something the assigned employee can set on their own task.
     if status == "removed" or status not in [s["value"] for s in WORK_STATUSES]:
-        return redirect(url_for("team_dashboard"))
+        return _team_dashboard_section_redirect("tasks")
 
     item = db.execute(
         "SELECT * FROM tuning_order_items WHERE id = ?", (assignment["item_id"],)
     ).fetchone()
     if item is None:
-        return redirect(url_for("team_dashboard"))
+        return _team_dashboard_section_redirect("tasks")
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
@@ -8148,7 +8169,7 @@ def team_tuning_task_set_status(assignment_id):
             (cur.lastrowid, assignment_id),
         )
     db.commit()
-    return redirect(url_for("team_dashboard"))
+    return _team_dashboard_section_redirect("tasks")
 
 
 @app.route("/team/tuning-tasks/<int:assignment_id>/writeoff-material", methods=["POST"])
@@ -8165,12 +8186,12 @@ def team_tuning_task_writeoff_material(assignment_id):
         (assignment_id, employee_name),
     ).fetchone()
     if assignment is None or assignment["assignment_status"] != "accepted":
-        return redirect(url_for("team_dashboard"))
+        return _team_dashboard_section_redirect("tasks")
     item = db.execute(
         "SELECT * FROM tuning_order_items WHERE id = ?", (assignment["item_id"],)
     ).fetchone()
     if item is None:
-        return redirect(url_for("team_dashboard"))
+        return _team_dashboard_section_redirect("tasks")
 
     combo_raw = request.form.get("product_warehouse", "").strip()
     quantity_raw = request.form.get("quantity", "").strip().replace(",", ".")
@@ -8204,7 +8225,7 @@ def team_tuning_task_writeoff_material(assignment_id):
 
     if errors:
         session["team_writeoff_error"] = " ".join(errors)
-        return redirect(url_for("team_dashboard"))
+        return _team_dashboard_section_redirect("tasks")
 
     project_id = _project_id_for_tuning_order(db, item["order_id"])
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -8222,7 +8243,7 @@ def team_tuning_task_writeoff_material(assignment_id):
     )
     db.commit()
     _maybe_create_low_stock_request(db, product_id)
-    return redirect(url_for("team_dashboard"))
+    return _team_dashboard_section_redirect("tasks")
 
 
 @app.route("/team/supply-requests/create", methods=["POST"])
@@ -8231,7 +8252,7 @@ def team_create_supply_request():
     db = get_db()
     employee_name = session.get("team_employee_name")
     if not any(_employee_has_position(db, employee_name, p) for p in SUPPLY_REQUEST_POSITIONS):
-        return redirect(url_for("team_dashboard"))
+        return _team_dashboard_section_redirect("supply")
 
     item_names = request.form.getlist("item_name[]")
     quantities = request.form.getlist("quantity[]")
@@ -8251,7 +8272,7 @@ def team_create_supply_request():
         items.append((name, qty))
 
     if not items:
-        return redirect(url_for("team_dashboard"))
+        return _team_dashboard_section_redirect("supply")
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     cur = db.execute(
@@ -8265,7 +8286,7 @@ def team_create_supply_request():
             (request_id, name, qty),
         )
     db.commit()
-    return redirect(url_for("team_dashboard"))
+    return _team_dashboard_section_redirect("supply")
 
 
 @app.route("/team/checklist/start/<checklist_type>", methods=["GET", "POST"])

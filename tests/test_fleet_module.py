@@ -251,6 +251,65 @@ class FleetModuleIntegrationTests(unittest.TestCase):
             url=f"/fleet/0/defects/{defect['id']}",
         )
 
+    def test_captain_dashboard_prioritizes_daily_actions_and_compact_status(self):
+        with self.client.session_transaction() as session:
+            session["team_id"] = 2
+            session["team_employee_name"] = "Дмитрий Тарусов"
+            session["team_username"] = "captain-test"
+
+        response = self.client.get("/team/")
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("<title>Кабинет капитана</title>", html)
+        self.assertIn(
+            '<details id="captain-fleet" class="panel collapsible-panel captain-fleet-panel" open>',
+            html,
+        )
+        self.assertLess(html.index("captain-command-deck"), html.index("captain-status-board"))
+        self.assertLess(html.index("captain-status-board"), html.index("captain-fuel-details"))
+        self.assertIn("Предрейсовый осмотр", html)
+        self.assertIn("Послерейсовый осмотр", html)
+        self.assertIn("В канистрах", html)
+        self.assertIn(
+            '<details id="captain-defect-form" class="manual-defect-disclosure">',
+            html,
+        )
+        self.assertIn('class="team-mobile-nav"', html)
+
+    def test_captain_dashboard_opens_requested_section_without_expanding_fleet(self):
+        with self.client.session_transaction() as session:
+            session["team_id"] = 2
+            session["team_employee_name"] = "Дмитрий Тарусов"
+            session["team_username"] = "captain-test"
+
+        response = self.client.get(
+            "/team/?boat_index=0&week=all&section=income"
+        )
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            '<details id="captain-fleet" class="panel collapsible-panel captain-fleet-panel">',
+            html,
+        )
+        self.assertIn(
+            '<details id="team-income" class="panel collapsible-panel" open>',
+            html,
+        )
+        self.assertIn('class="team-income-cards"', html)
+
+        redirect_response = self.client.post(
+            "/team/tasks/999999/respond",
+            data={"boat_index": "2", "response": "accepted"},
+        )
+        self.assertEqual(redirect_response.status_code, 302)
+        self.assertTrue(
+            redirect_response.headers["Location"].endswith(
+                "/team/?section=tasks&boat_index=2#team-tasks"
+            )
+        )
+
     def test_admin_can_delete_defect_with_children_but_keeps_payroll_entry(self):
         defect_id = self.create_defect()
         with application_module.app.app_context():

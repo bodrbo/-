@@ -4223,3 +4223,393 @@ table.records tr.row-expense td.amount { color: var(--danger); }
   .refund-unmatched-row select { width: 100%; max-width: none; }
   .refund-unmatched-row > div { grid-template-columns: 1fr; gap: 3px; }
 }
+
+/* ------------------------------------------------------------------
+   Captain cabinet — a helm-first layout for work on board
+   ------------------------------------------------------------------ */
+.team-dashboard-body {
+  --team-action: #176a9e;
+  --team-action-hover: #0f567f;
+  --team-deck: #102f3c;
+}
+.team-dashboard-page { max-width: 1120px; }
+.team-topbar { padding-top: 17px; padding-bottom: 16px; }
+.team-topbar .topbar-inner { align-items: center; }
+.team-topbar .title-block h1 { margin: 0; font-size: 20px; line-height: 1.2; }
+.team-dashboard-body .btn-primary,
+.team-dashboard-body button[type="submit"]:not(.btn-secondary):not(.btn-reject):not(.btn-accept):not(.icon-btn):not(.btn-delete):not(.captain-command-button) {
+  background: var(--team-action);
+}
+.team-dashboard-body .btn-primary:hover,
+.team-dashboard-body button[type="submit"]:not(.btn-secondary):not(.btn-reject):not(.btn-accept):not(.icon-btn):not(.btn-delete):not(.captain-command-button):hover {
+  background: var(--team-action-hover);
+}
+.team-dashboard-body :where(button, a, select, textarea, summary):focus-visible {
+  outline: 3px solid rgba(23, 106, 158, .32);
+  outline-offset: 2px;
+}
+.team-dashboard-body .collapsible-panel > summary { min-height: 44px; }
+.team-dashboard-body .collapsible-panel { scroll-margin-top: 12px; }
+.captain-fleet-body { gap: 14px; }
+
+.captain-boat-picker {
+  grid-template-columns: minmax(220px, 360px) auto;
+  margin-bottom: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 10px;
+  background: var(--paper-alt);
+}
+.captain-boat-picker label { color: var(--ink-soft); }
+.captain-boat-picker select { min-height: 44px; background-color: var(--paper); }
+
+.captain-command-deck {
+  overflow: hidden;
+  padding: 20px;
+  border-radius: 13px;
+  background: var(--team-deck);
+  color: var(--paper);
+  box-shadow: 0 18px 38px -28px rgba(15, 42, 53, .9);
+}
+.captain-command-heading,
+.captain-status-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+.captain-command-heading h2,
+.captain-status-heading h2 {
+  margin: 2px 0 0;
+  font-size: 20px;
+  line-height: 1.2;
+}
+.captain-command-heading h2 { color: var(--paper); }
+.captain-section-eyebrow {
+  display: block;
+  color: #7fc4ed;
+  font-family: 'PT Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.captain-status-heading .captain-section-eyebrow { color: var(--team-action); }
+.captain-command-boat,
+.captain-status-updated {
+  color: rgba(255, 255, 255, .7);
+  font-family: 'PT Mono', monospace;
+  font-size: 10px;
+  text-align: right;
+}
+.captain-status-updated { color: var(--muted); }
+.captain-command-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+.captain-command-actions form { margin: 0; }
+button.captain-command-button {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 78px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, .15);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .075);
+  color: var(--paper);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, transform .15s ease;
+}
+button.captain-command-button:hover {
+  border-color: rgba(127, 196, 237, .65);
+  background: rgba(52, 152, 219, .16);
+  transform: translateY(-1px);
+}
+button.captain-command-alert:hover {
+  border-color: rgba(230, 142, 120, .62);
+  background: rgba(179, 64, 44, .16);
+}
+.captain-command-button > span:nth-child(2) { display: grid; min-width: 0; }
+.captain-command-button strong { font-size: 13px; line-height: 1.25; }
+.captain-command-button small { margin-top: 3px; color: rgba(255, 255, 255, .68); font-size: 11px; line-height: 1.3; }
+.captain-command-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(127, 196, 237, .13);
+  color: #9ad4f5;
+}
+.captain-command-alert .captain-command-icon { background: rgba(230, 142, 120, .12); color: #e9957f; }
+.captain-command-icon svg { width: 19px; height: 19px; }
+.captain-command-arrow { color: rgba(255, 255, 255, .55); font-family: 'PT Mono', monospace; }
+
+.captain-status-board {
+  padding: 18px 20px 20px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--paper-alt);
+}
+.captain-status-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.3fr) minmax(145px, .75fr) minmax(145px, .75fr) minmax(220px, 1.25fr);
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--hairline);
+}
+.captain-status-cell {
+  display: flex;
+  min-width: 0;
+  min-height: 92px;
+  padding: 15px 16px;
+  flex-direction: column;
+  justify-content: center;
+  background: var(--paper);
+  color: var(--ink);
+  text-decoration: none;
+}
+.captain-status-link { transition: background-color .15s ease; }
+.captain-status-link:hover { background: #f8fbfd; }
+.captain-status-label {
+  color: var(--muted);
+  font-family: 'PT Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.captain-status-value { display: flex; align-items: baseline; gap: 6px; margin-top: 6px; }
+.captain-status-value strong { font-family: 'PT Mono', monospace; font-size: 27px; line-height: 1; }
+.captain-status-value span { color: var(--muted); font-size: 11px; }
+.captain-fuel-track {
+  overflow: hidden;
+  height: 6px;
+  margin-top: 10px;
+  border-radius: 99px;
+  background: var(--hairline-soft);
+}
+.captain-fuel-track > span { display: block; width: var(--fuel-level); height: 100%; background: var(--success); }
+.fuel-status-low .captain-fuel-track > span { background: var(--warning); }
+.fuel-status-critical .captain-fuel-track > span { background: var(--danger); }
+.captain-offline-status {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  background: var(--ink);
+  color: var(--paper);
+}
+.captain-offline-status:hover { background: #153b49; }
+.captain-offline-status > span:nth-child(2) { display: grid; min-width: 0; }
+.captain-offline-status strong { overflow: hidden; font-size: 12px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.captain-offline-status small { overflow: hidden; margin-top: 3px; color: #b9cad5; font-family: 'PT Mono', monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.captain-offline-status [data-offline-connection].is-online { background: transparent; color: #8bd1ae; }
+
+.captain-utility-disclosure {
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--paper);
+}
+.captain-utility-disclosure > summary {
+  display: flex;
+  align-items: center;
+  min-height: 58px;
+  gap: 10px;
+  padding: 10px 14px;
+  list-style: none;
+  cursor: pointer;
+}
+.captain-utility-disclosure > summary::-webkit-details-marker { display: none; }
+.captain-utility-disclosure > summary > span:first-child { display: grid; min-width: 0; }
+.captain-utility-disclosure > summary strong { font-size: 13px; }
+.captain-utility-disclosure > summary small { margin-top: 2px; color: var(--muted); font-size: 10.5px; }
+.captain-utility-disclosure > summary .badge { margin-left: auto; }
+.captain-utility-disclosure > summary .chev {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--team-action);
+  border-bottom: 2px solid var(--team-action);
+  transform: rotate(45deg);
+  transition: transform .15s ease;
+}
+.captain-utility-disclosure[open] > summary .chev { transform: rotate(225deg); }
+.captain-utility-body { padding: 0 14px 14px; border-top: 1px solid var(--hairline-soft); }
+.captain-fuel-details .fuel-panel {
+  margin: 0;
+  padding: 18px 0 0;
+  border: 0;
+  box-shadow: none;
+}
+.captain-fuel-details .fuel-panel-heading { margin-bottom: 14px; }
+
+.captain-fleet-grid { grid-template-columns: minmax(240px, .8fr) minmax(0, 1.7fr); }
+.captain-defects-card { grid-column: auto; }
+.manual-defect-disclosure {
+  margin-bottom: 13px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.manual-defect-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 8px 11px;
+  list-style: none;
+  color: var(--team-action);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+.manual-defect-disclosure > summary::-webkit-details-marker { display: none; }
+.manual-defect-plus { font-family: 'PT Mono', monospace; font-size: 20px; line-height: 1; transition: transform .15s ease; }
+.manual-defect-disclosure[open] .manual-defect-plus { transform: rotate(45deg); }
+.manual-defect-disclosure .manual-defect-form { margin: 0; padding: 0 11px 11px; border: 0; }
+.team-task-status-row,
+.team-task-material-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.team-task-material-row { margin-top: 8px; }
+.team-supply-create { margin-bottom: 14px; }
+.team-income-cards { display: none; }
+.team-mobile-nav { display: none; }
+
+@media (max-width: 920px) {
+  .captain-command-actions { grid-template-columns: 1fr 1fr; }
+  .captain-command-alert { grid-column: 1 / -1; }
+  .captain-status-grid { grid-template-columns: 1fr 1fr; }
+  .captain-status-fuel,
+  .captain-offline-status { grid-column: span 2; }
+  .captain-fleet-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 700px) {
+  .team-dashboard-body.is-captain { padding-bottom: 78px; }
+  .team-topbar { padding: 10px 12px; }
+  .team-topbar .topbar-inner { flex-flow: row nowrap; align-items: center; gap: 12px; }
+  .team-topbar .brand-logo { height: 35px; }
+  .team-topbar .title-block { min-width: 0; }
+  .team-topbar .title-block h1 { overflow: hidden; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
+  .team-dashboard-page { padding: 12px 12px 30px; }
+  .team-dashboard-page .investor-bar { margin-bottom: 10px; }
+  .team-dashboard-page .employee-avatar { width: 38px; height: 38px; }
+  .team-dashboard-page .investor-name { font-size: 14px; }
+  .team-dashboard-page .investor-bar .btn-secondary { min-height: 44px; padding: 9px 13px; }
+  .team-dashboard-page select,
+  .team-dashboard-page .btn-primary,
+  .team-dashboard-page .btn-secondary,
+  .team-dashboard-page .btn-add { min-height: 44px; }
+  .team-dashboard-page > .panel { margin-bottom: 10px; padding: 12px 14px; }
+  .team-dashboard-body .collapsible-panel > summary { font-size: 16px; }
+  .team-dashboard-body .collapsible-body { margin-top: 10px; padding-top: 10px; gap: 12px; }
+  .captain-boat-picker { grid-template-columns: 1fr; padding: 10px; }
+  .captain-command-deck { padding: 14px; }
+  .captain-command-heading,
+  .captain-status-heading { align-items: flex-start; margin-bottom: 11px; }
+  .captain-command-heading h2,
+  .captain-status-heading h2 { font-size: 18px; }
+  .captain-command-boat { display: none; }
+  .captain-command-actions { grid-template-columns: 1fr 1fr; }
+  .captain-command-alert { grid-column: 1 / -1; }
+  button.captain-command-button { min-height: 70px; }
+  button.captain-command-alert { min-height: 70px; }
+  .captain-command-button small { display: none; }
+  .captain-status-board { padding: 13px; }
+  .captain-status-updated { margin-top: 2px; }
+  .captain-status-cell { min-height: 84px; padding: 13px; }
+  .captain-status-value strong { font-size: 24px; }
+  .captain-offline-status { min-height: 72px; }
+  .captain-utility-disclosure > summary { min-height: 60px; }
+  .captain-utility-body { padding: 0 10px 10px; }
+  .captain-fuel-details .fuel-panel { padding-top: 13px; }
+  .captain-fuel-details .fuel-panel-heading h2 { font-size: 18px; }
+  .captain-fuel-details .fuel-instrument { padding: 12px; }
+  .captain-fuel-details .fuel-refill-card,
+  .captain-fuel-details .fuel-pending-card { padding: 12px; }
+  .captain-fleet-card { padding: 13px; }
+  .captain-fleet-card-head { margin-bottom: 11px; }
+  .captain-document-row,
+  .captain-defect-row { min-height: 44px; padding: 9px; }
+  .captain-defect-row { display: grid; justify-content: stretch; gap: 7px; }
+  .captain-defect-row .status-badge { justify-self: start; }
+  .captain-document-row .row-actions .icon-btn { width: 44px; height: 44px; }
+  .captain-document-row .row-actions .icon-btn svg { width: 17px; height: 17px; }
+  .manual-defect-controls button { min-height: 44px; }
+  .team-task-status-row .status-select-form,
+  .team-task-status-row .status-select-form select { width: 100%; min-height: 44px; }
+  .team-supply-create { width: 100%; min-height: 44px; }
+  .team-income-table { display: none; }
+  .team-income-cards { display: grid; gap: 8px; }
+  .team-income-card { padding: 12px; border: 1px solid var(--hairline-soft); border-radius: 9px; background: var(--paper-alt); }
+  .team-income-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .team-income-card-head time { color: var(--muted); font-family: 'PT Mono', monospace; font-size: 10.5px; }
+  .team-income-card-head strong { color: var(--success); font-family: 'PT Mono', monospace; font-size: 15px; white-space: nowrap; }
+  .team-income-card h4 { margin: 8px 0; font-size: 13px; }
+  .team-income-card dl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0; }
+  .team-income-card dl > div { display: grid; }
+  .team-income-card dt { color: var(--muted); font-size: 10.5px; }
+  .team-income-card dd { margin: 2px 0 0; font-family: 'PT Mono', monospace; font-size: 12px; }
+  .team-mobile-nav {
+    position: fixed;
+    z-index: 110;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    padding: 5px max(6px, env(safe-area-inset-right)) calc(5px + env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
+    border-top: 1px solid var(--hairline);
+    background: rgba(255, 255, 255, .96);
+    box-shadow: 0 -12px 30px -24px rgba(15, 42, 53, .75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .team-mobile-nav a {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    min-height: 54px;
+    gap: 3px;
+    flex-direction: column;
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .team-mobile-nav a:hover,
+  .team-mobile-nav a:focus-visible { background: var(--paper-alt); color: var(--team-action); }
+  .team-mobile-nav svg { width: 21px; height: 21px; }
+  #captain-defects { scroll-margin-top: 10px; }
+}
+
+@media (max-width: 340px) {
+  .captain-command-actions { grid-template-columns: 1fr; }
+  .captain-command-alert { grid-column: auto; }
+  button.captain-command-button { min-height: 70px; }
+  .captain-status-grid { grid-template-columns: 1fr; }
+  .captain-status-fuel,
+  .captain-offline-status { grid-column: auto; }
+  .captain-status-updated { display: none; }
+  .captain-offline-status strong,
+  .captain-offline-status small { white-space: normal; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button.captain-command-button,
+  .captain-utility-disclosure > summary .chev,
+  .manual-defect-plus { transition: none; }
+  button.captain-command-button:hover { transform: none; }
+}
