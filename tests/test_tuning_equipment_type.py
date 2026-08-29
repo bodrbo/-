@@ -115,6 +115,8 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertEqual(existing.status_code, 302)
         self.assertEqual(form.status_code, 200)
         self.assertIn('role="combobox"', form_html)
+        self.assertIn("data-combo-allow-custom", form_html)
+        self.assertIn('class="combo-option"', form_html)
         self.assertIn("Salute 585 HT", form_html)
         self.assertIn("Создать новую модель", form_html)
 

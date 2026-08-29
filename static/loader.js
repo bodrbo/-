@@ -267,7 +267,8 @@ initTableFilters();
 // a [data-combo] wrapper containing [data-combo-input] (visible text),
 // [data-combo-value] (hidden input actually submitted), [data-combo-dropdown]
 // holding .combo-option divs (each with data-value/data-label/data-search),
-// and optional [data-combo-empty]/[data-combo-more] status lines.
+// and optional [data-combo-empty]/[data-combo-more] status lines. A wrapper
+// with [data-combo-allow-custom] submits typed text when no option is picked.
 (function () {
   var wrappers = document.querySelectorAll("[data-combo]");
   if (!wrappers.length) return;
@@ -281,7 +282,8 @@ initTableFilters();
     var emptyEl = wrap.querySelector("[data-combo-empty]");
     var moreEl = wrap.querySelector("[data-combo-more]");
     var options = Array.prototype.slice.call(wrap.querySelectorAll(".combo-option"));
-    if (!input || !hidden || !dropdown || !options.length) return;
+    var allowCustom = wrap.hasAttribute("data-combo-allow-custom");
+    if (!input || !hidden || !dropdown || (!options.length && !allowCustom)) return;
 
     var timer = null;
 
@@ -331,7 +333,9 @@ initTableFilters();
       // Any edit invalidates a previous pick until a fresh one is clicked —
       // otherwise a half-changed search term could silently submit the old
       // product_id.
-      if (input.value !== input.dataset.selectedLabel) hidden.value = "";
+      if (input.value !== input.dataset.selectedLabel) {
+        hidden.value = allowCustom ? input.value.trim() : "";
+      }
       input.classList.remove("combo-input-error");
       clearTimeout(timer);
       timer = setTimeout(render, 120);
@@ -360,6 +364,8 @@ initTableFilters();
     var form = wrap.closest("form");
     if (form) {
       form.addEventListener("submit", function (e) {
+        if (input.disabled) return;
+        if (allowCustom) hidden.value = input.value.trim();
         if (!hidden.value) {
           e.preventDefault();
           input.classList.add("combo-input-error");

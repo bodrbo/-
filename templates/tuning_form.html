@@ -641,20 +641,30 @@
         </fieldset>
         <div class="field" id="boatModelField" {{ 'hidden' if selected_equipment_type == 'motor' }}>
           <div class="field-label-with-link">
-            <label for="boat_model">Модель лодки</label>
+            <label for="boat_model_search">Модель лодки</label>
             {% if boat_profile_id and selected_equipment_type == 'boat' %}
             <a href="{{ url_for('tuning_boat_profile', profile_id=boat_profile_id) }}"
                class="tuning-boat-profile-link">Открыть профиль ↗</a>
             {% endif %}
           </div>
-          <div class="boat-model-combobox" id="boatModelCombobox">
-            <input type="text" id="boat_model" name="boat_model"
-                   value="{{ form_values.boat_model if form_values else '' }}"
-                   placeholder="Начните вводить название модели"
-                   autocomplete="off" role="combobox" aria-autocomplete="list"
-                   aria-expanded="false" aria-controls="boatModelResults"
+          {% set current_boat_model = form_values.boat_model if form_values else '' %}
+          <div class="combo-field" data-combo data-combo-allow-custom>
+            <input type="text" id="boat_model_search" class="combo-input" data-combo-input
+                   value="{{ current_boat_model }}" data-selected-label="{{ current_boat_model }}"
+                   placeholder="Начните вводить название модели…" autocomplete="off"
+                   role="combobox" aria-autocomplete="list"
                    {{ 'required' if selected_equipment_type == 'boat' }}>
-            <div id="boatModelResults" class="boat-model-results" role="listbox" hidden></div>
+            <input type="hidden" id="boat_model" name="boat_model" data-combo-value
+                   value="{{ current_boat_model }}">
+            <div class="combo-dropdown hidden" data-combo-dropdown>
+              <p class="combo-empty hidden" data-combo-empty>Создать новую модель: введённое название будет добавлено в каталог.</p>
+              {% for model in boat_model_choices|default([]) %}
+              <div class="combo-option" data-value="{{ model }}" data-label="{{ model }}"
+                   data-search="{{ model|lower }}">
+                <span class="combo-option-name">{{ model }}</span>
+              </div>
+              {% endfor %}
+            </div>
           </div>
           <span class="field-context">Выберите модель из каталога или введите название новой.</span>
         </div>
@@ -964,143 +974,32 @@ function updateOrderTotal() {
   document.getElementById('order-total').textContent = total.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
 }
 
-var boatModelChoices = {{ boat_model_choices|default([])|tojson }};
-var boatModelActiveIndex = -1;
-
-function normalizeBoatModelSearch(value) {
-  return (value || '').toLocaleLowerCase('ru-RU').replace(/ё/g, 'е').trim();
-}
-
-function closeBoatModelResults() {
-  var input = document.getElementById('boat_model');
-  var results = document.getElementById('boatModelResults');
-  if (!input || !results) return;
-  results.hidden = true;
-  input.setAttribute('aria-expanded', 'false');
-  input.removeAttribute('aria-activedescendant');
-  boatModelActiveIndex = -1;
-}
-
-function selectBoatModel(value) {
-  var input = document.getElementById('boat_model');
-  if (!input) return;
-  input.value = value;
-  closeBoatModelResults();
-  input.focus();
-}
-
-function setActiveBoatModelResult(index) {
-  var input = document.getElementById('boat_model');
-  var buttons = Array.from(document.querySelectorAll('#boatModelResults button'));
-  if (!input || !buttons.length) return;
-  boatModelActiveIndex = (index + buttons.length) % buttons.length;
-  buttons.forEach(function (button, buttonIndex) {
-    button.classList.toggle('active', buttonIndex === boatModelActiveIndex);
-  });
-  var active = buttons[boatModelActiveIndex];
-  input.setAttribute('aria-activedescendant', active.id);
-  active.scrollIntoView({block: 'nearest'});
-}
-
-function renderBoatModelResults() {
-  var input = document.getElementById('boat_model');
-  var results = document.getElementById('boatModelResults');
-  if (!input || !results || input.closest('#boatModelField').hidden) return;
-
-  var query = normalizeBoatModelSearch(input.value);
-  var matches = boatModelChoices.filter(function (model) {
-    return !query || normalizeBoatModelSearch(model).includes(query);
-  }).slice(0, 12);
-  var exactMatch = boatModelChoices.some(function (model) {
-    return normalizeBoatModelSearch(model) === query;
-  });
-
-  results.replaceChildren();
-  matches.forEach(function (model, index) {
-    var button = document.createElement('button');
-    button.type = 'button';
-    button.id = 'boatModelResult' + index;
-    button.setAttribute('role', 'option');
-    button.textContent = model;
-    button.addEventListener('click', function () { selectBoatModel(model); });
-    results.appendChild(button);
-  });
-
-  if (query && !exactMatch) {
-    var createButton = document.createElement('button');
-    createButton.type = 'button';
-    createButton.id = 'boatModelResultCreate';
-    createButton.className = 'boat-model-create-result';
-    createButton.setAttribute('role', 'option');
-    createButton.textContent = '＋ Создать новую модель «' + input.value.trim() + '»';
-    createButton.addEventListener('click', function () {
-      selectBoatModel(input.value.trim());
-    });
-    results.appendChild(createButton);
-  }
-
-  if (!results.children.length) {
-    closeBoatModelResults();
-    return;
-  }
-  results.hidden = false;
-  input.setAttribute('aria-expanded', 'true');
-  boatModelActiveIndex = -1;
-}
-
-function setupBoatModelCombobox() {
-  var input = document.getElementById('boat_model');
-  var combobox = document.getElementById('boatModelCombobox');
-  if (!input || !combobox) return;
-  input.addEventListener('focus', renderBoatModelResults);
-  input.addEventListener('input', renderBoatModelResults);
-  input.addEventListener('keydown', function (event) {
-    var results = document.getElementById('boatModelResults');
-    if (event.key === 'Escape') {
-      closeBoatModelResults();
-    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      if (results.hidden) renderBoatModelResults();
-      var resultCount = results.querySelectorAll('button').length;
-      var nextIndex = boatModelActiveIndex < 0
-        ? (event.key === 'ArrowDown' ? 0 : resultCount - 1)
-        : boatModelActiveIndex + (event.key === 'ArrowDown' ? 1 : -1);
-      setActiveBoatModelResult(nextIndex);
-    } else if (event.key === 'Enter' && !results.hidden && boatModelActiveIndex >= 0) {
-      event.preventDefault();
-      results.querySelectorAll('button')[boatModelActiveIndex].click();
-    }
-  });
-  document.addEventListener('click', function (event) {
-    if (!combobox.contains(event.target)) closeBoatModelResults();
-  });
-}
-
 function updateEquipmentFields() {
   var selected = document.querySelector('input[name="equipment_type"]:checked');
   var motorOnly = selected && selected.value === 'motor';
   var boatField = document.getElementById('boatModelField');
   var boatNumberField = document.getElementById('boatRegistrationNumberField');
   var boatInput = document.getElementById('boat_model');
+  var boatSearchInput = document.getElementById('boat_model_search');
   var motorInput = document.getElementById('motor_model');
   var motorSerialField = document.getElementById('motorSerialNumberField');
   var motorLabel = document.getElementById('motorModelLabel');
   var motorContext = document.getElementById('motorModelContext');
-  if (!boatField || !boatNumberField || !boatInput || !motorInput || !motorSerialField) return;
+  if (!boatField || !boatNumberField || !boatInput || !boatSearchInput || !motorInput || !motorSerialField) return;
 
   boatField.hidden = motorOnly;
   boatNumberField.hidden = motorOnly;
   motorSerialField.hidden = !motorOnly;
-  boatInput.required = !motorOnly;
+  boatInput.disabled = motorOnly;
+  boatSearchInput.disabled = motorOnly;
+  boatSearchInput.required = !motorOnly;
   motorInput.required = motorOnly;
   motorLabel.textContent = motorOnly ? 'Модель мотора' : 'Мотор';
   motorContext.textContent = motorOnly ? '' : 'Необязательно';
-  if (motorOnly) closeBoatModelResults();
 }
 
 document.addEventListener('DOMContentLoaded', updateOrderTotal);
 document.addEventListener('DOMContentLoaded', updateEquipmentFields);
-document.addEventListener('DOMContentLoaded', setupBoatModelCombobox);
 
 // "Выставить счёт" (ЮKassa) stays disabled until the amount field holds a
 // real positive number — clicking it with an empty/zero amount used to just
