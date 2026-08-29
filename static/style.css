@@ -2505,6 +2505,44 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   color: var(--muted);
   font-size: 9px;
 }
+.boat-model-combobox { position: relative; }
+.boat-model-results {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 5px);
+  right: 0;
+  left: 0;
+  max-height: 286px;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  background: var(--paper);
+  box-shadow: 0 12px 28px rgba(20, 31, 39, .15);
+}
+.boat-model-results[hidden] { display: none; }
+.boat-model-results button {
+  display: block;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.boat-model-results button:hover,
+.boat-model-results button.active { background: var(--paper-alt); }
+.boat-model-results .boat-model-create-result {
+  margin-top: 4px;
+  border-top: 1px solid var(--hairline-soft);
+  border-radius: 0 0 6px 6px;
+  color: var(--brass-strong);
+  font-weight: 700;
+}
 #boatModelField[hidden],
 #boatRegistrationNumberField[hidden],
 #motorSerialNumberField[hidden] { display: none; }

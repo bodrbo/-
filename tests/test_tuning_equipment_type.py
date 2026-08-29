@@ -103,6 +103,35 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertIn("Укажите модель лодки.", boat_errors)
         self.assertIn("Укажите модель мотора.", motor_errors)
 
+    def test_creation_form_searches_catalog_and_creates_new_boat_profile(self):
+        self.login()
+        existing = self.client.post(
+            "/tuning/add", data=self.valid_form(boat_model="Salute 585 HT")
+        )
+
+        form = self.client.get("/tuning/add")
+        form_html = form.get_data(as_text=True)
+
+        self.assertEqual(existing.status_code, 302)
+        self.assertEqual(form.status_code, 200)
+        self.assertIn('role="combobox"', form_html)
+        self.assertIn("Salute 585 HT", form_html)
+        self.assertIn("Создать новую модель", form_html)
+
+        created = self.client.post(
+            "/tuning/add", data=self.valid_form(boat_model="Nimbus 305 Coupe")
+        )
+
+        self.assertEqual(created.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            profile = db.execute(
+                "SELECT model_name FROM tuning_boat_profiles "
+                "WHERE model_key = 'nimbus 305 coupe'"
+            ).fetchone()
+            self.assertIsNotNone(profile)
+            self.assertEqual(profile["model_name"], "Nimbus 305 Coupe")
+
     def test_motor_order_is_saved_but_not_added_to_boat_catalog(self):
         self.login()
         response = self.client.post(

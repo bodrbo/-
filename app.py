@@ -249,6 +249,17 @@ def _tuning_boat_profile_id(db, model_name):
     return row[0] if row else None
 
 
+def _tuning_boat_model_choices(db):
+    """Canonical display names available to the order-form combobox."""
+    return [
+        row[0]
+        for row in db.execute(
+            "SELECT model_name FROM tuning_boat_profiles "
+            "ORDER BY model_name COLLATE NOCASE"
+        ).fetchall()
+    ]
+
+
 def get_work_item_photos(db, item_id):
     """All photos attached to a tuning_order_items row, oldest first, each
     with its own comment — {id, url, comment}."""
@@ -4574,9 +4585,13 @@ def unlink_hull_sheet(order_id, sheet_id):
 @admin_login_required
 def add_tuning_order():
     if request.method == "GET":
+        db = get_db()
+        _sync_tuning_boat_profiles(db)
+        db.commit()
         return render_template(
             "tuning_form.html", edit_order=None, errors=None, form_values=None,
             items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
+            boat_model_choices=_tuning_boat_model_choices(db),
         )
 
     db = get_db()
@@ -4585,6 +4600,7 @@ def add_tuning_order():
         return render_template(
             "tuning_form.html", edit_order=None, errors=errors, form_values=request.form,
             items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
+            boat_model_choices=_tuning_boat_model_choices(db),
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -4612,6 +4628,7 @@ def add_tuning_order():
         "INSERT INTO projects (name, tuning_order_id, created_at) VALUES (?, ?, ?)",
         (f"Заказ №{order_id}", order_id, now),
     )
+    _sync_tuning_boat_profiles(db)
     db.commit()
     return redirect(url_for("tuning_index"))
 
@@ -4975,6 +4992,7 @@ def edit_tuning_order(order_id):
             cost_units=SUPPLY_COST_UNITS,
             notes=notes, admins=admins,
             boat_profile_id=boat_profile_id,
+            boat_model_choices=_tuning_boat_model_choices(db),
             modulkassa_configured=_modulkassa_configured(),
         )
 
@@ -4999,6 +5017,7 @@ def edit_tuning_order(order_id):
             yookassa_error=None,
             hull_sheets=hull_sheets, available_hull_sheets=available_hull_sheets,
             boat_profile_id=boat_profile_id,
+            boat_model_choices=_tuning_boat_model_choices(db),
             modulkassa_configured=_modulkassa_configured(),
         ), 400
 
@@ -5048,6 +5067,7 @@ def edit_tuning_order(order_id):
                 (order_id, item["work_name"], item["cost_price"], item["multiplier"], item["price"],
                  DEFAULT_WORK_STATUS),
             )
+    _sync_tuning_boat_profiles(db)
     db.commit()
     # The UPDATE above wrote subtotal/total from work items alone (all
     # _process_tuning_form knows about) — fold in any goods added via the
