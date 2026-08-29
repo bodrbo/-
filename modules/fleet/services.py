@@ -11,6 +11,7 @@ from .constants import (
     DEFECT_ASSIGNABLE_POSITIONS,
     DEFECT_PLAN_STATUSES,
     DEFECT_STATUSES,
+    TASK_ASSIGNMENT_COMMENT_MAX_LENGTH,
 )
 
 
@@ -212,7 +213,9 @@ def delete_defect(db, boat, defect_id):
     return repository.delete_defect(db, defect_id, boat)
 
 
-def create_defect_assignment(db, defect_id, employee_name, rate_raw, hours_raw):
+def create_defect_assignment(
+    db, defect_id, employee_name, rate_raw, hours_raw, comment_raw=""
+):
     valid_employees = assignable_employees(db)
     try:
         rate = float((rate_raw or "").strip().replace(",", "."))
@@ -222,7 +225,10 @@ def create_defect_assignment(db, defect_id, employee_name, rate_raw, hours_raw):
 
     if employee_name not in valid_employees or rate <= 0 or hours <= 0:
         return None
+    comment = (comment_raw or "").strip()
+    if len(comment) > TASK_ASSIGNMENT_COMMENT_MAX_LENGTH:
+        return None
 
     return repository.add_assignment(
-        db, defect_id, employee_name, rate, hours, current_timestamp()
+        db, defect_id, employee_name, rate, hours, comment, current_timestamp()
     )

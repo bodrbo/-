@@ -45,6 +45,7 @@ from modules.fleet.constants import (
     DEFECT_STATUSES,
     DEFECT_TASK_WORK_TYPE,
     FUEL_CONFIG,
+    TASK_ASSIGNMENT_COMMENT_MAX_LENGTH,
     YCLIENTS_BLOCKED_SHIFT_COLOR,
     YCLIENTS_CANCELLED_COLOR,
 )
@@ -1175,6 +1176,7 @@ def init_db():
             employee_name TEXT NOT NULL,
             rate REAL NOT NULL,
             norm_hours REAL NOT NULL,
+            comment TEXT NOT NULL DEFAULT '',
             assignment_status TEXT NOT NULL DEFAULT 'pending',
             assigned_at TEXT NOT NULL,
             responded_at TEXT,
@@ -1182,6 +1184,14 @@ def init_db():
         )
         """
     )
+    defect_assignment_cols = [
+        row[1] for row in conn.execute("PRAGMA table_info(defect_assignments)").fetchall()
+    ]
+    if "comment" not in defect_assignment_cols:
+        conn.execute(
+            "ALTER TABLE defect_assignments "
+            "ADD COLUMN comment TEXT NOT NULL DEFAULT ''"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tuning_item_assignments (
@@ -1190,6 +1200,7 @@ def init_db():
             employee_name TEXT NOT NULL,
             rate REAL NOT NULL,
             norm_hours REAL NOT NULL,
+            comment TEXT NOT NULL DEFAULT '',
             assignment_status TEXT NOT NULL DEFAULT 'pending',
             assigned_at TEXT NOT NULL,
             responded_at TEXT,
@@ -1197,6 +1208,15 @@ def init_db():
         )
         """
     )
+    tuning_assignment_cols = [
+        row[1]
+        for row in conn.execute("PRAGMA table_info(tuning_item_assignments)").fetchall()
+    ]
+    if "comment" not in tuning_assignment_cols:
+        conn.execute(
+            "ALTER TABLE tuning_item_assignments "
+            "ADD COLUMN comment TEXT NOT NULL DEFAULT ''"
+        )
     init_notification_schema(conn)
 
     conn.execute(
@@ -5257,6 +5277,7 @@ def assign_tuning_item(order_id, item_id):
     employee_name = request.form.get("employee_name", "").strip()
     rate_raw = request.form.get("rate", "").strip().replace(",", ".")
     hours_raw = request.form.get("norm_hours", "").strip().replace(",", ".")
+    comment = request.form.get("comment", "").strip()
 
     valid_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
     rate = hours = None
@@ -5269,11 +5290,26 @@ def assign_tuning_item(order_id, item_id):
     except ValueError:
         pass
 
-    if employee_name in valid_employees and rate is not None and rate > 0 and hours is not None and hours > 0:
+    if (
+        employee_name in valid_employees
+        and rate is not None
+        and rate > 0
+        and hours is not None
+        and hours > 0
+        and len(comment) <= TASK_ASSIGNMENT_COMMENT_MAX_LENGTH
+    ):
         cur = db.execute(
-            "INSERT INTO tuning_item_assignments (item_id, employee_name, rate, norm_hours, "
-            "assignment_status, assigned_at) VALUES (?, ?, ?, ?, 'pending', ?)",
-            (item_id, employee_name, rate, hours, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+            "INSERT INTO tuning_item_assignments "
+            "(item_id, employee_name, rate, norm_hours, comment, assignment_status, assigned_at) "
+            "VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+            (
+                item_id,
+                employee_name,
+                rate,
+                hours,
+                comment,
+                dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            ),
         )
         db.commit()
         _notify_task_assignment(db, ASSIGNMENT_TUNING, cur.lastrowid)

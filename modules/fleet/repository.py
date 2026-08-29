@@ -207,12 +207,14 @@ def list_employees_with_positions(db, positions):
     return [row["name"] for row in rows]
 
 
-def add_assignment(db, defect_id, employee_name, rate, norm_hours, assigned_at):
+def add_assignment(
+    db, defect_id, employee_name, rate, norm_hours, comment, assigned_at
+):
     cur = db.execute(
         "INSERT INTO defect_assignments "
-        "(defect_id, employee_name, rate, norm_hours, assignment_status, assigned_at) "
-        "VALUES (?, ?, ?, ?, 'pending', ?)",
-        (defect_id, employee_name, rate, norm_hours, assigned_at),
+        "(defect_id, employee_name, rate, norm_hours, comment, assignment_status, assigned_at) "
+        "VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+        (defect_id, employee_name, rate, norm_hours, comment, assigned_at),
     )
     db.commit()
     return cur.lastrowid

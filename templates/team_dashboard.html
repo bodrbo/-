@@ -403,6 +403,12 @@
         <div class="hint" style="margin:0;">
           Ставка: {{ task.rate|float|round(2) }} ₽ · Нормочасы: {{ task.norm_hours|float|round(2) }}
         </div>
+        {% if task.comment %}
+        <div class="task-card-comment">
+          <span>Комментарий</span>
+          {{ task.comment }}
+        </div>
+        {% endif %}
         {% if task.assignment_status == 'pending' %}
         <div class="task-card-actions">
           <form action="{{ url_for('team_task_respond' if task.kind == 'defect' else 'team_tuning_task_respond', assignment_id=task.id) }}" method="post">

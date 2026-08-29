@@ -157,6 +157,9 @@ class TuningEquipmentTypeTests(unittest.TestCase):
             )
             db.commit()
 
+        edit_page = self.client.get(f"/tuning/edit/{order_id}")
+        self.assertIn(b'name="comment"', edit_page.data)
+
         with patch.object(
             application_module,
             "send_telegram_notification_to_employee",
@@ -168,6 +171,7 @@ class TuningEquipmentTypeTests(unittest.TestCase):
                     "employee_name": "Дмитрий Тарусов",
                     "rate": "2000",
                     "norm_hours": "1.5",
+                    "comment": "Согласовать место установки с клиентом",
                 },
             )
 
@@ -176,12 +180,27 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertEqual(notification.call_args.args[1], "Дмитрий Тарусов")
         self.assertIn("Вам поручена задача", notification.call_args.args[2])
         self.assertIn("Диагностика", notification.call_args.args[2])
+        self.assertIn(
+            "Согласовать место установки с клиентом",
+            notification.call_args.args[2],
+        )
         with application_module.app.app_context():
-            delivery = application_module.get_db().execute(
+            db = application_module.get_db()
+            delivery = db.execute(
                 "SELECT notification_event FROM task_notification_deliveries "
                 "WHERE assignment_type = 'tuning'"
             ).fetchone()
+            assignment = db.execute(
+                "SELECT comment FROM tuning_item_assignments"
+            ).fetchone()
         self.assertEqual(delivery["notification_event"], "task.assigned")
+        self.assertEqual(
+            assignment["comment"], "Согласовать место установки с клиентом"
+        )
+        assigned_page = self.client.get(f"/tuning/edit/{order_id}")
+        self.assertIn(
+            "Согласовать место установки с клиентом".encode(), assigned_page.data
+        )
 
     def test_motor_order_is_saved_but_not_added_to_boat_catalog(self):
         self.login()

@@ -356,6 +356,7 @@ def create_fleet_blueprint(
                 request.form.get("employee_name", "").strip(),
                 request.form.get("rate", ""),
                 request.form.get("norm_hours", ""),
+                request.form.get("comment", ""),
             )
             if assignment_id is not None and task_assigned_notifier is not None:
                 task_assigned_notifier(db, "defect", assignment_id)

@@ -90,6 +90,8 @@ class FleetModuleIntegrationTests(unittest.TestCase):
         response = self.client.get(f"/fleet/0/defects/{defect_id}")
         self.assertEqual(response.status_code, 200)
         self.assertIn("Удалить неисправность".encode(), response.data)
+        boat_page = self.client.get("/fleet/0")
+        self.assertIn(b'name="comment"', boat_page.data)
 
         response = self.client.post(
             f"/fleet/0/defects/{defect_id}",
@@ -139,6 +141,7 @@ class FleetModuleIntegrationTests(unittest.TestCase):
                     "employee_name": "Дмитрий Тарусов",
                     "rate": "1500",
                     "norm_hours": "2",
+                    "comment": "Сначала проверить предохранитель",
                 },
             )
         self.assertEqual(response.status_code, 302)
@@ -146,6 +149,9 @@ class FleetModuleIntegrationTests(unittest.TestCase):
         self.assertEqual(task_notification.call_args.args[1], "Дмитрий Тарусов")
         self.assertIn(
             "Вам поручена задача", task_notification.call_args.args[2]
+        )
+        self.assertIn(
+            "Сначала проверить предохранитель", task_notification.call_args.args[2]
         )
 
         with application_module.app.app_context():
@@ -159,6 +165,21 @@ class FleetModuleIntegrationTests(unittest.TestCase):
             self.assertEqual(plan_status, "done")
             self.assertEqual(assignment["employee_name"], "Дмитрий Тарусов")
             self.assertEqual(assignment["rate"], 1500)
+            self.assertEqual(
+                assignment["comment"], "Сначала проверить предохранитель"
+            )
+
+        admin_boat = self.client.get("/fleet/0")
+        self.assertIn("Сначала проверить предохранитель".encode(), admin_boat.data)
+
+        with self.client.session_transaction() as session:
+            session.clear()
+            session["team_id"] = 2
+            session["team_employee_name"] = "Дмитрий Тарусов"
+            session["team_username"] = "captain-test"
+        team_tasks = self.client.get("/team/?section=tasks")
+        self.assertEqual(team_tasks.status_code, 200)
+        self.assertIn("Сначала проверить предохранитель".encode(), team_tasks.data)
 
     def test_admin_can_create_manual_defect_for_selected_boat(self):
         self.log_in_as_admin()

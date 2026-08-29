@@ -32,6 +32,7 @@ class TaskNotificationTestCase(unittest.TestCase):
                 employee_name TEXT NOT NULL,
                 rate REAL NOT NULL,
                 norm_hours REAL NOT NULL,
+                comment TEXT NOT NULL DEFAULT '',
                 assignment_status TEXT NOT NULL,
                 assigned_at TEXT NOT NULL
             );
@@ -52,6 +53,7 @@ class TaskNotificationTestCase(unittest.TestCase):
                 employee_name TEXT NOT NULL,
                 rate REAL NOT NULL,
                 norm_hours REAL NOT NULL,
+                comment TEXT NOT NULL DEFAULT '',
                 assignment_status TEXT NOT NULL,
                 assigned_at TEXT NOT NULL
             );
@@ -74,26 +76,31 @@ class TaskNotificationTestCase(unittest.TestCase):
     def tearDown(self):
         self.db.close()
 
-    def add_defect_assignment(self, assignment_id, status, assigned_at):
+    def add_defect_assignment(self, assignment_id, status, assigned_at, comment=""):
         self.db.execute(
             "INSERT INTO defect_assignments "
-            "(id, defect_id, employee_name, rate, norm_hours, assignment_status, assigned_at) "
-            "VALUES (?, 1, 'Капитан', 1500, 2, ?, ?)",
-            (assignment_id, status, assigned_at),
+            "(id, defect_id, employee_name, rate, norm_hours, comment, assignment_status, assigned_at) "
+            "VALUES (?, 1, 'Капитан', 1500, 2, ?, ?, ?)",
+            (assignment_id, comment, status, assigned_at),
         )
         self.db.commit()
 
-    def add_tuning_assignment(self, assignment_id, status, assigned_at):
+    def add_tuning_assignment(self, assignment_id, status, assigned_at, comment=""):
         self.db.execute(
             "INSERT INTO tuning_item_assignments "
-            "(id, item_id, employee_name, rate, norm_hours, assignment_status, assigned_at) "
-            "VALUES (?, 10, 'Мастер', 2000, 1.5, ?, ?)",
-            (assignment_id, status, assigned_at),
+            "(id, item_id, employee_name, rate, norm_hours, comment, assignment_status, assigned_at) "
+            "VALUES (?, 10, 'Мастер', 2000, 1.5, ?, ?, ?)",
+            (assignment_id, comment, status, assigned_at),
         )
         self.db.commit()
 
     def test_immediate_assignment_message_contains_task_context_and_is_logged(self):
-        self.add_tuning_assignment(1, "pending", "2026-08-29 09:00")
+        self.add_tuning_assignment(
+            1,
+            "pending",
+            "2026-08-29 09:00",
+            "Отключить питание <обязательно>",
+        )
         sender = Mock(return_value="sent")
 
         status = notify_task_assigned(
@@ -112,6 +119,7 @@ class TaskNotificationTestCase(unittest.TestCase):
         self.assertIn("Вам поручена задача", args[2])
         self.assertIn("№7 · Салют 585", args[2])
         self.assertIn("Установить эхолот", args[2])
+        self.assertIn("Комментарий: Отключить питание &lt;обязательно&gt;", args[2])
         self.assertIn("3 000 ₽", args[2])
         delivery = self.db.execute(
             "SELECT * FROM task_notification_deliveries"

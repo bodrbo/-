@@ -3187,6 +3187,34 @@ button.btn-reject:hover { background: #932f20; }
 }
 .task-card + .task-card { margin-top: 10px; }
 .task-card-actions { display: flex; gap: 10px; }
+.task-card-comment {
+  padding: 10px 12px;
+  border-left: 3px solid var(--brass);
+  border-radius: 0 7px 7px 0;
+  background: rgba(184, 134, 49, .08);
+  color: var(--ink-soft);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.task-card-comment span {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.assignment-comment-preview {
+  max-width: 300px;
+  margin-top: 5px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 
 /* Captain fleet workspace: one selected vessel drives inspections,
    documents and defects, so the captain never has to select it twice. */

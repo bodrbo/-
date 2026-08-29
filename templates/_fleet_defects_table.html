@@ -49,6 +49,9 @@
           {% elif d.assignment and d.assignment.assignment_status == 'accepted' %}
             Исполнитель: {{ d.assignment.employee_name }}
           {% endif %}
+          {% if d.assignment and d.assignment.comment %}
+          <div class="assignment-comment-preview">{{ d.assignment.comment }}</div>
+          {% endif %}
         </td>
         <td class="row-actions">
           <form action="{{ url_for('fleet.delete_defect', boat_index=boat_index, defect_id=d.id) }}"

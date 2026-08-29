@@ -338,6 +338,11 @@
           <label for="assign-hours">Нормочасы</label>
           <input type="text" id="assign-hours" name="norm_hours" inputmode="decimal" required>
         </div>
+        <div class="field">
+          <label for="assign-comment">Комментарий к задаче</label>
+          <textarea id="assign-comment" name="comment" rows="4" maxlength="2000"
+                    placeholder="Уточните, что именно нужно сделать, важные детали и ограничения"></textarea>
+        </div>
         <button type="submit" class="btn-primary">Поручить</button>
       </form>
     </div>
@@ -369,6 +374,7 @@ function openAssignModal(actionUrl, description) {
   document.getElementById('assign-modal-description').textContent = description;
   document.getElementById('assign-rate').value = '';
   document.getElementById('assign-hours').value = '';
+  document.getElementById('assign-comment').value = '';
   document.getElementById('assign-modal').classList.remove('hidden');
 }
 
