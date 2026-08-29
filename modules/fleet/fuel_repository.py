@@ -34,6 +34,18 @@ def balance_at(db, boat, occurred_at=None):
     return float(db.execute(query, params).fetchone()["balance"] or 0)
 
 
+def reserve_balance_at(db, boat, occurred_at=None):
+    query = (
+        "SELECT COALESCE(SUM(reserve_delta), 0) AS balance "
+        "FROM boat_fuel_transactions WHERE boat = ? AND deleted_at IS NULL"
+    )
+    params = [boat]
+    if occurred_at is not None:
+        query += " AND occurred_at <= ?"
+        params.append(occurred_at)
+    return float(db.execute(query, params).fetchone()["balance"] or 0)
+
+
 def add_transaction(
     db,
     boat,
@@ -46,16 +58,18 @@ def add_transaction(
     actor_role,
     actor_name,
     created_at,
+    reserve_delta=0,
 ):
     cursor = db.execute(
         "INSERT INTO boat_fuel_transactions "
-        "(boat, kind, liters_delta, reported_liters, occurred_at, source_ref, "
+        "(boat, kind, liters_delta, reserve_delta, reported_liters, occurred_at, source_ref, "
         "source_label, created_by_role, created_by_name, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             boat,
             kind,
             liters_delta,
+            reserve_delta,
             reported_liters,
             occurred_at,
             source_ref,
@@ -100,7 +114,7 @@ def list_transactions(db, boat, limit=30):
 def count_active_transactions(db, boat):
     return db.execute(
         "SELECT COUNT(*) AS count FROM boat_fuel_transactions "
-        "WHERE boat = ? AND deleted_at IS NULL",
+        "WHERE boat = ? AND deleted_at IS NULL AND ABS(liters_delta) > 0.0001",
         (boat,),
     ).fetchone()["count"]
 

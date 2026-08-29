@@ -16,9 +16,13 @@ from .constants import (
 TRANSACTION_LABELS = {
     "calibration": "Заправка до полного",
     "refill": "Заправка",
+    "reserve_refill": "Заправка канистр",
+    "reserve_transfer": "Перелив из резерва в бак",
     "group_consumption": "Групповой рейс",
     "individual_consumption": "Индивидуальный рейс",
 }
+
+MAX_RESERVE_OPERATION_LITERS = 1000.0
 
 
 def current_datetime():
@@ -59,6 +63,7 @@ def fuel_summary(db, boat, history_limit=30):
     state = repository.get_state(db, boat)
     activated = bool(state and state["activated_at"])
     balance = round(repository.balance_at(db, boat), 2) if activated else None
+    reserve_balance = round(repository.reserve_balance_at(db, boat), 2)
     capacity = config["capacity_liters"] if config else None
     percent = 0.0
     status = "inactive"
@@ -88,6 +93,10 @@ def fuel_summary(db, boat, history_limit=30):
         "activated_at": state["activated_at"] if state else None,
         "last_synced_at": state["last_synced_at"] if state else None,
         "balance_liters": balance,
+        "reserve_liters": reserve_balance,
+        "total_liters": (
+            round(balance + reserve_balance, 2) if balance is not None else None
+        ),
         "gauge_liters": max(0.0, min(capacity, balance)) if activated and capacity else None,
         "percent": percent,
         "status": status,
@@ -98,7 +107,16 @@ def fuel_summary(db, boat, history_limit=30):
     }
 
 
-def record_refill(db, boat, raw_liters, raw_occurred_at, fill_to_full, actor_role, actor_name):
+def record_refill(
+    db,
+    boat,
+    raw_liters,
+    raw_occurred_at,
+    fill_to_full,
+    actor_role,
+    actor_name,
+    operation="tank",
+):
     config = FUEL_CONFIG.get(boat)
     if config is None:
         return False, "Для этого катера не настроен топливный бак."
@@ -106,8 +124,12 @@ def record_refill(db, boat, raw_liters, raw_occurred_at, fill_to_full, actor_rol
     liters = _parse_positive_liters(raw_liters)
     if liters is None:
         return False, "Укажите объём заправки больше нуля."
-    if liters > config["capacity_liters"]:
+    if operation not in {"tank", "reserve", "reserve_to_tank"}:
+        operation = "tank"
+    if operation == "tank" and liters > config["capacity_liters"]:
         return False, "Объём заправки превышает ёмкость бака."
+    if operation == "reserve" and liters > MAX_RESERVE_OPERATION_LITERS:
+        return False, "Объём заправки резервных канистр слишком большой."
 
     occurred = _parse_local_datetime(raw_occurred_at)
     now = current_datetime().replace(second=0, microsecond=0)
@@ -118,15 +140,61 @@ def record_refill(db, boat, raw_liters, raw_occurred_at, fill_to_full, actor_rol
 
     state = repository.get_state(db, boat)
     activated_at = _parse_local_datetime(state["activated_at"]) if state else None
-    if activated_at is None and not fill_to_full:
+    if operation == "tank" and activated_at is None and not fill_to_full:
         return False, "Сначала отметьте первую заправку до полного бака."
-    if activated_at is not None and occurred < activated_at:
+    if operation in {"tank", "reserve_to_tank"} and activated_at is not None and occurred < activated_at:
         return False, "Заправка не может быть раньше запуска учёта топлива."
+    if operation == "reserve_to_tank" and activated_at is None:
+        return False, "Сначала запустите учёт топлива полной заправкой бака."
 
     occurred_at = format_timestamp(occurred)
     created_at = format_timestamp(now)
     balance_before = repository.balance_at(db, boat, occurred_at) if activated_at else 0.0
+    reserve_before = repository.reserve_balance_at(db, boat, occurred_at)
     capacity = config["capacity_liters"]
+
+    if operation == "reserve":
+        source_ref = f"manual:{uuid.uuid4().hex}"
+        with db:
+            repository.add_transaction(
+                db,
+                boat,
+                "reserve_refill",
+                0,
+                liters,
+                occurred_at,
+                source_ref,
+                "Заправка резервных канистр",
+                actor_role,
+                actor_name,
+                created_at,
+                reserve_delta=liters,
+            )
+        return True, f"В резерв катера «{boat}» добавлено {liters:g} л."
+
+    if operation == "reserve_to_tank":
+        if reserve_before + 0.01 < liters:
+            return False, f"В резерве только {max(0, reserve_before):g} л."
+        free = max(0.0, round(capacity - balance_before, 2))
+        if liters > free + 0.01:
+            return False, f"По расчёту в бак помещается не больше {free:g} л."
+        source_ref = f"manual:{uuid.uuid4().hex}"
+        with db:
+            repository.add_transaction(
+                db,
+                boat,
+                "reserve_transfer",
+                liters,
+                liters,
+                occurred_at,
+                source_ref,
+                "Перелив из резервных канистр",
+                actor_role,
+                actor_name,
+                created_at,
+                reserve_delta=-liters,
+            )
+        return True, f"Из резерва в бак катера «{boat}» перелито {liters:g} л."
 
     if fill_to_full:
         delta = round(capacity - balance_before, 2)
@@ -221,6 +289,14 @@ def delete_transaction(db, boat, transaction_id, actor_name):
         return False, (
             "Начальную заправку нельзя удалить, пока после неё есть другие операции. "
             "Сначала удалите более поздние записи журнала."
+        )
+    reserve_after_delete = (
+        repository.reserve_balance_at(db, boat) - transaction["reserve_delta"]
+    )
+    if reserve_after_delete < -0.01:
+        return False, (
+            "Эту заправку канистр нельзя удалить: резерв станет отрицательным. "
+            "Сначала удалите более поздние переливы в бак."
         )
 
     deleted_at = format_timestamp(current_datetime())

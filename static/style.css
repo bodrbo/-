@@ -1160,13 +1160,23 @@ a.diag-card:hover { border-color: var(--brass); box-shadow: var(--shadow); }
 .fuel-notice-error { color: var(--danger); border-color: rgba(179, 64, 44, .3); background: rgba(179, 64, 44, .07); }
 .fuel-instrument {
   display: grid;
-  grid-template-columns: 150px minmax(220px, 1fr) 230px;
+  grid-template-columns: 190px minmax(220px, 1fr) 230px;
   align-items: center;
   gap: 20px;
   padding: 20px;
   border: 1px solid var(--hairline);
   border-radius: 12px;
   background: var(--paper-alt);
+}
+.fuel-readings { display: grid; gap: 10px; }
+.fuel-readings > div > small {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
 }
 .fuel-reading { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
 .fuel-reading strong {
@@ -1176,6 +1186,11 @@ a.diag-card:hover { border-color: var(--brass); box-shadow: var(--shadow); }
   letter-spacing: -.05em;
 }
 .fuel-reading span { color: var(--muted); font-family: 'PT Mono', monospace; font-size: 13px; }
+.fuel-reserve-reading {
+  padding-top: 9px;
+  border-top: 1px solid var(--hairline-soft);
+}
+.fuel-reserve-reading .fuel-reading strong { color: var(--brass-strong); font-size: 24px; }
 .fuel-gauge {
   position: relative;
   height: 42px;
@@ -1244,7 +1259,8 @@ a.diag-card:hover { border-color: var(--brass); box-shadow: var(--shadow); }
 .fuel-refill-form label:not(.fuel-full-toggle) { display: flex; flex-direction: column; gap: 5px; }
 .fuel-refill-form label > span { color: var(--muted); font-size: 11px; font-weight: 700; }
 .fuel-panel .fuel-refill-form input[type="text"],
-.fuel-panel .fuel-refill-form input[type="datetime-local"] { width: 100%; padding: 9px 10px; }
+.fuel-panel .fuel-refill-form input[type="datetime-local"],
+.fuel-panel .fuel-refill-form select { width: 100%; padding: 9px 10px; }
 .fuel-full-toggle {
   display: flex;
   align-items: center;
@@ -1303,10 +1319,12 @@ a.diag-card:hover { border-color: var(--brass); box-shadow: var(--shadow); }
 .fuel-delta { font-family: 'PT Mono', monospace; font-weight: 700; white-space: nowrap; }
 .fuel-delta.is-positive { color: var(--success); }
 .fuel-delta.is-negative { color: var(--danger); }
+.fuel-delta.is-transfer { color: var(--brass-strong); }
+.fuel-delta small { color: var(--muted); font-size: 9px; }
 .fuel-history-actions { width: 38px; padding-left: 4px !important; text-align: right; }
 .fuel-history-actions form { margin: 0; }
 @media (max-width: 900px) {
-  .fuel-instrument { grid-template-columns: 130px minmax(180px, 1fr); }
+  .fuel-instrument { grid-template-columns: 180px minmax(180px, 1fr); }
   .fuel-instrument-meta { grid-column: 1 / -1; }
   .fuel-workspace { grid-template-columns: 1fr; }
 }

@@ -107,6 +107,7 @@ def create_fleet_blueprint(get_db, admin_login_required):
             request.form.get("fill_to_full") == "1",
             "admin",
             session.get("admin_name") or "Администратор",
+            request.form.get("fuel_operation", "tank"),
         )
         session["fuel_notice"] = {
             "type": "success" if success else "error",

@@ -1171,6 +1171,7 @@ def init_db():
             boat TEXT NOT NULL,
             kind TEXT NOT NULL,
             liters_delta REAL NOT NULL,
+            reserve_delta REAL NOT NULL DEFAULT 0,
             reported_liters REAL,
             occurred_at TEXT NOT NULL,
             source_ref TEXT NOT NULL UNIQUE,
@@ -1196,6 +1197,11 @@ def init_db():
     if "deleted_by" not in fuel_transaction_cols:
         conn.execute(
             "ALTER TABLE boat_fuel_transactions ADD COLUMN deleted_by TEXT"
+        )
+    if "reserve_delta" not in fuel_transaction_cols:
+        conn.execute(
+            "ALTER TABLE boat_fuel_transactions "
+            "ADD COLUMN reserve_delta REAL NOT NULL DEFAULT 0"
         )
     conn.execute(
         """
@@ -7917,6 +7923,7 @@ def team_add_fuel_refill():
         request.form.get("fill_to_full") == "1",
         "team",
         session.get("team_employee_name") or "Капитан",
+        request.form.get("fuel_operation", "tank"),
     )
     session["fuel_notice"] = {
         "type": "success" if success else "error",

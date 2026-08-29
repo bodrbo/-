@@ -158,6 +158,120 @@ class FuelModuleIntegrationTests(unittest.TestCase):
             self.assertEqual(summary["balance_liters"], 80.5)
             self.assertEqual(summary["pending_trips"], [])
 
+    def test_reserve_canisters_are_tracked_and_transferred_to_tank(self):
+        success, message = self.activate_boat()
+        self.assertTrue(success, message)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            fuel_services.sync_yclients_records(
+                db,
+                [self.completed_group_record()],
+                {777: "8bc34a"},
+                dt.datetime(2026, 8, 18, 12, 0),
+            )
+
+        self.log_in_as_admin()
+        reserve_response = self.client.post(
+            "/fleet/2/fuel/refill",
+            data={
+                "fuel_operation": "reserve",
+                "liters": "30",
+                "occurred_at": "2026-08-18T10:30",
+            },
+        )
+        transfer_response = self.client.post(
+            "/fleet/2/fuel/refill",
+            data={
+                "fuel_operation": "reserve_to_tank",
+                "liters": "10",
+                "occurred_at": "2026-08-18T11:00",
+            },
+        )
+
+        self.assertEqual(reserve_response.status_code, 302)
+        self.assertEqual(transfer_response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            summary = fuel_services.fuel_summary(db, "Бодрый Первый")
+            transfer = db.execute(
+                "SELECT * FROM boat_fuel_transactions "
+                "WHERE kind = 'reserve_transfer'"
+            ).fetchone()
+            reserve_refill = db.execute(
+                "SELECT * FROM boat_fuel_transactions "
+                "WHERE kind = 'reserve_refill'"
+            ).fetchone()
+            self.assertEqual(summary["balance_liters"], 98)
+            self.assertEqual(summary["reserve_liters"], 20)
+            self.assertEqual(summary["total_liters"], 118)
+            self.assertEqual(transfer["liters_delta"], 10)
+            self.assertEqual(transfer["reserve_delta"], -10)
+            transfer_id = transfer["id"]
+            removed, removal_message = fuel_services.delete_transaction(
+                db,
+                "Бодрый Первый",
+                reserve_refill["id"],
+                "Администратор теста",
+            )
+            self.assertFalse(removed)
+            self.assertIn("резерв станет отрицательным", removal_message)
+
+        with self.client.session_transaction() as session:
+            session["team_id"] = 1
+            session["team_employee_name"] = "Дмитрий Тарусов"
+            session["team_username"] = "captain-test"
+        captain_page = self.client.get("/team/?boat_index=2")
+        captain_html = captain_page.get_data(as_text=True)
+        self.assertEqual(captain_page.status_code, 200)
+        self.assertIn("В резерве", captain_html)
+        self.assertIn("20.0", captain_html)
+
+        self.log_in_as_admin()
+        deleted = self.client.post(
+            f"/fleet/2/fuel/transactions/{transfer_id}/delete"
+        )
+        self.assertEqual(deleted.status_code, 302)
+        with application_module.app.app_context():
+            summary = fuel_services.fuel_summary(
+                application_module.get_db(), "Бодрый Первый"
+            )
+            self.assertEqual(summary["balance_liters"], 88)
+            self.assertEqual(summary["reserve_liters"], 30)
+
+    def test_reserve_transfer_checks_available_reserve_and_tank_space(self):
+        success, message = self.activate_boat()
+        self.assertTrue(success, message)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            success, message = fuel_services.record_refill(
+                db,
+                "Бодрый Первый",
+                "20",
+                "2026-08-18T09:00",
+                False,
+                "admin",
+                "Администратор теста",
+                "reserve",
+            )
+            self.assertTrue(success, message)
+            success, message = fuel_services.record_refill(
+                db,
+                "Бодрый Первый",
+                "10",
+                "2026-08-18T10:00",
+                False,
+                "admin",
+                "Администратор теста",
+                "reserve_to_tank",
+            )
+
+            self.assertFalse(success)
+            self.assertIn("в бак помещается", message)
+            self.assertEqual(
+                fuel_services.fuel_summary(db, "Бодрый Первый")["reserve_liters"],
+                20,
+            )
+
     def test_red_activity_removes_previous_automatic_fuel_debit(self):
         success, _ = self.activate_boat()
         self.assertTrue(success)
