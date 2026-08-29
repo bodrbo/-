@@ -143,6 +143,8 @@ def defect_detail_context(db, defect, viewer_role, boat_index=None):
     completed_count = sum(1 for item in plan_items if item["status"] == "done")
     return {
         "defect": defect,
+        "boats": BOATS,
+        "transfer_history": repository.list_defect_transfers(db, defect["id"]),
         "plan_items": plan_items,
         "completed_count": completed_count,
         "defect_statuses": DEFECT_STATUSES,
@@ -151,6 +153,28 @@ def defect_detail_context(db, defect, viewer_role, boat_index=None):
         "boat_index": boat_index,
         "active_page": "fleet" if viewer_role == "admin" else None,
     }
+
+
+def transfer_defect(db, defect_id, source_boat, destination_boat, transferred_by):
+    valid_boats = {item["name"] for item in BOATS}
+    if source_boat not in valid_boats or destination_boat not in valid_boats:
+        return False, "Не удалось определить выбранный катер."
+    if source_boat == destination_boat:
+        return False, "Выберите другой катер для переноса."
+    if repository.get_defect(db, defect_id, source_boat) is None:
+        return False, "Неисправность не найдена у исходного катера."
+
+    transferred = repository.transfer_defect(
+        db,
+        defect_id,
+        source_boat,
+        destination_boat,
+        (transferred_by or "Администратор").strip() or "Администратор",
+        current_timestamp(),
+    )
+    if not transferred:
+        return False, "Не удалось перенести неисправность. Обновите страницу."
+    return True, f"Неисправность перенесена на катер «{destination_boat}»."
 
 
 def save_defect_case_notes(db, defect_id, form):

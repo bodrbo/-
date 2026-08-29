@@ -49,6 +49,9 @@
 </header>
 
 <main class="wrap defect-case-page">
+  {% if defect_notice %}
+  <div class="defect-notice defect-notice-{{ defect_notice.type }}" role="alert">{{ defect_notice.message }}</div>
+  {% endif %}
   {% if viewer_role == 'admin' %}
   <a href="{{ url_for('fleet.boat_detail', boat_index=boat_index) }}" class="term defect-back-link">← К катеру «{{ defect.boat }}»</a>
   {% else %}
@@ -67,13 +70,42 @@
     </div>
     {% if viewer_role == 'admin' %}
     <div class="defect-case-admin-actions">
-      <span>Удаление также очистит план работ и назначения. Начисления зарплаты сохранятся.</span>
+      <div class="defect-transfer-control">
+        <span class="defect-transfer-label">Катер</span>
+        <form action="{{ url_for('fleet.transfer_defect', boat_index=boat_index, defect_id=defect.id) }}"
+              method="post"
+              onsubmit="return confirm('Перенести неисправность на выбранный катер?');">
+          <label for="destination-boat" class="sr-only">Перенести неисправность на другой катер</label>
+          <select id="destination-boat" name="destination_boat_index" required>
+            <option value="" selected disabled>Выберите другой катер</option>
+            {% for boat_option in boats %}
+            {% if boat_option.name != defect.boat %}
+            <option value="{{ loop.index0 }}">{{ boat_option.name }}</option>
+            {% endif %}
+            {% endfor %}
+          </select>
+          <button type="submit" class="btn-secondary">Перенести</button>
+        </form>
+      </div>
       <form action="{{ url_for('fleet.delete_defect', boat_index=boat_index, defect_id=defect.id) }}"
             method="post"
             onsubmit="return confirm('Удалить неисправность? Это действие нельзя отменить.');">
         <button type="submit" class="defect-delete-button">Удалить неисправность</button>
       </form>
     </div>
+    {% if transfer_history %}
+    <details class="defect-transfer-history">
+      <summary>История переносов · {{ transfer_history|length }}</summary>
+      <ul>
+        {% for transfer in transfer_history %}
+        <li>
+          <strong>{{ transfer.source_boat }} → {{ transfer.destination_boat }}</strong>
+          <span>{{ transfer.transferred_at }} · {{ transfer.transferred_by }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
     {% endif %}
   </section>
 

@@ -1867,13 +1867,27 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
   padding-top: 14px;
   border-top: 1px solid var(--hairline-soft);
 }
-.defect-case-admin-actions > span {
+.defect-transfer-control {
   margin-right: auto;
+  min-width: 0;
+}
+.defect-transfer-label {
+  display: block;
+  margin-bottom: 5px;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.45;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
 }
 .defect-case-admin-actions form { margin: 0; }
+.defect-transfer-control form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.defect-transfer-control select { min-width: 190px; }
 .defect-case-admin-actions button.defect-delete-button {
   border: 1px solid rgba(179, 64, 44, .38);
   background: transparent;
@@ -1885,6 +1899,17 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
   background: var(--danger);
   color: #fff8f4;
 }
+.defect-transfer-history {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline-soft);
+  color: var(--muted);
+  font-size: 12px;
+}
+.defect-transfer-history summary { cursor: pointer; font-weight: 700; }
+.defect-transfer-history ul { margin: 10px 0 0; padding-left: 18px; }
+.defect-transfer-history li + li { margin-top: 6px; }
+.defect-transfer-history li span { display: block; margin-top: 2px; }
 .defect-case-form { display: contents; }
 .defect-case-section { margin-top: 14px; }
 .defect-section-heading {
@@ -1965,6 +1990,9 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
   .defect-case-title h2 { font-size: 21px; }
   .defect-case-admin-actions { align-items: stretch; flex-direction: column; }
   .defect-case-admin-actions button { width: 100%; }
+  .defect-transfer-control { margin-right: 0; }
+  .defect-transfer-control form { align-items: stretch; flex-direction: column; }
+  .defect-transfer-control select { min-width: 0; width: 100%; }
   .defect-save-row { align-items: stretch; flex-direction: column; }
   .defect-save-row .hint { margin: 0; }
   .defect-plan-item { grid-template-columns: 24px minmax(0, 1fr); }

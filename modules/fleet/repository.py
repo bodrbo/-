@@ -71,6 +71,45 @@ def get_defect(db, defect_id, boat=None):
     ).fetchone()
 
 
+def list_defect_transfers(db, defect_id):
+    return db.execute(
+        "SELECT * FROM boat_defect_transfers WHERE defect_id = ? "
+        "ORDER BY transferred_at DESC, id DESC",
+        (defect_id,),
+    ).fetchall()
+
+
+def transfer_defect(
+    db,
+    defect_id,
+    source_boat,
+    destination_boat,
+    transferred_by,
+    transferred_at,
+):
+    with db:
+        cursor = db.execute(
+            "UPDATE boat_defects SET boat = ?, updated_at = ? "
+            "WHERE id = ? AND boat = ?",
+            (destination_boat, transferred_at, defect_id, source_boat),
+        )
+        if cursor.rowcount != 1:
+            return False
+        db.execute(
+            "INSERT INTO boat_defect_transfers "
+            "(defect_id, source_boat, destination_boat, transferred_by, transferred_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                defect_id,
+                source_boat,
+                destination_boat,
+                transferred_by,
+                transferred_at,
+            ),
+        )
+    return True
+
+
 def add_defect(db, boat, description, employee_name, reported_at):
     cursor = db.execute(
         "INSERT INTO boat_defects "
@@ -143,6 +182,9 @@ def delete_defect(db, defect_id, boat):
         return False
 
     with db:
+        db.execute(
+            "DELETE FROM boat_defect_transfers WHERE defect_id = ?", (defect_id,)
+        )
         db.execute(
             "DELETE FROM defect_work_plan_items WHERE defect_id = ?", (defect_id,)
         )

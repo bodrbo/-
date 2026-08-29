@@ -1106,6 +1106,22 @@ def init_db():
         conn.execute("ALTER TABLE boat_defects ADD COLUMN anamnesis TEXT NOT NULL DEFAULT ''")
     if "diagnosis" not in defect_cols:
         conn.execute("ALTER TABLE boat_defects ADD COLUMN diagnosis TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS boat_defect_transfers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            defect_id INTEGER NOT NULL,
+            source_boat TEXT NOT NULL,
+            destination_boat TEXT NOT NULL,
+            transferred_by TEXT NOT NULL,
+            transferred_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_boat_defect_transfers_defect "
+        "ON boat_defect_transfers(defect_id, transferred_at)"
+    )
     if boat_defects_is_new:
         # One-time backfill: every "problem" answer ever reported through a
         # standard checklist question becomes a tracked defect too, so

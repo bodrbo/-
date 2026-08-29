@@ -181,7 +181,42 @@ def create_fleet_blueprint(
             )
         return render_template(
             "defect_detail.html",
+            defect_notice=session.pop("defect_notice", None),
             **services.defect_detail_context(db, defect, "admin", boat_index),
+        )
+
+    @blueprint.route(
+        "/fleet/<int:boat_index>/defects/<int:defect_id>/transfer",
+        methods=["POST"],
+    )
+    @admin_login_required
+    def transfer_defect(boat_index, defect_id):
+        source_boat = services.boat_by_index(boat_index)
+        if source_boat is None:
+            return redirect(url_for("fleet.index"))
+        try:
+            destination_index = int(request.form.get("destination_boat_index", ""))
+        except (TypeError, ValueError):
+            destination_index = -1
+        destination_boat = services.boat_by_index(destination_index)
+        success, message = services.transfer_defect(
+            get_db(),
+            defect_id,
+            source_boat,
+            destination_boat,
+            session.get("admin_name") or "Администратор",
+        )
+        session["defect_notice"] = {
+            "type": "success" if success else "error",
+            "message": message,
+        }
+        target_index = destination_index if success else boat_index
+        return redirect(
+            url_for(
+                "fleet.defect_detail",
+                boat_index=target_index,
+                defect_id=defect_id,
+            )
         )
 
     @blueprint.route(

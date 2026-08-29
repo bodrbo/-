@@ -62,6 +62,10 @@ class FleetModuleIntegrationTests(unittest.TestCase):
             fleet_rules["fleet.create_defect"],
             "/fleet/<int:boat_index>/defects",
         )
+        self.assertEqual(
+            fleet_rules["fleet.transfer_defect"],
+            "/fleet/<int:boat_index>/defects/<int:defect_id>/transfer",
+        )
         self.assertNotIn("fleet_index", fleet_rules)
 
     def test_fleet_requires_admin_session(self):
@@ -188,6 +192,95 @@ class FleetModuleIntegrationTests(unittest.TestCase):
             b'<details id="current-defects" class="panel collapsible-panel" open>',
             page.data,
         )
+
+    def test_admin_can_transfer_defect_to_another_boat_with_all_children(self):
+        defect_id = self.create_defect()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO defect_work_plan_items "
+                "(defect_id, description, status, created_at, updated_at) "
+                "VALUES (?, 'Проверить проводку', 'pending', ?, ?)",
+                (defect_id, "2026-08-18 10:05", "2026-08-18 10:05"),
+            )
+            db.execute(
+                "INSERT INTO defect_assignments "
+                "(defect_id, employee_name, rate, norm_hours, assignment_status, assigned_at) "
+                "VALUES (?, 'Дмитрий Тарусов', 1500, 1, 'pending', ?)",
+                (defect_id, "2026-08-18 10:10"),
+            )
+            db.commit()
+
+        self.log_in_as_admin()
+        card = self.client.get(f"/fleet/0/defects/{defect_id}")
+        self.assertEqual(card.status_code, 200)
+        self.assertIn(
+            f'action="/fleet/0/defects/{defect_id}/transfer"'.encode(),
+            card.data,
+        )
+        self.assertIn("Бодрый Второй".encode(), card.data)
+
+        wrong_source = self.client.post(
+            f"/fleet/1/defects/{defect_id}/transfer",
+            data={"destination_boat_index": "2"},
+        )
+        self.assertEqual(wrong_source.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.assertEqual(
+                db.execute(
+                    "SELECT boat FROM boat_defects WHERE id = ?", (defect_id,)
+                ).fetchone()["boat"],
+                "Ларус",
+            )
+            self.assertEqual(
+                db.execute(
+                    "SELECT COUNT(*) AS count FROM boat_defect_transfers "
+                    "WHERE defect_id = ?",
+                    (defect_id,),
+                ).fetchone()["count"],
+                0,
+            )
+
+        response = self.client.post(
+            f"/fleet/0/defects/{defect_id}/transfer",
+            data={"destination_boat_index": "1"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response.headers["Location"].endswith(
+                f"/fleet/1/defects/{defect_id}"
+            )
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            defect = db.execute(
+                "SELECT * FROM boat_defects WHERE id = ?", (defect_id,)
+            ).fetchone()
+            transfer = db.execute(
+                "SELECT * FROM boat_defect_transfers WHERE defect_id = ?",
+                (defect_id,),
+            ).fetchone()
+            plan = db.execute(
+                "SELECT * FROM defect_work_plan_items WHERE defect_id = ?",
+                (defect_id,),
+            ).fetchone()
+            assignment = db.execute(
+                "SELECT * FROM defect_assignments WHERE defect_id = ?",
+                (defect_id,),
+            ).fetchone()
+        self.assertEqual(defect["boat"], "Бодрый Второй")
+        self.assertEqual(transfer["source_boat"], "Ларус")
+        self.assertEqual(transfer["destination_boat"], "Бодрый Второй")
+        self.assertEqual(transfer["transferred_by"], "Администратор")
+        self.assertIsNotNone(plan)
+        self.assertIsNotNone(assignment)
+
+        moved_card = self.client.get(response.headers["Location"])
+        self.assertEqual(moved_card.status_code, 200)
+        self.assertIn("Неисправность перенесена".encode(), moved_card.data)
+        self.assertIn("История переносов".encode(), moved_card.data)
+        self.assertIn("Ларус → Бодрый Второй".encode(), moved_card.data)
 
     def test_admin_manual_defect_rejects_empty_description(self):
         self.log_in_as_admin()
@@ -344,6 +437,12 @@ class FleetModuleIntegrationTests(unittest.TestCase):
                 "'accepted', ?, ?)",
                 (defect_id, "2026-08-18 10:10", entry_id),
             )
+            db.execute(
+                "INSERT INTO boat_defect_transfers "
+                "(defect_id, source_boat, destination_boat, transferred_by, transferred_at) "
+                "VALUES (?, 'Бодрый Первый', 'Ларус', 'Администратор', ?)",
+                (defect_id, "2026-08-18 10:08"),
+            )
             db.commit()
 
         response = self.client.post(f"/fleet/0/defects/{defect_id}/delete")
@@ -383,6 +482,12 @@ class FleetModuleIntegrationTests(unittest.TestCase):
             self.assertIsNone(
                 db.execute(
                     "SELECT 1 FROM defect_assignments WHERE defect_id = ?", (defect_id,)
+                ).fetchone()
+            )
+            self.assertIsNone(
+                db.execute(
+                    "SELECT 1 FROM boat_defect_transfers WHERE defect_id = ?",
+                    (defect_id,),
                 ).fetchone()
             )
             self.assertIsNotNone(
