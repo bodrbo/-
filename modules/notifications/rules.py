@@ -6,6 +6,7 @@ touching Flask routes or Telegram API calls.
 """
 
 from dataclasses import dataclass
+from typing import Tuple
 
 
 EVENT_TUNING_WORK_APPROVED = "tuning.work_approved"
@@ -17,7 +18,7 @@ EVENT_FLEET_EXTRA_DEFECT = "fleet.extra_defect"
 @dataclass(frozen=True)
 class NotificationRule:
     event: str
-    positions: tuple[str, ...]
+    positions: Tuple[str, ...]
     delivery: str
     description: str
 

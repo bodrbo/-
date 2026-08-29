@@ -10,11 +10,11 @@ from .rules import notification_rule
 class DispatchResult:
     event: str
     chat_ids: Tuple[Optional[str], ...]
-    statuses: tuple[object, ...]
+    statuses: Tuple[object, ...]
     used_fallback: bool
 
 
-def _chat_ids_for_positions(db, positions: tuple[str, ...]) -> tuple[str, ...]:
+def _chat_ids_for_positions(db, positions: Tuple[str, ...]) -> Tuple[str, ...]:
     if not positions:
         return ()
     placeholders = ", ".join("?" for _ in positions)
@@ -71,7 +71,7 @@ def dispatch_photos(
     dispatch: DispatchResult,
     photo_paths: Iterable[str],
     telegram_photo_sender: Callable[..., object],
-) -> tuple[object, ...]:
+) -> Tuple[object, ...]:
     """Send attachments to exactly the same recipients as the text alert."""
     return tuple(
         telegram_photo_sender(photo_path, chat_id=chat_id)
