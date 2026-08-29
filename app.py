@@ -66,12 +66,16 @@ from modules.employees.services import (
     telegram_chat_id_for_employee,
 )
 from modules.notifications import (
+    ASSIGNMENT_TUNING,
     EVENT_FLEET_CHECKLIST_PROBLEM,
     EVENT_FLEET_DEFECT_CREATED,
     EVENT_FLEET_EXTRA_DEFECT,
     EVENT_TUNING_WORK_APPROVED,
     dispatch_notification,
     dispatch_photos,
+    init_schema as init_notification_schema,
+    notify_task_assigned,
+    send_due_task_reminders,
 )
 from modules.refunds import create_refunds_blueprint
 from modules.refunds import services as refund_services
@@ -541,6 +545,16 @@ def send_telegram_notification_to_employee(db, employee_name, text):
         _log_telegram(f"Telegram notification {status}")
         return status
     return send_telegram_notification(text, chat_id=chat_id)
+
+
+def _notify_task_assignment(db, assignment_type, assignment_id):
+    """App adapter used by both assignment interfaces."""
+    return notify_task_assigned(
+        db,
+        assignment_type,
+        assignment_id,
+        send_telegram_notification_to_employee,
+    )
 
 
 def send_telegram_notification_to_admin(db, admin_id, text):
@@ -1167,6 +1181,7 @@ def init_db():
         )
         """
     )
+    init_notification_schema(conn)
 
     conn.execute(
         """
@@ -3315,7 +3330,13 @@ def download_trip_contract(contract_id):
 # =======================================================================
 # Флот
 # =======================================================================
-app.register_blueprint(create_fleet_blueprint(get_db, admin_login_required))
+app.register_blueprint(
+    create_fleet_blueprint(
+        get_db,
+        admin_login_required,
+        task_assigned_notifier=_notify_task_assignment,
+    )
+)
 
 
 # =======================================================================
@@ -5233,12 +5254,13 @@ def assign_tuning_item(order_id, item_id):
         pass
 
     if employee_name in valid_employees and rate is not None and rate > 0 and hours is not None and hours > 0:
-        db.execute(
+        cur = db.execute(
             "INSERT INTO tuning_item_assignments (item_id, employee_name, rate, norm_hours, "
             "assignment_status, assigned_at) VALUES (?, ?, ?, ?, 'pending', ?)",
             (item_id, employee_name, rate, hours, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
         )
         db.commit()
+        _notify_task_assignment(db, ASSIGNMENT_TUNING, cur.lastrowid)
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
@@ -10352,13 +10374,22 @@ def fuel_sync_now():
 
 @app.route("/internal/cron/sync-fuel")
 def cron_sync_fuel():
-    """Hourly Beget cron target for trips, live income and fuel."""
+    """Hourly Beget cron target for trips, income, fuel and task reminders."""
     if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
         return "forbidden", 403
+    db = get_db()
+    reminder_stats = send_due_task_reminders(
+        db, send_telegram_notification_to_employee
+    )
     if not yclients_configured():
-        return "yclients not configured", 503
+        return (
+            "yclients not configured; "
+            f"task reminders: {reminder_stats['sent_3h']} after 3h, "
+            f"{reminder_stats['sent_6h']} after 6h",
+            503,
+        )
     try:
-        stats = _sync_hourly_yclients(get_db())
+        stats = _sync_hourly_yclients(db)
     except (requests.RequestException, RuntimeError, ValueError) as error:
         return f"error: {error}", 502
     trip_stats = stats["trips"]
@@ -10379,7 +10410,24 @@ def cron_sync_fuel():
         f"schedule: {schedule_summary}; "
         f"fuel: {fuel_stats['automatic']} automatic, "
         f"{fuel_stats.get('cancelled', 0)} cancelled removed, "
-        f"{fuel_stats['pending']} pending, {fuel_stats['skipped']} skipped",
+        f"{fuel_stats['pending']} pending, {fuel_stats['skipped']} skipped; "
+        f"task reminders: {reminder_stats['sent_3h']} after 3h, "
+        f"{reminder_stats['sent_6h']} after 6h",
+        200,
+    )
+
+
+@app.route("/internal/cron/send-task-reminders")
+def cron_send_task_reminders():
+    """Standalone idempotent task-reminder target for diagnostics or cron."""
+    if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
+        return "forbidden", 403
+    stats = send_due_task_reminders(
+        get_db(), send_telegram_notification_to_employee
+    )
+    return (
+        f"ok: {stats['sent_3h']} reminder(s) after 3h, "
+        f"{stats['sent_6h']} reminder(s) after 6h",
         200,
     )
 

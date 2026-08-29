@@ -194,10 +194,11 @@ def create_defect_assignment(db, defect_id, employee_name, rate_raw, hours_raw):
         rate = float((rate_raw or "").strip().replace(",", "."))
         hours = float((hours_raw or "").strip().replace(",", "."))
     except ValueError:
-        return False
+        return None
 
     if employee_name not in valid_employees or rate <= 0 or hours <= 0:
-        return False
+        return None
 
-    repository.add_assignment(db, defect_id, employee_name, rate, hours, current_timestamp())
-    return True
+    return repository.add_assignment(
+        db, defect_id, employee_name, rate, hours, current_timestamp()
+    )

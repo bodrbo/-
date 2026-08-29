@@ -6,6 +6,9 @@ from modules.notifications import (
     EVENT_FLEET_CHECKLIST_PROBLEM,
     EVENT_FLEET_DEFECT_CREATED,
     EVENT_FLEET_EXTRA_DEFECT,
+    EVENT_TASK_ASSIGNED,
+    EVENT_TASK_UNACCEPTED_3H,
+    EVENT_TASK_UNACCEPTED_6H,
     EVENT_TUNING_WORK_APPROVED,
     dispatch_notification,
     dispatch_photos,
@@ -69,6 +72,21 @@ class NotificationModuleTestCase(unittest.TestCase):
             rule = notification_rule(event)
             self.assertEqual(rule.delivery, "immediate")
             self.assertEqual(rule.positions, ("Тюнингмэн",))
+        self.assertEqual(notification_rule(EVENT_TASK_ASSIGNED).delay_hours, 0)
+        self.assertEqual(
+            notification_rule(EVENT_TASK_UNACCEPTED_3H).delay_hours, 3
+        )
+        self.assertEqual(
+            notification_rule(EVENT_TASK_UNACCEPTED_6H).delay_hours, 6
+        )
+        for event in (
+            EVENT_TASK_ASSIGNED,
+            EVENT_TASK_UNACCEPTED_3H,
+            EVENT_TASK_UNACCEPTED_6H,
+        ):
+            self.assertEqual(
+                notification_rule(event).recipient, "assigned_employee"
+            )
 
     def test_dispatches_only_to_active_linked_employees_in_target_positions(self):
         self.add_employee(1, "Мастер", ["Тюнингмэн"], "101")

@@ -23,7 +23,9 @@ from .constants import (
 )
 
 
-def create_fleet_blueprint(get_db, admin_login_required):
+def create_fleet_blueprint(
+    get_db, admin_login_required, task_assigned_notifier=None
+):
     """Build the fleet Blueprint with the application's DB and auth adapters."""
     blueprint = Blueprint("fleet", __name__)
 
@@ -313,13 +315,15 @@ def create_fleet_blueprint(get_db, admin_login_required):
             return redirect(url_for("fleet.index"))
         db = get_db()
         if repository.get_defect(db, defect_id, boat) is not None:
-            services.create_defect_assignment(
+            assignment_id = services.create_defect_assignment(
                 db,
                 defect_id,
                 request.form.get("employee_name", "").strip(),
                 request.form.get("rate", ""),
                 request.form.get("norm_hours", ""),
             )
+            if assignment_id is not None and task_assigned_notifier is not None:
+                task_assigned_notifier(db, "defect", assignment_id)
         return redirect(url_for("fleet.boat_detail", boat_index=boat_index))
 
     return blueprint

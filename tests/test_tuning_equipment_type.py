@@ -19,6 +19,10 @@ class TuningEquipmentTypeTests(unittest.TestCase):
 
     @staticmethod
     def _clear_tuning_data(db):
+        db.execute(
+            "DELETE FROM task_notification_deliveries WHERE assignment_type = 'tuning'"
+        )
+        db.execute("DELETE FROM tuning_item_assignments")
         db.execute("DELETE FROM tuning_order_items")
         db.execute("DELETE FROM tuning_boat_profiles")
         db.execute("DELETE FROM projects WHERE tuning_order_id IS NOT NULL")
@@ -133,6 +137,51 @@ class TuningEquipmentTypeTests(unittest.TestCase):
             ).fetchone()
             self.assertIsNotNone(profile)
             self.assertEqual(profile["model_name"], "Nimbus 305 Coupe")
+
+    def test_assigning_tuning_work_notifies_the_employee_immediately(self):
+        self.login()
+        self.client.post("/tuning/add", data=self.valid_form())
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            order_id = db.execute("SELECT id FROM tuning_orders").fetchone()["id"]
+            item_id = db.execute(
+                "SELECT id FROM tuning_order_items WHERE order_id = ?", (order_id,)
+            ).fetchone()["id"]
+            employee = db.execute(
+                "SELECT id FROM employees WHERE name = 'Дмитрий Тарусов'"
+            ).fetchone()
+            db.execute(
+                "INSERT OR IGNORE INTO employee_positions "
+                "(employee_id, position, created_at) VALUES (?, 'Тюнингмэн', ?)",
+                (employee["id"], "2026-08-29 12:00"),
+            )
+            db.commit()
+
+        with patch.object(
+            application_module,
+            "send_telegram_notification_to_employee",
+            return_value="sent",
+        ) as notification:
+            response = self.client.post(
+                f"/tuning/{order_id}/item/{item_id}/assign",
+                data={
+                    "employee_name": "Дмитрий Тарусов",
+                    "rate": "2000",
+                    "norm_hours": "1.5",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        notification.assert_called_once()
+        self.assertEqual(notification.call_args.args[1], "Дмитрий Тарусов")
+        self.assertIn("Вам поручена задача", notification.call_args.args[2])
+        self.assertIn("Диагностика", notification.call_args.args[2])
+        with application_module.app.app_context():
+            delivery = application_module.get_db().execute(
+                "SELECT notification_event FROM task_notification_deliveries "
+                "WHERE assignment_type = 'tuning'"
+            ).fetchone()
+        self.assertEqual(delivery["notification_event"], "task.assigned")
 
     def test_motor_order_is_saved_but_not_added_to_boat_catalog(self):
         self.login()

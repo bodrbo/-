@@ -124,15 +124,25 @@ class FleetModuleIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 302)
 
-        response = self.client.post(
-            f"/fleet/0/defects/{defect_id}/assign",
-            data={
-                "employee_name": "Дмитрий Тарусов",
-                "rate": "1500",
-                "norm_hours": "2",
-            },
-        )
+        with patch.object(
+            application_module,
+            "send_telegram_notification_to_employee",
+            return_value="sent",
+        ) as task_notification:
+            response = self.client.post(
+                f"/fleet/0/defects/{defect_id}/assign",
+                data={
+                    "employee_name": "Дмитрий Тарусов",
+                    "rate": "1500",
+                    "norm_hours": "2",
+                },
+            )
         self.assertEqual(response.status_code, 302)
+        task_notification.assert_called_once()
+        self.assertEqual(task_notification.call_args.args[1], "Дмитрий Тарусов")
+        self.assertIn(
+            "Вам поручена задача", task_notification.call_args.args[2]
+        )
 
         with application_module.app.app_context():
             db = application_module.get_db()
