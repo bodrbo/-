@@ -90,7 +90,7 @@
     {% if clients %}
     <div class="table-scroll">
       <table class="records tuning-clients-table" id="tuning-clients-table">
-        <thead><tr><th>Клиент</th><th>Статус</th><th>Телефон</th><th>Последняя техника</th><th>Заказов</th><th>Последний заказ</th><th>Сумма</th><th>Оплачено</th><th>К доплате</th><th></th></tr></thead>
+        <thead><tr><th>Клиент</th><th>Статус</th><th>Телефон</th><th>Последняя техника</th><th>Заказов</th><th>Последний заказ</th><th>Сумма</th><th>Оплачено</th><th>К доплате</th></tr></thead>
         <tbody>
           {% for client in clients %}
           <tr>
@@ -121,7 +121,6 @@
             <td class="amount">{{ client.order_total|money }}</td>
             <td class="amount tuning-client-paid">{{ client.paid_total|money }}</td>
             <td class="amount {{ 'tuning-client-debt' if client.outstanding > 0 }}">{{ client.outstanding|money }}</td>
-            <td class="row-actions"><a href="{{ url_for('admin_client_dashboard', client_id=client.id) }}" class="tuning-client-open" aria-label="Открыть кабинет клиента {{ client.client_name }}">Открыть ЛК <span aria-hidden="true">→</span></a></td>
           </tr>
           {% endfor %}
         </tbody>

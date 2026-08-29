@@ -239,6 +239,10 @@ class ClientDashboardRoleTests(unittest.TestCase):
         self.assertIn("5 000,00", html)
         self.assertIn("13 000,00", html)
         self.assertIn(f'/admin/clients/{self.client_id}/cabinet', html)
+        self.assertEqual(
+            html.count(f'/admin/clients/{self.client_id}/cabinet'), 1
+        )
+        self.assertNotIn("Открыть ЛК", html)
         self.assertIn(
             'href="/admin/clients" class="active"', html
         )

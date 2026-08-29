@@ -4893,7 +4893,7 @@ button.captain-command-alert:hover {
   background: var(--paper);
 }
 .tuning-clients-directory .table-scroll { margin: 0; }
-.tuning-clients-table { min-width: 1200px; }
+.tuning-clients-table { min-width: 1080px; }
 .tuning-clients-table td { vertical-align: middle; }
 .tuning-client-name {
   display: block;
@@ -4931,23 +4931,6 @@ button.captain-command-alert:hover {
 .tuning-client-status-form:focus-within { outline: 2px solid rgba(52, 152, 219, .28); outline-offset: 2px; }
 .tuning-client-paid { color: var(--success); }
 .tuning-client-debt { color: var(--danger); }
-.tuning-client-open {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 36px;
-  padding: 7px 10px;
-  border: 1px solid var(--hairline);
-  border-radius: 8px;
-  color: var(--ink-soft);
-  font-size: 10.5px;
-  font-weight: 700;
-  text-decoration: none;
-  white-space: nowrap;
-}
-.tuning-client-open span { color: var(--brass-strong); font-size: 15px; transition: transform .18s ease; }
-.tuning-client-open:hover { border-color: var(--brass); background: var(--brass-pale); color: var(--ink); }
-.tuning-client-open:hover span { transform: translateX(2px); }
 .tuning-clients-directory > .hint { margin: 0; padding: 18px 22px; }
 .tuning-clients-directory > .empty-state { margin: 0; border: 0; border-radius: 0; }
 
