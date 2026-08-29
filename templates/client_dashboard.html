@@ -57,7 +57,8 @@
       <p>Клиент не видит эту панель, внутреннюю экономику, заметки и служебные данные заказов.</p>
     </div>
     <div class="client-admin-toolbar-actions">
-      <a href="{{ url_for('tuning_index') }}" class="client-admin-link">← К заказам</a>
+      <a href="{{ url_for('tuning_clients') }}" class="client-admin-link">← К клиентам</a>
+      <a href="{{ url_for('tuning_index') }}" class="client-admin-link">К заказам</a>
       <a href="{{ url_for('client_dashboard', token=client.token) }}" target="_blank" rel="noopener" class="client-admin-preview-link">Открыть версию клиента</a>
     </div>
   </section>

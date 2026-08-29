@@ -151,6 +151,12 @@ class ClientDashboardRoleTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/admin/login", response.headers["Location"])
 
+    def test_clients_directory_requires_admin_login(self):
+        response = self.client.get("/admin/clients")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/admin/login", response.headers["Location"])
+
     def test_public_cabinet_does_not_expose_internal_data(self):
         response = self.client.get(f"/client/{self.CLIENT_TOKEN}")
         html = response.get_data(as_text=True)
@@ -188,6 +194,7 @@ class ClientDashboardRoleTests(unittest.TestCase):
         self.assertIn("11 600,00 ₽", html)
         self.assertIn("6 400,00 ₽", html)
         self.assertIn(f'/tuning/edit/{self.order_id}', html)
+        self.assertIn('href="/admin/clients"', html)
         self.assertIn(f'/client/{self.CLIENT_TOKEN}', html)
         self.assertNotIn(
             f'/client/{self.CLIENT_TOKEN}/item/{self.item_id}/approve', html
@@ -200,8 +207,27 @@ class ClientDashboardRoleTests(unittest.TestCase):
         html = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
+        self.assertIn('href="/admin/clients"', html)
         self.assertIn(f'/admin/clients/{self.client_id}/cabinet', html)
         self.assertNotIn(f'/client/{self.CLIENT_TOKEN}', html)
+
+    def test_clients_directory_aggregates_orders_and_payments(self):
+        self.login()
+        response = self.client.get("/admin/clients")
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Клиенты тюнинга", html)
+        self.assertIn("Иван Петров", html)
+        self.assertIn(self.CLIENT_PHONE, html)
+        self.assertIn("Finnmaster T8", html)
+        self.assertIn("18 000,00", html)
+        self.assertIn("5 000,00", html)
+        self.assertIn("13 000,00", html)
+        self.assertIn(f'/admin/clients/{self.client_id}/cabinet', html)
+        self.assertIn(
+            'href="/admin/clients" class="active"', html
+        )
 
 
 if __name__ == "__main__":

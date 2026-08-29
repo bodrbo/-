@@ -4275,6 +4275,56 @@ def tuning_index():
     )
 
 
+@app.route("/admin/clients")
+@admin_login_required
+def tuning_clients():
+    db = get_db()
+    client_rows = db.execute(
+        "SELECT c.id, c.client_name, c.boat_model, c.phone, c.created_at, "
+        "COALESCE(os.order_count, 0) AS order_count, "
+        "COALESCE(os.order_total, 0) AS order_total, "
+        "os.last_order_at, COALESCE(ps.paid_total, 0) AS paid_total, "
+        "(SELECT CASE WHEN latest.equipment_type = 'motor' "
+        "        THEN latest.motor_model ELSE latest.boat_model END "
+        " FROM tuning_orders latest WHERE latest.client_id = c.id "
+        " ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) "
+        "AS latest_equipment_model, "
+        "(SELECT latest.equipment_type FROM tuning_orders latest "
+        " WHERE latest.client_id = c.id "
+        " ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) "
+        "AS latest_equipment_type "
+        "FROM clients c "
+        "LEFT JOIN ("
+        " SELECT client_id, COUNT(*) AS order_count, SUM(total) AS order_total, "
+        " MAX(created_at) AS last_order_at FROM tuning_orders "
+        " WHERE client_id IS NOT NULL GROUP BY client_id"
+        ") os ON os.client_id = c.id "
+        "LEFT JOIN ("
+        " SELECT o.client_id, SUM(p.amount) AS paid_total "
+        " FROM tuning_orders o JOIN tuning_payments p ON p.order_id = o.id "
+        " WHERE o.client_id IS NOT NULL GROUP BY o.client_id"
+        ") ps ON ps.client_id = c.id "
+        "ORDER BY COALESCE(os.last_order_at, c.created_at) DESC, c.id DESC"
+    ).fetchall()
+    clients = []
+    for row in client_rows:
+        client = dict(row)
+        client["outstanding"] = max(
+            0.0, client["order_total"] - client["paid_total"]
+        )
+        clients.append(client)
+
+    return render_template(
+        "tuning_clients.html",
+        clients=clients,
+        clients_count=len(clients),
+        orders_count=sum(client["order_count"] for client in clients),
+        order_total=sum(client["order_total"] for client in clients),
+        outstanding_total=sum(client["outstanding"] for client in clients),
+        active_page="clients",
+    )
+
+
 @app.route("/tuning/boats")
 @admin_login_required
 def tuning_boat_catalog():

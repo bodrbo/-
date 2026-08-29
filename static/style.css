@@ -4800,3 +4800,130 @@ button.captain-command-alert:hover {
   .client-admin-order-heading { align-items: stretch; flex-direction: column; }
   .client-admin-edit-link { width: 100%; }
 }
+
+/* ------------------------------------------------------------------
+   Tuning clients — administrative customer directory
+   ------------------------------------------------------------------ */
+.wrap.tuning-clients-page { max-width: 1280px; }
+.tuning-clients-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 4px 0 20px;
+}
+.tuning-clients-heading h2 { margin: 3px 0 6px; font-size: 25px; }
+.tuning-clients-heading > div > p:last-child {
+  max-width: 760px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.tuning-clients-eyebrow {
+  margin: 0;
+  color: var(--brass-strong);
+  font-family: 'PT Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.tuning-clients-totals { margin-bottom: 18px; }
+.tuning-clients-directory { padding: 0; overflow: hidden; }
+.tuning-clients-directory-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.tuning-clients-directory-head h2 { margin: 0 0 3px; font-size: 19px; }
+.tuning-clients-directory-head p { margin: 0; color: var(--muted); font-size: 11.5px; }
+.tuning-clients-search {
+  position: relative;
+  display: block;
+  width: min(340px, 100%);
+  flex: none;
+}
+.tuning-clients-search svg {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  width: 17px;
+  height: 17px;
+  color: var(--muted);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+.tuning-clients-search input {
+  width: 100%;
+  height: 42px;
+  padding: 9px 12px 9px 38px;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  background: var(--paper-alt);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+.tuning-clients-search input:focus {
+  outline: 2px solid rgba(194, 143, 44, .18);
+  border-color: var(--brass);
+  background: var(--paper);
+}
+.tuning-clients-directory .table-scroll { margin: 0; }
+.tuning-clients-table { min-width: 1080px; }
+.tuning-clients-table td { vertical-align: middle; }
+.tuning-client-name {
+  display: block;
+  color: var(--ink);
+  font-weight: 700;
+  text-decoration-color: rgba(194, 143, 44, .45);
+  text-underline-offset: 3px;
+}
+.tuning-client-name:hover { color: var(--brass-strong); }
+.tuning-client-id {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-family: 'PT Mono', monospace;
+  font-size: 9px;
+}
+.tuning-client-phone { color: var(--ink-soft); white-space: nowrap; }
+.tuning-client-equipment { display: block; margin-top: 4px; min-width: 150px; font-weight: 700; }
+.tuning-client-paid { color: var(--success); }
+.tuning-client-debt { color: var(--danger); }
+.tuning-client-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.tuning-client-open span { color: var(--brass-strong); font-size: 15px; transition: transform .18s ease; }
+.tuning-client-open:hover { border-color: var(--brass); background: var(--brass-pale); color: var(--ink); }
+.tuning-client-open:hover span { transform: translateX(2px); }
+.tuning-clients-directory > .hint { margin: 0; padding: 18px 22px; }
+.tuning-clients-directory > .empty-state { margin: 0; border: 0; border-radius: 0; }
+
+@media (max-width: 780px) {
+  .tuning-clients-heading,
+  .tuning-clients-directory-head { align-items: stretch; flex-direction: column; }
+  .tuning-clients-directory-head { gap: 14px; }
+  .tuning-clients-search { width: 100%; }
+}
+
+@media (max-width: 560px) {
+  .tuning-clients-heading h2 { font-size: 22px; }
+  .tuning-clients-directory-head { padding: 17px 16px 14px; }
+  .tuning-clients-search input { min-height: 44px; }
+}
