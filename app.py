@@ -741,6 +741,13 @@ ORDER_STATUSES = [
 ]
 DEFAULT_ORDER_STATUS = "estimate"
 
+CLIENT_STATUSES = [
+    {"value": "satisfied", "label": "Довольный"},
+    {"value": "neutral", "label": "Нейтральный"},
+    {"value": "dissatisfied", "label": "Недовольный"},
+]
+DEFAULT_CLIENT_STATUS = "neutral"
+
 WORK_STATUSES = [
     {"value": "pending", "label": "На согласовании"},
     {"value": "approved", "label": "Согласовано"},
@@ -1585,10 +1592,16 @@ def init_db():
             boat_model TEXT NOT NULL,
             phone TEXT NOT NULL UNIQUE,
             token TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL DEFAULT 'neutral',
             created_at TEXT NOT NULL
         )
         """
     )
+    client_cols = [row[1] for row in conn.execute("PRAGMA table_info(clients)").fetchall()]
+    if "status" not in client_cols:
+        conn.execute(
+            "ALTER TABLE clients ADD COLUMN status TEXT NOT NULL DEFAULT 'neutral'"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS hull_diagnostic_sheets (
@@ -4280,7 +4293,7 @@ def tuning_index():
 def tuning_clients():
     db = get_db()
     client_rows = db.execute(
-        "SELECT c.id, c.client_name, c.boat_model, c.phone, c.created_at, "
+        "SELECT c.id, c.client_name, c.boat_model, c.phone, c.status, c.created_at, "
         "COALESCE(os.order_count, 0) AS order_count, "
         "COALESCE(os.order_total, 0) AS order_total, "
         "os.last_order_at, COALESCE(ps.paid_total, 0) AS paid_total, "
@@ -4321,8 +4334,21 @@ def tuning_clients():
         orders_count=sum(client["order_count"] for client in clients),
         order_total=sum(client["order_total"] for client in clients),
         outstanding_total=sum(client["outstanding"] for client in clients),
+        client_statuses=CLIENT_STATUSES,
         active_page="clients",
     )
+
+
+@app.route("/admin/clients/<int:client_id>/status", methods=["POST"])
+@admin_login_required
+def update_tuning_client_status(client_id):
+    status = request.form.get("status", "").strip()
+    allowed_statuses = {item["value"] for item in CLIENT_STATUSES}
+    if status in allowed_statuses:
+        db = get_db()
+        db.execute("UPDATE clients SET status = ? WHERE id = ?", (status, client_id))
+        db.commit()
+    return redirect(url_for("tuning_clients"))
 
 
 @app.route("/tuning/boats")

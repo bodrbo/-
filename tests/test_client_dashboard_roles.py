@@ -157,6 +157,20 @@ class ClientDashboardRoleTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/admin/login", response.headers["Location"])
 
+    def test_client_status_update_requires_admin_login(self):
+        response = self.client.post(
+            f"/admin/clients/{self.client_id}/status",
+            data={"status": "dissatisfied"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/admin/login", response.headers["Location"])
+        with application_module.app.app_context():
+            status = application_module.get_db().execute(
+                "SELECT status FROM clients WHERE id = ?", (self.client_id,)
+            ).fetchone()["status"]
+        self.assertEqual(status, "neutral")
+
     def test_public_cabinet_does_not_expose_internal_data(self):
         response = self.client.get(f"/client/{self.CLIENT_TOKEN}")
         html = response.get_data(as_text=True)
@@ -228,6 +242,45 @@ class ClientDashboardRoleTests(unittest.TestCase):
         self.assertIn(
             'href="/admin/clients" class="active"', html
         )
+        self.assertIn("Статус", html)
+        self.assertIn("tuning-client-status-neutral", html)
+        self.assertIn('<option value="neutral" selected>Нейтральный</option>', html)
+
+    def test_admin_can_update_client_status_and_invalid_value_is_ignored(self):
+        self.login()
+        updated = self.client.post(
+            f"/admin/clients/{self.client_id}/status",
+            data={"status": "satisfied"},
+        )
+
+        self.assertEqual(updated.status_code, 302)
+        self.assertTrue(updated.headers["Location"].endswith("/admin/clients"))
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            status = db.execute(
+                "SELECT status FROM clients WHERE id = ?", (self.client_id,)
+            ).fetchone()["status"]
+        self.assertEqual(status, "satisfied")
+
+        directory = self.client.get("/admin/clients").get_data(as_text=True)
+        cabinet = self.client.get(
+            f"/admin/clients/{self.client_id}/cabinet"
+        ).get_data(as_text=True)
+        self.assertIn("tuning-client-status-satisfied", directory)
+        self.assertIn('<option value="satisfied" selected>Довольный</option>', directory)
+        self.assertIn("client-status-pill-satisfied", cabinet)
+        self.assertIn("Довольный", cabinet)
+
+        invalid = self.client.post(
+            f"/admin/clients/{self.client_id}/status",
+            data={"status": "unknown-status"},
+        )
+        self.assertEqual(invalid.status_code, 302)
+        with application_module.app.app_context():
+            status_after_invalid = application_module.get_db().execute(
+                "SELECT status FROM clients WHERE id = ?", (self.client_id,)
+            ).fetchone()["status"]
+        self.assertEqual(status_after_invalid, "satisfied")
 
 
 if __name__ == "__main__":

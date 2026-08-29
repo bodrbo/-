@@ -90,11 +90,21 @@
     {% if clients %}
     <div class="table-scroll">
       <table class="records tuning-clients-table" id="tuning-clients-table">
-        <thead><tr><th>Клиент</th><th>Телефон</th><th>Последняя техника</th><th>Заказов</th><th>Последний заказ</th><th>Сумма</th><th>Оплачено</th><th>К доплате</th><th></th></tr></thead>
+        <thead><tr><th>Клиент</th><th>Статус</th><th>Телефон</th><th>Последняя техника</th><th>Заказов</th><th>Последний заказ</th><th>Сумма</th><th>Оплачено</th><th>К доплате</th><th></th></tr></thead>
         <tbody>
           {% for client in clients %}
           <tr>
             <td><a href="{{ url_for('admin_client_dashboard', client_id=client.id) }}" class="tuning-client-name">{{ client.client_name }}</a><span class="tuning-client-id">ID {{ client.id }}</span></td>
+            <td>
+              <form action="{{ url_for('update_tuning_client_status', client_id=client.id) }}" method="post" class="tuning-client-status-form">
+                <select name="status" class="tuning-client-status tuning-client-status-{{ client.status }}" aria-label="Статус клиента {{ client.client_name }}" onchange="this.form.submit()">
+                  {% for status in client_statuses %}
+                  <option value="{{ status.value }}" {{ 'selected' if client.status == status.value }}>{{ status.label }}</option>
+                  {% endfor %}
+                </select>
+                <button type="submit" class="sr-only">Сохранить статус клиента {{ client.client_name }}</button>
+              </form>
+            </td>
             <td><a href="tel:{{ client.phone }}" class="tuning-client-phone">{{ client.phone }}</a></td>
             <td>
               {% if client.latest_equipment_model %}
