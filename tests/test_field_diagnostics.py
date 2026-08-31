@@ -88,9 +88,11 @@ class FieldDiagnosticsTests(unittest.TestCase):
                 [question["title"] for question in hull_questions],
                 expected,
             )
-            self.assertIn("транцевую доску", hull_questions[0]["text"])
-            self.assertIn("стрингеры", hull_questions[0]["text"])
-            self.assertIn("шпангоуты", hull_questions[0]["text"])
+            self.assertIn("транцевой доски", hull_questions[0]["text"])
+            self.assertIn("стрингеров", hull_questions[0]["text"])
+            self.assertIn("шпангоутов", hull_questions[0]["text"])
+            self.assertTrue(hull_questions[0]["text"].startswith("Осмотр"))
+            self.assertTrue(hull_questions[1]["text"].startswith("Осмотр"))
 
     def test_new_sheet_adds_custom_model_to_shared_catalog(self):
         self.login()
