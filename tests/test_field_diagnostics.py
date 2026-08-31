@@ -245,6 +245,7 @@ class FieldDiagnosticsTests(unittest.TestCase):
         self.assertEqual(pdf.mimetype, "application/pdf")
         self.assertTrue(pdf.data.startswith(b"%PDF-"))
         self.assertGreater(len(pdf.data), 5000)
+        self.assertIn(b"/Subtype /Image", pdf.data)
         self.assertIn(
             'inline; filename="Diagnostic-sheet-%d.pdf"' % sheet_id,
             pdf.headers["Content-Disposition"],

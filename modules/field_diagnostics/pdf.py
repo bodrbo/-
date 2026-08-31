@@ -43,6 +43,7 @@ def build_diagnostic_pdf(sheet, answers, inspection_label, fonts_dir,
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.platypus import (
+        Image,
         KeepTogether,
         Paragraph,
         SimpleDocTemplate,
@@ -133,7 +134,14 @@ def build_diagnostic_pdf(sheet, answers, inspection_label, fonts_dir,
     ok_answers = [answer for answer in answers if _value(answer, "status") == "ok"]
     problems = [answer for answer in answers if _value(answer, "status") == "problem"]
 
+    logo_path = os.path.join(os.path.dirname(fonts_dir), "logo-act.png")
+    logo_width = 130
     story = [
+        # The same advertising header used by both tuning acts. The source
+        # artwork already includes the logo and website address, so keeping
+        # it as one image preserves the brand proportions exactly.
+        Image(logo_path, width=logo_width, height=logo_width * 230 / 836),
+        Spacer(1, 12),
         Paragraph("ДИАГНОСТИЧЕСКИЙ ЛИСТ", title_style),
         Paragraph("Лист № %s" % safe(_value(sheet, "id")), sheet_number_style),
     ]
