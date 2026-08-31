@@ -358,6 +358,7 @@ class FieldDiagnosticsTests(unittest.TestCase):
         other_step = self.client.get(sheet_path)
         other_html = other_step.get_data(as_text=True)
         self.assertIn("Прочие неисправности", other_html)
+        self.assertIn("Общие рекомендации", other_html)
         self.assertIn("Завершить осмотр", other_html)
         with application_module.app.app_context():
             db = application_module.get_db()
@@ -375,7 +376,11 @@ class FieldDiagnosticsTests(unittest.TestCase):
                 "other_defect[]": [
                     "Не хватает спасательного жилета",
                     "Повреждён тент",
-                ]
+                ],
+                "general_recommendations": (
+                    "До следующего выхода заменить повреждённый тент и "
+                    "проверить комплект спасательных жилетов."
+                ),
             },
         )
         self.assertEqual(completed.status_code, 302)
@@ -386,6 +391,7 @@ class FieldDiagnosticsTests(unittest.TestCase):
         self.assertIn("Диагностический лист готов", result_html)
         self.assertIn("Трещина 4 см у крепления", result_html)
         self.assertIn("Не хватает спасательного жилета", result_html)
+        self.assertIn("До следующего выхода заменить", result_html)
         for block_name in DIAGNOSTIC_BLOCKS:
             self.assertIn(block_name, result_html)
 
@@ -397,6 +403,11 @@ class FieldDiagnosticsTests(unittest.TestCase):
             self.assertEqual(sheet["status"], "completed")
             self.assertIsNotNone(sheet["completed_at"])
             self.assertIsNotNone(sheet["other_completed_at"])
+            self.assertEqual(
+                sheet["general_recommendations"],
+                "До следующего выхода заменить повреждённый тент и "
+                "проверить комплект спасательных жилетов.",
+            )
             answers = db.execute(
                 "SELECT * FROM field_diagnostic_answers WHERE sheet_id = ? "
                 "ORDER BY question_index",
@@ -450,12 +461,13 @@ class FieldDiagnosticsTests(unittest.TestCase):
             )
         response = self.client.post(
             "/tuning/diagnostics/field/%d/other" % sheet_id,
-            data={"other_defect[]": ""},
+            data={"other_defect[]": "", "general_recommendations": ""},
         )
 
         self.assertEqual(response.status_code, 302)
         result = self.client.get(sheet_path).get_data(as_text=True)
         self.assertIn("Дополнительные неисправности не указаны", result)
+        self.assertIn("Общие рекомендации не указаны", result)
         with application_module.app.app_context():
             db = application_module.get_db()
             self.assertEqual(
@@ -487,7 +499,10 @@ class FieldDiagnosticsTests(unittest.TestCase):
         self.answer_all_questions(sheet_id)
         self.client.post(
             "/tuning/diagnostics/field/%d/other" % sheet_id,
-            data={"other_defect[]": ["Старое замечание", "Удалить замечание"]},
+            data={
+                "other_defect[]": ["Старое замечание", "Удалить замечание"],
+                "general_recommendations": "Старая рекомендация",
+            },
         )
 
         edit_page = self.client.get(
@@ -522,6 +537,7 @@ class FieldDiagnosticsTests(unittest.TestCase):
                 "",
                 "Новое замечание",
             ],
+            "general_recommendations": "Обновлённая рекомендация мастера",
         }
         for answer in answers:
             status = "problem" if answer["question_index"] == 0 else "ok"
@@ -564,6 +580,10 @@ class FieldDiagnosticsTests(unittest.TestCase):
             self.assertEqual(sheet["boat_model"], "Test Field Edited")
             self.assertEqual(sheet["owner_name"], "Пётр Новый")
             self.assertEqual(sheet["owner_phone"], "+7 921 000-00-00")
+            self.assertEqual(
+                sheet["general_recommendations"],
+                "Обновлённая рекомендация мастера",
+            )
             self.assertEqual(profile["model_name"], "Test Field Edited")
             self.assertEqual(changed_answer["status"], "problem")
             self.assertEqual(
@@ -580,6 +600,7 @@ class FieldDiagnosticsTests(unittest.TestCase):
         self.assertIn("Test Field Edited", result_html)
         self.assertIn("Не работает главный выключатель", result_html)
         self.assertIn("Исправленное замечание", result_html)
+        self.assertIn("Обновлённая рекомендация мастера", result_html)
         self.assertNotIn("Удалить замечание", result_html)
 
     def test_inspection_type_can_only_change_before_answers(self):

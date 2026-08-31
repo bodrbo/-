@@ -138,6 +138,14 @@
     </section>
     {% endfor %}
   </div>
+  <section class="panel field-diagnostic-recommendations-result">
+    <div class="field-diagnostic-block-heading"><span>05</span><h2>Общие рекомендации</h2></div>
+    {% if sheet.general_recommendations %}
+    <p>{{ sheet.general_recommendations }}</p>
+    {% else %}
+    <p class="hint">Общие рекомендации не указаны.</p>
+    {% endif %}
+  </section>
   {% elif other_step %}
   <section class="panel field-diagnostic-question-panel field-diagnostic-other-panel">
     <div class="field-diagnostic-progress-heading">
@@ -180,6 +188,13 @@
           </div>
         </div>
       </template>
+      <section class="field-diagnostic-recommendations-input" aria-labelledby="fieldRecommendationsTitle">
+        <span class="field-diagnostic-section">Итог осмотра</span>
+        <h2 id="fieldRecommendationsTitle">Общие рекомендации</h2>
+        <p>Укажите рекомендуемые работы, дальнейшие проверки или особенности эксплуатации, на которые судовладельцу стоит обратить внимание.</p>
+        <label for="fieldGeneralRecommendations">Рекомендации мастера</label>
+        <textarea id="fieldGeneralRecommendations" name="general_recommendations" maxlength="6000" placeholder="Например: заменить повреждённый элемент до следующего выхода, провести дополнительную диагностику…">{{ recommendations_value }}</textarea>
+      </section>
       <div class="field-diagnostic-other-actions">
         <button type="button" class="btn-add" onclick="addOtherDefect()">Добавить ещё неисправность</button>
         <button type="submit">Завершить осмотр</button>

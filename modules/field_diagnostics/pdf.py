@@ -113,6 +113,17 @@ def build_diagnostic_pdf(sheet, answers, inspection_label, fonts_dir,
         leading=12,
         textColor=navy,
     )
+    recommendations_style = ParagraphStyle(
+        "FieldRecommendations",
+        parent=item_text_style,
+        fontSize=9,
+        leading=14,
+        backColor=colors.HexColor("#F2F7FB"),
+        borderColor=colors.HexColor("#9CC9E8"),
+        borderWidth=0.6,
+        borderPadding=9,
+        spaceAfter=3 * mm,
+    )
     status_ok_style = ParagraphStyle(
         "FieldOk",
         fontName="FieldOpenSans-Bold",
@@ -298,6 +309,17 @@ def build_diagnostic_pdf(sheet, answers, inspection_label, fonts_dir,
                     ]
                 )
             )
+
+    recommendations = safe(
+        _value(sheet, "general_recommendations")
+        or "Общие рекомендации не указаны."
+    ).replace("\n", "<br/>")
+    story.extend(
+        [
+            Paragraph("Общие рекомендации", section_style),
+            Paragraph(recommendations, recommendations_style),
+        ]
+    )
 
     story.extend(
         [

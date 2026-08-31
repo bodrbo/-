@@ -22,6 +22,7 @@ PHONE_LIMIT = 50
 COMMENT_LIMIT = 4000
 OTHER_DEFECT_LIMIT = 2000
 OTHER_DEFECT_COUNT_LIMIT = 20
+RECOMMENDATIONS_LIMIT = 6000
 
 
 def create_blueprint(
@@ -296,7 +297,8 @@ def create_blueprint(
         return values, errors
 
     def sheet_context(db, diagnostic_sheet, answer_error=None,
-                      other_error=None, other_values=None):
+                      other_error=None, other_values=None,
+                      recommendations_value=None):
         questions = questions_for_sheet(db, diagnostic_sheet)
         answers = db.execute(
             "SELECT * FROM field_diagnostic_answers "
@@ -376,6 +378,11 @@ def create_blueprint(
             "answer_error": answer_error,
             "other_error": other_error,
             "other_values": other_values or [""],
+            "recommendations_value": (
+                diagnostic_sheet["general_recommendations"] or ""
+                if recommendations_value is None
+                else recommendations_value
+            ),
         }
 
     @blueprint.get("/tuning/diagnostics/field")
@@ -538,6 +545,14 @@ def create_blueprint(
         if resulting_extra_count > OTHER_DEFECT_COUNT_LIMIT:
             errors.append("В блоке «Прочее» можно сохранить не более 20 неисправностей.")
 
+        recommendations = request.form.get(
+            "general_recommendations", ""
+        ).strip()
+        if len(recommendations) > RECOMMENDATIONS_LIMIT:
+            errors.append(
+                "Общие рекомендации должны быть короче 6000 символов."
+            )
+
         owner_client_id = None
         if not errors:
             owner_client_id, owner_error = resolve_owner(db, values)
@@ -575,7 +590,7 @@ def create_blueprint(
         db.execute(
             "UPDATE field_diagnostic_sheets SET boat_profile_id = ?, boat_model = ?, "
             "owner_client_id = ?, owner_name = ?, owner_phone = ?, inspection_type = ?, "
-            "question_set_json = ? WHERE id = ?",
+            "question_set_json = ?, general_recommendations = ? WHERE id = ?",
             (
                 profile_id,
                 canonical_model,
@@ -584,6 +599,7 @@ def create_blueprint(
                 values["owner_phone"],
                 values["inspection_type"],
                 question_set_json,
+                recommendations,
                 sheet_id,
             ),
         )
@@ -716,11 +732,16 @@ def create_blueprint(
 
         raw_values = request.form.getlist("other_defect[]")
         values = [value.strip() for value in raw_values if value.strip()]
+        recommendations = request.form.get(
+            "general_recommendations", ""
+        ).strip()
         error = None
         if len(values) > OTHER_DEFECT_COUNT_LIMIT:
             error = "За один осмотр можно добавить не более 20 прочих неисправностей."
         elif any(len(value) > OTHER_DEFECT_LIMIT for value in values):
             error = "Описание каждой неисправности должно быть короче 2000 символов."
+        elif len(recommendations) > RECOMMENDATIONS_LIMIT:
+            error = "Общие рекомендации должны быть короче 6000 символов."
         if error:
             return render_template(
                 "field_diagnostic_sheet.html",
@@ -729,6 +750,9 @@ def create_blueprint(
                     diagnostic_sheet,
                     other_error=error,
                     other_values=raw_values or [""],
+                    recommendations_value=request.form.get(
+                        "general_recommendations", ""
+                    ),
                 ),
             ), 400
 
@@ -741,8 +765,9 @@ def create_blueprint(
             )
         db.execute(
             "UPDATE field_diagnostic_sheets SET status = 'completed', "
-            "other_completed_at = ?, completed_at = ? WHERE id = ?",
-            (now, now, sheet_id),
+            "other_completed_at = ?, completed_at = ?, general_recommendations = ? "
+            "WHERE id = ?",
+            (now, now, recommendations, sheet_id),
         )
         db.commit()
         return redirect(url_for("field_diagnostics.sheet", sheet_id=sheet_id))

@@ -179,6 +179,12 @@
       <button type="button" class="btn-add" onclick="addEditExtra()">Добавить неисправность</button>
     </section>
 
+    <section class="panel field-diagnostic-edit-section">
+      <div class="field-diagnostic-block-heading"><span>05</span><h2>Общие рекомендации</h2></div>
+      <p class="hint field-diagnostic-edit-hint">Итоговые рекомендации мастера для судовладельца.</p>
+      <textarea class="field-diagnostic-recommendations-textarea" name="general_recommendations" maxlength="6000" placeholder="Рекомендуемые работы, дополнительные проверки и особенности эксплуатации…">{{ request.form.get('general_recommendations', sheet.general_recommendations or '') }}</textarea>
+    </section>
+
     <div class="field-diagnostic-edit-savebar">
       <span>Изменения сразу попадут в диагностический PDF.</span>
       <div><a href="{{ url_for('field_diagnostics.sheet', sheet_id=sheet.id) }}" class="btn-secondary">Отмена</a><button type="submit">Сохранить изменения</button></div>

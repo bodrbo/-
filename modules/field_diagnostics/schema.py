@@ -61,6 +61,11 @@ def init_schema(conn):
         conn.execute(
             "ALTER TABLE field_diagnostic_sheets ADD COLUMN owner_client_id INTEGER"
         )
+    if "general_recommendations" not in sheet_columns:
+        conn.execute(
+            "ALTER TABLE field_diagnostic_sheets "
+            "ADD COLUMN general_recommendations TEXT NOT NULL DEFAULT ''"
+        )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_field_diagnostic_sheets_owner_client "
         "ON field_diagnostic_sheets (owner_client_id, id)"

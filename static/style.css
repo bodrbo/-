@@ -1436,6 +1436,35 @@ body.modal-open { overflow: hidden; }
 .field-diagnostic-other-row .icon-btn { flex: none; margin-top: 5px; }
 .field-diagnostic-other-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 18px; }
 .field-diagnostic-other-actions .btn-add { margin: 0; }
+.field-diagnostic-recommendations-input {
+  margin-top: 24px;
+  padding-top: 22px;
+  border-top: 1px solid var(--hairline);
+}
+.field-diagnostic-recommendations-input h2 { margin: 3px 0 6px; }
+.field-diagnostic-recommendations-input > p {
+  max-width: 720px;
+  margin: 0 0 15px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.field-diagnostic-recommendations-input label { display: block; margin-bottom: 6px; }
+.field-diagnostic-recommendations-input textarea,
+.field-diagnostic-recommendations-textarea {
+  width: 100%;
+  min-height: 150px;
+  background: var(--paper-alt);
+  line-height: 1.55;
+}
+.field-diagnostic-recommendations-result { border-left: 4px solid var(--brass); }
+.field-diagnostic-recommendations-result > p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
 
 /* Diagnostic-sheet revision is a dedicated workspace: metadata stays compact,
    while each recorded result gets enough room to remain readable and editable. */
@@ -1509,7 +1538,8 @@ body.modal-open { overflow: hidden; }
 .field-diagnostic-edit-grid input:focus,
 .field-diagnostic-edit-grid select:focus,
 .field-diagnostic-edit-answer textarea:focus,
-.field-diagnostic-edit-extra textarea:focus {
+.field-diagnostic-edit-extra textarea:focus,
+.field-diagnostic-recommendations-textarea:focus {
   outline: 2px solid var(--brass);
   outline-offset: 1px;
   border-color: var(--brass);
