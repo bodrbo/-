@@ -24,6 +24,11 @@ class FieldDiagnosticsTests(unittest.TestCase):
             db.execute(
                 "DELETE FROM tuning_boat_profiles WHERE model_key LIKE 'test field %'"
             )
+            db.execute(
+                "DELETE FROM clients WHERE phone IN "
+                "('+7 999 123-45-67', '+7 921 000-00-00') "
+                "OR client_name LIKE 'Test Field Client %'"
+            )
             db.commit()
 
     def login(self):
@@ -91,6 +96,15 @@ class FieldDiagnosticsTests(unittest.TestCase):
             self.assertEqual(sheet["owner_phone"], "+7 999 123-45-67")
             self.assertEqual(sheet["created_by_name"], "Диагност")
             self.assertIn('"section": "Электрика"', sheet["question_set_json"])
+            owner = db.execute(
+                "SELECT * FROM clients WHERE id = ?", (sheet["owner_client_id"],)
+            ).fetchone()
+            self.assertIsNotNone(owner)
+            self.assertEqual(owner["client_name"], "Иван Судовладелец")
+            self.assertEqual(owner["phone"], "+7 999 123-45-67")
+            self.assertEqual(owner["boat_model"], "Test Field 520")
+            self.assertTrue(owner["token"])
+            owner_token = owner["token"]
 
         page = self.client.get(response.headers["Location"])
         html = page.get_data(as_text=True)
@@ -100,6 +114,10 @@ class FieldDiagnosticsTests(unittest.TestCase):
         self.assertNotIn(FIELD_DIAGNOSTIC_QUESTIONS["land"][0]["title"], html)
         for block_name in DIAGNOSTIC_BLOCKS:
             self.assertIn(block_name, html)
+
+        cabinet = self.client.get("/client/%s" % owner_token)
+        self.assertEqual(cabinet.status_code, 200)
+        self.assertIn("Иван Судовладелец", cabinet.get_data(as_text=True))
 
     def test_existing_catalog_model_is_reused_with_canonical_spelling(self):
         self.login()
@@ -151,6 +169,124 @@ class FieldDiagnosticsTests(unittest.TestCase):
             self.assertEqual(
                 db.execute("SELECT COUNT(*) FROM field_diagnostic_sheets").fetchone()[0],
                 0,
+            )
+
+    def test_existing_owner_is_selected_by_id_and_verified_by_phone(self):
+        self.login()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            first = db.execute(
+                "INSERT INTO clients "
+                "(client_name, boat_model, phone, token, created_at) "
+                "VALUES ('Test Field Client Тёзка', '', '+7 900 100-10-10', "
+                "'test-field-owner-first', '2026-08-31 10:00')"
+            ).lastrowid
+            second = db.execute(
+                "INSERT INTO clients "
+                "(client_name, boat_model, phone, token, created_at) "
+                "VALUES ('Test Field Client Тёзка', '', '+7 900 200-20-20', "
+                "'test-field-owner-second', '2026-08-31 10:00')"
+            ).lastrowid
+            db.commit()
+
+        page_html = self.client.get(
+            "/tuning/diagnostics/field"
+        ).get_data(as_text=True)
+        self.assertIn("+7 900 100-10-10", page_html)
+        self.assertIn("+7 900 200-20-20", page_html)
+
+        response = self.client.post(
+            "/tuning/diagnostics/field/add",
+            data={
+                "boat_model": "Test Field Owner Boat",
+                "owner_client_id": str(second),
+                "owner_name": "Test Field Client Тёзка",
+                "owner_phone": "+7 900 200-20-20",
+                "inspection_type": "water",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            sheet = db.execute(
+                "SELECT * FROM field_diagnostic_sheets"
+            ).fetchone()
+            self.assertEqual(sheet["owner_client_id"], second)
+            self.assertNotEqual(sheet["owner_client_id"], first)
+            self.assertEqual(sheet["owner_phone"], "+7 900 200-20-20")
+        sheet_html = self.client.get(
+            response.headers["Location"]
+        ).get_data(as_text=True)
+        self.assertIn(
+            "/admin/clients/%d/cabinet" % second,
+            sheet_html,
+        )
+
+        mismatch = self.client.post(
+            "/tuning/diagnostics/field/add",
+            data={
+                "boat_model": "Test Field Wrong Owner",
+                "owner_client_id": str(first),
+                "owner_name": "Test Field Client Тёзка",
+                "owner_phone": "+7 900 200-20-20",
+                "inspection_type": "water",
+            },
+        )
+        self.assertEqual(mismatch.status_code, 400)
+        self.assertIn(
+            "Номер телефона не совпадает с выбранным клиентом",
+            mismatch.get_data(as_text=True),
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.assertEqual(
+                db.execute(
+                    "SELECT COUNT(*) FROM field_diagnostic_sheets"
+                ).fetchone()[0],
+                1,
+            )
+
+    def test_typed_owner_phone_reuses_existing_cabinet_after_normalization(self):
+        self.login()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            client_id = db.execute(
+                "INSERT INTO clients "
+                "(client_name, boat_model, phone, token, created_at) "
+                "VALUES ('Test Field Client Существующий', 'Старая лодка', "
+                "'+7 (900) 555-44-33', 'test-field-normalized-phone', "
+                "'2026-08-31 10:00')"
+            ).lastrowid
+            db.commit()
+
+        response = self.client.post(
+            "/tuning/diagnostics/field/add",
+            data={
+                "boat_model": "Test Field New Boat",
+                "owner_client_id": "",
+                "owner_name": "Другое написание имени",
+                "owner_phone": "8 900 555 44 33",
+                "inspection_type": "land",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            sheet = db.execute(
+                "SELECT * FROM field_diagnostic_sheets"
+            ).fetchone()
+            self.assertEqual(sheet["owner_client_id"], client_id)
+            self.assertEqual(
+                sheet["owner_name"], "Test Field Client Существующий"
+            )
+            self.assertEqual(sheet["owner_phone"], "+7 (900) 555-44-33")
+            self.assertEqual(
+                db.execute(
+                    "SELECT COUNT(*) FROM clients "
+                    "WHERE client_name = 'Test Field Client Существующий'"
+                ).fetchone()[0],
+                1,
             )
 
     def test_problem_needs_description_and_answers_are_sequential(self):

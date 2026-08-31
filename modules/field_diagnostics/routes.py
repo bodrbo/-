@@ -3,6 +3,7 @@
 import datetime as dt
 import json
 import os
+import secrets
 
 from flask import Blueprint, current_app, redirect, render_template, request, session, url_for
 
@@ -35,6 +36,87 @@ def create_blueprint(
         return db.execute(
             "SELECT * FROM field_diagnostic_sheets WHERE id = ?", (sheet_id,)
         ).fetchone()
+
+    def client_choices(db):
+        return db.execute(
+            "SELECT id, client_name, phone FROM clients "
+            "ORDER BY client_name COLLATE NOCASE, phone, id"
+        ).fetchall()
+
+    def normalize_phone_identity(phone):
+        digits = "".join(character for character in phone if character.isdigit())
+        if len(digits) == 11 and digits[0] in ("7", "8"):
+            return "7" + digits[1:]
+        if len(digits) == 10:
+            return "7" + digits
+        return digits
+
+    def resolve_owner(db, values):
+        """Resolve a cabinet by selected id and phone, or create a new one.
+
+        A display name is never enough to identify a client: duplicate names
+        are valid, while the normalized phone number is the stable identity.
+        """
+        phone_identity = normalize_phone_identity(values["owner_phone"])
+        if len(phone_identity) < 7:
+            return None, "Укажите корректный номер телефона судовладельца."
+
+        raw_client_id = values["owner_client_id"]
+        if raw_client_id:
+            if not raw_client_id.isdigit():
+                return None, "Выберите судовладельца из списка ещё раз."
+            client = db.execute(
+                "SELECT id, client_name, boat_model, phone FROM clients WHERE id = ?",
+                (int(raw_client_id),),
+            ).fetchone()
+            if client is None:
+                return None, "Выбранный судовладелец больше не существует."
+            if normalize_phone_identity(client["phone"]) != phone_identity:
+                return (
+                    None,
+                    "Номер телефона не совпадает с выбранным клиентом. "
+                    "Выберите клиента заново или введите нового.",
+                )
+            values["owner_name"] = client["client_name"]
+            values["owner_phone"] = client["phone"]
+            values["owner_client_id"] = str(client["id"])
+            return client["id"], None
+
+        matches = [
+            client
+            for client in db.execute(
+                "SELECT id, client_name, boat_model, phone FROM clients ORDER BY id"
+            ).fetchall()
+            if normalize_phone_identity(client["phone"]) == phone_identity
+        ]
+        if len(matches) > 1:
+            return (
+                None,
+                "В базе найдено несколько клиентов с этим номером. "
+                "Выберите нужного судовладельца из списка.",
+            )
+        if matches:
+            client = matches[0]
+            values["owner_name"] = client["client_name"]
+            values["owner_phone"] = client["phone"]
+            values["owner_client_id"] = str(client["id"])
+            return client["id"], None
+
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        cursor = db.execute(
+            "INSERT INTO clients "
+            "(client_name, boat_model, phone, token, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                values["owner_name"],
+                values["boat_model"],
+                values["owner_phone"],
+                secrets.token_urlsafe(16),
+                now,
+            ),
+        )
+        values["owner_client_id"] = str(cursor.lastrowid)
+        return cursor.lastrowid, None
 
     def questions_for_sheet(db, diagnostic_sheet):
         """Use a frozen question set so edits never corrupt an active visit."""
@@ -114,6 +196,7 @@ def create_blueprint(
             sheets=sheets,
             inspection_types=INSPECTION_TYPES,
             boat_model_choices=boat_model_choices(db),
+            client_choices=client_choices(db),
             errors=errors or [],
             form_values=form_values or {},
         )
@@ -145,6 +228,7 @@ def create_blueprint(
             "owner_name": diagnostic_sheet["owner_name"],
             "owner_phone": diagnostic_sheet["owner_phone"],
             "inspection_type": diagnostic_sheet["inspection_type"],
+            "owner_client_id": str(diagnostic_sheet["owner_client_id"] or ""),
         }
         if extra_form_rows is None:
             extra_form_rows = [
@@ -159,6 +243,7 @@ def create_blueprint(
             "sheet": diagnostic_sheet,
             "inspection_types": INSPECTION_TYPES,
             "boat_model_choices": boat_model_choices(db),
+            "client_choices": client_choices(db),
             "answers": answers,
             "answers_by_block": answers_by_block,
             "extra_defects": extra_defects,
@@ -189,6 +274,7 @@ def create_blueprint(
             "owner_name": " ".join(form.get("owner_name", "").split()),
             "owner_phone": form.get("owner_phone", "").strip(),
             "inspection_type": form.get("inspection_type", "").strip(),
+            "owner_client_id": form.get("owner_client_id", "").strip(),
         }
         errors = []
         if not values["boat_model"]:
@@ -205,6 +291,8 @@ def create_blueprint(
             errors.append("Телефон должен быть короче 50 символов.")
         if values["inspection_type"] not in INSPECTION_TYPES:
             errors.append("Выберите тип осмотра.")
+        if values["owner_client_id"] and not values["owner_client_id"].isdigit():
+            errors.append("Выберите судовладельца из списка ещё раз.")
         return values, errors
 
     def sheet_context(db, diagnostic_sheet, answer_error=None,
@@ -303,6 +391,9 @@ def create_blueprint(
             return render_index(errors, values, 400)
 
         db = get_db()
+        owner_client_id, owner_error = resolve_owner(db, values)
+        if owner_error:
+            return render_index([owner_error], values, 400)
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
         profile_id, canonical_model = ensure_boat_profile(
             db, values["boat_model"], now
@@ -314,12 +405,13 @@ def create_blueprint(
         )
         cursor = db.execute(
             "INSERT INTO field_diagnostic_sheets "
-            "(boat_profile_id, boat_model, owner_name, owner_phone, inspection_type, "
-            "status, created_by_name, started_at, question_set_json) "
-            "VALUES (?, ?, ?, ?, ?, 'in_progress', ?, ?, ?)",
+            "(boat_profile_id, boat_model, owner_client_id, owner_name, owner_phone, "
+            "inspection_type, status, created_by_name, started_at, question_set_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?, ?, ?)",
             (
                 profile_id,
                 canonical_model,
+                owner_client_id,
                 values["owner_name"],
                 values["owner_phone"],
                 values["inspection_type"],
@@ -446,6 +538,12 @@ def create_blueprint(
         if resulting_extra_count > OTHER_DEFECT_COUNT_LIMIT:
             errors.append("В блоке «Прочее» можно сохранить не более 20 неисправностей.")
 
+        owner_client_id = None
+        if not errors:
+            owner_client_id, owner_error = resolve_owner(db, values)
+            if owner_error:
+                errors.append(owner_error)
+
         if errors:
             extra_form_rows = [
                 {"id": raw_id, "description": raw_description}
@@ -476,11 +574,12 @@ def create_blueprint(
             )
         db.execute(
             "UPDATE field_diagnostic_sheets SET boat_profile_id = ?, boat_model = ?, "
-            "owner_name = ?, owner_phone = ?, inspection_type = ?, question_set_json = ? "
-            "WHERE id = ?",
+            "owner_client_id = ?, owner_name = ?, owner_phone = ?, inspection_type = ?, "
+            "question_set_json = ? WHERE id = ?",
             (
                 profile_id,
                 canonical_model,
+                owner_client_id,
                 values["owner_name"],
                 values["owner_phone"],
                 values["inspection_type"],

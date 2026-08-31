@@ -57,6 +57,14 @@ def init_schema(conn):
         conn.execute(
             "ALTER TABLE field_diagnostic_sheets ADD COLUMN question_set_json TEXT"
         )
+    if "owner_client_id" not in sheet_columns:
+        conn.execute(
+            "ALTER TABLE field_diagnostic_sheets ADD COLUMN owner_client_id INTEGER"
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_field_diagnostic_sheets_owner_client "
+        "ON field_diagnostic_sheets (owner_client_id, id)"
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS field_diagnostic_extra_defects (

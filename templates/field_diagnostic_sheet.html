@@ -57,7 +57,13 @@
   </div>
 
   <section class="field-diagnostic-summary-strip" aria-label="Данные осмотра">
-    <div><span>Судовладелец</span><strong>{{ sheet.owner_name }}</strong><small>{{ sheet.owner_phone }}</small></div>
+    <div>
+      <span>Судовладелец</span>
+      <strong>
+        {% if sheet.owner_client_id %}<a href="{{ url_for('admin_client_dashboard', client_id=sheet.owner_client_id) }}" class="field-diagnostic-owner-link">{{ sheet.owner_name }}</a>{% else %}{{ sheet.owner_name }}{% endif %}
+      </strong>
+      <small>{{ sheet.owner_phone }}</small>
+    </div>
     <div><span>Тип осмотра</span><strong>{{ inspection_label }}</strong><small>Начат {{ sheet.started_at }}</small></div>
     <div class="field-diagnostic-counter"><span>Проверено</span><strong>{{ answered_count }} / {{ total }}</strong><small>{{ total - answered_count }} осталось</small></div>
   </section>

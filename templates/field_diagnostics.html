@@ -149,15 +149,36 @@
         <span class="field-context">Выберите существующую модель или введите новую.</span>
       </div>
       <div class="field-diagnostic-owner-fields">
-        <div class="field">
-          <label for="field_owner_name">Судовладелец</label>
-          <input type="text" id="field_owner_name" name="owner_name" maxlength="160" required
-                 value="{{ form_values.get('owner_name', '') }}" placeholder="Имя или ФИО">
+        <div class="field" data-owner-client-combo>
+          <label for="field_owner_name_search">Судовладелец</label>
+          {% set current_owner_name = form_values.get('owner_name', '') %}
+          <div class="combo-field" data-combo data-combo-allow-custom>
+            <input type="text" id="field_owner_name_search" class="combo-input" data-combo-input
+                   value="{{ current_owner_name }}" data-selected-label="{{ current_owner_name }}"
+                   placeholder="Имя или ФИО" autocomplete="off" role="combobox"
+                   aria-autocomplete="list" maxlength="160" required>
+            <input type="hidden" name="owner_name" data-combo-value value="{{ current_owner_name }}">
+            <input type="hidden" name="owner_client_id" data-owner-client-id value="{{ form_values.get('owner_client_id', '') }}">
+            <div class="combo-dropdown hidden" data-combo-dropdown>
+              <p class="combo-empty hidden" data-combo-empty>Новый клиент будет добавлен в базу и получит личный кабинет.</p>
+              {% for client in client_choices %}
+              <div class="combo-option field-diagnostic-client-option"
+                   data-value="{{ client.client_name }}" data-label="{{ client.client_name }}"
+                   data-search="{{ (client.client_name ~ ' ' ~ client.phone)|lower }}"
+                   data-owner-client-option data-client-id="{{ client.id }}" data-client-phone="{{ client.phone }}">
+                <span class="combo-option-name">{{ client.client_name }}</span>
+                <span class="combo-option-sku">{{ client.phone }}</span>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          <span class="field-context">Ищите по имени или телефону; нового клиента можно ввести вручную.</span>
         </div>
         <div class="field">
           <label for="field_owner_phone">Номер телефона</label>
           <input type="tel" id="field_owner_phone" name="owner_phone" maxlength="50" required
-                 inputmode="tel" value="{{ form_values.get('owner_phone', '') }}" placeholder="+7 999 000-00-00">
+                 inputmode="tel" data-owner-client-phone value="{{ form_values.get('owner_phone', '') }}" placeholder="+7 999 000-00-00">
+          <span class="field-context">По номеру система проверит, есть ли клиент в базе.</span>
         </div>
       </div>
       <fieldset class="field-diagnostic-type-field">

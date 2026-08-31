@@ -1315,6 +1315,9 @@ body.modal-open { overflow: hidden; }
 .field-diagnostic-summary-strip > div + div { border-left: 1px solid var(--hairline-soft); }
 .field-diagnostic-summary-strip span { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
 .field-diagnostic-summary-strip strong { overflow: hidden; color: var(--ink); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.field-diagnostic-owner-link { color: inherit; text-decoration: none; }
+.field-diagnostic-owner-link:hover,
+.field-diagnostic-owner-link:focus-visible { color: var(--brass-strong); text-decoration: underline; }
 .field-diagnostic-summary-strip small { color: var(--muted); font-size: 10.5px; }
 .field-diagnostic-counter strong { color: var(--brass-strong); font-family: 'PT Mono', monospace; font-size: 20px; }
 .field-diagnostic-route {
