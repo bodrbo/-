@@ -501,6 +501,201 @@ class YclientsHourlyImportTests(unittest.TestCase):
             [("Даниил Галецкий", 1100), ("Эльмира Бектаева", 1100)],
         )
 
+    def test_simultaneous_paid_tours_wait_for_own_boat_and_keep_solo_rate(self):
+        daniil = self.record(
+            2001,
+            "13",
+            activity_id=6001,
+            staff_name="Даниил Галецкий",
+            color="",
+        )
+        daniil["datetime"] = "2026-08-29T13:00:00+03:00"
+        daniil["seance_length"] = 9000
+        daniil["services"] = [{
+            "id": 14624702,
+            "title": "Форты Кронштадта - большой тур",
+            "cost": 20000,
+        }]
+        platon = self.record(
+            2002,
+            "13",
+            activity_id=6002,
+            staff_name="Платон Жмаев",
+            color="",
+        )
+        platon["datetime"] = "2026-08-29T13:00:00+03:00"
+        platon["seance_length"] = 5400
+        platon["services"] = [{
+            "id": 14624778,
+            "title": "Форты и маяки Кронштадта - средний тур",
+            "cost": 15000,
+        }]
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            first = application_module._import_yclients_trip_records(
+                db,
+                [daniil, platon],
+                {6001: "673ab7"},
+                "2026-08-29",
+                "2026-08-29",
+            )
+            first_labor = db.execute(
+                "SELECT entries.employee, entries.rate FROM trip_labor "
+                "JOIN entries ON entries.id = trip_labor.entry_id"
+            ).fetchall()
+
+            second = application_module._import_yclients_trip_records(
+                db,
+                [daniil, platon],
+                {6001: "673ab7", 6002: "8bc34a"},
+                "2026-08-29",
+                "2026-08-29",
+            )
+            trips = db.execute(
+                "SELECT trips.boat, entries.employee, entries.work_type, "
+                "entries.rate, entries.quantity FROM trips "
+                "JOIN trip_labor ON trip_labor.trip_id = trips.id "
+                "JOIN entries ON entries.id = trip_labor.entry_id "
+                "ORDER BY entries.employee"
+            ).fetchall()
+            pending = db.execute(
+                "SELECT COUNT(*) AS count FROM import_candidates"
+            ).fetchone()["count"]
+
+        self.assertEqual(first["imported"], 1)
+        self.assertEqual(first["pending"], 1)
+        self.assertEqual(
+            [(row["employee"], row["rate"]) for row in first_labor],
+            [("Даниил Галецкий", 1870)],
+        )
+        self.assertEqual(second["imported"], 1)
+        self.assertEqual(pending, 0)
+        self.assertEqual(
+            [
+                (
+                    row["boat"], row["employee"], row["work_type"],
+                    row["rate"], row["quantity"],
+                )
+                for row in trips
+            ],
+            [
+                ("Бодрый Второй", "Даниил Галецкий", "Большой тур", 1870, 2.5),
+                ("Бодрый Первый", "Платон Жмаев", "Средний тур", 1870, 1.5),
+            ],
+        )
+
+    def test_reimport_splits_historically_merged_paid_tours_by_boat(self):
+        daniil = self.record(
+            2101,
+            "13",
+            activity_id=6101,
+            staff_name="Даниил Галецкий",
+            color="",
+        )
+        daniil["datetime"] = "2026-08-29T13:00:00+03:00"
+        daniil["seance_length"] = 9000
+        daniil["services"] = [{
+            "id": 14624702,
+            "title": "Форты Кронштадта - большой тур",
+            "cost": 20000,
+        }]
+        platon = self.record(
+            2102,
+            "13",
+            activity_id=6102,
+            staff_name="Платон Жмаев",
+            color="",
+        )
+        platon["datetime"] = "2026-08-29T13:00:00+03:00"
+        platon["seance_length"] = 5400
+        platon["services"] = [{
+            "id": 14624778,
+            "title": "Форты и маяки Кронштадта - средний тур",
+            "cost": 15000,
+        }]
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            boat = application_module.boat_lookup("Бодрый Второй")
+            old_payload = {
+                "boat": "Бодрый Второй",
+                "trip_date": "2026-08-29",
+                "trip_time": "13:00",
+                "sale_channel": "direct",
+                "commission_pct": boat["commission_direct"],
+                "revenue": 20000,
+                "fuel_cost": boat["fuel"],
+                "mooring_cost": boat["mooring"],
+                "labor_items": [
+                    {
+                        "employee": "Даниил Галецкий",
+                        "work_type": "Большой тур",
+                        "quantity": 2.5,
+                        "rate": 1100,
+                    },
+                    {
+                        "employee": "Платон Жмаев",
+                        "work_type": "Средний тур",
+                        "quantity": 1.5,
+                        "rate": 1100,
+                    },
+                ],
+            }
+            errors, old_trip_data = application_module._process_trip_form(
+                db, application_module._payload_to_form(old_payload)
+            )
+            self.assertEqual(errors, [])
+            old_trip_id = application_module._insert_trip(db, old_trip_data)
+            application_module._mark_yclients_refs_imported(
+                db, ["activity:6101", "activity:6102"], old_trip_id
+            )
+            db.commit()
+
+            result = application_module._import_yclients_trip_records(
+                db,
+                [daniil, platon],
+                {6101: "673ab7", 6102: "8bc34a"},
+                "2026-08-29",
+                "2026-08-29",
+            )
+            trips = db.execute(
+                "SELECT trips.boat, entries.employee, entries.work_type, "
+                "entries.rate, entries.quantity FROM trips "
+                "JOIN trip_labor ON trip_labor.trip_id = trips.id "
+                "JOIN entries ON entries.id = trip_labor.entry_id "
+                "ORDER BY entries.employee"
+            ).fetchall()
+            refs = db.execute(
+                "SELECT yclients_imports.yclients_ref, trips.boat "
+                "FROM yclients_imports JOIN trips "
+                "ON trips.id = yclients_imports.trip_id "
+                "ORDER BY yclients_imports.yclients_ref"
+            ).fetchall()
+
+        self.assertEqual(result["payroll_updated"], 1)
+        self.assertEqual(result["imported"], 1)
+        self.assertEqual(
+            [
+                (
+                    row["boat"], row["employee"], row["work_type"],
+                    row["rate"], row["quantity"],
+                )
+                for row in trips
+            ],
+            [
+                ("Бодрый Второй", "Даниил Галецкий", "Большой тур", 1870, 2.5),
+                ("Бодрый Первый", "Платон Жмаев", "Средний тур", 1870, 1.5),
+            ],
+        )
+        self.assertEqual(
+            [(row["yclients_ref"], row["boat"]) for row in refs],
+            [
+                ("activity:6101", "Бодрый Второй"),
+                ("activity:6102", "Бодрый Первый"),
+            ],
+        )
+
     def test_existing_trip_updates_when_service_duration_changes(self):
         primary = self.record(
             1921209114,

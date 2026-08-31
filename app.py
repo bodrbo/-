@@ -6704,6 +6704,16 @@ def _repair_boat_derived_numbers(db, rows):
         )
 
 
+def _candidate_is_crew_placeholder(payload):
+    """YCLIENTS' second-employee row: no sale and no service of its own."""
+    labor_items = payload.get("labor_items") or []
+    return bool(
+        not (payload.get("revenue") or 0)
+        and labor_items
+        and not any(item.get("work_type") for item in labor_items)
+    )
+
+
 def merge_pending_candidates(db):
     """Second line of defence, independent of Yclients' own data: scan every
     candidate currently waiting for confirmation and merge any that share
@@ -6735,15 +6745,20 @@ def merge_pending_candidates(db):
         slot = (boat, payload.get("trip_date", ""), payload.get("trip_time", ""))
         groups.setdefault(slot, []).append((row, payload))
 
-    # A boat-less candidate can still be matched up by date+time alone, as
-    # long as exactly one resolved-boat candidate shares that exact slot —
-    # if two+ boats have trips at the same moment, don't guess which one
-    # this partner belongs to; leave it for manual review instead.
+    # A boat-less candidate can still be matched up by date+time alone, but
+    # only when it is the zero-revenue, service-less crew placeholder that
+    # YCLIENTS creates for the second employee.  A real paid booking whose
+    # activity colour temporarily failed to load may belong to another boat
+    # departing at the same time; merging that booking used to turn two solo
+    # guide-captains into one two-person crew and incorrectly reduce both
+    # rates from 1870 to 1100.
     slots_by_datetime = {}
     for slot in groups:
         boat, trip_date, trip_time = slot
         slots_by_datetime.setdefault((trip_date, trip_time), []).append(slot)
     for row, payload in unresolved:
+        if not _candidate_is_crew_placeholder(payload):
+            continue
         when = (payload.get("trip_date", ""), payload.get("trip_time", ""))
         matches = slots_by_datetime.get(when) or []
         if len(matches) == 1:
@@ -6752,6 +6767,17 @@ def merge_pending_candidates(db):
     merged_away = 0
     for slot, items in groups.items():
         if len(items) < 2:
+            continue
+
+        # One physical trip may have one paid/service-bearing booking plus
+        # any number of empty crew placeholders.  Two independent paid
+        # bookings at the same time are not proof of one crew, even when a
+        # temporarily wrong activity colour makes their boats look equal.
+        anchors = [
+            item for item in items
+            if not _candidate_is_crew_placeholder(item[1])
+        ]
+        if len(anchors) != 1:
             continue
 
         items.sort(key=lambda ip: ip[1].get("revenue") or 0, reverse=True)
@@ -6865,6 +6891,45 @@ def _imported_trip_for_candidate_slot(db, payload):
         (boat, trip_date, trip_time),
     ).fetchall()
     return rows[0]["id"] if len(rows) == 1 else None
+
+
+def _known_paid_ref_moved_out_of_merged_trip(db, trip_id, payload):
+    """Whether a paid YCLIENTS ref was historically merged into another boat.
+
+    Earlier versions matched any boat-less candidate to the sole resolved
+    trip at the same date/time.  Once YCLIENTS returns the missing activity
+    colour, a paid ref can therefore reveal that it belongs to a different
+    boat.  Only split trips backed by multiple refs: a single-ref booking
+    changing boats is a different update case and must not create a duplicate.
+    """
+    boat = str(payload.get("boat") or "").strip()
+    trip_date = str(payload.get("trip_date") or "").strip()
+    trip_time = str(payload.get("trip_time") or "00:00").strip()
+    if not boat or not trip_date or not (payload.get("revenue") or 0):
+        return False
+
+    trip = db.execute(
+        "SELECT boat, trip_date, COALESCE(trip_time, '00:00') AS trip_time "
+        "FROM trips WHERE id = ?",
+        (trip_id,),
+    ).fetchone()
+    if trip is None:
+        return False
+    # This repair is intentionally limited to the reported cross-boat
+    # collision at one exact departure time.  A legitimate booking whose
+    # date/time was edited in YCLIENTS follows the existing update path and
+    # must not be split away from its crew placeholder.
+    if trip["boat"] == boat or (
+        trip["trip_date"], trip["trip_time"]
+    ) != (trip_date, trip_time):
+        return False
+
+    ref_count = db.execute(
+        "SELECT COUNT(*) AS count FROM yclients_imports "
+        "WHERE trip_id = ?",
+        (trip_id,),
+    ).fetchone()["count"]
+    return ref_count > 1
 
 
 def _trip_labor_payload(db, trip_id):
@@ -7193,6 +7258,29 @@ def _import_yclients_trip_records(
                         already[ref] = trip_id
                 if trip_id is None:
                     continue  # an intentional skip unrelated to a known trip
+            if _known_paid_ref_moved_out_of_merged_trip(
+                db, trip_id, candidate["payload"]
+            ):
+                # The ref was joined to this trip only because its own boat
+                # colour was unavailable on an earlier import.  Release it;
+                # the normal association/import path below will either join
+                # the now-resolved boat's existing trip or create that trip.
+                db.execute(
+                    "DELETE FROM yclients_imports "
+                    "WHERE yclients_ref = ? AND trip_id = ?",
+                    (ref, trip_id),
+                )
+                already.pop(ref, None)
+                resolved_trip_id = _imported_trip_for_candidate_slot(
+                    db, candidate["payload"]
+                )
+                if resolved_trip_id is not None:
+                    associated_by_trip.setdefault(
+                        resolved_trip_id, []
+                    ).append((candidate, False))
+                else:
+                    unassociated.append(candidate)
+                continue
             associated_by_trip.setdefault(trip_id, []).append((candidate, True))
             continue
         trip_id = _imported_trip_for_candidate_slot(db, candidate["payload"])
@@ -7230,6 +7318,19 @@ def _import_yclients_trip_records(
     for candidate in unassociated:
         ref = candidate["yclients_ref"]
         if ref in existing_candidates:
+            # Refresh a queued candidate from the latest YCLIENTS data.
+            # Activity colours can be temporarily unavailable; keeping the
+            # original boat-less payload forever would force an unnecessary
+            # manual correction even after the next fetch resolves the boat.
+            db.execute(
+                "UPDATE import_candidates SET summary = ?, payload = ? "
+                "WHERE yclients_ref = ?",
+                (
+                    candidate["summary"],
+                    json.dumps(candidate["payload"], ensure_ascii=False),
+                    ref,
+                ),
+            )
             continue
         db.execute(
             "INSERT INTO import_candidates (yclients_ref, summary, payload, created_at) "
