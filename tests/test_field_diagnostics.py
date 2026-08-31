@@ -72,6 +72,26 @@ class FieldDiagnosticsTests(unittest.TestCase):
             self.assertEqual(response.status_code, 302)
             self.assertIn("/admin/login", response.headers["Location"])
 
+    def test_visible_hull_block_has_only_the_two_current_checks(self):
+        expected = [
+            "Проверка целостности видимого силового набора",
+            "Проверка состояния внешнего гелькоута",
+        ]
+
+        for inspection_type in ("water", "land"):
+            hull_questions = [
+                question
+                for question in FIELD_DIAGNOSTIC_QUESTIONS[inspection_type]
+                if question["section"] == "Видимая часть корпуса"
+            ]
+            self.assertEqual(
+                [question["title"] for question in hull_questions],
+                expected,
+            )
+            self.assertIn("транцевую доску", hull_questions[0]["text"])
+            self.assertIn("стрингеры", hull_questions[0]["text"])
+            self.assertIn("шпангоуты", hull_questions[0]["text"])
+
     def test_new_sheet_adds_custom_model_to_shared_catalog(self):
         self.login()
 
