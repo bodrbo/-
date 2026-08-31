@@ -132,4 +132,5 @@ FIELD_DIAGNOSTIC_QUESTIONS = {
 ANSWER_STATUSES = {
     "ok": "Исправно",
     "problem": "Обнаружена неисправность",
+    "skipped": "Не проверялось",
 }

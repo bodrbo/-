@@ -327,6 +327,10 @@ def create_blueprint(
                 answer for answer in answers
                 if answer["section_name"] == block_name
             ]
+            visible_block_answers = [
+                answer for answer in block_answers
+                if answer["status"] != "skipped"
+            ]
             block_questions = [
                 question for question in questions
                 if question["section"] == block_name
@@ -348,7 +352,7 @@ def create_blueprint(
             block_states.append({"name": block_name, "state": state})
             block_results.append({
                 "name": block_name,
-                "answers": block_answers,
+                "answers": visible_block_answers,
                 "extra_defects": extra_defects if block_name == "Прочее" else (),
             })
 

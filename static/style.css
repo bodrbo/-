@@ -3466,6 +3466,8 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .checklist-answer-btn.ok:hover { background: #26593f; }
 .checklist-answer-btn.problem { background: var(--danger); }
 .checklist-answer-btn.problem:hover { background: #932f20; }
+.checklist-answer-btn.skipped { background: var(--muted); }
+.checklist-answer-btn.skipped:hover { background: #4f5d6a; }
 .checklist-problem-panel { margin-top: 18px; }
 .checklist-problem-panel textarea {
   width: 100%;

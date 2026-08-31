@@ -140,6 +140,7 @@
               <select id="{{ status_name }}" name="{{ status_name }}" class="field-diagnostic-answer-status">
                 <option value="ok" {{ 'selected' if selected_status == 'ok' }}>Исправно</option>
                 <option value="problem" {{ 'selected' if selected_status == 'problem' }}>Обнаружена неисправность</option>
+                <option value="skipped" {{ 'selected' if selected_status == 'skipped' }}>Не проверялось — исключить из документа</option>
               </select>
             </div>
             <div class="field">

@@ -142,8 +142,18 @@ def build_diagnostic_pdf(sheet, answers, inspection_label, fonts_dir,
     safe = lambda value: html.escape(str(value or ""))
     completed_at = _value(sheet, "completed_at") or _value(sheet, "started_at")
     display_date = str(completed_at)[:16]
-    ok_answers = [answer for answer in answers if _value(answer, "status") == "ok"]
-    problems = [answer for answer in answers if _value(answer, "status") == "problem"]
+    document_answers = [
+        answer for answer in answers
+        if _value(answer, "status") != "skipped"
+    ]
+    ok_answers = [
+        answer for answer in document_answers
+        if _value(answer, "status") == "ok"
+    ]
+    problems = [
+        answer for answer in document_answers
+        if _value(answer, "status") == "problem"
+    ]
 
     logo_path = os.path.join(os.path.dirname(fonts_dir), "logo-act.png")
     logo_width = 130
@@ -190,7 +200,7 @@ def build_diagnostic_pdf(sheet, answers, inspection_label, fonts_dir,
 
     for block_name in DIAGNOSTIC_BLOCKS:
         block_answers = [
-            answer for answer in answers
+            answer for answer in document_answers
             if _value(answer, "section_name") == block_name
         ]
         block_items = []

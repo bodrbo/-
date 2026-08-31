@@ -336,6 +336,57 @@ class FieldDiagnosticsTests(unittest.TestCase):
                 0,
             )
 
+    def test_skipped_check_completes_progress_but_is_excluded_from_result(self):
+        self.login()
+        created = self.create_sheet(inspection_type="water")
+        sheet_path = created.headers["Location"]
+        sheet_id = self.sheet_id_from(created)
+        questions = FIELD_DIAGNOSTIC_QUESTIONS["water"]
+        skipped_question = questions[1]
+
+        for question_index in range(len(questions)):
+            response = self.client.post(
+                "/tuning/diagnostics/field/%d/answer" % sheet_id,
+                data={
+                    "question_index": str(question_index),
+                    "status": "skipped" if question_index == 1 else "ok",
+                },
+            )
+            self.assertEqual(response.status_code, 302)
+
+        final_step = self.client.get(sheet_path).get_data(as_text=True)
+        self.assertIn("Общие рекомендации", final_step)
+        completed = self.client.post(
+            "/tuning/diagnostics/field/%d/other" % sheet_id,
+            data={
+                "other_defect[]": "",
+                "general_recommendations": "Повторить непроведённую проверку отдельно.",
+            },
+        )
+        self.assertEqual(completed.status_code, 302)
+
+        result_html = self.client.get(sheet_path).get_data(as_text=True)
+        self.assertNotIn(skipped_question["title"], result_html)
+        self.assertIn("Повторить непроведённую проверку", result_html)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            answer = db.execute(
+                "SELECT * FROM field_diagnostic_answers "
+                "WHERE sheet_id = ? AND question_index = 1",
+                (sheet_id,),
+            ).fetchone()
+            sheet = db.execute(
+                "SELECT * FROM field_diagnostic_sheets WHERE id = ?", (sheet_id,)
+            ).fetchone()
+            self.assertEqual(answer["status"], "skipped")
+            self.assertEqual(sheet["status"], "completed")
+
+        pdf = self.client.get(
+            "/tuning/diagnostics/field/%d/diagnostic-sheet.pdf" % sheet_id
+        )
+        self.assertEqual(pdf.status_code, 200)
+        self.assertTrue(pdf.data.startswith(b"%PDF-"))
+
     def test_completed_inspection_builds_pdf_with_ok_and_problem_results(self):
         self.login()
         created = self.create_sheet(inspection_type="land")
@@ -540,11 +591,17 @@ class FieldDiagnosticsTests(unittest.TestCase):
             "general_recommendations": "Обновлённая рекомендация мастера",
         }
         for answer in answers:
-            status = "problem" if answer["question_index"] == 0 else "ok"
+            if answer["question_index"] == 0:
+                status = "problem"
+            elif answer["question_index"] == 2:
+                status = "skipped"
+            else:
+                status = "ok"
             data["answer_status_%d" % answer["id"]] = status
             data["answer_comment_%d" % answer["id"]] = (
                 "Не работает главный выключатель" if status == "problem" else ""
             )
+        skipped_title = answers[2]["question_title"]
 
         response = self.client.post(
             "/tuning/diagnostics/field/%d/edit" % sheet_id,
@@ -571,6 +628,11 @@ class FieldDiagnosticsTests(unittest.TestCase):
                 "WHERE sheet_id = ? AND question_index = 0",
                 (sheet_id,),
             ).fetchone()
+            skipped_answer = db.execute(
+                "SELECT * FROM field_diagnostic_answers "
+                "WHERE sheet_id = ? AND question_index = 2",
+                (sheet_id,),
+            ).fetchone()
             saved_extras = db.execute(
                 "SELECT description FROM field_diagnostic_extra_defects "
                 "WHERE sheet_id = ? ORDER BY id",
@@ -586,6 +648,7 @@ class FieldDiagnosticsTests(unittest.TestCase):
             )
             self.assertEqual(profile["model_name"], "Test Field Edited")
             self.assertEqual(changed_answer["status"], "problem")
+            self.assertEqual(skipped_answer["status"], "skipped")
             self.assertEqual(
                 changed_answer["comment"], "Не работает главный выключатель"
             )
@@ -601,6 +664,7 @@ class FieldDiagnosticsTests(unittest.TestCase):
         self.assertIn("Не работает главный выключатель", result_html)
         self.assertIn("Исправленное замечание", result_html)
         self.assertIn("Обновлённая рекомендация мастера", result_html)
+        self.assertNotIn(skipped_title, result_html)
         self.assertNotIn("Удалить замечание", result_html)
 
     def test_inspection_type_can_only_change_before_answers(self):

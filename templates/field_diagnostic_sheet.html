@@ -65,7 +65,7 @@
       <small>{{ sheet.owner_phone }}</small>
     </div>
     <div><span>Тип осмотра</span><strong>{{ inspection_label }}</strong><small>Начат {{ sheet.started_at }}</small></div>
-    <div class="field-diagnostic-counter"><span>Проверено</span><strong>{{ answered_count }} / {{ total }}</strong><small>{{ total - answered_count }} осталось</small></div>
+    <div class="field-diagnostic-counter"><span>Обработано</span><strong>{{ answered_count }} / {{ total }}</strong><small>{{ total - answered_count }} осталось</small></div>
   </section>
 
   <ol class="field-diagnostic-route" aria-label="Блоки диагностического листа">
@@ -233,6 +233,14 @@
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 3l8.5 14.5H1.5L10 3z"/><path d="M10 8.3v4M10 14.8h.01"/></svg>
         Есть неисправность
       </button>
+      <form action="{{ url_for('field_diagnostics.answer', sheet_id=sheet.id) }}" method="post">
+        <input type="hidden" name="question_index" value="{{ question_index }}">
+        <input type="hidden" name="status" value="skipped">
+        <button type="submit" class="checklist-answer-btn skipped" title="Пункт не проверялся и не попадёт в диагностический лист">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 10h12"/></svg>
+          Пропустить
+        </button>
+      </form>
     </div>
 
     <div class="field-diagnostic-problem-form {{ '' if answer_error else 'hidden' }}" id="fieldProblemForm">
