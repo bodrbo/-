@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ sheet.boat_model }} — выездная диагностика</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<meta name="theme-color" content="#3498db">
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+</head>
+<body>
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100"><g fill="var(--brass)"><path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/><path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/><path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/></g><circle cx="50" cy="50" r="15" fill="none" stroke="var(--ink)" stroke-width="4"/><circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/></svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="topbar-top-row">
+      <div class="brand"><a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a></div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg></button>
+    </div>
+    {% include '_admin_main_nav.html' %}
+    <div class="title-block"><h1>{{ sheet.boat_model }}</h1></div>
+    <div class="topbar-actions">
+      <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления"><svg class="push-toggle-off" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8z"/></svg><svg class="push-toggle-on" viewBox="0 0 20 20" fill="currentColor"><path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8z"/></svg></button>
+      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="wrap field-diagnostic-run-page">
+  <nav class="sub-tabs">
+    <a href="{{ url_for('tuning_index') }}">Заказы</a>
+    <a href="{{ url_for('tuning_diagnostics') }}" class="active">Диагностика лодок</a>
+    <a href="{{ url_for('tuning_boat_catalog') }}">Каталог лодок</a>
+  </nav>
+  <nav class="sub-tabs sub-tabs-nested" aria-label="Виды диагностики">
+    <a href="{{ url_for('tuning_diagnostics') }}">Корпусная диагностика</a>
+    <a href="{{ url_for('field_diagnostics.index') }}" class="active">Выездная диагностика</a>
+  </nav>
+
+  <a href="{{ url_for('field_diagnostics.index') }}" class="term field-diagnostic-back">← Ко всем листам</a>
+
+  <section class="field-diagnostic-summary-strip" aria-label="Данные осмотра">
+    <div><span>Судовладелец</span><strong>{{ sheet.owner_name }}</strong><small>{{ sheet.owner_phone }}</small></div>
+    <div><span>Тип осмотра</span><strong>{{ inspection_label }}</strong><small>Начат {{ sheet.started_at }}</small></div>
+    <div class="field-diagnostic-counter"><span>Проверено</span><strong>{{ answered_count }} / {{ total }}</strong><small>{{ total - answered_count }} осталось</small></div>
+  </section>
+
+  {% if done %}
+  <section class="panel field-diagnostic-result">
+    <div class="field-diagnostic-result-heading">
+      <div>
+        <span class="field-diagnostics-eyebrow">Осмотр завершён</span>
+        <h2>Диагностический лист готов</h2>
+        <p>Все {{ total }} пунктов зафиксированы. PDF содержит и исправные системы, и обнаруженные неисправности.</p>
+      </div>
+      <a href="{{ url_for('field_diagnostics.pdf', sheet_id=sheet.id) }}" class="btn-primary" target="_blank" rel="noopener">
+        Скачать PDF
+      </a>
+    </div>
+    <div class="field-diagnostic-result-counts">
+      <div class="is-ok"><strong>{{ ok_answers|length }}</strong><span>исправно</span></div>
+      <div class="is-problem"><strong>{{ problems|length }}</strong><span>неисправностей</span></div>
+    </div>
+  </section>
+
+  <div class="field-diagnostic-results-grid">
+    <section class="panel">
+      <h2>Исправные пункты</h2>
+      <div class="field-diagnostic-result-list">
+        {% for answer in ok_answers %}
+        <div class="field-diagnostic-result-item is-ok">
+          <span class="field-diagnostic-result-icon">✓</span>
+          <div><strong>{{ answer.question_title }}</strong><small>{{ answer.section_name }}</small></div>
+        </div>
+        {% else %}
+        <p class="hint">Исправных пунктов не отмечено.</p>
+        {% endfor %}
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Обнаруженные неисправности</h2>
+      <div class="field-diagnostic-result-list">
+        {% for answer in problems %}
+        <div class="field-diagnostic-result-item is-problem">
+          <span class="field-diagnostic-result-icon">!</span>
+          <div><strong>{{ answer.question_title }}</strong><p>{{ answer.comment }}</p><small>{{ answer.section_name }}</small></div>
+        </div>
+        {% else %}
+        <p class="hint">Неисправности не обнаружены.</p>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+  {% else %}
+  <section class="panel field-diagnostic-question-panel">
+    <div class="field-diagnostic-progress-heading">
+      <div>
+        <span class="field-diagnostic-section">{{ question.section }}</span>
+        <span class="checklist-progress">Пункт {{ question_index + 1 }} из {{ total }}</span>
+      </div>
+      <strong>{{ ((answered_count / total) * 100)|round|int }}%</strong>
+    </div>
+    <div class="field-diagnostic-progress-track" aria-label="Прогресс осмотра" role="progressbar" aria-valuemin="0" aria-valuemax="{{ total }}" aria-valuenow="{{ answered_count }}">
+      <span style="width:{{ (answered_count / total) * 100 }}%"></span>
+    </div>
+
+    <div class="field-diagnostic-question-copy">
+      <h2>{{ question.title }}</h2>
+      <p>{{ question.text }}</p>
+    </div>
+
+    {% if answer_error %}<div class="alert" role="alert">{{ answer_error }}</div>{% endif %}
+
+    <div class="checklist-answer-buttons" id="fieldAnswerButtons">
+      <form action="{{ url_for('field_diagnostics.answer', sheet_id=sheet.id) }}" method="post">
+        <input type="hidden" name="question_index" value="{{ question_index }}">
+        <input type="hidden" name="status" value="ok">
+        <button type="submit" class="checklist-answer-btn ok">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 10.5l4 4 8-9"/></svg>
+          Исправно
+        </button>
+      </form>
+      <button type="button" class="checklist-answer-btn problem" onclick="showFieldProblemForm()">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 3l8.5 14.5H1.5L10 3z"/><path d="M10 8.3v4M10 14.8h.01"/></svg>
+        Есть неисправность
+      </button>
+    </div>
+
+    <div class="field-diagnostic-problem-form {{ '' if answer_error else 'hidden' }}" id="fieldProblemForm">
+      <form action="{{ url_for('field_diagnostics.answer', sheet_id=sheet.id) }}" method="post">
+        <input type="hidden" name="question_index" value="{{ question_index }}">
+        <input type="hidden" name="status" value="problem">
+        <label for="fieldProblemComment">Опишите неисправность</label>
+        <textarea id="fieldProblemComment" name="comment" maxlength="4000" required placeholder="Что обнаружено, при каких условиях проявляется, важные подробности…">{{ request.form.get('comment', '') if answer_error else '' }}</textarea>
+        <div class="field-diagnostic-problem-actions">
+          <button type="button" class="btn-secondary" onclick="hideFieldProblemForm()">Назад</button>
+          <button type="submit" class="checklist-answer-btn problem">Зафиксировать неисправность</button>
+        </div>
+      </form>
+    </div>
+  </section>
+  {% endif %}
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+{% if not done %}
+<script>
+  function showFieldProblemForm() {
+    document.getElementById('fieldAnswerButtons').classList.add('hidden');
+    document.getElementById('fieldProblemForm').classList.remove('hidden');
+    document.getElementById('fieldProblemComment').focus();
+  }
+  function hideFieldProblemForm() {
+    document.getElementById('fieldProblemForm').classList.add('hidden');
+    document.getElementById('fieldAnswerButtons').classList.remove('hidden');
+  }
+  {% if answer_error %}document.getElementById('fieldAnswerButtons').classList.add('hidden');{% endif %}
+</script>
+{% endif %}
+</body>
+</html>
+

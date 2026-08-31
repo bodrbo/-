@@ -81,6 +81,10 @@ from modules.notifications import (
 from modules.refunds import create_refunds_blueprint
 from modules.refunds import services as refund_services
 from modules.offline import create_offline_blueprint, init_schema as init_offline_schema
+from modules.field_diagnostics import (
+    create_blueprint as create_field_diagnostics_blueprint,
+    init_schema as init_field_diagnostics_schema,
+)
 from modules.tuning_boat_specs import boat_specification_for, format_parameters
 
 # reportlab (PDF generation for "Акт выполненных работ") is imported lazily,
@@ -1688,6 +1692,7 @@ def init_db():
         )
         """
     )
+    init_field_diagnostics_schema(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS bank_transactions (
@@ -4560,6 +4565,16 @@ def update_tuning_boat_profile(profile_id):
     db.commit()
     session["boat_profile_notice"] = "Профиль лодки обновлён."
     return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
+
+
+app.register_blueprint(
+    create_field_diagnostics_blueprint(
+        get_db=get_db,
+        admin_login_required=admin_login_required,
+        normalize_boat_model=_normalize_tuning_boat_model,
+        boat_model_choices=_tuning_boat_model_choices,
+    )
+)
 
 
 @app.route("/tuning/diagnostics/hull")

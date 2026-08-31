@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Выездная диагностика</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<meta name="theme-color" content="#3498db">
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Боцман">
+</head>
+<body>
+
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100">
+      <g fill="var(--brass)">
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/>
+      </g>
+      <circle cx="50" cy="50" r="15" fill="none" stroke="var(--ink)" stroke-width="4"/>
+      <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
+    </svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="topbar-top-row">
+      <div class="brand">
+        <a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a>
+      </div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>
+      </button>
+    </div>
+    {% include '_admin_main_nav.html' %}
+    <div class="title-block"><h1>Диагностика лодок</h1></div>
+    <div class="topbar-actions">
+      <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
+        <svg class="push-toggle-off" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8z"/><path d="M8.3 16a1.7 1.7 0 003.4 0"/></svg>
+        <svg class="push-toggle-on" viewBox="0 0 20 20" fill="currentColor"><path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8z"/></svg>
+      </button>
+      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <nav class="sub-tabs">
+    <a href="{{ url_for('tuning_index') }}" class="{{ 'active' if sub_page == 'orders' }}">Заказы</a>
+    <a href="{{ url_for('tuning_diagnostics') }}" class="{{ 'active' if sub_page == 'diagnostics' }}">Диагностика лодок</a>
+    <a href="{{ url_for('tuning_boat_catalog') }}" class="{{ 'active' if sub_page == 'boat_catalog' }}">Каталог лодок</a>
+  </nav>
+  <nav class="sub-tabs sub-tabs-nested" aria-label="Виды диагностики">
+    <a href="{{ url_for('tuning_diagnostics') }}" class="{{ 'active' if diag_page == 'hull' }}">Корпусная диагностика</a>
+    <a href="{{ url_for('field_diagnostics.index') }}" class="{{ 'active' if diag_page == 'field' }}">Выездная диагностика</a>
+  </nav>
+
+  <section class="panel field-diagnostics-intro">
+    <div>
+      <span class="field-diagnostics-eyebrow">Технический осмотр</span>
+      <h2>Выездная диагностика</h2>
+      <p>Проведите осмотр на воде или на суше. Система соберёт исправные пункты и замечания в единый диагностический лист.</p>
+    </div>
+    <div class="field-diagnostics-ledger" aria-label="Сводка диагностических листов">
+      <span><strong>{{ sheets|length }}</strong> всего</span>
+      <span><strong>{{ sheets|selectattr('status', 'equalto', 'completed')|list|length }}</strong> завершено</span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="diag-grid field-diagnostic-grid">
+      <button type="button" class="diag-card diag-card-add" onclick="openFieldDiagnosticModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        <span>Новый диагностический лист</span>
+      </button>
+      {% for sheet in sheets %}
+      <a class="diag-card field-diagnostic-card" href="{{ url_for('field_diagnostics.sheet', sheet_id=sheet.id) }}">
+        <span class="field-diagnostic-card-status {{ 'is-complete' if sheet.status == 'completed' }}">
+          {{ 'Завершён' if sheet.status == 'completed' else 'В процессе' }}
+        </span>
+        <span class="field-diagnostic-card-model">{{ sheet.boat_model }}</span>
+        <span class="field-diagnostic-card-owner">{{ sheet.owner_name }}</span>
+        <span class="field-diagnostic-card-meta">{{ inspection_types.get(sheet.inspection_type, sheet.inspection_type) }} · {{ sheet.started_at[:10]|ru_date }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    {% if not sheets %}
+    <p class="field-diagnostic-empty">Здесь появится история выездных осмотров. Начните с первого диагностического листа.</p>
+    {% endif %}
+  </section>
+</main>
+
+<div class="field-diagnostic-modal {{ 'is-open' if errors }}" id="fieldDiagnosticModal" role="dialog" aria-modal="true" aria-labelledby="fieldDiagnosticModalTitle" aria-hidden="{{ 'false' if errors else 'true' }}">
+  <button type="button" class="field-diagnostic-modal-backdrop" aria-label="Закрыть" onclick="closeFieldDiagnosticModal()"></button>
+  <div class="field-diagnostic-modal-box">
+    <div class="field-diagnostic-modal-heading">
+      <div>
+        <span class="field-diagnostics-eyebrow">Новый выезд</span>
+        <h2 id="fieldDiagnosticModalTitle">Новый диагностический лист</h2>
+      </div>
+      <button type="button" class="field-diagnostic-modal-close" onclick="closeFieldDiagnosticModal()" aria-label="Закрыть">×</button>
+    </div>
+    {% if errors %}
+    <div class="alert" role="alert">
+      <strong>Проверьте заполнение:</strong>
+      <ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    <form action="{{ url_for('field_diagnostics.add_sheet') }}" method="post" class="field-diagnostic-create-form">
+      <div class="field">
+        <label for="field_boat_model_search">Модель лодки</label>
+        {% set current_boat_model = form_values.get('boat_model', '') %}
+        <div class="combo-field" data-combo data-combo-allow-custom>
+          <input type="text" id="field_boat_model_search" class="combo-input" data-combo-input
+                 value="{{ current_boat_model }}" data-selected-label="{{ current_boat_model }}"
+                 placeholder="Начните вводить название модели…" autocomplete="off"
+                 role="combobox" aria-autocomplete="list" required>
+          <input type="hidden" name="boat_model" data-combo-value value="{{ current_boat_model }}">
+          <div class="combo-dropdown hidden" data-combo-dropdown>
+            <p class="combo-empty hidden" data-combo-empty>Новая модель будет добавлена в каталог.</p>
+            {% for model in boat_model_choices %}
+            <div class="combo-option" data-value="{{ model }}" data-label="{{ model }}" data-search="{{ model|lower }}">
+              <span class="combo-option-name">{{ model }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <span class="field-context">Выберите существующую модель или введите новую.</span>
+      </div>
+      <div class="field-diagnostic-owner-fields">
+        <div class="field">
+          <label for="field_owner_name">Судовладелец</label>
+          <input type="text" id="field_owner_name" name="owner_name" maxlength="160" required
+                 value="{{ form_values.get('owner_name', '') }}" placeholder="Имя или ФИО">
+        </div>
+        <div class="field">
+          <label for="field_owner_phone">Номер телефона</label>
+          <input type="tel" id="field_owner_phone" name="owner_phone" maxlength="50" required
+                 inputmode="tel" value="{{ form_values.get('owner_phone', '') }}" placeholder="+7 999 000-00-00">
+        </div>
+      </div>
+      <fieldset class="field-diagnostic-type-field">
+        <legend>Тип осмотра</legend>
+        <div class="field-diagnostic-type-options">
+          {% for value, label in inspection_types.items() %}
+          <label>
+            <input type="radio" name="inspection_type" value="{{ value }}" required
+                   {{ 'checked' if form_values.get('inspection_type') == value }}>
+            <span>
+              <strong>{{ label }}</strong>
+              <small>{{ 'Ходовые испытания и проверка систем под нагрузкой' if value == 'water' else 'Корпус, двигатель и системы без спуска на воду' }}</small>
+            </span>
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+      <div class="field-diagnostic-modal-actions">
+        <button type="button" class="btn-secondary" onclick="closeFieldDiagnosticModal()">Отмена</button>
+        <button type="submit">Начать осмотр</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+  var fieldDiagnosticModal = document.getElementById('fieldDiagnosticModal');
+  var firstField = document.getElementById('field_boat_model_search');
+
+  function openFieldDiagnosticModal() {
+    fieldDiagnosticModal.classList.add('is-open');
+    fieldDiagnosticModal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+    window.setTimeout(function () { firstField.focus(); }, 40);
+  }
+
+  function closeFieldDiagnosticModal() {
+    fieldDiagnosticModal.classList.remove('is-open');
+    fieldDiagnosticModal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('modal-open');
+  }
+
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && fieldDiagnosticModal.classList.contains('is-open')) closeFieldDiagnosticModal();
+  });
+  {% if errors %}document.body.classList.add('modal-open');{% endif %}
+</script>
+</body>
+</html>
+

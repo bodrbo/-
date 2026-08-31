@@ -78,6 +78,7 @@
 
   <nav class="sub-tabs sub-tabs-nested">
     <a href="{{ url_for('tuning_diagnostics') }}" class="{{ 'active' if diag_page == 'hull' }}">Корпусная диагностика</a>
+    <a href="{{ url_for('field_diagnostics.index') }}" class="{{ 'active' if diag_page == 'field' }}">Выездная диагностика</a>
   </nav>
 
   <a href="{{ url_for('tuning_diagnostics') }}" class="term" style="display:inline-block; margin-bottom:14px;">← Ко всем листам</a>

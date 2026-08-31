@@ -1038,6 +1038,311 @@ a.diag-card:hover { border-color: var(--brass); box-shadow: var(--shadow); }
   color: var(--brass-strong);
   background: var(--paper-alt);
 }
+
+/* --- Field diagnostics: a compact technical log built on the same square
+   diagnostic cards and checklist controls as the existing hull/fleet UI. --- */
+.field-diagnostics-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  background: linear-gradient(120deg, var(--paper) 0%, var(--paper-alt) 100%);
+}
+.field-diagnostics-intro h2,
+.field-diagnostic-modal-heading h2 {
+  margin: 2px 0 7px;
+  color: var(--ink);
+}
+.field-diagnostics-intro p {
+  max-width: 690px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.field-diagnostics-eyebrow,
+.field-diagnostic-section {
+  color: var(--brass-strong);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.field-diagnostics-ledger {
+  display: flex;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--paper);
+}
+.field-diagnostics-ledger span {
+  display: flex;
+  flex-direction: column;
+  min-width: 96px;
+  padding: 11px 16px;
+  color: var(--muted);
+  font-size: 10.5px;
+  text-align: center;
+}
+.field-diagnostics-ledger span + span { border-left: 1px solid var(--hairline); }
+.field-diagnostics-ledger strong {
+  color: var(--ink);
+  font-family: 'PT Mono', monospace;
+  font-size: 18px;
+}
+.field-diagnostic-grid .diag-card-add {
+  flex-direction: column;
+  gap: 12px;
+  font-family: inherit;
+}
+.field-diagnostic-grid .diag-card-add svg { width: 31px; height: 31px; }
+.field-diagnostic-card {
+  position: relative;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 6px;
+  text-align: left;
+  overflow: hidden;
+}
+.field-diagnostic-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 5px;
+  background: var(--brass);
+}
+.field-diagnostic-card-model { font-size: 17px; line-height: 1.25; }
+.field-diagnostic-card-owner { color: var(--ink-soft); font-size: 12.5px; font-weight: 600; }
+.field-diagnostic-card-meta { color: var(--muted); font-size: 10.5px; font-weight: 500; }
+.field-diagnostic-card-status {
+  position: absolute;
+  top: 17px;
+  right: 16px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #fff2dc;
+  color: var(--warning);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.field-diagnostic-card-status.is-complete { background: #e8f3ed; color: var(--success); }
+.field-diagnostic-empty {
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+body.modal-open { overflow: hidden; }
+.field-diagnostic-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 3100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity .18s ease, visibility .18s ease;
+}
+.field-diagnostic-modal.is-open { visibility: visible; opacity: 1; }
+.field-diagnostic-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border: 0;
+  background: rgba(15, 42, 53, .58);
+  cursor: default;
+}
+.field-diagnostic-modal-box {
+  position: relative;
+  width: min(680px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  padding: 26px;
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: 0 24px 70px rgba(15, 42, 53, .28);
+}
+.field-diagnostic-modal-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+.field-diagnostic-modal-heading h2 { font-size: 21px; }
+.field-diagnostic-modal-close {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  background: var(--paper-alt);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.field-diagnostic-create-form { display: flex; flex-direction: column; gap: 18px; }
+.field-diagnostic-create-form input[type="tel"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--paper-alt);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 14px;
+}
+.field-diagnostic-create-form input[type="tel"]:focus {
+  outline: 2px solid var(--brass);
+  outline-offset: 1px;
+  border-color: var(--brass);
+}
+.field-diagnostic-owner-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.field-diagnostic-type-field { margin: 0; padding: 0; border: 0; }
+.field-diagnostic-type-field legend {
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.field-diagnostic-type-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.field-diagnostic-type-options label { position: relative; cursor: pointer; }
+.field-diagnostic-type-options input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.field-diagnostic-type-options span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 82px;
+  padding: 14px;
+  border: 1.5px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--paper-alt);
+  transition: border-color .15s ease, background-color .15s ease;
+}
+.field-diagnostic-type-options strong { color: var(--ink); font-size: 13.5px; }
+.field-diagnostic-type-options small { color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+.field-diagnostic-type-options input:checked + span {
+  border-color: var(--brass);
+  background: #eaf4fb;
+  box-shadow: inset 0 0 0 1px var(--brass);
+}
+.field-diagnostic-type-options input:focus-visible + span { outline: 2px solid var(--brass); outline-offset: 2px; }
+.field-diagnostic-modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.field-diagnostic-modal-actions .btn-secondary { margin: 0; }
+
+.field-diagnostic-back { display: inline-block; margin-bottom: 14px; }
+.field-diagnostic-summary-strip {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr .7fr;
+  margin-bottom: 18px;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+.field-diagnostic-summary-strip > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 14px 18px;
+}
+.field-diagnostic-summary-strip > div + div { border-left: 1px solid var(--hairline-soft); }
+.field-diagnostic-summary-strip span { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.field-diagnostic-summary-strip strong { overflow: hidden; color: var(--ink); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.field-diagnostic-summary-strip small { color: var(--muted); font-size: 10.5px; }
+.field-diagnostic-counter strong { color: var(--brass-strong); font-family: 'PT Mono', monospace; font-size: 20px; }
+.field-diagnostic-progress-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.field-diagnostic-progress-heading > div { display: flex; flex-direction: column; gap: 4px; }
+.field-diagnostic-progress-heading .checklist-progress { margin: 0; }
+.field-diagnostic-progress-heading > strong { color: var(--brass-strong); font-family: 'PT Mono', monospace; font-size: 17px; }
+.field-diagnostic-progress-track {
+  height: 6px;
+  margin: 12px 0 28px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--hairline-soft);
+}
+.field-diagnostic-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brass);
+  transition: width .25s ease;
+}
+.field-diagnostic-question-copy { max-width: 780px; }
+.field-diagnostic-question-copy h2 { margin-bottom: 8px; font-size: 28px; line-height: 1.2; }
+.field-diagnostic-question-copy p { margin: 0 0 26px; color: var(--ink-soft); font-size: 15px; line-height: 1.6; }
+.field-diagnostic-problem-form { max-width: 780px; padding-top: 4px; }
+.field-diagnostic-problem-form label { display: block; margin-bottom: 7px; }
+.field-diagnostic-problem-form textarea { width: 100%; min-height: 120px; }
+.field-diagnostic-problem-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.field-diagnostic-problem-actions .btn-secondary { margin: 0; }
+.field-diagnostic-result-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.field-diagnostic-result-heading h2 { margin: 3px 0 8px; font-size: 24px; }
+.field-diagnostic-result-heading p { max-width: 650px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.field-diagnostic-result-heading .btn-primary { flex: none; text-decoration: none; }
+.field-diagnostic-result-counts { display: flex; gap: 12px; margin-top: 22px; }
+.field-diagnostic-result-counts > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 145px;
+  padding: 12px 15px;
+  border-radius: 9px;
+}
+.field-diagnostic-result-counts strong { font-family: 'PT Mono', monospace; font-size: 22px; }
+.field-diagnostic-result-counts span { font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.field-diagnostic-result-counts .is-ok { background: #e8f3ed; color: var(--success); }
+.field-diagnostic-result-counts .is-problem { background: #f6e8e4; color: var(--danger); }
+.field-diagnostic-results-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.field-diagnostic-result-list { display: flex; flex-direction: column; gap: 9px; }
+.field-diagnostic-result-item { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; border: 1px solid var(--hairline); border-radius: 9px; }
+.field-diagnostic-result-icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex: none; border-radius: 50%; color: #fff; font-weight: 800; }
+.field-diagnostic-result-item.is-ok .field-diagnostic-result-icon { background: var(--success); }
+.field-diagnostic-result-item.is-problem .field-diagnostic-result-icon { background: var(--danger); }
+.field-diagnostic-result-item > div { display: flex; flex-direction: column; min-width: 0; }
+.field-diagnostic-result-item strong { color: var(--ink); font-size: 12.5px; }
+.field-diagnostic-result-item small { color: var(--muted); font-size: 10px; }
+.field-diagnostic-result-item p { margin: 3px 0; color: var(--ink-soft); font-size: 12px; line-height: 1.45; }
+
+@media (max-width: 720px) {
+  .field-diagnostics-intro { align-items: stretch; flex-direction: column; }
+  .field-diagnostics-ledger { align-self: flex-start; }
+  .field-diagnostic-owner-fields,
+  .field-diagnostic-type-options,
+  .field-diagnostic-results-grid { grid-template-columns: 1fr; }
+  .field-diagnostic-summary-strip { grid-template-columns: 1fr; }
+  .field-diagnostic-summary-strip > div + div { border-top: 1px solid var(--hairline-soft); border-left: 0; }
+  .field-diagnostic-result-heading { align-items: stretch; flex-direction: column; }
+  .field-diagnostic-result-heading .btn-primary { text-align: center; }
+  .field-diagnostic-question-copy h2 { font-size: 23px; }
+  .field-diagnostic-modal { align-items: flex-end; padding: 0; }
+  .field-diagnostic-modal-box { max-height: 92vh; border-radius: 16px 16px 0 0; padding: 22px 18px; }
+  .field-diagnostic-modal-actions { flex-direction: column-reverse; }
+  .field-diagnostic-modal-actions button { width: 100%; }
+  .field-diagnostic-problem-actions { align-items: stretch; flex-direction: column-reverse; }
+  .field-diagnostic-problem-actions button { width: 100%; justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .field-diagnostic-modal,
+  .field-diagnostic-progress-track span { transition: none; }
+}
 .hull-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
