@@ -4,6 +4,8 @@ import html
 from io import BytesIO
 import os
 
+from .constants import DIAGNOSTIC_BLOCKS
+
 
 _FONTS_REGISTERED = False
 
@@ -32,7 +34,8 @@ def _value(row, key, default=""):
     return default if value is None else value
 
 
-def build_diagnostic_pdf(sheet, answers, inspection_label, fonts_dir):
+def build_diagnostic_pdf(sheet, answers, inspection_label, fonts_dir,
+                         extra_defects=()):
     """Return a print-ready A4 diagnostic report as bytes."""
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER, TA_RIGHT
@@ -102,13 +105,6 @@ def build_diagnostic_pdf(sheet, answers, inspection_label, fonts_dir):
         spaceBefore=5 * mm,
         spaceAfter=2.5 * mm,
     )
-    item_title_style = ParagraphStyle(
-        "FieldItemTitle",
-        fontName="FieldOpenSans-Bold",
-        fontSize=9.5,
-        leading=13,
-        textColor=navy,
-    )
     item_text_style = ParagraphStyle(
         "FieldItemText",
         fontName="FieldOpenSans",
@@ -149,7 +145,11 @@ def build_diagnostic_pdf(sheet, answers, inspection_label, fonts_dir):
         [Paragraph("Дата завершения", label_style), Paragraph("Результат", label_style)],
         [
             Paragraph(safe(display_date), value_style),
-            Paragraph("Исправно: %d · Неисправности: %d" % (len(ok_answers), len(problems)), value_style),
+            Paragraph(
+                "Исправно: %d · Неисправности: %d"
+                % (len(ok_answers), len(problems) + len(extra_defects)),
+                value_style,
+            ),
         ],
     ]
     metadata_table = Table(metadata, colWidths=[86 * mm, 86 * mm])
@@ -169,86 +169,127 @@ def build_diagnostic_pdf(sheet, answers, inspection_label, fonts_dir):
     )
     story.extend([metadata_table, Spacer(1, 3 * mm)])
 
-    story.append(Paragraph("Исправные узлы и системы", section_style))
-    if ok_answers:
-        ok_rows = []
-        for index, answer in enumerate(ok_answers, start=1):
-            title = safe(_value(answer, "question_title"))
-            text = safe(_value(answer, "question_text"))
-            ok_rows.append(
-                [
-                    Paragraph(str(index), status_ok_style),
-                    Paragraph("<b>%s</b><br/>%s" % (title, text), item_text_style),
-                    Paragraph("ИСПРАВНО", status_ok_style),
-                ]
-            )
-        ok_table = Table(ok_rows, colWidths=[9 * mm, 130 * mm, 33 * mm], repeatRows=0)
-        ok_table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, -1), pale_green),
-                    ("BOX", (0, 0), (-1, -1), 0.5, hairline),
-                    ("INNERGRID", (0, 0), (-1, -1), 0.35, hairline),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                    ("TOPPADDING", (0, 0), (-1, -1), 6),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                ]
-            )
-        )
-        story.append(ok_table)
-    else:
-        story.append(Paragraph("Исправные пункты не отмечены.", item_text_style))
+    for block_name in DIAGNOSTIC_BLOCKS:
+        block_answers = [
+            answer for answer in answers
+            if _value(answer, "section_name") == block_name
+        ]
+        block_items = []
+        if block_name == "Прочее":
+            for index, answer in enumerate(block_answers, start=1):
+                is_problem = _value(answer, "status") == "problem"
+                content = "<b>%s</b><br/>%s" % (
+                    safe(_value(answer, "question_title")),
+                    safe(
+                        _value(answer, "comment")
+                        or _value(answer, "question_text")
+                    ),
+                )
+                status_style = status_problem_style if is_problem else status_ok_style
+                block_items.append(
+                    Table(
+                        [[
+                            Paragraph(str(index), status_style),
+                            Paragraph(content, item_text_style),
+                            Paragraph("НЕИСПРАВНО" if is_problem else "ИСПРАВНО", status_style),
+                        ]],
+                        colWidths=[9 * mm, 125 * mm, 38 * mm],
+                        style=TableStyle(
+                            [
+                                ("BACKGROUND", (0, 0), (-1, -1), pale_red if is_problem else pale_green),
+                                ("BOX", (0, 0), (-1, -1), 0.5, hairline),
+                                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                            ]
+                        ),
+                    )
+                )
+            for index, defect in enumerate(extra_defects, start=1):
+                block_items.append(
+                    Table(
+                        [[
+                            Paragraph(str(index + len(block_answers)), status_problem_style),
+                            Paragraph(safe(_value(defect, "description")), item_text_style),
+                            Paragraph("НЕИСПРАВНОСТЬ", status_problem_style),
+                        ]],
+                        colWidths=[9 * mm, 125 * mm, 38 * mm],
+                        style=TableStyle(
+                            [
+                                ("BACKGROUND", (0, 0), (-1, -1), pale_red),
+                                ("BOX", (0, 0), (-1, -1), 0.5, hairline),
+                                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                            ]
+                        ),
+                    )
+                )
+        else:
+            for index, answer in enumerate(block_answers, start=1):
+                is_problem = _value(answer, "status") == "problem"
+                title = safe(_value(answer, "question_title"))
+                text = safe(_value(answer, "question_text"))
+                comment = safe(_value(answer, "comment"))
+                if is_problem:
+                    content = "<b>%s</b><br/>%s<br/><font color='#A43D2C'><b>Замечание:</b> %s</font>" % (
+                        title, text, comment or "Описание не указано",
+                    )
+                else:
+                    content = "<b>%s</b><br/>%s" % (title, text)
+                status_style = status_problem_style if is_problem else status_ok_style
+                block_items.append(
+                    Table(
+                        [[
+                            Paragraph(str(index), status_style),
+                            Paragraph(content, item_text_style),
+                            Paragraph("НЕИСПРАВНО" if is_problem else "ИСПРАВНО", status_style),
+                        ]],
+                        colWidths=[9 * mm, 125 * mm, 38 * mm],
+                        style=TableStyle(
+                            [
+                                ("BACKGROUND", (0, 0), (-1, -1), pale_red if is_problem else pale_green),
+                                ("BOX", (0, 0), (-1, -1), 0.5, hairline),
+                                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                            ]
+                        ),
+                    )
+                )
 
-    if problems:
-        problem_blocks = []
-        for index, answer in enumerate(problems, start=1):
-            problem_table = Table(
-                [
+        empty_text = (
+            "Дополнительные неисправности не указаны."
+            if block_name == "Прочее"
+            else "В этом блоке нет зафиксированных пунктов."
+        )
+        if block_items:
+            story.append(
+                KeepTogether(
                     [
-                        Paragraph("НЕИСПРАВНОСТЬ %d" % index, status_problem_style),
-                        Paragraph(safe(_value(answer, "section_name")), label_style),
-                    ],
-                    [
-                        Paragraph(safe(_value(answer, "question_title")), item_title_style),
-                        Paragraph(safe(_value(answer, "comment") or "Описание не указано"), item_text_style),
-                    ],
-                ],
-                colWidths=[58 * mm, 114 * mm],
-            )
-            problem_table.setStyle(
-                TableStyle(
-                    [
-                        ("BACKGROUND", (0, 0), (-1, -1), pale_red),
-                        ("BOX", (0, 0), (-1, -1), 0.6, red),
-                        ("INNERGRID", (0, 0), (-1, -1), 0.35, hairline),
-                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                        ("LEFTPADDING", (0, 0), (-1, -1), 7),
-                        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
-                        ("TOPPADDING", (0, 0), (-1, -1), 7),
-                        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+                        Paragraph(safe(block_name), section_style),
+                        block_items[0],
+                        Spacer(1, 1.5 * mm),
                     ]
                 )
             )
-            problem_blocks.append(problem_table)
-        # Keep the section heading with the first defect. Otherwise a nearly
-        # full first page can leave a lonely heading at its bottom while all
-        # useful content starts on the next page.
-        story.append(
-            KeepTogether(
-                [
-                    Paragraph("Обнаруженные неисправности", section_style),
-                    problem_blocks[0],
-                    Spacer(1, 2.5 * mm),
-                ]
+            for block_item in block_items[1:]:
+                story.extend([KeepTogether(block_item), Spacer(1, 1.5 * mm)])
+        else:
+            story.append(
+                KeepTogether(
+                    [
+                        Paragraph(safe(block_name), section_style),
+                        Paragraph(empty_text, item_text_style),
+                    ]
+                )
             )
-        )
-        for problem_table in problem_blocks[1:]:
-            story.extend([KeepTogether(problem_table), Spacer(1, 2.5 * mm)])
-    else:
-        story.append(Paragraph("Обнаруженные неисправности", section_style))
-        story.append(Paragraph("По результатам осмотра неисправности не обнаружены.", item_text_style))
 
     story.extend(
         [

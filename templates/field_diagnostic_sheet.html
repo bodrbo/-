@@ -52,6 +52,15 @@
     <div class="field-diagnostic-counter"><span>Проверено</span><strong>{{ answered_count }} / {{ total }}</strong><small>{{ total - answered_count }} осталось</small></div>
   </section>
 
+  <ol class="field-diagnostic-route" aria-label="Блоки диагностического листа">
+    {% for block in block_states %}
+    <li class="is-{{ block.state }}">
+      <span>{{ loop.index }}</span>
+      <strong>{{ block.name }}</strong>
+    </li>
+    {% endfor %}
+  </ol>
+
   {% if done %}
   <section class="panel field-diagnostic-result">
     <div class="field-diagnostic-result-heading">
@@ -66,38 +75,100 @@
     </div>
     <div class="field-diagnostic-result-counts">
       <div class="is-ok"><strong>{{ ok_answers|length }}</strong><span>исправно</span></div>
-      <div class="is-problem"><strong>{{ problems|length }}</strong><span>неисправностей</span></div>
+      <div class="is-problem"><strong>{{ problems|length + extra_defects|length }}</strong><span>неисправностей</span></div>
     </div>
   </section>
 
-  <div class="field-diagnostic-results-grid">
-    <section class="panel">
-      <h2>Исправные пункты</h2>
+  <div class="field-diagnostic-block-results">
+    {% for block in block_results %}
+    <section class="panel field-diagnostic-block-result">
+      <div class="field-diagnostic-block-heading">
+        <span>{{ '%02d'|format(loop.index) }}</span>
+        <h2>{{ block.name }}</h2>
+      </div>
       <div class="field-diagnostic-result-list">
-        {% for answer in ok_answers %}
-        <div class="field-diagnostic-result-item is-ok">
-          <span class="field-diagnostic-result-icon">✓</span>
-          <div><strong>{{ answer.question_title }}</strong><small>{{ answer.section_name }}</small></div>
-        </div>
+        {% if block.name == 'Прочее' %}
+          {% for answer in block.answers %}
+          <div class="field-diagnostic-result-item is-{{ 'problem' if answer.status == 'problem' else 'ok' }}">
+            <span class="field-diagnostic-result-icon">{{ '!' if answer.status == 'problem' else '✓' }}</span>
+            <div><strong>{{ answer.question_title }}</strong><p>{{ answer.comment or answer.question_text }}</p></div>
+          </div>
+          {% endfor %}
+          {% for defect in block.extra_defects %}
+          <div class="field-diagnostic-result-item is-problem">
+            <span class="field-diagnostic-result-icon">!</span>
+            <div><p>{{ defect.description }}</p></div>
+          </div>
+          {% else %}
+          {% if not block.answers %}
+          <p class="hint">Дополнительные неисправности не указаны.</p>
+          {% endif %}
+          {% endfor %}
         {% else %}
-        <p class="hint">Исправных пунктов не отмечено.</p>
-        {% endfor %}
+          {% for answer in block.answers %}
+          <div class="field-diagnostic-result-item is-{{ 'problem' if answer.status == 'problem' else 'ok' }}">
+            <span class="field-diagnostic-result-icon">{{ '!' if answer.status == 'problem' else '✓' }}</span>
+            <div>
+              <strong>{{ answer.question_title }}</strong>
+              {% if answer.status == 'problem' %}<p>{{ answer.comment }}</p>{% endif %}
+              <small>{{ 'Обнаружена неисправность' if answer.status == 'problem' else 'Исправно' }}</small>
+            </div>
+          </div>
+          {% else %}
+          <p class="hint">В этом блоке нет зафиксированных пунктов.</p>
+          {% endfor %}
+        {% endif %}
       </div>
     </section>
-    <section class="panel">
-      <h2>Обнаруженные неисправности</h2>
-      <div class="field-diagnostic-result-list">
-        {% for answer in problems %}
-        <div class="field-diagnostic-result-item is-problem">
-          <span class="field-diagnostic-result-icon">!</span>
-          <div><strong>{{ answer.question_title }}</strong><p>{{ answer.comment }}</p><small>{{ answer.section_name }}</small></div>
-        </div>
-        {% else %}
-        <p class="hint">Неисправности не обнаружены.</p>
-        {% endfor %}
-      </div>
-    </section>
+    {% endfor %}
   </div>
+  {% elif other_step %}
+  <section class="panel field-diagnostic-question-panel field-diagnostic-other-panel">
+    <div class="field-diagnostic-progress-heading">
+      <div>
+        <span class="field-diagnostic-section">Прочее</span>
+        <span class="checklist-progress">Финальный блок</span>
+      </div>
+      <strong>100%</strong>
+    </div>
+    <div class="field-diagnostic-progress-track" aria-label="Основная часть осмотра завершена" role="progressbar" aria-valuemin="0" aria-valuemax="{{ total }}" aria-valuenow="{{ total }}">
+      <span style="width:100%"></span>
+    </div>
+    <div class="field-diagnostic-question-copy">
+      <h2>Прочие неисправности</h2>
+      <p>Добавьте отдельными полями неисправности, которые не относятся к электрике, видимой части корпуса или двигателю. Если таких нет, оставьте поле пустым.</p>
+    </div>
+    {% if other_error %}<div class="alert" role="alert">{{ other_error }}</div>{% endif %}
+    <form action="{{ url_for('field_diagnostics.save_other', sheet_id=sheet.id) }}" method="post" class="field-diagnostic-other-form">
+      <div class="field-diagnostic-other-list" id="fieldOtherList">
+        {% for value in other_values %}
+        <div class="field-diagnostic-other-row">
+          <label for="fieldOther{{ loop.index }}">Неисправность {{ loop.index }}</label>
+          <div>
+            <textarea id="fieldOther{{ loop.index }}" name="other_defect[]" maxlength="2000" placeholder="Опишите обнаруженную неисправность…">{{ value }}</textarea>
+            <button type="button" class="icon-btn danger" onclick="removeOtherDefect(this)" aria-label="Удалить поле" title="Удалить поле">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+            </button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <template id="fieldOtherTemplate">
+        <div class="field-diagnostic-other-row">
+          <label>Дополнительная неисправность</label>
+          <div>
+            <textarea name="other_defect[]" maxlength="2000" placeholder="Опишите обнаруженную неисправность…"></textarea>
+            <button type="button" class="icon-btn danger" onclick="removeOtherDefect(this)" aria-label="Удалить поле" title="Удалить поле">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+            </button>
+          </div>
+        </div>
+      </template>
+      <div class="field-diagnostic-other-actions">
+        <button type="button" class="btn-add" onclick="addOtherDefect()">Добавить ещё неисправность</button>
+        <button type="submit">Завершить осмотр</button>
+      </div>
+    </form>
   {% else %}
   <section class="panel field-diagnostic-question-panel">
     <div class="field-diagnostic-progress-heading">
@@ -161,9 +232,25 @@
     document.getElementById('fieldProblemForm').classList.add('hidden');
     document.getElementById('fieldAnswerButtons').classList.remove('hidden');
   }
+  function addOtherDefect() {
+    var list = document.getElementById('fieldOtherList');
+    var template = document.getElementById('fieldOtherTemplate');
+    if (!list || !template || list.children.length >= 20) return;
+    list.appendChild(template.content.cloneNode(true));
+    list.lastElementChild.querySelector('textarea').focus();
+  }
+  function removeOtherDefect(button) {
+    var row = button.closest('.field-diagnostic-other-row');
+    var list = document.getElementById('fieldOtherList');
+    if (!row || !list) return;
+    if (list.children.length === 1) {
+      row.querySelector('textarea').value = '';
+      return;
+    }
+    row.remove();
+  }
   {% if answer_error %}document.getElementById('fieldAnswerButtons').classList.add('hidden');{% endif %}
 </script>
 {% endif %}
 </body>
 </html>
-

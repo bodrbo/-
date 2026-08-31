@@ -1,7 +1,10 @@
 import unittest
 
 from support import application_module
-from modules.field_diagnostics.constants import FIELD_DIAGNOSTIC_QUESTIONS
+from modules.field_diagnostics.constants import (
+    DIAGNOSTIC_BLOCKS,
+    FIELD_DIAGNOSTIC_QUESTIONS,
+)
 
 
 class FieldDiagnosticsTests(unittest.TestCase):
@@ -15,6 +18,7 @@ class FieldDiagnosticsTests(unittest.TestCase):
     def cleanup_database():
         with application_module.app.app_context():
             db = application_module.get_db()
+            db.execute("DELETE FROM field_diagnostic_extra_defects")
             db.execute("DELETE FROM field_diagnostic_answers")
             db.execute("DELETE FROM field_diagnostic_sheets")
             db.execute(
@@ -67,6 +71,7 @@ class FieldDiagnosticsTests(unittest.TestCase):
             self.assertEqual(sheet["owner_name"], "Иван Судовладелец")
             self.assertEqual(sheet["owner_phone"], "+7 999 123-45-67")
             self.assertEqual(sheet["created_by_name"], "Диагност")
+            self.assertIn('"section": "Электрика"', sheet["question_set_json"])
 
         page = self.client.get(response.headers["Location"])
         html = page.get_data(as_text=True)
@@ -74,6 +79,8 @@ class FieldDiagnosticsTests(unittest.TestCase):
         self.assertIn("Осмотр на воде", html)
         self.assertIn(FIELD_DIAGNOSTIC_QUESTIONS["water"][0]["title"], html)
         self.assertNotIn(FIELD_DIAGNOSTIC_QUESTIONS["land"][0]["title"], html)
+        for block_name in DIAGNOSTIC_BLOCKS:
+            self.assertIn(block_name, html)
 
     def test_existing_catalog_model_is_reused_with_canonical_spelling(self):
         self.login()
@@ -171,12 +178,39 @@ class FieldDiagnosticsTests(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 302)
 
+        other_step = self.client.get(sheet_path)
+        other_html = other_step.get_data(as_text=True)
+        self.assertIn("Прочие неисправности", other_html)
+        self.assertIn("Завершить осмотр", other_html)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.assertEqual(
+                db.execute(
+                    "SELECT status FROM field_diagnostic_sheets WHERE id = ?",
+                    (sheet_id,),
+                ).fetchone()["status"],
+                "in_progress",
+            )
+
+        completed = self.client.post(
+            "/tuning/diagnostics/field/%d/other" % sheet_id,
+            data={
+                "other_defect[]": [
+                    "Не хватает спасательного жилета",
+                    "Повреждён тент",
+                ]
+            },
+        )
+        self.assertEqual(completed.status_code, 302)
+
         result = self.client.get(sheet_path)
         result_html = result.get_data(as_text=True)
         self.assertEqual(result.status_code, 200)
         self.assertIn("Диагностический лист готов", result_html)
         self.assertIn("Трещина 4 см у крепления", result_html)
-        self.assertIn("11", result_html)
+        self.assertIn("Не хватает спасательного жилета", result_html)
+        for block_name in DIAGNOSTIC_BLOCKS:
+            self.assertIn(block_name, result_html)
 
         with application_module.app.app_context():
             db = application_module.get_db()
@@ -185,6 +219,7 @@ class FieldDiagnosticsTests(unittest.TestCase):
             ).fetchone()
             self.assertEqual(sheet["status"], "completed")
             self.assertIsNotNone(sheet["completed_at"])
+            self.assertIsNotNone(sheet["other_completed_at"])
             answers = db.execute(
                 "SELECT * FROM field_diagnostic_answers WHERE sheet_id = ? "
                 "ORDER BY question_index",
@@ -193,6 +228,15 @@ class FieldDiagnosticsTests(unittest.TestCase):
             self.assertEqual(len(answers), len(questions))
             self.assertEqual(answers[1]["status"], "problem")
             self.assertEqual(answers[1]["comment"], "Трещина 4 см у крепления")
+            extra_defects = db.execute(
+                "SELECT description FROM field_diagnostic_extra_defects "
+                "WHERE sheet_id = ? ORDER BY id",
+                (sheet_id,),
+            ).fetchall()
+            self.assertEqual(
+                [row["description"] for row in extra_defects],
+                ["Не хватает спасательного жилета", "Повреждён тент"],
+            )
 
         pdf = self.client.get(
             "/tuning/diagnostics/field/%d/diagnostic-sheet.pdf" % sheet_id
@@ -205,6 +249,45 @@ class FieldDiagnosticsTests(unittest.TestCase):
             'inline; filename="Diagnostic-sheet-%d.pdf"' % sheet_id,
             pdf.headers["Content-Disposition"],
         )
+
+    def test_other_block_can_be_completed_without_defects(self):
+        self.login()
+        created = self.create_sheet(inspection_type="water")
+        sheet_path = created.headers["Location"]
+        sheet_id = int(sheet_path.rstrip("/").rsplit("/", 1)[-1])
+        questions = FIELD_DIAGNOSTIC_QUESTIONS["water"]
+        section_order = []
+        for question in questions:
+            if not section_order or section_order[-1] != question["section"]:
+                section_order.append(question["section"])
+        self.assertEqual(section_order, list(DIAGNOSTIC_BLOCKS[:3]))
+        self.assertNotIn(
+            "Прочее", {question["section"] for question in questions}
+        )
+
+        for question_index in range(len(questions)):
+            self.client.post(
+                "/tuning/diagnostics/field/%d/answer" % sheet_id,
+                data={"question_index": str(question_index), "status": "ok"},
+            )
+        response = self.client.post(
+            "/tuning/diagnostics/field/%d/other" % sheet_id,
+            data={"other_defect[]": ""},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        result = self.client.get(sheet_path).get_data(as_text=True)
+        self.assertIn("Дополнительные неисправности не указаны", result)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.assertEqual(
+                db.execute(
+                    "SELECT COUNT(*) FROM field_diagnostic_extra_defects "
+                    "WHERE sheet_id = ?",
+                    (sheet_id,),
+                ).fetchone()[0],
+                0,
+            )
 
     def test_pdf_is_not_available_until_inspection_is_completed(self):
         self.login()
