@@ -85,6 +85,10 @@ from modules.field_diagnostics import (
     create_blueprint as create_field_diagnostics_blueprint,
     init_schema as init_field_diagnostics_schema,
 )
+from modules.schedule import (
+    create_schedule_blueprint,
+    init_schema as init_schedule_schema,
+)
 from modules.tuning_boat_specs import boat_specification_for, format_parameters
 
 # reportlab (PDF generation for "Акт выполненных работ") is imported lazily,
@@ -1222,6 +1226,7 @@ def init_db():
             "ADD COLUMN comment TEXT NOT NULL DEFAULT ''"
         )
     init_notification_schema(conn)
+    init_schedule_schema(conn)
 
     conn.execute(
         """
@@ -3391,6 +3396,24 @@ app.register_blueprint(
         telegram_sender=lambda chat_id, text: send_telegram_notification(text, chat_id=chat_id),
         telegram_configured=lambda: bool(TELEGRAM_BOT_TOKEN),
         telegram_bot_username=lambda: TELEGRAM_BOT_USERNAME,
+    )
+)
+
+
+# =======================================================================
+# Внутреннее расписание рейсов
+# =======================================================================
+app.register_blueprint(
+    create_schedule_blueprint(
+        get_db=get_db,
+        admin_login_required=admin_login_required,
+        boats=BOATS,
+        trip_services=[
+            work_type for work_type in WORK_TYPES
+            if "гид" not in work_type["name"].casefold()
+            and "капитан" not in work_type["name"].casefold()
+        ],
+        avatar_url=find_avatar_url,
     )
 )
 

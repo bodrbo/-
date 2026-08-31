@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Расписание рейсов — Бодрый Боцман</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+</head>
+<body class="schedule-body">
+<header class="topbar schedule-topbar">
+  <div class="topbar-inner">
+    <div class="topbar-top-row">
+      <div class="brand">
+        <a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a>
+      </div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>
+      </button>
+    </div>
+    {% include '_admin_main_nav.html' %}
+    <div class="title-block">
+      <h1>Расписание рейсов</h1>
+      <p>Оперативное управление катерами и экипажами</p>
+    </div>
+    <div class="topbar-actions">
+      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="schedule-shell">
+  {% if notice %}
+  <div class="schedule-notice {{ notice.type }}" role="status">
+    <span>{{ notice.message }}</span>
+    <button type="button" aria-label="Закрыть" onclick="this.parentElement.remove()">×</button>
+  </div>
+  {% endif %}
+
+  <section class="schedule-command-bar" aria-label="Управление расписанием">
+    <div class="schedule-date-controls">
+      <a class="schedule-today" href="{{ url_for('schedule.index', date=today, employee=selected_employee) }}">Сегодня</a>
+      <div class="schedule-stepper">
+        <a href="{{ url_for('schedule.index', date=previous_day, employee=selected_employee) }}" aria-label="Предыдущий день">‹</a>
+        <a href="{{ url_for('schedule.index', date=next_day, employee=selected_employee) }}" aria-label="Следующий день">›</a>
+      </div>
+      <label class="schedule-date-picker">
+        <span>{{ day_label }}</span>
+        <input type="date" value="{{ day.isoformat() }}" aria-label="Выбрать дату" onchange="changeScheduleDate(this.value)">
+      </label>
+    </div>
+
+    <div class="schedule-command-actions">
+      <label class="schedule-crew-filter">
+        <span class="sr-only">Показать сотрудника</span>
+        <select onchange="changeScheduleEmployee(this.value)">
+          <option value="all" {{ 'selected' if selected_employee == 'all' }}>Все сотрудники</option>
+          {% for employee in crew %}
+          <option value="{{ employee.id }}" {{ 'selected' if selected_employee == employee.id|string }}>{{ employee.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="schedule-day-total" title="Плановая стоимость рейсов за день">
+        <span>{{ items|length }} рейс{{ '' if items|length == 1 else 'а' if items|length in [2, 3, 4] else 'ов' }}</span>
+        <strong>{{ '{:,.0f}'.format(items|sum(attribute='revenue')).replace(',', ' ') }} ₽</strong>
+      </div>
+      <button type="button" class="schedule-create-button" onclick="openScheduleCreate()">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 3v14M3 10h14"/></svg>
+        Новый рейс
+      </button>
+    </div>
+  </section>
+
+  {% if visible_crew %}
+  <section class="schedule-board" aria-label="Расписание на {{ day_label }}">
+    <div class="schedule-board-scroll">
+      <div class="schedule-board-inner" style="--crew-count: {{ visible_crew|length }}; --schedule-height: {{ grid_height }}px;">
+        <div class="schedule-corner">
+          <span>Время</span>
+          <small>СПБ</small>
+        </div>
+        <div class="schedule-crew-heads">
+          {% for employee in visible_crew %}
+          <article class="schedule-crew-head">
+            {% if employee.avatar_url %}
+            <img src="{{ employee.avatar_url }}" alt="">
+            {% else %}
+            <span class="schedule-avatar-fallback">{{ employee.name.split()[0][0] }}{{ employee.name.split()[-1][0] }}</span>
+            {% endif %}
+            <div><strong>{{ employee.name }}</strong><small>{{ employee.position_label }}</small></div>
+          </article>
+          {% endfor %}
+        </div>
+
+        <div class="schedule-time-axis" style="height: {{ grid_height }}px">
+          {% for mark in hour_marks %}
+          <span class="schedule-hour-label" style="top: {{ mark.top_px }}px">{{ mark.label }}</span>
+          {% endfor %}
+        </div>
+
+        <div class="schedule-columns" style="height: {{ grid_height }}px">
+          {% for employee in visible_crew %}
+          <div class="schedule-column" data-employee-id="{{ employee.id }}" onclick="handleScheduleColumnClick(event, {{ employee.id }})">
+            {% for mark in hour_marks %}
+            <span class="schedule-hour-line" style="top: {{ mark.top_px }}px"></span>
+            <span class="schedule-half-line" style="top: {{ mark.top_px + 37.5 }}px"></span>
+            {% endfor %}
+            {% if now_line_px is not none %}<span class="schedule-now-line" style="top: {{ now_line_px }}px"><i></i></span>{% endif %}
+
+            {% for card in cards_by_employee.get(employee.id, []) %}
+            <button type="button"
+                    class="schedule-card {{ card.kind }} boat-tone-{{ card.boat_tone }}"
+                    style="top: {{ card.top_px }}px; height: {{ card.height_px }}px"
+                    onclick="event.stopPropagation(); openScheduleEdit({{ card.id }})">
+              <span class="schedule-card-time">{{ card.start_time }}–{{ card.end_time }}</span>
+              <strong>{{ card.service_name }}</strong>
+              <span class="schedule-card-boat">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 14h14l-2 3H5l-2-3zM6 14V8h7l2 6M8 8V5h4v3"/></svg>
+                {{ card.boat }}
+              </span>
+              {% if card.kind == 'event' %}
+              <span class="schedule-card-meta">{{ card.participants_count }}/{{ card.capacity }} мест · {{ card.assignment_role }}</span>
+              {% else %}
+              <span class="schedule-card-meta">{{ card.customer_name }}{% if card.customer_phone %} · {{ card.customer_phone }}{% endif %}</span>
+              {% endif %}
+            </button>
+            {% endfor %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </section>
+  <p class="schedule-board-hint">Нажмите на свободное время, чтобы создать рейс. Нажмите на карточку, чтобы перенести, переназначить или удалить её.</p>
+  {% else %}
+  <section class="panel empty-state schedule-empty">
+    <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+    <div class="t">Нет сотрудников для расписания</div>
+    <div class="s">Добавьте сотруднику должность «Капитан», «Гид» или «Гид-капитан».</div>
+    <a href="{{ url_for('employees.index') }}" class="btn-secondary">Открыть сотрудников</a>
+  </section>
+  {% endif %}
+</main>
+
+<div class="schedule-modal" id="scheduleModal" hidden>
+  <div class="schedule-modal-backdrop" onclick="closeScheduleModal()"></div>
+  <section class="schedule-modal-card" role="dialog" aria-modal="true" aria-labelledby="scheduleModalTitle">
+    <header class="schedule-modal-header">
+      <div>
+        <span id="scheduleModalEyebrow">Новый рейс</span>
+        <h2 id="scheduleModalTitle">Добавить в расписание</h2>
+      </div>
+      <button type="button" class="schedule-modal-close" onclick="closeScheduleModal()" aria-label="Закрыть">×</button>
+    </header>
+
+    <form method="post" action="{{ url_for('schedule.create_item') }}" id="scheduleItemForm" class="schedule-form">
+      <input type="hidden" name="return_employee" value="{{ selected_employee }}">
+      <div class="schedule-kind-switch" role="group" aria-label="Тип рейса">
+        {% for value, label in item_kinds.items() %}
+        <label><input type="radio" name="kind" value="{{ value }}" {{ 'checked' if loop.first }} onchange="syncScheduleKind()"><span>{{ label }}</span></label>
+        {% endfor %}
+      </div>
+
+      <div class="schedule-form-grid">
+        <label class="field schedule-field-wide">
+          <span>Вид рейса</span>
+          <select name="service_name" id="scheduleService" required onchange="applyScheduleDuration()">
+            <option value="" disabled selected>Выберите услугу</option>
+            {% for service in trip_services %}
+            <option value="{{ service.name }}" data-hours="{{ service.hours }}">{{ service.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Катер</span>
+          <select name="boat" id="scheduleBoat" required>
+            <option value="" disabled selected>Выберите катер</option>
+            {% for boat in boats %}<option value="{{ boat.name }}">{{ boat.name }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Дата</span>
+          <input type="date" name="trip_date" id="scheduleDate" value="{{ day.isoformat() }}" required>
+        </label>
+        <label class="field">
+          <span>Начало</span>
+          <input type="time" name="start_time" id="scheduleStart" step="1800" required onchange="applyScheduleDuration()">
+        </label>
+        <label class="field">
+          <span>Окончание</span>
+          <input type="time" name="end_time" id="scheduleEnd" step="1800" required>
+        </label>
+      </div>
+
+      <div class="schedule-form-section">
+        <div class="schedule-form-section-heading"><span>Экипаж</span><small>Сотрудник не может быть назначен на два пересекающихся рейса</small></div>
+        <div id="scheduleAssignments"></div>
+        <button type="button" class="schedule-add-assignment" onclick="addScheduleAssignment()">+ Добавить сотрудника</button>
+      </div>
+
+      <div class="schedule-form-grid schedule-booking-fields" id="scheduleBookingFields">
+        <label class="field">
+          <span>Имя клиента</span>
+          <input type="text" name="customer_name" id="scheduleCustomer" maxlength="180" placeholder="Имя или ФИО">
+        </label>
+        <label class="field">
+          <span>Телефон</span>
+          <input type="tel" name="customer_phone" id="schedulePhone" maxlength="40" placeholder="+7 999 000-00-00">
+        </label>
+      </div>
+
+      <div class="schedule-form-grid schedule-event-fields" id="scheduleEventFields" hidden>
+        <label class="field">
+          <span>Вместимость</span>
+          <input type="number" name="capacity" id="scheduleCapacity" min="1" max="100" value="10">
+        </label>
+        <label class="field">
+          <span>Уже записано</span>
+          <input type="number" name="participants_count" id="scheduleParticipants" min="0" max="100" value="0">
+        </label>
+      </div>
+
+      <div class="schedule-form-grid">
+        <label class="field">
+          <span>Плановая стоимость, ₽</span>
+          <input type="text" inputmode="decimal" name="revenue" id="scheduleRevenue" value="0">
+        </label>
+        <label class="field schedule-field-wide">
+          <span>Комментарий</span>
+          <textarea name="note" id="scheduleNote" maxlength="2000" rows="3" placeholder="Пожелания клиента, место посадки, важные детали"></textarea>
+        </label>
+      </div>
+
+      <footer class="schedule-form-actions">
+        <button type="button" class="btn-secondary" onclick="closeScheduleModal()">Отмена</button>
+        <button type="submit" id="scheduleSubmit">Создать рейс</button>
+      </footer>
+    </form>
+
+    <form method="post" id="scheduleDeleteForm" class="schedule-delete-form" hidden onsubmit="return confirm('Удалить рейс из расписания?');">
+      <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
+      <input type="hidden" name="return_employee" value="{{ selected_employee }}">
+      <button type="submit" class="icon-btn danger" title="Удалить рейс" aria-label="Удалить рейс">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h12M8 3h4l1 3H7l1-3zM6 6l.7 11h6.6L14 6M8.5 9v5M11.5 9v5"/></svg>
+      </button>
+      <span>Удалить рейс</span>
+    </form>
+  </section>
+</div>
+
+<template id="scheduleAssignmentTemplate">
+  <div class="schedule-assignment-row">
+    <label class="field">
+      <span>Сотрудник</span>
+      <select name="employee_id[]" required>
+        <option value="" disabled selected>Выберите сотрудника</option>
+        {% for employee in crew %}<option value="{{ employee.id }}">{{ employee.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="field">
+      <span>Роль</span>
+      <select name="role[]">
+        {% for value, label in crew_roles.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="button" class="icon-btn danger" onclick="removeScheduleAssignment(this)" aria-label="Убрать сотрудника">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 5l10 10M15 5L5 15"/></svg>
+    </button>
+  </div>
+</template>
+
+<script>
+  const scheduleItems = {{ items|tojson }};
+  const scheduleDayStart = {{ day_start_minutes }};
+  const schedulePxPerMinute = {{ px_per_minute }};
+  const scheduleBaseUrl = {{ url_for('schedule.index')|tojson }};
+  const scheduleCreateUrl = {{ url_for('schedule.create_item')|tojson }};
+
+  function changeScheduleDate(value) {
+    const params = new URLSearchParams({date: value, employee: {{ selected_employee|tojson }}});
+    window.location.href = scheduleBaseUrl + '?' + params.toString();
+  }
+  function changeScheduleEmployee(value) {
+    const params = new URLSearchParams({date: {{ day.isoformat()|tojson }}, employee: value});
+    window.location.href = scheduleBaseUrl + '?' + params.toString();
+  }
+  function roundHalfHour(minutes) { return Math.max(0, Math.min(1410, Math.round(minutes / 30) * 30)); }
+  function minutesToTime(minutes) {
+    const safe = Math.max(0, Math.min(1439, minutes));
+    return String(Math.floor(safe / 60)).padStart(2, '0') + ':' + String(safe % 60).padStart(2, '0');
+  }
+  function setScheduleModalOpen(open) {
+    const modal = document.getElementById('scheduleModal');
+    modal.hidden = !open;
+    document.body.classList.toggle('schedule-modal-open', open);
+    if (open) setTimeout(() => document.getElementById('scheduleService').focus(), 20);
+  }
+  function resetScheduleForm() {
+    const form = document.getElementById('scheduleItemForm');
+    form.reset();
+    form.action = scheduleCreateUrl;
+    document.getElementById('scheduleDate').value = {{ day.isoformat()|tojson }};
+    document.getElementById('scheduleStart').value = '10:00';
+    document.getElementById('scheduleEnd').value = '11:00';
+    document.getElementById('scheduleRevenue').value = '0';
+    document.getElementById('scheduleAssignments').innerHTML = '';
+    document.getElementById('scheduleDeleteForm').hidden = true;
+    document.getElementById('scheduleModalEyebrow').textContent = 'Новый рейс';
+    document.getElementById('scheduleModalTitle').textContent = 'Добавить в расписание';
+    document.getElementById('scheduleSubmit').textContent = 'Создать рейс';
+    syncScheduleKind();
+  }
+  function openScheduleCreate(employeeId, startTime) {
+    resetScheduleForm();
+    if (startTime) {
+      document.getElementById('scheduleStart').value = startTime;
+      document.getElementById('scheduleEnd').value = minutesToTime(
+        Number(startTime.slice(0, 2)) * 60 + Number(startTime.slice(3, 5)) + 60
+      );
+    }
+    addScheduleAssignment(employeeId || '');
+    setScheduleModalOpen(true);
+  }
+  function openScheduleEdit(itemId) {
+    resetScheduleForm();
+    const item = scheduleItems.find(candidate => candidate.id === itemId);
+    if (!item) return;
+    const form = document.getElementById('scheduleItemForm');
+    form.action = scheduleCreateUrl + '/' + item.id;
+    form.querySelector(`input[name="kind"][value="${item.kind}"]`).checked = true;
+    document.getElementById('scheduleBoat').value = item.boat;
+    document.getElementById('scheduleService').value = item.service_name;
+    document.getElementById('scheduleDate').value = item.trip_date;
+    document.getElementById('scheduleStart').value = item.start_time;
+    document.getElementById('scheduleEnd').value = item.end_time;
+    document.getElementById('scheduleCustomer').value = item.customer_name || '';
+    document.getElementById('schedulePhone').value = item.customer_phone || '';
+    document.getElementById('scheduleCapacity').value = item.capacity || 10;
+    document.getElementById('scheduleParticipants').value = item.participants_count || 0;
+    document.getElementById('scheduleRevenue').value = item.revenue || 0;
+    document.getElementById('scheduleNote').value = item.note || '';
+    item.assignment_ids.forEach((employeeId, index) => addScheduleAssignment(employeeId, item.assignment_roles[index]));
+    document.getElementById('scheduleModalEyebrow').textContent = item.kind_label;
+    document.getElementById('scheduleModalTitle').textContent = item.service_name;
+    document.getElementById('scheduleSubmit').textContent = 'Сохранить изменения';
+    const deleteForm = document.getElementById('scheduleDeleteForm');
+    deleteForm.action = scheduleCreateUrl + '/' + item.id + '/delete';
+    deleteForm.hidden = false;
+    syncScheduleKind();
+    setScheduleModalOpen(true);
+  }
+  function closeScheduleModal() { setScheduleModalOpen(false); }
+  function syncScheduleKind() {
+    const kind = document.querySelector('input[name="kind"]:checked').value;
+    const booking = document.getElementById('scheduleBookingFields');
+    const eventFields = document.getElementById('scheduleEventFields');
+    booking.hidden = kind !== 'booking';
+    eventFields.hidden = kind !== 'event';
+    document.getElementById('scheduleCustomer').required = kind === 'booking';
+  }
+  function addScheduleAssignment(employeeId, role) {
+    const fragment = document.getElementById('scheduleAssignmentTemplate').content.cloneNode(true);
+    const row = fragment.querySelector('.schedule-assignment-row');
+    if (employeeId) row.querySelector('[name="employee_id[]"]').value = String(employeeId);
+    row.querySelector('[name="role[]"]').value = role || 'guide_captain';
+    document.getElementById('scheduleAssignments').appendChild(fragment);
+  }
+  function removeScheduleAssignment(button) {
+    const rows = document.querySelectorAll('.schedule-assignment-row');
+    if (rows.length === 1) return;
+    button.closest('.schedule-assignment-row').remove();
+  }
+  function applyScheduleDuration() {
+    const service = document.getElementById('scheduleService');
+    const start = document.getElementById('scheduleStart').value;
+    if (!service.selectedOptions.length || !start) return;
+    const hours = Number(service.selectedOptions[0].dataset.hours || 1);
+    const startMinutes = Number(start.slice(0, 2)) * 60 + Number(start.slice(3, 5));
+    document.getElementById('scheduleEnd').value = minutesToTime(startMinutes + Math.round(hours * 60));
+  }
+  function handleScheduleColumnClick(event, employeeId) {
+    if (event.target.closest('.schedule-card')) return;
+    const column = event.currentTarget;
+    const minutes = roundHalfHour(scheduleDayStart + event.offsetY / schedulePxPerMinute);
+    openScheduleCreate(employeeId, minutesToTime(minutes));
+  }
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !document.getElementById('scheduleModal').hidden) closeScheduleModal();
+  });
+</script>
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+</body>
+</html>
