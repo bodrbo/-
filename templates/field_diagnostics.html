@@ -83,14 +83,26 @@
         <span>Новый диагностический лист</span>
       </button>
       {% for sheet in sheets %}
-      <a class="diag-card field-diagnostic-card" href="{{ url_for('field_diagnostics.sheet', sheet_id=sheet.id) }}">
-        <span class="field-diagnostic-card-status {{ 'is-complete' if sheet.status == 'completed' }}">
-          {{ 'Завершён' if sheet.status == 'completed' else 'В процессе' }}
-        </span>
-        <span class="field-diagnostic-card-model">{{ sheet.boat_model }}</span>
-        <span class="field-diagnostic-card-owner">{{ sheet.owner_name }}</span>
-        <span class="field-diagnostic-card-meta">{{ inspection_types.get(sheet.inspection_type, sheet.inspection_type) }} · {{ sheet.started_at[:10]|ru_date }}</span>
-      </a>
+      <div class="field-diagnostic-card-wrap">
+        <a class="diag-card field-diagnostic-card" href="{{ url_for('field_diagnostics.sheet', sheet_id=sheet.id) }}">
+          <span class="field-diagnostic-card-status {{ 'is-complete' if sheet.status == 'completed' }}">
+            {{ 'Завершён' if sheet.status == 'completed' else 'В процессе' }}
+          </span>
+          <span class="field-diagnostic-card-model">{{ sheet.boat_model }}</span>
+          <span class="field-diagnostic-card-owner">{{ sheet.owner_name }}</span>
+          <span class="field-diagnostic-card-meta">{{ inspection_types.get(sheet.inspection_type, sheet.inspection_type) }} · {{ sheet.started_at[:10]|ru_date }}</span>
+        </a>
+        <div class="field-diagnostic-card-actions">
+          <a href="{{ url_for('field_diagnostics.edit_sheet', sheet_id=sheet.id) }}" class="icon-btn" title="Редактировать" aria-label="Редактировать диагностический лист">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.8V17h2.2L15 8.2 11.8 5 3 13.8zM10.8 6l3.2 3.2M13.2 3.6l3.2 3.2"/></svg>
+          </a>
+          <form action="{{ url_for('field_diagnostics.delete_sheet', sheet_id=sheet.id) }}" method="post" onsubmit="return confirm('Удалить диагностический лист №{{ sheet.id }}?');">
+            <button type="submit" class="icon-btn danger" title="Удалить" aria-label="Удалить диагностический лист">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+            </button>
+          </form>
+        </div>
+      </div>
       {% endfor %}
     </div>
     {% if not sheets %}
@@ -196,4 +208,3 @@
 </script>
 </body>
 </html>
-

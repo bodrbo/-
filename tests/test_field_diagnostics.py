@@ -42,11 +42,30 @@ class FieldDiagnosticsTests(unittest.TestCase):
             },
         )
 
-    def test_routes_require_admin_login(self):
-        response = self.client.get("/tuning/diagnostics/field")
+    @staticmethod
+    def sheet_id_from(response):
+        return int(response.headers["Location"].rstrip("/").rsplit("/", 1)[-1])
 
-        self.assertEqual(response.status_code, 302)
-        self.assertIn("/admin/login", response.headers["Location"])
+    def answer_all_questions(self, sheet_id, inspection_type="water"):
+        for question_index in range(
+            len(FIELD_DIAGNOSTIC_QUESTIONS[inspection_type])
+        ):
+            response = self.client.post(
+                "/tuning/diagnostics/field/%d/answer" % sheet_id,
+                data={"question_index": str(question_index), "status": "ok"},
+            )
+            self.assertEqual(response.status_code, 302)
+
+    def test_routes_require_admin_login(self):
+        responses = [
+            self.client.get("/tuning/diagnostics/field"),
+            self.client.get("/tuning/diagnostics/field/1/edit"),
+            self.client.post("/tuning/diagnostics/field/1/delete"),
+        ]
+
+        for response in responses:
+            self.assertEqual(response.status_code, 302)
+            self.assertIn("/admin/login", response.headers["Location"])
 
     def test_new_sheet_adds_custom_model_to_shared_catalog(self):
         self.login()
@@ -302,6 +321,216 @@ class FieldDiagnosticsTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertTrue(response.headers["Location"].endswith(sheet_path))
+
+    def test_completed_sheet_can_be_fully_edited(self):
+        self.login()
+        created = self.create_sheet()
+        sheet_id = self.sheet_id_from(created)
+        self.answer_all_questions(sheet_id)
+        self.client.post(
+            "/tuning/diagnostics/field/%d/other" % sheet_id,
+            data={"other_defect[]": ["Старое замечание", "Удалить замечание"]},
+        )
+
+        edit_page = self.client.get(
+            "/tuning/diagnostics/field/%d/edit" % sheet_id
+        )
+        edit_html = edit_page.get_data(as_text=True)
+        self.assertEqual(edit_page.status_code, 200)
+        self.assertIn("Редактировать диагностический лист", edit_html)
+        self.assertIn("После начала осмотра тип зафиксирован", edit_html)
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            answers = db.execute(
+                "SELECT * FROM field_diagnostic_answers WHERE sheet_id = ? "
+                "ORDER BY question_index",
+                (sheet_id,),
+            ).fetchall()
+            extras = db.execute(
+                "SELECT * FROM field_diagnostic_extra_defects WHERE sheet_id = ? "
+                "ORDER BY id",
+                (sheet_id,),
+            ).fetchall()
+
+        data = {
+            "boat_model": "Test Field Edited",
+            "owner_name": "Пётр Новый",
+            "owner_phone": "+7 921 000-00-00",
+            "inspection_type": "water",
+            "extra_id[]": [str(extras[0]["id"]), str(extras[1]["id"]), ""],
+            "extra_description[]": [
+                "Исправленное замечание",
+                "",
+                "Новое замечание",
+            ],
+        }
+        for answer in answers:
+            status = "problem" if answer["question_index"] == 0 else "ok"
+            data["answer_status_%d" % answer["id"]] = status
+            data["answer_comment_%d" % answer["id"]] = (
+                "Не работает главный выключатель" if status == "problem" else ""
+            )
+
+        response = self.client.post(
+            "/tuning/diagnostics/field/%d/edit" % sheet_id,
+            data=data,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response.headers["Location"].endswith(
+                "/tuning/diagnostics/field/%d" % sheet_id
+            )
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            sheet = db.execute(
+                "SELECT * FROM field_diagnostic_sheets WHERE id = ?", (sheet_id,)
+            ).fetchone()
+            profile = db.execute(
+                "SELECT * FROM tuning_boat_profiles WHERE id = ?",
+                (sheet["boat_profile_id"],),
+            ).fetchone()
+            changed_answer = db.execute(
+                "SELECT * FROM field_diagnostic_answers "
+                "WHERE sheet_id = ? AND question_index = 0",
+                (sheet_id,),
+            ).fetchone()
+            saved_extras = db.execute(
+                "SELECT description FROM field_diagnostic_extra_defects "
+                "WHERE sheet_id = ? ORDER BY id",
+                (sheet_id,),
+            ).fetchall()
+
+            self.assertEqual(sheet["boat_model"], "Test Field Edited")
+            self.assertEqual(sheet["owner_name"], "Пётр Новый")
+            self.assertEqual(sheet["owner_phone"], "+7 921 000-00-00")
+            self.assertEqual(profile["model_name"], "Test Field Edited")
+            self.assertEqual(changed_answer["status"], "problem")
+            self.assertEqual(
+                changed_answer["comment"], "Не работает главный выключатель"
+            )
+            self.assertEqual(
+                [row["description"] for row in saved_extras],
+                ["Исправленное замечание", "Новое замечание"],
+            )
+
+        result_html = self.client.get(
+            "/tuning/diagnostics/field/%d" % sheet_id
+        ).get_data(as_text=True)
+        self.assertIn("Test Field Edited", result_html)
+        self.assertIn("Не работает главный выключатель", result_html)
+        self.assertIn("Исправленное замечание", result_html)
+        self.assertNotIn("Удалить замечание", result_html)
+
+    def test_inspection_type_can_only_change_before_answers(self):
+        self.login()
+        created = self.create_sheet(inspection_type="water")
+        sheet_id = self.sheet_id_from(created)
+        edit_path = "/tuning/diagnostics/field/%d/edit" % sheet_id
+        base_data = {
+            "boat_model": "Test Field 520",
+            "owner_name": "Иван Судовладелец",
+            "owner_phone": "+7 999 123-45-67",
+            "inspection_type": "land",
+            "extra_id[]": "",
+            "extra_description[]": "",
+        }
+
+        changed = self.client.post(edit_path, data=base_data)
+        self.assertEqual(changed.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            sheet = db.execute(
+                "SELECT * FROM field_diagnostic_sheets WHERE id = ?", (sheet_id,)
+            ).fetchone()
+            self.assertEqual(sheet["inspection_type"], "land")
+            self.assertIn(
+                FIELD_DIAGNOSTIC_QUESTIONS["land"][0]["title"],
+                sheet["question_set_json"],
+            )
+
+        answered = self.client.post(
+            "/tuning/diagnostics/field/%d/answer" % sheet_id,
+            data={"question_index": "0", "status": "ok"},
+        )
+        self.assertEqual(answered.status_code, 302)
+        base_data["inspection_type"] = "water"
+        blocked = self.client.post(edit_path, data=base_data)
+
+        self.assertEqual(blocked.status_code, 400)
+        self.assertIn(
+            "Тип осмотра нельзя изменить после первого ответа",
+            blocked.get_data(as_text=True),
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            sheet = db.execute(
+                "SELECT * FROM field_diagnostic_sheets WHERE id = ?", (sheet_id,)
+            ).fetchone()
+            self.assertEqual(sheet["inspection_type"], "land")
+
+    def test_delete_sheet_removes_results_but_keeps_catalog_profile(self):
+        self.login()
+        created = self.create_sheet()
+        sheet_id = self.sheet_id_from(created)
+        self.client.post(
+            "/tuning/diagnostics/field/%d/answer" % sheet_id,
+            data={"question_index": "0", "status": "problem", "comment": "Тест"},
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            profile_id = db.execute(
+                "SELECT boat_profile_id FROM field_diagnostic_sheets WHERE id = ?",
+                (sheet_id,),
+            ).fetchone()["boat_profile_id"]
+            db.execute(
+                "INSERT INTO field_diagnostic_extra_defects "
+                "(sheet_id, description, created_at) VALUES (?, 'Тест', '2026-08-31')",
+                (sheet_id,),
+            )
+            db.commit()
+
+        response = self.client.post(
+            "/tuning/diagnostics/field/%d/delete" % sheet_id
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response.headers["Location"].endswith("/tuning/diagnostics/field")
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.assertEqual(
+                db.execute(
+                    "SELECT COUNT(*) FROM field_diagnostic_sheets WHERE id = ?",
+                    (sheet_id,),
+                ).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                db.execute(
+                    "SELECT COUNT(*) FROM field_diagnostic_answers WHERE sheet_id = ?",
+                    (sheet_id,),
+                ).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                db.execute(
+                    "SELECT COUNT(*) FROM field_diagnostic_extra_defects "
+                    "WHERE sheet_id = ?",
+                    (sheet_id,),
+                ).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                db.execute(
+                    "SELECT COUNT(*) FROM tuning_boat_profiles WHERE id = ?",
+                    (profile_id,),
+                ).fetchone()[0],
+                1,
+            )
 
 
 if __name__ == "__main__":

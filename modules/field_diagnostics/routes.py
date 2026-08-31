@@ -119,6 +119,94 @@ def create_blueprint(
         )
         return response, status_code
 
+    def edit_context(db, diagnostic_sheet, errors=None, form_values=None,
+                     extra_form_rows=None):
+        answers = db.execute(
+            "SELECT * FROM field_diagnostic_answers "
+            "WHERE sheet_id = ? ORDER BY question_index",
+            (diagnostic_sheet["id"],),
+        ).fetchall()
+        extra_defects = db.execute(
+            "SELECT * FROM field_diagnostic_extra_defects "
+            "WHERE sheet_id = ? ORDER BY id",
+            (diagnostic_sheet["id"],),
+        ).fetchall()
+        answers_by_block = []
+        for block_name in DIAGNOSTIC_BLOCKS:
+            answers_by_block.append({
+                "name": block_name,
+                "answers": [
+                    answer for answer in answers
+                    if answer["section_name"] == block_name
+                ],
+            })
+        values = form_values or {
+            "boat_model": diagnostic_sheet["boat_model"],
+            "owner_name": diagnostic_sheet["owner_name"],
+            "owner_phone": diagnostic_sheet["owner_phone"],
+            "inspection_type": diagnostic_sheet["inspection_type"],
+        }
+        if extra_form_rows is None:
+            extra_form_rows = [
+                {"id": row["id"], "description": row["description"]}
+                for row in extra_defects
+            ]
+            extra_form_rows.append({"id": "", "description": ""})
+        return {
+            "active_page": "tuning",
+            "sub_page": "diagnostics",
+            "diag_page": "field",
+            "sheet": diagnostic_sheet,
+            "inspection_types": INSPECTION_TYPES,
+            "boat_model_choices": boat_model_choices(db),
+            "answers": answers,
+            "answers_by_block": answers_by_block,
+            "extra_defects": extra_defects,
+            "extra_form_rows": extra_form_rows,
+            "errors": errors or [],
+            "form_values": values,
+        }
+
+    def ensure_boat_profile(db, model_name, now):
+        model_key = normalize_boat_model(model_name)
+        profile = db.execute(
+            "SELECT id, model_name FROM tuning_boat_profiles WHERE model_key = ?",
+            (model_key,),
+        ).fetchone()
+        if profile is not None:
+            return profile["id"], profile["model_name"]
+        cursor = db.execute(
+            "INSERT INTO tuning_boat_profiles "
+            "(model_key, model_name, specifications, created_at, updated_at) "
+            "VALUES (?, ?, '', ?, ?)",
+            (model_key, model_name, now, now),
+        )
+        return cursor.lastrowid, model_name
+
+    def validate_sheet_values(form):
+        values = {
+            "boat_model": " ".join(form.get("boat_model", "").split()),
+            "owner_name": " ".join(form.get("owner_name", "").split()),
+            "owner_phone": form.get("owner_phone", "").strip(),
+            "inspection_type": form.get("inspection_type", "").strip(),
+        }
+        errors = []
+        if not values["boat_model"]:
+            errors.append("Укажите модель лодки.")
+        elif len(values["boat_model"]) > MODEL_LIMIT:
+            errors.append("Название модели должно быть короче 180 символов.")
+        if not values["owner_name"]:
+            errors.append("Укажите имя судовладельца.")
+        elif len(values["owner_name"]) > OWNER_NAME_LIMIT:
+            errors.append("Имя судовладельца должно быть короче 160 символов.")
+        if not values["owner_phone"]:
+            errors.append("Укажите телефон судовладельца.")
+        elif len(values["owner_phone"]) > PHONE_LIMIT:
+            errors.append("Телефон должен быть короче 50 символов.")
+        if values["inspection_type"] not in INSPECTION_TYPES:
+            errors.append("Выберите тип осмотра.")
+        return values, errors
+
     def sheet_context(db, diagnostic_sheet, answer_error=None,
                       other_error=None, other_values=None):
         questions = questions_for_sheet(db, diagnostic_sheet)
@@ -210,49 +298,15 @@ def create_blueprint(
     @blueprint.post("/tuning/diagnostics/field/add")
     @admin_login_required
     def add_sheet():
-        values = {
-            "boat_model": " ".join(request.form.get("boat_model", "").split()),
-            "owner_name": " ".join(request.form.get("owner_name", "").split()),
-            "owner_phone": request.form.get("owner_phone", "").strip(),
-            "inspection_type": request.form.get("inspection_type", "").strip(),
-        }
-        errors = []
-        if not values["boat_model"]:
-            errors.append("Укажите модель лодки.")
-        elif len(values["boat_model"]) > MODEL_LIMIT:
-            errors.append("Название модели должно быть короче 180 символов.")
-        if not values["owner_name"]:
-            errors.append("Укажите имя судовладельца.")
-        elif len(values["owner_name"]) > OWNER_NAME_LIMIT:
-            errors.append("Имя судовладельца должно быть короче 160 символов.")
-        if not values["owner_phone"]:
-            errors.append("Укажите телефон судовладельца.")
-        elif len(values["owner_phone"]) > PHONE_LIMIT:
-            errors.append("Телефон должен быть короче 50 символов.")
-        if values["inspection_type"] not in INSPECTION_TYPES:
-            errors.append("Выберите тип осмотра.")
+        values, errors = validate_sheet_values(request.form)
         if errors:
             return render_index(errors, values, 400)
 
         db = get_db()
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-        model_key = normalize_boat_model(values["boat_model"])
-        profile = db.execute(
-            "SELECT id, model_name FROM tuning_boat_profiles WHERE model_key = ?",
-            (model_key,),
-        ).fetchone()
-        if profile is None:
-            cursor = db.execute(
-                "INSERT INTO tuning_boat_profiles "
-                "(model_key, model_name, specifications, created_at, updated_at) "
-                "VALUES (?, ?, '', ?, ?)",
-                (model_key, values["boat_model"], now, now),
-            )
-            profile_id = cursor.lastrowid
-            canonical_model = values["boat_model"]
-        else:
-            profile_id = profile["id"]
-            canonical_model = profile["model_name"]
+        profile_id, canonical_model = ensure_boat_profile(
+            db, values["boat_model"], now
+        )
 
         question_set_json = json.dumps(
             FIELD_DIAGNOSTIC_QUESTIONS[values["inspection_type"]],
@@ -289,6 +343,196 @@ def create_blueprint(
             "field_diagnostic_sheet.html",
             **sheet_context(db, diagnostic_sheet),
         )
+
+    @blueprint.route(
+        "/tuning/diagnostics/field/<int:sheet_id>/edit",
+        methods=["GET", "POST"],
+    )
+    @admin_login_required
+    def edit_sheet(sheet_id):
+        db = get_db()
+        diagnostic_sheet = get_sheet(db, sheet_id)
+        if diagnostic_sheet is None:
+            return redirect(url_for("field_diagnostics.index"))
+        if request.method == "GET":
+            return render_template(
+                "field_diagnostic_edit.html",
+                **edit_context(db, diagnostic_sheet),
+            )
+
+        values, errors = validate_sheet_values(request.form)
+        answers = db.execute(
+            "SELECT * FROM field_diagnostic_answers "
+            "WHERE sheet_id = ? ORDER BY question_index",
+            (sheet_id,),
+        ).fetchall()
+        if (
+            answers
+            and values["inspection_type"] in INSPECTION_TYPES
+            and values["inspection_type"] != diagnostic_sheet["inspection_type"]
+        ):
+            errors.append(
+                "Тип осмотра нельзя изменить после первого ответа. "
+                "Создайте новый лист, если был выбран неверный тип."
+            )
+            values["inspection_type"] = diagnostic_sheet["inspection_type"]
+
+        answer_updates = []
+        for answer in answers:
+            status = request.form.get(
+                "answer_status_%d" % answer["id"], answer["status"]
+            ).strip()
+            comment = request.form.get(
+                "answer_comment_%d" % answer["id"], answer["comment"] or ""
+            ).strip()
+            if status not in ANSWER_STATUSES:
+                errors.append(
+                    "Выберите корректный результат для пункта «%s»."
+                    % answer["question_title"]
+                )
+                continue
+            if status == "problem" and not comment:
+                errors.append(
+                    "Опишите неисправность в пункте «%s»."
+                    % answer["question_title"]
+                )
+            if len(comment) > COMMENT_LIMIT:
+                errors.append(
+                    "Описание в пункте «%s» должно быть короче 4000 символов."
+                    % answer["question_title"]
+                )
+            answer_updates.append(
+                (status, comment if status == "problem" else None, answer["id"])
+            )
+
+        extra_ids = request.form.getlist("extra_id[]")
+        extra_descriptions = request.form.getlist("extra_description[]")
+        extra_updates = []
+        existing_extra_ids = {
+            row["id"]
+            for row in db.execute(
+                "SELECT id FROM field_diagnostic_extra_defects WHERE sheet_id = ?",
+                (sheet_id,),
+            ).fetchall()
+        }
+        seen_extra_ids = set()
+        if len(extra_ids) != len(extra_descriptions):
+            errors.append("Не удалось сопоставить прочие неисправности. Обновите страницу.")
+        else:
+            for raw_id, raw_description in zip(extra_ids, extra_descriptions):
+                description = raw_description.strip()
+                if len(description) > OTHER_DEFECT_LIMIT:
+                    errors.append(
+                        "Описание каждой прочей неисправности должно быть короче 2000 символов."
+                    )
+                if raw_id:
+                    if not raw_id.isdigit() or int(raw_id) not in existing_extra_ids:
+                        errors.append("Одна из прочих неисправностей больше не существует.")
+                        continue
+                    extra_id = int(raw_id)
+                    if extra_id in seen_extra_ids:
+                        errors.append("Одна из прочих неисправностей отправлена дважды.")
+                        continue
+                    seen_extra_ids.add(extra_id)
+                    extra_updates.append((extra_id, description))
+                elif description:
+                    extra_updates.append((None, description))
+
+        resulting_extra_count = (
+            len(existing_extra_ids - seen_extra_ids)
+            + sum(1 for extra_id, description in extra_updates if extra_id and description)
+            + sum(1 for extra_id, description in extra_updates if extra_id is None and description)
+        )
+        if resulting_extra_count > OTHER_DEFECT_COUNT_LIMIT:
+            errors.append("В блоке «Прочее» можно сохранить не более 20 неисправностей.")
+
+        if errors:
+            extra_form_rows = [
+                {"id": raw_id, "description": raw_description}
+                for raw_id, raw_description in zip(extra_ids, extra_descriptions)
+            ]
+            if not extra_form_rows:
+                extra_form_rows = [{"id": "", "description": ""}]
+            return render_template(
+                "field_diagnostic_edit.html",
+                **edit_context(
+                    db,
+                    diagnostic_sheet,
+                    errors=errors,
+                    form_values=values,
+                    extra_form_rows=extra_form_rows,
+                ),
+            ), 400
+
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        profile_id, canonical_model = ensure_boat_profile(
+            db, values["boat_model"], now
+        )
+        question_set_json = diagnostic_sheet["question_set_json"]
+        if values["inspection_type"] != diagnostic_sheet["inspection_type"]:
+            question_set_json = json.dumps(
+                FIELD_DIAGNOSTIC_QUESTIONS[values["inspection_type"]],
+                ensure_ascii=False,
+            )
+        db.execute(
+            "UPDATE field_diagnostic_sheets SET boat_profile_id = ?, boat_model = ?, "
+            "owner_name = ?, owner_phone = ?, inspection_type = ?, question_set_json = ? "
+            "WHERE id = ?",
+            (
+                profile_id,
+                canonical_model,
+                values["owner_name"],
+                values["owner_phone"],
+                values["inspection_type"],
+                question_set_json,
+                sheet_id,
+            ),
+        )
+        for status, comment, answer_id in answer_updates:
+            db.execute(
+                "UPDATE field_diagnostic_answers SET status = ?, comment = ? "
+                "WHERE id = ? AND sheet_id = ?",
+                (status, comment, answer_id, sheet_id),
+            )
+        for extra_id, description in extra_updates:
+            if extra_id is None:
+                db.execute(
+                    "INSERT INTO field_diagnostic_extra_defects "
+                    "(sheet_id, description, created_at) VALUES (?, ?, ?)",
+                    (sheet_id, description, now),
+                )
+            elif description:
+                db.execute(
+                    "UPDATE field_diagnostic_extra_defects SET description = ? "
+                    "WHERE id = ? AND sheet_id = ?",
+                    (description, extra_id, sheet_id),
+                )
+            else:
+                db.execute(
+                    "DELETE FROM field_diagnostic_extra_defects "
+                    "WHERE id = ? AND sheet_id = ?",
+                    (extra_id, sheet_id),
+                )
+        db.commit()
+        return redirect(url_for("field_diagnostics.sheet", sheet_id=sheet_id))
+
+    @blueprint.post("/tuning/diagnostics/field/<int:sheet_id>/delete")
+    @admin_login_required
+    def delete_sheet(sheet_id):
+        db = get_db()
+        if get_sheet(db, sheet_id) is None:
+            return redirect(url_for("field_diagnostics.index"))
+        db.execute(
+            "DELETE FROM field_diagnostic_extra_defects WHERE sheet_id = ?",
+            (sheet_id,),
+        )
+        db.execute(
+            "DELETE FROM field_diagnostic_answers WHERE sheet_id = ?",
+            (sheet_id,),
+        )
+        db.execute("DELETE FROM field_diagnostic_sheets WHERE id = ?", (sheet_id,))
+        db.commit()
+        return redirect(url_for("field_diagnostics.index"))
 
     @blueprint.post("/tuning/diagnostics/field/<int:sheet_id>/answer")
     @admin_login_required

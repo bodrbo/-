@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Редактировать {{ sheet.boat_model }} — выездная диагностика</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<meta name="theme-color" content="#3498db">
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+</head>
+<body>
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100"><g fill="var(--brass)"><path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/><path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/><path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/></g><circle cx="50" cy="50" r="15" fill="none" stroke="var(--ink)" stroke-width="4"/><circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/></svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="topbar-top-row">
+      <div class="brand"><a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a></div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg></button>
+    </div>
+    {% include '_admin_main_nav.html' %}
+    <div class="title-block"><h1>Редактировать диагностический лист</h1></div>
+    <div class="topbar-actions">
+      <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления"><svg class="push-toggle-off" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8z"/></svg><svg class="push-toggle-on" viewBox="0 0 20 20" fill="currentColor"><path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8z"/></svg></button>
+      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="wrap field-diagnostic-edit-page">
+  <nav class="sub-tabs">
+    <a href="{{ url_for('tuning_index') }}">Заказы</a>
+    <a href="{{ url_for('tuning_diagnostics') }}" class="active">Диагностика лодок</a>
+    <a href="{{ url_for('tuning_boat_catalog') }}">Каталог лодок</a>
+  </nav>
+  <nav class="sub-tabs sub-tabs-nested" aria-label="Виды диагностики">
+    <a href="{{ url_for('tuning_diagnostics') }}">Корпусная диагностика</a>
+    <a href="{{ url_for('field_diagnostics.index') }}" class="active">Выездная диагностика</a>
+  </nav>
+
+  <a href="{{ url_for('field_diagnostics.sheet', sheet_id=sheet.id) }}" class="term field-diagnostic-back">← Вернуться к листу</a>
+
+  {% if errors %}
+  <div class="alert" role="alert">
+    <strong>Не удалось сохранить изменения:</strong>
+    <ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <form action="{{ url_for('field_diagnostics.edit_sheet', sheet_id=sheet.id) }}" method="post" class="field-diagnostic-edit-form">
+    <section class="panel field-diagnostic-edit-section">
+      <div class="field-diagnostic-edit-heading">
+        <div><span class="field-diagnostics-eyebrow">Реквизиты</span><h2>Данные диагностического листа</h2></div>
+        <span class="field-diagnostic-edit-id">Лист №{{ sheet.id }}</span>
+      </div>
+      <div class="field-diagnostic-edit-grid">
+        <div class="field">
+          <label for="edit_boat_model_search">Модель лодки</label>
+          {% set current_boat_model = form_values.get('boat_model', sheet.boat_model) %}
+          <div class="combo-field" data-combo data-combo-allow-custom>
+            <input type="text" id="edit_boat_model_search" class="combo-input" data-combo-input
+                   value="{{ current_boat_model }}" data-selected-label="{{ current_boat_model }}"
+                   placeholder="Начните вводить название модели…" autocomplete="off"
+                   role="combobox" aria-autocomplete="list" required>
+            <input type="hidden" name="boat_model" data-combo-value value="{{ current_boat_model }}">
+            <div class="combo-dropdown hidden" data-combo-dropdown>
+              <p class="combo-empty hidden" data-combo-empty>Новая модель будет добавлена в каталог.</p>
+              {% for model in boat_model_choices %}
+              <div class="combo-option" data-value="{{ model }}" data-label="{{ model }}" data-search="{{ model|lower }}"><span class="combo-option-name">{{ model }}</span></div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <label for="edit_owner_name">Судовладелец</label>
+          <input type="text" id="edit_owner_name" name="owner_name" maxlength="160" required value="{{ form_values.get('owner_name', sheet.owner_name) }}">
+        </div>
+        <div class="field">
+          <label for="edit_owner_phone">Номер телефона</label>
+          <input type="tel" id="edit_owner_phone" name="owner_phone" maxlength="50" required inputmode="tel" value="{{ form_values.get('owner_phone', sheet.owner_phone) }}">
+        </div>
+        <div class="field">
+          <label for="edit_inspection_type">Тип осмотра</label>
+          {% set selected_type = form_values.get('inspection_type', sheet.inspection_type) %}
+          <select id="edit_inspection_type" name="inspection_type" {{ 'disabled' if answers }}>
+            {% for value, label in inspection_types.items() %}<option value="{{ value }}" {{ 'selected' if selected_type == value }}>{{ label }}</option>{% endfor %}
+          </select>
+          {% if answers %}
+          <input type="hidden" name="inspection_type" value="{{ sheet.inspection_type }}">
+          <span class="field-context">После начала осмотра тип зафиксирован.</span>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+
+    {% for block in answers_by_block if block.name != 'Прочее' and block.answers %}
+    <section class="panel field-diagnostic-edit-section">
+      <div class="field-diagnostic-block-heading"><span>{{ '%02d'|format(loop.index) }}</span><h2>{{ block.name }}</h2></div>
+      <div class="field-diagnostic-edit-answers">
+        {% for answer in block.answers %}
+        {% set status_name = 'answer_status_' ~ answer.id %}
+        {% set comment_name = 'answer_comment_' ~ answer.id %}
+        {% set selected_status = request.form.get(status_name, answer.status) %}
+        <div class="field-diagnostic-edit-answer">
+          <div class="field-diagnostic-edit-answer-copy">
+            <strong>{{ answer.question_title }}</strong>
+            <p>{{ answer.question_text }}</p>
+          </div>
+          <div class="field-diagnostic-edit-answer-controls">
+            <div class="field">
+              <label for="{{ status_name }}">Результат</label>
+              <select id="{{ status_name }}" name="{{ status_name }}" class="field-diagnostic-answer-status">
+                <option value="ok" {{ 'selected' if selected_status == 'ok' }}>Исправно</option>
+                <option value="problem" {{ 'selected' if selected_status == 'problem' }}>Обнаружена неисправность</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="{{ comment_name }}">Описание неисправности</label>
+              <textarea id="{{ comment_name }}" name="{{ comment_name }}" maxlength="4000" placeholder="Заполняется для неисправного пункта">{{ request.form.get(comment_name, answer.comment or '') }}</textarea>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endfor %}
+
+    <section class="panel field-diagnostic-edit-section">
+      <div class="field-diagnostic-block-heading"><span>04</span><h2>Прочее</h2></div>
+      <p class="hint field-diagnostic-edit-hint">Исправьте описание, очистите поле для удаления или добавьте новую неисправность.</p>
+      <div class="field-diagnostic-edit-extras" id="editExtraList">
+        {% for row in extra_form_rows %}
+        <div class="field-diagnostic-edit-extra">
+          <input type="hidden" name="extra_id[]" value="{{ row.id }}">
+          <textarea name="extra_description[]" maxlength="2000" placeholder="Описание прочей неисправности">{{ row.description }}</textarea>
+          <button type="button" class="icon-btn danger" onclick="removeEditExtra(this)" title="Удалить неисправность" aria-label="Удалить неисправность">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+          </button>
+        </div>
+        {% endfor %}
+      </div>
+      <template id="editExtraTemplate">
+        <div class="field-diagnostic-edit-extra">
+          <input type="hidden" name="extra_id[]" value="">
+          <textarea name="extra_description[]" maxlength="2000" placeholder="Описание прочей неисправности"></textarea>
+          <button type="button" class="icon-btn danger" onclick="removeEditExtra(this)" title="Удалить неисправность" aria-label="Удалить неисправность">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+          </button>
+        </div>
+      </template>
+      <button type="button" class="btn-add" onclick="addEditExtra()">Добавить неисправность</button>
+    </section>
+
+    <div class="field-diagnostic-edit-savebar">
+      <span>Изменения сразу попадут в диагностический PDF.</span>
+      <div><a href="{{ url_for('field_diagnostics.sheet', sheet_id=sheet.id) }}" class="btn-secondary">Отмена</a><button type="submit">Сохранить изменения</button></div>
+    </div>
+  </form>
+
+  <section class="panel field-diagnostic-danger-zone">
+    <div><h2>Удалить диагностический лист</h2><p>Лист, ответы и прочие неисправности будут удалены без возможности восстановления.</p></div>
+    <form action="{{ url_for('field_diagnostics.delete_sheet', sheet_id=sheet.id) }}" method="post" onsubmit="return confirm('Удалить диагностический лист №{{ sheet.id }}? Это действие нельзя отменить.');">
+      <button type="submit" class="field-diagnostic-delete-button">Удалить лист</button>
+    </form>
+  </section>
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+  function addEditExtra() {
+    var list = document.getElementById('editExtraList');
+    var template = document.getElementById('editExtraTemplate');
+    if (list.querySelectorAll('.field-diagnostic-edit-extra:not(.is-removed)').length >= 20) return;
+    list.appendChild(template.content.cloneNode(true));
+    list.lastElementChild.querySelector('textarea').focus();
+  }
+  function removeEditExtra(button) {
+    var row = button.closest('.field-diagnostic-edit-extra');
+    var idInput = row.querySelector('input[name="extra_id[]"]');
+    if (idInput.value) {
+      row.querySelector('textarea').value = '';
+      row.classList.add('is-removed');
+    } else {
+      row.remove();
+    }
+  }
+</script>
+</body>
+</html>
+

@@ -44,7 +44,17 @@
     <a href="{{ url_for('field_diagnostics.index') }}" class="active">Выездная диагностика</a>
   </nav>
 
-  <a href="{{ url_for('field_diagnostics.index') }}" class="term field-diagnostic-back">← Ко всем листам</a>
+  <div class="field-diagnostic-page-toolbar">
+    <a href="{{ url_for('field_diagnostics.index') }}" class="term">← Ко всем листам</a>
+    <div class="field-diagnostic-page-actions">
+      <a href="{{ url_for('field_diagnostics.edit_sheet', sheet_id=sheet.id) }}" class="btn-secondary">Редактировать</a>
+      <form action="{{ url_for('field_diagnostics.delete_sheet', sheet_id=sheet.id) }}" method="post" onsubmit="return confirm('Удалить диагностический лист №{{ sheet.id }}? Это действие нельзя отменить.');">
+        <button type="submit" class="icon-btn danger" title="Удалить" aria-label="Удалить диагностический лист">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+        </button>
+      </form>
+    </div>
+  </div>
 
   <section class="field-diagnostic-summary-strip" aria-label="Данные осмотра">
     <div><span>Судовладелец</span><strong>{{ sheet.owner_name }}</strong><small>{{ sheet.owner_phone }}</small></div>
