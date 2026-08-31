@@ -3122,20 +3122,38 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   min-height: 37px;
   padding: 8px 10px 9px 13px;
   border: 0;
-  border-left: 4px solid rgba(255,255,255,.68);
+  border-left: 4px solid currentColor;
   border-radius: 8px;
-  color: #fff;
+  background: var(--schedule-card-color, #607d8b);
+  color: var(--schedule-card-ink, #fff);
   text-align: left;
   box-shadow: 0 8px 18px -13px rgba(15,42,53,.7);
   cursor: pointer;
   transition: transform .15s ease, box-shadow .15s ease;
 }
 .schedule-card:hover { z-index: 5; transform: translateY(-1px); box-shadow: 0 12px 24px -14px rgba(15,42,53,.82); }
-.schedule-card.booking { background: linear-gradient(145deg, #239bd3, #1686be); }
-.schedule-card.event { background: linear-gradient(145deg, #8055c4, #6942ab); }
-.schedule-card.boat-tone-1 { border-left-color: #f4c95d; }
-.schedule-card.boat-tone-2 { border-left-color: #74d39a; }
+.schedule-card.event { border-left-style: double; border-left-width: 6px; }
+.schedule-card-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+}
 .schedule-card-time { font-family: 'PT Mono', monospace; font-size: 9px; font-weight: 700; opacity: .9; }
+.schedule-card-kind {
+  overflow: hidden;
+  padding: 1px 4px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-family: 'PT Mono', monospace;
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: .78;
+}
 .schedule-card strong {
   display: -webkit-box;
   overflow: hidden;

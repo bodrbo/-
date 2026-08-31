@@ -108,6 +108,13 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertEqual(assignment["role"], "guide_captain")
         self.assertIsNone(item["accounting_trip_id"])
 
+        page = self.client.get(
+            "/schedule?date=2026-09-05"
+        ).get_data(as_text=True)
+        self.assertIn("--schedule-card-color: #673ab7", page)
+        self.assertIn("--schedule-card-ink: #ffffff", page)
+        self.assertIn("Запись", page)
+
     def test_admin_creates_group_event_without_client_fields(self):
         self.login()
         response = self.client.post(

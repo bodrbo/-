@@ -3408,6 +3408,7 @@ app.register_blueprint(
         get_db=get_db,
         admin_login_required=admin_login_required,
         boats=BOATS,
+        boat_colors=BOAT_COLORS,
         trip_services=[
             work_type for work_type in WORK_TYPES
             if "гид" not in work_type["name"].casefold()

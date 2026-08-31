@@ -221,7 +221,47 @@ def delete_item(db, item_id):
     return (True, "Рейс удалён из расписания.") if deleted else (False, "Рейс не найден.")
 
 
-def day_view(db, day, selected_employee, boats, avatar_url):
+def _normalise_hex_color(raw_color):
+    value = str(raw_color or "").strip().lstrip("#")
+    if len(value) == 3:
+        value = "".join(character * 2 for character in value)
+    if len(value) != 6 or any(
+        character not in "0123456789abcdefABCDEF" for character in value
+    ):
+        return None
+    return f"#{value.lower()}"
+
+
+def _relative_luminance(color):
+    channels = [int(color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+    channels = [
+        channel / 12.92
+        if channel <= 0.04045
+        else ((channel + 0.055) / 1.055) ** 2.4
+        for channel in channels
+    ]
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+
+def _card_ink_for(color):
+    background = _relative_luminance(color)
+    dark_ink = _relative_luminance("#102a36")
+    white_ink = 1.0
+    dark_contrast = (background + 0.05) / (dark_ink + 0.05)
+    white_contrast = (white_ink + 0.05) / (background + 0.05)
+    return "#102a36" if dark_contrast >= white_contrast else "#ffffff"
+
+
+def _display_colors_by_boat(boat_colors):
+    result = {}
+    for raw_color, boat_name in boat_colors.items():
+        color = _normalise_hex_color(raw_color)
+        if color and boat_name not in result:
+            result[boat_name] = color
+    return result
+
+
+def day_view(db, day, selected_employee, boats, boat_colors, avatar_url):
     crew = repository.list_crew_employees(db)
     selected_id = None
     if selected_employee not in (None, "", "all"):
@@ -240,7 +280,7 @@ def day_view(db, day, selected_employee, boats, avatar_url):
         employee["avatar_url"] = avatar_url(employee["name"])
         employee["position_label"] = " · ".join(employee["positions"])
 
-    boat_indices = {boat["name"]: index for index, boat in enumerate(boats)}
+    colors_by_boat = _display_colors_by_boat(boat_colors)
     raw_items = repository.list_day_items(db, day.isoformat())
     items = []
     earliest = DEFAULT_DAY_START_HOUR * 60
@@ -265,7 +305,8 @@ def day_view(db, day, selected_employee, boats, avatar_url):
         item["crew_label"] = ", ".join(
             assignment["employee_name"] for assignment in item["assignments"]
         )
-        item["boat_tone"] = boat_indices.get(item["boat"], 0) % 3
+        item["boat_color"] = colors_by_boat.get(item["boat"], "#607d8b")
+        item["boat_ink"] = _card_ink_for(item["boat_color"])
         items.append(item)
 
     earliest = max(0, earliest)

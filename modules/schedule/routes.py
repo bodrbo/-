@@ -12,6 +12,7 @@ def create_schedule_blueprint(
     get_db,
     admin_login_required,
     boats,
+    boat_colors,
     trip_services,
     avatar_url,
 ):
@@ -34,7 +35,7 @@ def create_schedule_blueprint(
         day = services.parse_day(request.args.get("date"))
         selected_employee = request.args.get("employee", "all")
         context = services.day_view(
-            get_db(), day, selected_employee, boats, avatar_url
+            get_db(), day, selected_employee, boats, boat_colors, avatar_url
         )
         return render_template(
             "schedule/index.html",

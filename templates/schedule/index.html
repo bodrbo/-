@@ -109,10 +109,13 @@
 
             {% for card in cards_by_employee.get(employee.id, []) %}
             <button type="button"
-                    class="schedule-card {{ card.kind }} boat-tone-{{ card.boat_tone }}"
-                    style="top: {{ card.top_px }}px; height: {{ card.height_px }}px"
+                    class="schedule-card {{ card.kind }}"
+                    style="top: {{ card.top_px }}px; height: {{ card.height_px }}px; --schedule-card-color: {{ card.boat_color }}; --schedule-card-ink: {{ card.boat_ink }}"
                     onclick="event.stopPropagation(); openScheduleEdit({{ card.id }})">
-              <span class="schedule-card-time">{{ card.start_time }}–{{ card.end_time }}</span>
+              <span class="schedule-card-topline">
+                <span class="schedule-card-time">{{ card.start_time }}–{{ card.end_time }}</span>
+                <span class="schedule-card-kind">{{ card.kind_label }}</span>
+              </span>
               <strong>{{ card.service_name }}</strong>
               <span class="schedule-card-boat">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 14h14l-2 3H5l-2-3zM6 14V8h7l2 6M8 8V5h4v3"/></svg>
