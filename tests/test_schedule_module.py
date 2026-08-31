@@ -10,8 +10,13 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.client = application_module.app.test_client()
         with application_module.app.app_context():
             db = application_module.get_db()
+            db.execute("DELETE FROM schedule_participants")
             db.execute("DELETE FROM schedule_assignments")
             db.execute("DELETE FROM schedule_items")
+            db.execute(
+                "DELETE FROM clients WHERE phone IN "
+                "('+79998880001', '+79998880002', '+79998880003')"
+            )
             self.daniil_id = self.ensure_crew_member(
                 db, "Даниил Галецкий", "Гид-капитан"
             )
@@ -87,6 +92,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn("Платон Жмаев", html)
         self.assertIn("5 сентября, суббота", html)
         self.assertIn("Новый рейс", html)
+        self.assertNotIn('name="participants_count"', html)
 
     def test_admin_creates_individual_booking_with_assignment(self):
         self.login()
@@ -115,7 +121,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn("--schedule-card-ink: #ffffff", page)
         self.assertIn("Запись", page)
 
-    def test_admin_creates_group_event_without_client_fields(self):
+    def test_admin_creates_group_event_with_linked_clients(self):
         self.login()
         response = self.client.post(
             "/schedule/items",
@@ -128,7 +134,9 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
                     "employee_id[]": [str(self.platon_id)],
                     "role[]": ["captain"],
                     "capacity": "10",
-                    "participants_count": "4",
+                    "participant_client_id[]": ["", ""],
+                    "participant_name[]": ["Алия", "Мария"],
+                    "participant_phone[]": ["+79998880001", "+79998880002"],
                     "customer_name": "",
                     "customer_phone": "",
                 },
@@ -136,13 +144,147 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 302)
         with application_module.app.app_context():
-            item = application_module.get_db().execute(
+            db = application_module.get_db()
+            item = db.execute(
                 "SELECT * FROM schedule_items"
             ).fetchone()
+            participants = db.execute(
+                "SELECT * FROM schedule_participants ORDER BY id"
+            ).fetchall()
+            clients = db.execute(
+                "SELECT * FROM clients WHERE phone IN (?, ?) ORDER BY phone",
+                ("+79998880001", "+79998880002"),
+            ).fetchall()
         self.assertEqual(item["kind"], "event")
         self.assertEqual(item["capacity"], 10)
-        self.assertEqual(item["participants_count"], 4)
+        self.assertEqual(item["participants_count"], 2)
         self.assertEqual(item["customer_name"], "")
+        self.assertEqual(len(participants), 2)
+        self.assertEqual(len(clients), 2)
+        self.assertEqual(participants[0]["client_name"], "Алия")
+
+    def test_group_event_reuses_existing_client_by_verified_phone(self):
+        self.login()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            cursor = db.execute(
+                "INSERT INTO clients "
+                "(client_name, boat_model, phone, token, created_at) "
+                "VALUES ('Александр', '', '+79998880003', "
+                "'schedule-existing-client', '2026-08-31 12:00')"
+            )
+            client_id = cursor.lastrowid
+            db.commit()
+
+        response = self.client.post(
+            "/schedule/items",
+            data=self.booking_data(
+                kind="event",
+                capacity="8",
+                customer_name="",
+                **{
+                    "employee_id[]": [str(self.platon_id)],
+                    "role[]": ["captain"],
+                    "participant_client_id[]": [str(client_id)],
+                    "participant_name[]": ["Александр"],
+                    "participant_phone[]": ["+7 (999) 888-00-03"],
+                },
+            ),
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            participant = db.execute(
+                "SELECT * FROM schedule_participants"
+            ).fetchone()
+            client_count = db.execute(
+                "SELECT COUNT(*) AS count FROM clients "
+                "WHERE phone = '+79998880003'"
+            ).fetchone()["count"]
+        self.assertEqual(participant["client_id"], client_id)
+        self.assertEqual(participant["client_phone"], "+79998880003")
+        self.assertEqual(client_count, 1)
+
+    def test_group_event_rejects_more_clients_than_capacity(self):
+        self.login()
+        response = self.client.post(
+            "/schedule/items",
+            data=self.booking_data(
+                kind="event",
+                capacity="1",
+                customer_name="",
+                **{
+                    "participant_client_id[]": ["", ""],
+                    "participant_name[]": ["Алия", "Мария"],
+                    "participant_phone[]": ["+79998880001", "+79998880002"],
+                },
+            ),
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_count = db.execute(
+                "SELECT COUNT(*) AS count FROM schedule_items"
+            ).fetchone()["count"]
+            client_count = db.execute(
+                "SELECT COUNT(*) AS count FROM clients "
+                "WHERE phone IN ('+79998880001', '+79998880002')"
+            ).fetchone()["count"]
+        self.assertEqual(item_count, 0)
+        self.assertEqual(client_count, 0)
+
+    def test_edit_group_event_updates_client_list_and_counter(self):
+        self.login()
+        self.client.post(
+            "/schedule/items",
+            data=self.booking_data(
+                kind="event",
+                capacity="10",
+                customer_name="",
+                **{
+                    "participant_client_id[]": ["", ""],
+                    "participant_name[]": ["Алия", "Мария"],
+                    "participant_phone[]": ["+79998880001", "+79998880002"],
+                },
+            ),
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = db.execute("SELECT id FROM schedule_items").fetchone()["id"]
+            client = db.execute(
+                "SELECT id, client_name, phone FROM clients "
+                "WHERE phone = '+79998880002'"
+            ).fetchone()
+
+        response = self.client.post(
+            f"/schedule/items/{item_id}",
+            data=self.booking_data(
+                kind="event",
+                capacity="10",
+                customer_name="",
+                **{
+                    "participant_client_id[]": [str(client["id"])],
+                    "participant_name[]": [client["client_name"]],
+                    "participant_phone[]": [client["phone"]],
+                },
+            ),
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item = db.execute(
+                "SELECT participants_count FROM schedule_items WHERE id = ?",
+                (item_id,),
+            ).fetchone()
+            participants = db.execute(
+                "SELECT client_name FROM schedule_participants "
+                "WHERE schedule_item_id = ?",
+                (item_id,),
+            ).fetchall()
+        self.assertEqual(item["participants_count"], 1)
+        self.assertEqual(
+            [participant["client_name"] for participant in participants], ["Мария"]
+        )
 
     def test_edit_moves_trip_and_reassigns_employee(self):
         self.login()

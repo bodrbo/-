@@ -212,15 +212,21 @@
         </label>
       </div>
 
-      <div class="schedule-form-grid schedule-event-fields" id="scheduleEventFields" hidden>
-        <label class="field">
+      <div class="schedule-event-fields" id="scheduleEventFields" hidden>
+        <div class="schedule-event-capacity">
+          <label class="field">
           <span>Вместимость</span>
-          <input type="number" name="capacity" id="scheduleCapacity" min="1" max="100" value="10">
-        </label>
-        <label class="field">
-          <span>Уже записано</span>
-          <input type="number" name="participants_count" id="scheduleParticipants" min="0" max="100" value="0">
-        </label>
+            <input type="number" name="capacity" id="scheduleCapacity" min="1" max="100" value="10" oninput="syncScheduleParticipantCount()">
+          </label>
+          <span class="schedule-participant-counter" id="scheduleParticipantCounter">0 из 10 мест</span>
+        </div>
+        <div class="schedule-form-section-heading">
+          <span>Клиенты в рейсе</span>
+          <small>Выберите из базы или введите нового</small>
+        </div>
+        <div class="schedule-legacy-participants" id="scheduleLegacyParticipants" hidden></div>
+        <div id="scheduleParticipantRows" class="schedule-participant-rows"></div>
+        <button type="button" class="schedule-add-assignment" onclick="addScheduleParticipant()">+ Добавить клиента</button>
       </div>
 
       <div class="schedule-form-grid">
@@ -272,8 +278,31 @@
   </div>
 </template>
 
+<template id="scheduleParticipantTemplate">
+  <div class="schedule-participant-row">
+    <input type="hidden" name="participant_client_id[]">
+    <input type="hidden" name="participant_name[]">
+    <label class="field">
+      <span>Имя клиента</span>
+      <input type="text" data-participant-search list="scheduleClientOptions" maxlength="180" placeholder="Начните вводить имя" oninput="applyScheduleClient(this)">
+    </label>
+    <label class="field">
+      <span>Телефон</span>
+      <input type="tel" name="participant_phone[]" maxlength="40" placeholder="+7 999 000-00-00" oninput="scheduleParticipantPhoneChanged(this)">
+    </label>
+    <button type="button" class="icon-btn danger" onclick="removeScheduleParticipant(this)" aria-label="Убрать клиента">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h12M8 3h4l1 3H7l1-3zM6 6l.7 11h6.6L14 6M8.5 9v5M11.5 9v5"/></svg>
+    </button>
+  </div>
+</template>
+
+<datalist id="scheduleClientOptions">
+  {% for client in clients %}<option value="{{ client.client_name }} · {{ client.phone }}"></option>{% endfor %}
+</datalist>
+
 <script>
   const scheduleItems = {{ items|tojson }};
+  const scheduleClients = {{ clients|tojson }};
   const scheduleDayStart = {{ day_start_minutes }};
   const schedulePxPerMinute = {{ px_per_minute }};
   const scheduleBaseUrl = {{ url_for('schedule.index')|tojson }};
@@ -307,6 +336,8 @@
     document.getElementById('scheduleEnd').value = '11:00';
     document.getElementById('scheduleRevenue').value = '0';
     document.getElementById('scheduleAssignments').innerHTML = '';
+    document.getElementById('scheduleParticipantRows').innerHTML = '';
+    document.getElementById('scheduleLegacyParticipants').hidden = true;
     document.getElementById('scheduleDeleteForm').hidden = true;
     document.getElementById('scheduleModalEyebrow').textContent = 'Новый рейс';
     document.getElementById('scheduleModalTitle').textContent = 'Добавить в расписание';
@@ -339,7 +370,14 @@
     document.getElementById('scheduleCustomer').value = item.customer_name || '';
     document.getElementById('schedulePhone').value = item.customer_phone || '';
     document.getElementById('scheduleCapacity').value = item.capacity || 10;
-    document.getElementById('scheduleParticipants').value = item.participants_count || 0;
+    (item.participants || []).forEach(participant => addScheduleParticipant(
+      participant.client_id, participant.client_name, participant.client_phone
+    ));
+    const legacyParticipants = document.getElementById('scheduleLegacyParticipants');
+    if (item.kind === 'event' && item.participants_count > 0 && !(item.participants || []).length) {
+      legacyParticipants.textContent = `Раньше для этого рейса было указано ${item.participants_count} чел. без имён. Добавьте клиентов перед сохранением.`;
+      legacyParticipants.hidden = false;
+    }
     document.getElementById('scheduleRevenue').value = item.revenue || 0;
     document.getElementById('scheduleNote').value = item.note || '';
     item.assignment_ids.forEach((employeeId, index) => addScheduleAssignment(employeeId, item.assignment_roles[index]));
@@ -360,6 +398,10 @@
     booking.hidden = kind !== 'booking';
     eventFields.hidden = kind !== 'event';
     document.getElementById('scheduleCustomer').required = kind === 'booking';
+    if (kind === 'event' && !document.querySelector('.schedule-participant-row')) {
+      addScheduleParticipant();
+    }
+    syncScheduleParticipantCount();
   }
   function addScheduleAssignment(employeeId, role) {
     const fragment = document.getElementById('scheduleAssignmentTemplate').content.cloneNode(true);
@@ -372,6 +414,50 @@
     const rows = document.querySelectorAll('.schedule-assignment-row');
     if (rows.length === 1) return;
     button.closest('.schedule-assignment-row').remove();
+  }
+  function addScheduleParticipant(clientId, clientName, clientPhone) {
+    const fragment = document.getElementById('scheduleParticipantTemplate').content.cloneNode(true);
+    const row = fragment.querySelector('.schedule-participant-row');
+    row.querySelector('[name="participant_client_id[]"]').value = clientId || '';
+    row.querySelector('[name="participant_name[]"]').value = clientName || '';
+    row.querySelector('[data-participant-search]').value = clientName || '';
+    row.querySelector('[name="participant_phone[]"]').value = clientPhone || '';
+    document.getElementById('scheduleParticipantRows').appendChild(fragment);
+    syncScheduleParticipantCount();
+  }
+  function removeScheduleParticipant(button) {
+    button.closest('.schedule-participant-row').remove();
+    syncScheduleParticipantCount();
+  }
+  function applyScheduleClient(input) {
+    const row = input.closest('.schedule-participant-row');
+    const selected = scheduleClients.find(client => `${client.client_name} · ${client.phone}` === input.value);
+    const idInput = row.querySelector('[name="participant_client_id[]"]');
+    const nameInput = row.querySelector('[name="participant_name[]"]');
+    if (!selected) {
+      idInput.value = '';
+      nameInput.value = input.value;
+      syncScheduleParticipantCount();
+      return;
+    }
+    idInput.value = selected.id;
+    nameInput.value = selected.client_name;
+    row.querySelector('[name="participant_phone[]"]').value = selected.phone;
+    syncScheduleParticipantCount();
+  }
+  function scheduleParticipantPhoneChanged(input) {
+    const row = input.closest('.schedule-participant-row');
+    const client = scheduleClients.find(candidate => String(candidate.id) === row.querySelector('[name="participant_client_id[]"]').value);
+    if (client && client.phone !== input.value) row.querySelector('[name="participant_client_id[]"]').value = '';
+    syncScheduleParticipantCount();
+  }
+  function syncScheduleParticipantCount() {
+    const rows = [...document.querySelectorAll('.schedule-participant-row')];
+    const filled = rows.filter(row => row.querySelector('[data-participant-search]').value.trim() || row.querySelector('[name="participant_phone[]"]').value.trim()).length;
+    const capacity = Number(document.getElementById('scheduleCapacity').value || 0);
+    const counter = document.getElementById('scheduleParticipantCounter');
+    counter.textContent = `${filled} из ${capacity} мест`;
+    counter.classList.toggle('over', capacity > 0 && filled > capacity);
   }
   function applyScheduleDuration() {
     const service = document.getElementById('scheduleService');

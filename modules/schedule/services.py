@@ -2,6 +2,7 @@
 
 import datetime as dt
 import math
+import secrets
 
 from . import repository
 from .constants import (
@@ -68,6 +69,92 @@ def _parse_datetime(day_raw, time_raw, field_label, errors):
         return None
 
 
+def _normalise_phone_identity(phone):
+    digits = "".join(character for character in phone if character.isdigit())
+    if len(digits) == 11 and digits[0] in ("7", "8"):
+        return "7" + digits[1:]
+    if len(digits) == 10:
+        return "7" + digits
+    return digits
+
+
+def _validate_participants(db, form, capacity, errors):
+    raw_client_ids = form.getlist("participant_client_id[]")
+    raw_names = form.getlist("participant_name[]")
+    raw_phones = form.getlist("participant_phone[]")
+    row_count = max(len(raw_client_ids), len(raw_names), len(raw_phones))
+    clients = repository.list_clients(db)
+    clients_by_id = {client["id"]: client for client in clients}
+    clients_by_phone = {}
+    for client in clients:
+        identity = _normalise_phone_identity(client["phone"])
+        if identity:
+            clients_by_phone.setdefault(identity, []).append(client)
+
+    participants = []
+    seen_phones = set()
+    for index in range(row_count):
+        raw_client_id = raw_client_ids[index] if index < len(raw_client_ids) else ""
+        name = _normalise_text(
+            raw_names[index] if index < len(raw_names) else "", 180
+        )
+        phone = _normalise_text(
+            raw_phones[index] if index < len(raw_phones) else "", 40
+        )
+        if not raw_client_id and not name and not phone:
+            continue
+
+        row_label = f"Участник №{index + 1}"
+        if not name:
+            errors.append(f"{row_label}: укажите имя.")
+        phone_identity = _normalise_phone_identity(phone)
+        if len(phone_identity) < 7:
+            errors.append(f"{row_label}: укажите корректный телефон.")
+        if not name or len(phone_identity) < 7:
+            continue
+        if phone_identity in seen_phones:
+            errors.append(f"{row_label}: этот клиент уже добавлен в рейс.")
+            continue
+
+        client = None
+        if raw_client_id:
+            try:
+                client = clients_by_id.get(int(raw_client_id))
+            except (TypeError, ValueError):
+                client = None
+            if client is None:
+                errors.append(f"{row_label}: выбранный клиент больше недоступен.")
+                continue
+            if _normalise_phone_identity(client["phone"]) != phone_identity:
+                errors.append(
+                    f"{row_label}: телефон не совпадает с выбранным клиентом."
+                )
+                continue
+        else:
+            matches = clients_by_phone.get(phone_identity, [])
+            if len(matches) > 1:
+                errors.append(
+                    f"{row_label}: в базе найдено несколько клиентов с этим телефоном."
+                )
+                continue
+            client = matches[0] if matches else None
+
+        if client is not None:
+            name = client["client_name"]
+            phone = client["phone"]
+        participants.append({
+            "client_id": client["id"] if client is not None else None,
+            "client_name": name,
+            "client_phone": phone,
+            "client_token": secrets.token_urlsafe(16) if client is None else None,
+        })
+        seen_phones.add(phone_identity)
+
+    if capacity and len(participants) > capacity:
+        errors.append("Клиентов в рейсе больше, чем доступных мест.")
+    return participants
+
+
 def validate_item_form(db, form, boats, services, exclude_id=None):
     errors = []
     kind = str(form.get("kind") or "booking").strip()
@@ -102,6 +189,7 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
     revenue = _parse_money(form.get("revenue"), errors)
 
     capacity = None
+    participants = []
     participants_count = 0
     if kind == "booking":
         if not customer_name:
@@ -111,16 +199,10 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
             capacity = int(str(form.get("capacity") or "10").strip())
         except ValueError:
             capacity = 0
-        try:
-            participants_count = int(
-                str(form.get("participants_count") or "0").strip()
-            )
-        except ValueError:
-            participants_count = -1
         if not 1 <= capacity <= 100:
             errors.append("Вместимость события должна быть от 1 до 100 человек.")
-        if not 0 <= participants_count <= max(capacity, 0):
-            errors.append("Число участников не может превышать вместимость.")
+        participants = _validate_participants(db, form, capacity, errors)
+        participants_count = len(participants)
         customer_name = ""
         customer_phone = ""
 
@@ -191,19 +273,19 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
         "revenue": revenue,
         "note": note,
     }
-    return errors, data, assignments
+    return errors, data, assignments, participants
 
 
 def save_item(db, form, boats, services, item_id=None):
     if item_id is not None and repository.get_item(db, item_id) is None:
         return False, "Рейс не найден.", None
-    errors, data, assignments = validate_item_form(
+    errors, data, assignments, participants = validate_item_form(
         db, form, boats, services, exclude_id=item_id
     )
     if errors:
         return False, " ".join(errors), data
     saved_id = repository.save_item(
-        db, item_id, data, assignments, current_timestamp()
+        db, item_id, data, assignments, participants, current_timestamp()
     )
     action = "обновлён" if item_id is not None else "создан"
     return True, f"Рейс {action}.", saved_id
@@ -263,6 +345,7 @@ def _display_colors_by_boat(boat_colors):
 
 def day_view(db, day, selected_employee, boats, boat_colors, avatar_url):
     crew = repository.list_crew_employees(db)
+    clients = repository.list_clients(db)
     selected_id = None
     if selected_employee not in (None, "", "all"):
         try:
@@ -350,6 +433,7 @@ def day_view(db, day, selected_employee, boats, boat_colors, avatar_url):
 
     return {
         "crew": crew,
+        "clients": clients,
         "visible_crew": visible_crew,
         "items": items,
         "cards_by_employee": cards_by_employee,

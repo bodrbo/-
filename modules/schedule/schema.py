@@ -40,10 +40,27 @@ def init_schema(conn):
         """
     )
     conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schedule_participants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            schedule_item_id INTEGER NOT NULL,
+            client_id INTEGER NOT NULL,
+            client_name TEXT NOT NULL,
+            client_phone TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(schedule_item_id, client_id)
+        )
+        """
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_schedule_items_day "
         "ON schedule_items(starts_at, deleted_at)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_schedule_assignments_employee "
         "ON schedule_assignments(employee_id, schedule_item_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schedule_participants_item "
+        "ON schedule_participants(schedule_item_id, client_id)"
     )

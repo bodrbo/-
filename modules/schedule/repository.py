@@ -20,6 +20,16 @@ def list_crew_employees(db):
     return list(employees.values())
 
 
+def list_clients(db):
+    return [
+        dict(row)
+        for row in db.execute(
+            "SELECT id, client_name, phone, status FROM clients "
+            "ORDER BY client_name COLLATE NOCASE, phone, id"
+        ).fetchall()
+    ]
+
+
 def get_item(db, item_id, include_deleted=False):
     query = "SELECT * FROM schedule_items WHERE id = ?"
     if not include_deleted:
@@ -57,10 +67,22 @@ def list_day_items(db, day):
         by_item.setdefault(assignment["schedule_item_id"], []).append(
             dict(assignment)
         )
+    participants = db.execute(
+        "SELECT * FROM schedule_participants "
+        f"WHERE schedule_item_id IN ({placeholders}) "
+        "ORDER BY schedule_item_id, id",
+        tuple(item_ids),
+    ).fetchall()
+    participants_by_item = {}
+    for participant in participants:
+        participants_by_item.setdefault(
+            participant["schedule_item_id"], []
+        ).append(dict(participant))
     result = []
     for item in items:
         row = dict(item)
         row["assignments"] = by_item.get(item["id"], [])
+        row["participants"] = participants_by_item.get(item["id"], [])
         result.append(row)
     return result
 
@@ -98,7 +120,7 @@ def find_boat_conflicts(db, boat, starts_at, ends_at, exclude_id=None):
     return db.execute(query, tuple(params)).fetchall()
 
 
-def save_item(db, item_id, data, assignments, timestamp):
+def save_item(db, item_id, data, assignments, participants, timestamp):
     try:
         if item_id is None:
             cursor = db.execute(
@@ -135,6 +157,10 @@ def save_item(db, item_id, data, assignments, timestamp):
                 "DELETE FROM schedule_assignments WHERE schedule_item_id = ?",
                 (item_id,),
             )
+            db.execute(
+                "DELETE FROM schedule_participants WHERE schedule_item_id = ?",
+                (item_id,),
+            )
         for assignment in assignments:
             db.execute(
                 "INSERT INTO schedule_assignments "
@@ -143,6 +169,28 @@ def save_item(db, item_id, data, assignments, timestamp):
                 (
                     item_id, assignment["employee_id"],
                     assignment["employee_name"], assignment["role"], timestamp,
+                ),
+            )
+        for participant in participants:
+            client_id = participant["client_id"]
+            if client_id is None:
+                cursor = db.execute(
+                    "INSERT INTO clients "
+                    "(client_name, boat_model, phone, token, created_at) "
+                    "VALUES (?, '', ?, ?, ?)",
+                    (
+                        participant["client_name"], participant["client_phone"],
+                        participant["client_token"], timestamp,
+                    ),
+                )
+                client_id = cursor.lastrowid
+            db.execute(
+                "INSERT INTO schedule_participants "
+                "(schedule_item_id, client_id, client_name, client_phone, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    item_id, client_id, participant["client_name"],
+                    participant["client_phone"], timestamp,
                 ),
             )
         db.commit()
