@@ -105,6 +105,24 @@ from modules.tuning_boat_specs import boat_specification_for, format_parameters
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 15 * 1024 * 1024  # cap uploaded photos at 15 MB
 
+
+@app.url_defaults
+def _version_static_assets(endpoint, values):
+    """Give cached static URLs a deploy-specific version automatically.
+
+    The offline service worker intentionally caches the application shell.
+    Without a changing URL an already-open browser can render fresh HTML
+    with an older stylesheet after a deploy.  File mtimes change on checkout,
+    while unchanged assets keep a stable, cache-friendly URL.
+    """
+    if endpoint != "static" or values.get("v") or not values.get("filename"):
+        return
+    asset_path = os.path.join(app.static_folder, values["filename"])
+    try:
+        values["v"] = str(os.stat(asset_path).st_mtime_ns)
+    except OSError:
+        pass
+
 # Signs the investor-login session cookie. Set SECRET_KEY as a real
 # environment variable in production so sessions survive restarts/deploys —
 # without it, a fresh random key is generated each process start (safe,

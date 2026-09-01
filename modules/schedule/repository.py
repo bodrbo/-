@@ -23,18 +23,35 @@ def list_crew_employees(db):
     return list(employees.values())
 
 
-def list_clients(db):
-    return [
-        dict(row)
-        for row in db.execute(
-            "SELECT clients.id, clients.client_name, clients.phone, clients.status "
-            "FROM clients JOIN client_segments "
-            "ON client_segments.client_id = clients.id "
-            "AND client_segments.segment = ? "
-            "ORDER BY clients.client_name COLLATE NOCASE, clients.phone, clients.id",
-            (EXCURSION_SEGMENT,),
-        ).fetchall()
-    ]
+def search_clients(db, query, limit=20):
+    """Return a small ranked slice of excursion clients for autocomplete."""
+    words = [word for word in str(query or "").strip().casefold().split() if word]
+    if not words:
+        return []
+    rows = db.execute(
+        "SELECT clients.id, clients.client_name, clients.phone, clients.status "
+        "FROM clients JOIN client_segments "
+        "ON client_segments.client_id = clients.id "
+        "AND client_segments.segment = ?",
+        (EXCURSION_SEGMENT,),
+    ).fetchall()
+    ranked = []
+    exact_query = " ".join(words)
+    for row in rows:
+        client = dict(row)
+        searchable = f"{client['client_name']} {client['phone']}".casefold()
+        if not all(word in searchable for word in words):
+            continue
+        name = client["client_name"].casefold()
+        if name.startswith(exact_query):
+            score = 0
+        elif exact_query in name:
+            score = 1
+        else:
+            score = 2 + sum(searchable.index(word) for word in words)
+        ranked.append((score, name, client["id"], client))
+    ranked.sort(key=lambda item: item[:3])
+    return [item[3] for item in ranked[:limit]]
 
 
 def list_all_clients(db):

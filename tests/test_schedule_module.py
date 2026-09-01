@@ -91,6 +91,8 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         response = self.client.get("/schedule")
         self.assertEqual(response.status_code, 302)
         self.assertIn("/admin/login", response.headers["Location"])
+        search_response = self.client.get("/schedule/clients/search?q=ал")
+        self.assertEqual(search_response.status_code, 302)
 
     def test_day_board_renders_crew_and_navigation(self):
         self.login()
@@ -103,6 +105,55 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn("5 сентября, суббота", html)
         self.assertIn("Новый рейс", html)
         self.assertNotIn('name="participants_count"', html)
+        self.assertNotIn('id="scheduleClientOptions"', html)
+        self.assertIn("schedule-board-nav", html)
+        self.assertIn("/schedule/clients/search", html)
+        self.assertRegex(html, r"/static/style\.css\?v=\d+")
+
+    def test_client_search_returns_only_ranked_excursion_clients(self):
+        self.login()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            excursion_id = db.execute(
+                "INSERT INTO clients "
+                "(client_name, boat_model, phone, token, created_at) "
+                "VALUES ('Алия Морская', '', '+79998880001', "
+                "'schedule-search-excursion', '2026-09-01 10:00')"
+            ).lastrowid
+            tuning_id = db.execute(
+                "INSERT INTO clients "
+                "(client_name, boat_model, phone, token, created_at) "
+                "VALUES ('Алия Тюнинг', '', '+79998880002', "
+                "'schedule-search-tuning', '2026-09-01 10:00')"
+            ).lastrowid
+            db.execute(
+                "INSERT INTO client_segments (client_id, segment, created_at) "
+                "VALUES (?, 'excursion', '2026-09-01 10:00')",
+                (excursion_id,),
+            )
+            db.execute(
+                "INSERT INTO client_segments (client_id, segment, created_at) "
+                "VALUES (?, 'tuning', '2026-09-01 10:00')",
+                (tuning_id,),
+            )
+            db.commit()
+
+        response = self.client.get("/schedule/clients/search?q=алия")
+
+        self.assertEqual(response.status_code, 200)
+        clients = response.get_json()["clients"]
+        names = [client["client_name"] for client in clients]
+        self.assertIn("Алия Морская", names)
+        self.assertNotIn("Алия Тюнинг", names)
+        created_client = next(
+            client for client in clients
+            if client["client_name"] == "Алия Морская"
+        )
+        self.assertEqual(created_client["phone"], "+79998880001")
+        self.assertEqual(
+            self.client.get("/schedule/clients/search?q=а").get_json(),
+            {"clients": []},
+        )
 
     def test_admin_creates_individual_booking_with_assignment(self):
         self.login()

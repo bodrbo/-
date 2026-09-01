@@ -1,4 +1,4 @@
-var SHELL_CACHE = "bodry-offline-shell-v1";
+var SHELL_CACHE = "bodry-offline-shell-v2";
 var PAGE_CACHE = "bodry-offline-pages-v1";
 var DOCUMENT_CACHE = "bodry-offline-documents-v1";
 var DB_NAME = "bodry-offline-v1";
@@ -78,6 +78,24 @@ function cachedShell(request) {
   });
 }
 
+function networkFirstShell(request) {
+  return fetch(request).then(function (response) {
+    if (response.ok) {
+      caches.open(SHELL_CACHE).then(function (cache) {
+        cache.put(request, response.clone());
+      });
+    }
+    return response;
+  }).catch(function () {
+    return caches.open(SHELL_CACHE).then(function (cache) {
+      return cache.match(request).then(function (cached) {
+        if (cached) return cached;
+        return cache.match(new URL(request.url).pathname);
+      });
+    }).then(function (cached) { return cached || Response.error(); });
+  });
+}
+
 self.addEventListener("fetch", function (event) {
   var request = event.request;
   if (request.method !== "GET") return;
@@ -103,7 +121,12 @@ self.addEventListener("fetch", function (event) {
   if (
     url.pathname === "/static/style.css" ||
     url.pathname === "/static/loader.js" ||
-    url.pathname === "/static/offline.js" ||
+    url.pathname === "/static/offline.js"
+  ) {
+    event.respondWith(networkFirstShell(request));
+    return;
+  }
+  if (
     url.pathname === "/static/manifest.json" ||
     url.pathname.indexOf("/static/fonts/") === 0 ||
     url.pathname === "/static/logo.png" ||

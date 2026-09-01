@@ -408,7 +408,6 @@ def _display_colors_by_boat(boat_colors):
 
 def day_view(db, day, selected_employee, boats, boat_colors, avatar_url):
     crew = repository.list_crew_employees(db)
-    clients = repository.list_clients(db)
     selected_id = None
     if selected_employee not in (None, "", "all"):
         try:
@@ -496,7 +495,6 @@ def day_view(db, day, selected_employee, boats, boat_colors, avatar_url):
 
     return {
         "crew": crew,
-        "clients": clients,
         "visible_crew": visible_crew,
         "items": items,
         "cards_by_employee": cards_by_employee,

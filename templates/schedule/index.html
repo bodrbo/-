@@ -66,14 +66,31 @@
       </div>
       <button type="button" class="schedule-create-button" onclick="openScheduleCreate()">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 3v14M3 10h14"/></svg>
-        Новый рейс
+        <span>Новый рейс</span>
       </button>
     </div>
   </section>
 
   {% if visible_crew %}
+  <div class="schedule-board-nav {{ 'is-single' if visible_crew|length == 1 }}" aria-label="Навигация по сотрудникам">
+    <div class="schedule-board-nav-summary">
+      <strong>Экипаж</strong>
+      <span id="scheduleCrewWindow">{{ visible_crew|length }} сотрудник{{ '' if visible_crew|length == 1 else 'а' if visible_crew|length in [2, 3, 4] else 'ов' }}</span>
+    </div>
+    <div class="schedule-board-nav-controls">
+      <button type="button" id="scheduleCrewPrevious" onclick="scrollScheduleCrew(-1)" aria-label="Предыдущий сотрудник">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="m12.5 4-6 6 6 6"/></svg>
+      </button>
+      <div class="schedule-top-scroll" id="scheduleTopScroll" tabindex="0" aria-label="Горизонтальная прокрутка сотрудников">
+        <div class="schedule-top-scroll-spacer" id="scheduleTopScrollSpacer"></div>
+      </div>
+      <button type="button" id="scheduleCrewNext" onclick="scrollScheduleCrew(1)" aria-label="Следующий сотрудник">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="m7.5 4 6 6-6 6"/></svg>
+      </button>
+    </div>
+  </div>
   <section class="schedule-board" aria-label="Расписание на {{ day_label }}">
-    <div class="schedule-board-scroll">
+    <div class="schedule-board-scroll" id="scheduleBoardScroll">
       <div class="schedule-board-inner" style="--crew-count: {{ visible_crew|length }}; --schedule-height: {{ grid_height }}px;">
         <div class="schedule-corner">
           <span>Время</span>
@@ -81,7 +98,7 @@
         </div>
         <div class="schedule-crew-heads">
           {% for employee in visible_crew %}
-          <article class="schedule-crew-head">
+          <article class="schedule-crew-head" title="{{ employee.name }} · {{ employee.position_label }}">
             {% if employee.avatar_url %}
             <img src="{{ employee.avatar_url }}" alt="">
             {% else %}
@@ -100,7 +117,12 @@
 
         <div class="schedule-columns" style="height: {{ grid_height }}px">
           {% for employee in visible_crew %}
-          <div class="schedule-column" data-employee-id="{{ employee.id }}" onclick="handleScheduleColumnClick(event, {{ employee.id }})">
+          <div class="schedule-column" data-employee-id="{{ employee.id }}"
+               data-employee-name="{{ employee.name }}" tabindex="0" role="region"
+               aria-label="Создать рейс для {{ employee.name }}. Стрелки вверх и вниз меняют время, Enter открывает форму"
+               onclick="handleScheduleColumnClick(event, {{ employee.id }})"
+               onfocus="prepareScheduleColumnKeyboard(this)"
+               onkeydown="handleScheduleColumnKeydown(event, {{ employee.id }})">
             {% for mark in hour_marks %}
             <span class="schedule-hour-line" style="top: {{ mark.top_px }}px"></span>
             <span class="schedule-half-line" style="top: {{ mark.top_px + 37.5 }}px"></span>
@@ -109,8 +131,9 @@
 
             {% for card in cards_by_employee.get(employee.id, []) %}
             <button type="button"
-                    class="schedule-card {{ card.kind }}"
+                    class="schedule-card {{ card.kind }} {{ 'is-compact' if card.height_px < 50 else 'is-medium' if card.height_px < 105 }}"
                     style="top: {{ card.top_px }}px; height: {{ card.height_px }}px; --schedule-card-color: {{ card.boat_color }}; --schedule-card-ink: {{ card.boat_ink }}"
+                    title="{{ card.start_time }}–{{ card.end_time }} · {{ card.service_name }} · {{ card.boat }}"
                     onclick="event.stopPropagation(); openScheduleEdit({{ card.id }})">
               <span class="schedule-card-topline">
                 <span class="schedule-card-time">{{ card.start_time }}–{{ card.end_time }}</span>
@@ -204,11 +227,16 @@
       <div class="schedule-form-grid schedule-booking-fields" id="scheduleBookingFields">
         <label class="field">
           <span>Имя клиента</span>
-          <input type="hidden" name="customer_client_id" id="scheduleCustomerClientId">
-          <input type="text" name="customer_name" id="scheduleCustomer"
-                 list="scheduleClientOptions" maxlength="180"
-                 placeholder="Выберите из базы или введите нового"
-                 oninput="applyScheduleBookingClient(this)">
+          <span class="schedule-client-picker" data-client-picker data-picker-kind="booking">
+            <input type="hidden" name="customer_client_id" id="scheduleCustomerClientId" data-client-id>
+            <input type="text" name="customer_name" id="scheduleCustomer"
+                   maxlength="180" autocomplete="off" role="combobox"
+                   aria-autocomplete="list" aria-expanded="false"
+                   aria-controls="scheduleBookingClientResults"
+                   placeholder="Начните вводить имя"
+                   oninput="scheduleClientInput(this)" onkeydown="scheduleClientKeydown(event, this)">
+            <span class="schedule-client-results" id="scheduleBookingClientResults" role="listbox" hidden></span>
+          </span>
         </label>
         <label class="field">
           <span>Телефон</span>
@@ -231,7 +259,7 @@
         </div>
         <div class="schedule-legacy-participants" id="scheduleLegacyParticipants" hidden></div>
         <div id="scheduleParticipantRows" class="schedule-participant-rows"></div>
-        <button type="button" class="schedule-add-assignment" onclick="addScheduleParticipant()">+ Добавить клиента</button>
+        <button type="button" class="schedule-add-assignment" onclick="addScheduleParticipant('', '', '', true)">+ Добавить клиента</button>
       </div>
 
       <div class="schedule-form-grid">
@@ -285,11 +313,17 @@
 
 <template id="scheduleParticipantTemplate">
   <div class="schedule-participant-row">
-    <input type="hidden" name="participant_client_id[]">
-    <input type="hidden" name="participant_name[]">
     <label class="field">
       <span>Имя клиента</span>
-      <input type="text" data-participant-search list="scheduleClientOptions" maxlength="180" placeholder="Начните вводить имя" oninput="applyScheduleClient(this)">
+      <span class="schedule-client-picker" data-client-picker data-picker-kind="participant">
+        <input type="hidden" name="participant_client_id[]" data-client-id>
+        <input type="hidden" name="participant_name[]" data-client-name>
+        <input type="text" data-participant-search maxlength="180" autocomplete="off"
+               role="combobox" aria-autocomplete="list" aria-expanded="false"
+               placeholder="Начните вводить имя"
+               oninput="scheduleClientInput(this)" onkeydown="scheduleClientKeydown(event, this)">
+        <span class="schedule-client-results" role="listbox" hidden></span>
+      </span>
     </label>
     <label class="field">
       <span>Телефон</span>
@@ -301,17 +335,19 @@
   </div>
 </template>
 
-<datalist id="scheduleClientOptions">
-  {% for client in clients %}<option value="{{ client.client_name }}{{ ' · ' ~ client.phone if client.phone }}"></option>{% endfor %}
-</datalist>
-
 <script>
   const scheduleItems = {{ items|tojson }};
-  const scheduleClients = {{ clients|tojson }};
   const scheduleDayStart = {{ day_start_minutes }};
   const schedulePxPerMinute = {{ px_per_minute }};
+  const scheduleCrewCount = {{ visible_crew|length }};
   const scheduleBaseUrl = {{ url_for('schedule.index')|tojson }};
   const scheduleCreateUrl = {{ url_for('schedule.create_item')|tojson }};
+  const scheduleClientSearchUrl = {{ url_for('schedule.search_clients')|tojson }};
+  const scheduleClientTimers = new WeakMap();
+  const scheduleClientRequests = new WeakMap();
+  let scheduleParticipantSerial = 0;
+  let scheduleModalTrigger = null;
+  let scheduleScrollSync = false;
 
   function changeScheduleDate(value) {
     const params = new URLSearchParams({date: value, employee: {{ selected_employee|tojson }}});
@@ -328,9 +364,24 @@
   }
   function setScheduleModalOpen(open) {
     const modal = document.getElementById('scheduleModal');
+    const header = document.querySelector('.schedule-topbar');
+    const shell = document.querySelector('.schedule-shell');
+    if (open) scheduleModalTrigger = document.activeElement;
     modal.hidden = !open;
     document.body.classList.toggle('schedule-modal-open', open);
-    if (open) setTimeout(() => document.getElementById('scheduleService').focus(), 20);
+    if (header) header.inert = open;
+    if (shell) shell.inert = open;
+    if (open) {
+      const modalCard = modal.querySelector('.schedule-modal-card');
+      modalCard.scrollLeft = 0;
+      setTimeout(() => document.getElementById('scheduleService').focus(), 20);
+    } else {
+      closeAllScheduleClientResults();
+      if (scheduleModalTrigger && scheduleModalTrigger !== document.body) {
+        scheduleModalTrigger.focus();
+      }
+      scheduleModalTrigger = null;
+    }
   }
   function resetScheduleForm() {
     const form = document.getElementById('scheduleItemForm');
@@ -344,6 +395,11 @@
     document.getElementById('scheduleParticipantRows').innerHTML = '';
     document.getElementById('scheduleLegacyParticipants').hidden = true;
     document.getElementById('scheduleDeleteForm').hidden = true;
+    document.querySelectorAll('[data-client-picker]').forEach(picker => {
+      picker.dataset.selectedPhone = '';
+      picker.querySelector('[data-client-id]').value = '';
+      closeScheduleClientResults(picker);
+    });
     document.getElementById('scheduleModalEyebrow').textContent = 'Новый рейс';
     document.getElementById('scheduleModalTitle').textContent = 'Добавить в расписание';
     document.getElementById('scheduleSubmit').textContent = 'Создать рейс';
@@ -372,11 +428,19 @@
     document.getElementById('scheduleDate').value = item.trip_date;
     document.getElementById('scheduleStart').value = item.start_time;
     document.getElementById('scheduleEnd').value = item.end_time;
-    document.getElementById('scheduleCustomer').value = item.customer_name || '';
-    document.getElementById('schedulePhone').value = item.customer_phone || '';
-    document.getElementById('scheduleCustomerClientId').value =
-      item.kind === 'booking' && (item.participants || []).length
-        ? item.participants[0].client_id : '';
+    const bookingParticipant = item.kind === 'booking' && (item.participants || []).length
+      ? item.participants[0] : null;
+    setScheduleClientSelection(
+      document.querySelector('[data-picker-kind="booking"]'),
+      bookingParticipant ? {
+        id: bookingParticipant.client_id,
+        client_name: bookingParticipant.client_name,
+        phone: bookingParticipant.client_phone,
+      } : {
+        id: '', client_name: item.customer_name || '', phone: item.customer_phone || '',
+      },
+      false,
+    );
     document.getElementById('scheduleCapacity').value = item.capacity || 10;
     (item.participants || []).forEach(participant => addScheduleParticipant(
       participant.client_id, participant.client_name, participant.client_phone
@@ -423,61 +487,164 @@
     if (rows.length === 1) return;
     button.closest('.schedule-assignment-row').remove();
   }
-  function applyScheduleBookingClient(input) {
-    const typed = input.value.trim();
-    const selected = scheduleClients.find(
-      client => `${client.client_name}${client.phone ? ' · ' + client.phone : ''}` === typed
-    );
-    const idInput = document.getElementById('scheduleCustomerClientId');
-    if (!selected) {
-      idInput.value = '';
+  function closeScheduleClientResults(picker) {
+    if (!picker) return;
+    const results = picker.querySelector('.schedule-client-results');
+    const input = picker.querySelector('[role="combobox"]');
+    results.hidden = true;
+    results.replaceChildren();
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+  }
+  function closeAllScheduleClientResults(exceptPicker) {
+    document.querySelectorAll('[data-client-picker]').forEach(picker => {
+      if (picker !== exceptPicker) closeScheduleClientResults(picker);
+    });
+  }
+  function scheduleClientInput(input) {
+    const picker = input.closest('[data-client-picker]');
+    picker.querySelector('[data-client-id]').value = '';
+    picker.dataset.selectedPhone = '';
+    if (picker.dataset.pickerKind === 'participant') {
+      picker.querySelector('[data-client-name]').value = input.value;
+      syncScheduleParticipantCount();
+    }
+    clearTimeout(scheduleClientTimers.get(input));
+    const previousRequest = scheduleClientRequests.get(input);
+    if (previousRequest) previousRequest.abort();
+    const query = input.value.trim();
+    if (query.length < 2) {
+      closeScheduleClientResults(picker);
       return;
     }
-    idInput.value = selected.id;
-    input.value = selected.client_name;
-    document.getElementById('schedulePhone').value = selected.phone;
+    scheduleClientTimers.set(input, setTimeout(() => searchScheduleClients(input, query), 180));
+  }
+  async function searchScheduleClients(input, query) {
+    const picker = input.closest('[data-client-picker]');
+    const controller = new AbortController();
+    scheduleClientRequests.set(input, controller);
+    try {
+      const response = await fetch(scheduleClientSearchUrl + '?q=' + encodeURIComponent(query), {
+        headers: {'Accept': 'application/json'},
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error('client-search-failed');
+      const payload = await response.json();
+      if (input.value.trim() !== query) return;
+      renderScheduleClientResults(picker, payload.clients || []);
+    } catch (error) {
+      if (error.name !== 'AbortError') closeScheduleClientResults(picker);
+    }
+  }
+  function renderScheduleClientResults(picker, clients) {
+    closeAllScheduleClientResults(picker);
+    const results = picker.querySelector('.schedule-client-results');
+    const input = picker.querySelector('[role="combobox"]');
+    results.replaceChildren();
+    if (!clients.length) {
+      const empty = document.createElement('span');
+      empty.className = 'schedule-client-results-empty';
+      empty.textContent = 'Совпадений нет — клиент будет создан при сохранении';
+      results.appendChild(empty);
+    } else {
+      clients.forEach((client, index) => {
+        const option = document.createElement('button');
+        option.type = 'button';
+        option.id = `${results.id || 'scheduleClientResult'}-${index}`;
+        option.setAttribute('role', 'option');
+        option.className = 'schedule-client-result';
+        if (client.status === 'blacklisted') option.classList.add('is-blacklisted');
+        const name = document.createElement('strong');
+        name.textContent = client.client_name;
+        const meta = document.createElement('small');
+        meta.textContent = client.status === 'blacklisted'
+          ? `${client.phone || 'Телефон не указан'} · Чёрный список`
+          : (client.phone || 'Телефон не указан');
+        option.append(name, meta);
+        option.addEventListener('click', () => setScheduleClientSelection(picker, client, true));
+        results.appendChild(option);
+      });
+    }
+    results.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+  }
+  function setScheduleClientSelection(picker, client, closeResults) {
+    if (!picker) return;
+    const input = picker.querySelector('[role="combobox"]');
+    input.value = client.client_name || '';
+    picker.querySelector('[data-client-id]').value = client.id || '';
+    picker.dataset.selectedPhone = client.phone || '';
+    if (picker.dataset.pickerKind === 'participant') {
+      picker.querySelector('[data-client-name]').value = client.client_name || '';
+      picker.closest('.schedule-participant-row').querySelector('[name="participant_phone[]"]').value = client.phone || '';
+      syncScheduleParticipantCount();
+    } else {
+      document.getElementById('schedulePhone').value = client.phone || '';
+    }
+    if (closeResults !== false) closeScheduleClientResults(picker);
+  }
+  function scheduleClientKeydown(event, input) {
+    const picker = input.closest('[data-client-picker]');
+    const results = picker.querySelector('.schedule-client-results');
+    const options = [...results.querySelectorAll('.schedule-client-result')];
+    if (event.key === 'Escape' && !results.hidden) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeScheduleClientResults(picker);
+      return;
+    }
+    if (!options.length || results.hidden || !['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
+    const current = options.findIndex(option => option.classList.contains('is-active'));
+    if (event.key === 'Enter') {
+      if (current >= 0) {
+        event.preventDefault();
+        options[current].click();
+      }
+      return;
+    }
+    event.preventDefault();
+    const next = event.key === 'ArrowDown'
+      ? Math.min(options.length - 1, current + 1)
+      : Math.max(0, current < 0 ? options.length - 1 : current - 1);
+    options.forEach((option, index) => {
+      const active = index === next;
+      option.classList.toggle('is-active', active);
+      option.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    input.setAttribute('aria-activedescendant', options[next].id);
+    options[next].scrollIntoView({block: 'nearest'});
   }
   function scheduleBookingPhoneChanged(input) {
-    const idInput = document.getElementById('scheduleCustomerClientId');
-    const selected = scheduleClients.find(
-      client => String(client.id) === idInput.value
-    );
-    if (selected && selected.phone !== input.value) idInput.value = '';
+    const picker = document.querySelector('[data-picker-kind="booking"]');
+    if (picker.querySelector('[data-client-id]').value && picker.dataset.selectedPhone !== input.value) {
+      picker.querySelector('[data-client-id]').value = '';
+    }
   }
-  function addScheduleParticipant(clientId, clientName, clientPhone) {
+  function addScheduleParticipant(clientId, clientName, clientPhone, focusNew) {
     const fragment = document.getElementById('scheduleParticipantTemplate').content.cloneNode(true);
     const row = fragment.querySelector('.schedule-participant-row');
-    row.querySelector('[name="participant_client_id[]"]').value = clientId || '';
-    row.querySelector('[name="participant_name[]"]').value = clientName || '';
-    row.querySelector('[data-participant-search]').value = clientName || '';
+    const picker = row.querySelector('[data-client-picker]');
+    const results = picker.querySelector('.schedule-client-results');
+    scheduleParticipantSerial += 1;
+    results.id = `scheduleParticipantResults${scheduleParticipantSerial}`;
+    row.querySelector('[data-participant-search]').setAttribute('aria-controls', results.id);
     row.querySelector('[name="participant_phone[]"]').value = clientPhone || '';
     document.getElementById('scheduleParticipantRows').appendChild(fragment);
+    setScheduleClientSelection(picker, {
+      id: clientId || '', client_name: clientName || '', phone: clientPhone || '',
+    }, false);
     syncScheduleParticipantCount();
+    if (focusNew) picker.querySelector('[data-participant-search]').focus();
   }
   function removeScheduleParticipant(button) {
     button.closest('.schedule-participant-row').remove();
     syncScheduleParticipantCount();
   }
-  function applyScheduleClient(input) {
-    const row = input.closest('.schedule-participant-row');
-    const selected = scheduleClients.find(client => `${client.client_name}${client.phone ? ' · ' + client.phone : ''}` === input.value);
-    const idInput = row.querySelector('[name="participant_client_id[]"]');
-    const nameInput = row.querySelector('[name="participant_name[]"]');
-    if (!selected) {
-      idInput.value = '';
-      nameInput.value = input.value;
-      syncScheduleParticipantCount();
-      return;
-    }
-    idInput.value = selected.id;
-    nameInput.value = selected.client_name;
-    row.querySelector('[name="participant_phone[]"]').value = selected.phone;
-    syncScheduleParticipantCount();
-  }
   function scheduleParticipantPhoneChanged(input) {
-    const row = input.closest('.schedule-participant-row');
-    const client = scheduleClients.find(candidate => String(candidate.id) === row.querySelector('[name="participant_client_id[]"]').value);
-    if (client && client.phone !== input.value) row.querySelector('[name="participant_client_id[]"]').value = '';
+    const picker = input.closest('.schedule-participant-row').querySelector('[data-client-picker]');
+    if (picker.querySelector('[data-client-id]').value && picker.dataset.selectedPhone !== input.value) {
+      picker.querySelector('[data-client-id]').value = '';
+    }
     syncScheduleParticipantCount();
   }
   function syncScheduleParticipantCount() {
@@ -499,12 +666,138 @@
   function handleScheduleColumnClick(event, employeeId) {
     if (event.target.closest('.schedule-card')) return;
     const column = event.currentTarget;
-    const minutes = roundHalfHour(scheduleDayStart + event.offsetY / schedulePxPerMinute);
+    const minutes = roundHalfHour(
+      scheduleDayStart + (event.clientY - column.getBoundingClientRect().top) / schedulePxPerMinute
+    );
     openScheduleCreate(employeeId, minutesToTime(minutes));
   }
+  function prepareScheduleColumnKeyboard(column) {
+    if (column.dataset.keyboardMinutes) return;
+    const duration = Math.floor(column.getBoundingClientRect().height / schedulePxPerMinute);
+    const defaultMinutes = Math.min(scheduleDayStart + duration - 30, Math.max(scheduleDayStart, 10 * 60));
+    setScheduleColumnKeyboardTime(column, defaultMinutes);
+  }
+  function setScheduleColumnKeyboardTime(column, minutes) {
+    const duration = Math.floor(column.getBoundingClientRect().height / schedulePxPerMinute);
+    const latest = scheduleDayStart + duration - 30;
+    const safeMinutes = Math.max(scheduleDayStart, Math.min(latest, roundHalfHour(minutes)));
+    const time = minutesToTime(safeMinutes);
+    column.dataset.keyboardMinutes = String(safeMinutes);
+    column.dataset.keyboardTime = time;
+    column.style.setProperty('--schedule-keyboard-top', `${(safeMinutes - scheduleDayStart) * schedulePxPerMinute}px`);
+    column.setAttribute(
+      'aria-label',
+      `Создать рейс для ${column.dataset.employeeName} в ${time}. Стрелки меняют время, Enter открывает форму`,
+    );
+  }
+  function handleScheduleColumnKeydown(event, employeeId) {
+    const column = event.currentTarget;
+    prepareScheduleColumnKeyboard(column);
+    const current = Number(column.dataset.keyboardMinutes);
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openScheduleCreate(employeeId, minutesToTime(current));
+    } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      setScheduleColumnKeyboardTime(column, current + (event.key === 'ArrowDown' ? 30 : -30));
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      setScheduleColumnKeyboardTime(column, scheduleDayStart);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      setScheduleColumnKeyboardTime(column, scheduleDayStart + column.getBoundingClientRect().height / schedulePxPerMinute);
+    }
+  }
+
+  function syncScheduleScroll(source, target) {
+    if (scheduleScrollSync) return;
+    scheduleScrollSync = true;
+    const sourceRange = Math.max(1, source.scrollWidth - source.clientWidth);
+    const targetRange = Math.max(0, target.scrollWidth - target.clientWidth);
+    target.scrollLeft = (source.scrollLeft / sourceRange) * targetRange;
+    requestAnimationFrame(() => {
+      scheduleScrollSync = false;
+      updateScheduleCrewWindow();
+    });
+  }
+  function updateScheduleCrewWindow() {
+    const board = document.getElementById('scheduleBoardScroll');
+    const heads = [...document.querySelectorAll('.schedule-crew-head')];
+    const label = document.getElementById('scheduleCrewWindow');
+    const previous = document.getElementById('scheduleCrewPrevious');
+    const next = document.getElementById('scheduleCrewNext');
+    if (!board || !heads.length || !label) return;
+    const columnWidth = heads[0].getBoundingClientRect().width || 1;
+    const axisWidth = document.querySelector('.schedule-time-axis')?.getBoundingClientRect().width || 0;
+    const start = Math.min(
+      scheduleCrewCount,
+      Math.max(1, Math.floor(Math.max(0, board.scrollLeft - axisWidth) / columnWidth) + 1),
+    );
+    const visible = Math.max(1, Math.floor((board.clientWidth - axisWidth) / columnWidth));
+    const end = Math.min(scheduleCrewCount, start + visible - 1);
+    label.textContent = scheduleCrewCount === 1 ? '1 сотрудник' : `${start}–${end} из ${scheduleCrewCount}`;
+    previous.disabled = board.scrollLeft <= 2;
+    next.disabled = board.scrollLeft >= board.scrollWidth - board.clientWidth - 2;
+  }
+  function syncScheduleRailMetrics() {
+    const board = document.getElementById('scheduleBoardScroll');
+    const rail = document.getElementById('scheduleTopScroll');
+    const spacer = document.getElementById('scheduleTopScrollSpacer');
+    if (!board || !rail || !spacer) return;
+    spacer.style.width = `${board.scrollWidth}px`;
+    syncScheduleScroll(board, rail);
+    updateScheduleCrewWindow();
+  }
+  function scrollScheduleCrew(direction) {
+    const board = document.getElementById('scheduleBoardScroll');
+    const head = document.querySelector('.schedule-crew-head');
+    if (!board || !head) return;
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    board.scrollBy({
+      left: direction * head.getBoundingClientRect().width,
+      behavior: reducedMotion ? 'auto' : 'smooth',
+    });
+  }
+  function initScheduleBoardNavigation() {
+    const board = document.getElementById('scheduleBoardScroll');
+    const rail = document.getElementById('scheduleTopScroll');
+    if (!board || !rail) return;
+    board.addEventListener('scroll', () => syncScheduleScroll(board, rail), {passive: true});
+    rail.addEventListener('scroll', () => syncScheduleScroll(rail, board), {passive: true});
+    window.addEventListener('resize', syncScheduleRailMetrics);
+    syncScheduleRailMetrics();
+  }
+
+  function scheduleModalFocusableElements() {
+    return [...document.querySelectorAll(
+      '#scheduleModal button:not([disabled]), #scheduleModal input:not([type="hidden"]):not([disabled]), ' +
+      '#scheduleModal select:not([disabled]), #scheduleModal textarea:not([disabled])'
+    )].filter(element => element.getClientRects().length && !element.closest('[hidden]'));
+  }
   document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && !document.getElementById('scheduleModal').hidden) closeScheduleModal();
+    const modal = document.getElementById('scheduleModal');
+    if (modal.hidden) return;
+    if (event.key === 'Escape') {
+      closeScheduleModal();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = scheduleModalFocusableElements();
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   });
+  document.addEventListener('click', event => {
+    if (!event.target.closest('[data-client-picker]')) closeAllScheduleClientResults();
+  });
+  initScheduleBoardNavigation();
 </script>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 </body>

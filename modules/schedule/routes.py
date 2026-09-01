@@ -2,7 +2,7 @@
 
 import datetime as dt
 
-from flask import Blueprint, redirect, render_template, request, session, url_for
+from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
 from . import repository, services
 from .constants import CREW_ROLES, ITEM_KINDS
@@ -52,6 +52,16 @@ def create_schedule_blueprint(
             crew_roles=CREW_ROLES,
             notice=session.pop("schedule_notice", None),
         )
+
+    @blueprint.route("/schedule/clients/search")
+    @admin_login_required
+    def search_clients():
+        query = request.args.get("q", "").strip()
+        if len(query) < 2:
+            return jsonify({"clients": []})
+        return jsonify({
+            "clients": repository.search_clients(get_db(), query, limit=20)
+        })
 
     @blueprint.route("/schedule/items", methods=["POST"])
     @admin_login_required
