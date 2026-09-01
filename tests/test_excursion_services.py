@@ -24,8 +24,12 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
                 "'средний тур', 'Тестовая индивидуальная экскурсия')"
             )
             db.execute(
-                "UPDATE excursion_services SET price = 0 "
+                "UPDATE excursion_services SET service_type = 'group', price = 0 "
                 "WHERE name = 'Средний тур'"
+            )
+            db.execute(
+                "DELETE FROM excursion_service_boat_prices WHERE service_id IN ("
+                "SELECT id FROM excursion_services WHERE name = 'Средний тур')"
             )
             db.commit()
 
@@ -44,8 +48,12 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
                 "'средний тур', 'Тестовая индивидуальная экскурсия')"
             )
             db.execute(
-                "UPDATE excursion_services SET price = 0 "
+                "UPDATE excursion_services SET service_type = 'group', price = 0 "
                 "WHERE name = 'Средний тур'"
+            )
+            db.execute(
+                "DELETE FROM excursion_service_boat_prices WHERE service_id IN ("
+                "SELECT id FROM excursion_services WHERE name = 'Средний тур')"
             )
             db.commit()
 
@@ -69,6 +77,9 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
         self.assertIn("Цена за гостя, ₽", html)
         self.assertIn("Групповая экскурсия", html)
         self.assertIn("Индивидуальная экскурсия", html)
+        self.assertIn('name="service_type"', html)
+        self.assertIn('data-pricing-type="group"', html)
+        self.assertIn('data-pricing-type="individual"', html)
         self.assertIn('class="active"', html)
         individual_html = self.client.get(
             "/services?section=individual"
@@ -188,6 +199,67 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
         self.assertEqual(service["service_type"], "individual")
         self.assertEqual(service["price"], 0)
         self.assertEqual(prices, dict(zip(boat_names, [4000, 5500, 6200])))
+
+    def test_admin_can_change_service_type_in_both_directions(self):
+        self.login()
+        boat_names = [boat["name"] for boat in application_module.BOATS]
+        with application_module.app.app_context():
+            service = application_module.get_db().execute(
+                "SELECT * FROM excursion_services WHERE name = 'Средний тур'"
+            ).fetchone()
+
+        to_individual = self.client.post(
+            f"/services/{service['id']}",
+            data={
+                "name": "Средний тур",
+                "service_type": "individual",
+                "hours": "1.5",
+                "boat_name[]": boat_names,
+                "boat_price[]": ["4100", "5200", "6300"],
+            },
+        )
+        self.assertEqual(to_individual.status_code, 302)
+        self.assertIn("section=individual", to_individual.headers["Location"])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            changed = db.execute(
+                "SELECT service_type, price FROM excursion_services WHERE id = ?",
+                (service["id"],),
+            ).fetchone()
+            rates = db.execute(
+                "SELECT COUNT(*) FROM excursion_service_boat_prices "
+                "WHERE service_id = ?",
+                (service["id"],),
+            ).fetchone()[0]
+        self.assertEqual(changed["service_type"], "individual")
+        self.assertEqual(changed["price"], 0)
+        self.assertEqual(rates, len(boat_names))
+
+        to_group = self.client.post(
+            f"/services/{service['id']}",
+            data={
+                "name": "Средний тур",
+                "service_type": "group",
+                "hours": "1.5",
+                "price": "2900",
+            },
+        )
+        self.assertEqual(to_group.status_code, 302)
+        self.assertIn("section=group", to_group.headers["Location"])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            restored = db.execute(
+                "SELECT service_type, price FROM excursion_services WHERE id = ?",
+                (service["id"],),
+            ).fetchone()
+            rates = db.execute(
+                "SELECT COUNT(*) FROM excursion_service_boat_prices "
+                "WHERE service_id = ?",
+                (service["id"],),
+            ).fetchone()[0]
+        self.assertEqual(restored["service_type"], "group")
+        self.assertEqual(restored["price"], 2900)
+        self.assertEqual(rates, 0)
 
     def test_duplicate_and_invalid_values_are_rejected(self):
         self.login()

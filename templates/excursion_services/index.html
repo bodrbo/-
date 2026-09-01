@@ -109,33 +109,37 @@
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 13.5h14l-2.2 3H5.2l-2.2-3zM6 13.5V8h7l2 5.5M8 8V5h4v3"/></svg>
         {% endif %}
       </div>
-      <form action="{{ url_for('excursion_services.update_service', service_id=service.id) }}" method="post" class="excursion-service-form excursion-service-edit-form {{ 'is-individual' if section == 'individual' }}">
-        <input type="hidden" name="service_type" value="{{ section }}">
+      <form action="{{ url_for('excursion_services.update_service', service_id=service.id) }}" method="post" class="excursion-service-form excursion-service-edit-form {{ 'is-individual' if section == 'individual' }}" data-service-form>
         <label class="excursion-service-name">
           <span>Название</span>
           <input name="name" maxlength="180" value="{{ service.name }}" required>
+        </label>
+        <label class="excursion-service-type">
+          <span>Тип услуги</span>
+          <select name="service_type" aria-label="Тип услуги для {{ service.name }}" data-service-type>
+            {% for value, label in service_types.items() %}
+            <option value="{{ value }}" {{ 'selected' if service.service_type == value }}>{{ label }}</option>
+            {% endfor %}
+          </select>
         </label>
         <label>
           <span>Длительность, ч</span>
           <input type="number" name="hours" min="0.5" max="24" step="0.5" value="{{ service.hours|round(2) }}" required>
         </label>
-        {% if section == 'group' %}
-        <label class="excursion-service-price">
+        <label class="excursion-service-price excursion-service-pricing" data-pricing-type="group" {{ 'hidden' if service.service_type != 'group' }}>
           <span>Цена за гостя, ₽</span>
-          <span class="excursion-service-price-input"><input type="number" name="price" min="0" max="10000000" step="1" value="{{ service.price|round(2) }}" required><b>₽</b></span>
+          <span class="excursion-service-price-input"><input type="number" name="price" min="0" max="10000000" step="1" value="{{ service.price|round(2) }}" {{ 'required' if service.service_type == 'group' else 'disabled' }}><b>₽</b></span>
         </label>
-        {% else %}
-        <fieldset class="excursion-boat-rates">
+        <fieldset class="excursion-boat-rates excursion-service-pricing" data-pricing-type="individual" {{ 'hidden' if service.service_type != 'individual' }}>
           <legend>Часовой тариф по катерам</legend>
           {% for boat in boats %}
           <label>
             <span>{{ boat.name }}</span>
             <input type="hidden" name="boat_name[]" value="{{ boat.name }}">
-            <span class="excursion-service-price-input"><input type="number" name="boat_price[]" min="0" max="10000000" step="1" value="{{ service.boat_prices.get(boat.name, 0)|round(2) }}" required><b>₽/ч</b></span>
+            <span class="excursion-service-price-input"><input type="number" name="boat_price[]" min="0" max="10000000" step="1" value="{{ service.boat_prices.get(boat.name, 0)|round(2) }}" {{ 'required' if service.service_type == 'individual' else 'disabled' }}><b>₽/ч</b></span>
           </label>
           {% endfor %}
         </fieldset>
-        {% endif %}
         <button type="submit" class="btn-secondary excursion-service-save">Сохранить</button>
       </form>
     </article>
@@ -159,6 +163,28 @@
       navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     });
   }
+
+  document.querySelectorAll('[data-service-form]').forEach((form) => {
+    const typeSelect = form.querySelector('[data-service-type]');
+    const pricingBlocks = form.querySelectorAll('[data-pricing-type]');
+    if (!typeSelect || !pricingBlocks.length) return;
+
+    const syncPricingFields = () => {
+      const serviceType = typeSelect.value;
+      form.classList.toggle('is-individual', serviceType === 'individual');
+      pricingBlocks.forEach((block) => {
+        const isActive = block.dataset.pricingType === serviceType;
+        block.hidden = !isActive;
+        block.querySelectorAll('input').forEach((input) => {
+          input.disabled = !isActive;
+          if (input.type === 'number') input.required = isActive;
+        });
+      });
+    };
+
+    typeSelect.addEventListener('change', syncPricingFields);
+    syncPricingFields();
+  });
 </script>
 </body>
 </html>

@@ -68,9 +68,11 @@ def create_blueprint(get_db, admin_login_required, boats):
         section = (
             existing["service_type"] if existing is not None else "group"
         )
-        success, message, _data = services.update_service(
+        success, message, data = services.update_service(
             get_db(), service_id, request.form, boats
         )
+        if success and data is not None:
+            section = data["service_type"]
         return redirect_with_notice(
             message, success, section, f"service-{service_id}"
         )
