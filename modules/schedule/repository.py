@@ -23,6 +23,50 @@ def list_crew_employees(db):
     return list(employees.values())
 
 
+def list_day_crew_ids(db, day):
+    return [
+        row["employee_id"]
+        for row in db.execute(
+            "SELECT employee_id FROM schedule_day_crew "
+            "WHERE work_date = ? ORDER BY created_at, employee_id",
+            (day,),
+        ).fetchall()
+    ]
+
+
+def list_day_assignment_employee_ids(db, day):
+    return {
+        row["employee_id"]
+        for row in db.execute(
+            "SELECT DISTINCT schedule_assignments.employee_id "
+            "FROM schedule_assignments JOIN schedule_items "
+            "ON schedule_items.id = schedule_assignments.schedule_item_id "
+            "WHERE schedule_items.deleted_at IS NULL "
+            "AND substr(schedule_items.starts_at, 1, 10) = ?",
+            (day,),
+        ).fetchall()
+    }
+
+
+def add_day_crew_member(db, day, employee_id, timestamp):
+    cursor = db.execute(
+        "INSERT OR IGNORE INTO schedule_day_crew "
+        "(work_date, employee_id, created_at) VALUES (?, ?, ?)",
+        (day, employee_id, timestamp),
+    )
+    db.commit()
+    return cursor.rowcount > 0
+
+
+def remove_day_crew_member(db, day, employee_id):
+    cursor = db.execute(
+        "DELETE FROM schedule_day_crew WHERE work_date = ? AND employee_id = ?",
+        (day, employee_id),
+    )
+    db.commit()
+    return cursor.rowcount > 0
+
+
 def search_clients(db, query, limit=20):
     """Return a small ranked slice of excursion clients for autocomplete."""
     words = [word for word in str(query or "").strip().casefold().split() if word]
@@ -205,6 +249,11 @@ def save_item(db, item_id, data, assignments, participants, timestamp):
                     item_id, assignment["employee_id"],
                     assignment["employee_name"], assignment["role"], timestamp,
                 ),
+            )
+            db.execute(
+                "INSERT OR IGNORE INTO schedule_day_crew "
+                "(work_date, employee_id, created_at) VALUES (?, ?, ?)",
+                (data["starts_at"][:10], assignment["employee_id"], timestamp),
             )
         for participant in participants:
             client_id = participant["client_id"]

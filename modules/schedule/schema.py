@@ -53,6 +53,25 @@ def init_schema(conn):
         """
     )
     conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schedule_day_crew (
+            work_date TEXT NOT NULL,
+            employee_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (work_date, employee_id)
+        )
+        """
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO schedule_day_crew "
+        "(work_date, employee_id, created_at) "
+        "SELECT substr(schedule_items.starts_at, 1, 10), "
+        "schedule_assignments.employee_id, schedule_items.created_at "
+        "FROM schedule_items JOIN schedule_assignments "
+        "ON schedule_assignments.schedule_item_id = schedule_items.id "
+        "WHERE schedule_items.deleted_at IS NULL"
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_schedule_items_day "
         "ON schedule_items(starts_at, deleted_at)"
     )
@@ -67,4 +86,8 @@ def init_schema(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_schedule_participants_client "
         "ON schedule_participants(client_id, schedule_item_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schedule_day_crew_employee "
+        "ON schedule_day_crew(employee_id, work_date)"
     )

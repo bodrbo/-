@@ -10,6 +10,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.client = application_module.app.test_client()
         with application_module.app.app_context():
             db = application_module.get_db()
+            db.execute("DELETE FROM schedule_day_crew")
             db.execute("DELETE FROM schedule_participants")
             db.execute("DELETE FROM schedule_assignments")
             db.execute("DELETE FROM schedule_items")
@@ -32,6 +33,14 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             )
             self.platon_id = self.ensure_crew_member(
                 db, "Платон Жмаев", "Капитан"
+            )
+            db.executemany(
+                "INSERT INTO schedule_day_crew "
+                "(work_date, employee_id, created_at) VALUES (?, ?, ?)",
+                [
+                    ("2026-09-05", self.daniil_id, "2026-09-01 09:00"),
+                    ("2026-09-05", self.platon_id, "2026-09-01 09:01"),
+                ],
             )
             db.commit()
 
@@ -93,6 +102,15 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn("/admin/login", response.headers["Location"])
         search_response = self.client.get("/schedule/clients/search?q=ал")
         self.assertEqual(search_response.status_code, 302)
+        self.assertEqual(
+            self.client.post("/schedule/crew", data={}).status_code, 302
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/schedule/crew/{self.daniil_id}/remove", data={}
+            ).status_code,
+            302,
+        )
 
     def test_day_board_renders_crew_and_navigation(self):
         self.login()
@@ -109,6 +127,89 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn("schedule-board-nav", html)
         self.assertIn("/schedule/clients/search", html)
         self.assertRegex(html, r"/static/style\.css\?v=\d+")
+
+    def test_admin_can_add_and_remove_employee_from_day_schedule(self):
+        self.login()
+        remove_response = self.client.post(
+            f"/schedule/crew/{self.platon_id}/remove",
+            data={"work_date": "2026-09-05"},
+        )
+        self.assertEqual(remove_response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            after_remove = db.execute(
+                "SELECT COUNT(*) AS count FROM schedule_day_crew "
+                "WHERE work_date = '2026-09-05' AND employee_id = ?",
+                (self.platon_id,),
+            ).fetchone()["count"]
+        self.assertEqual(after_remove, 0)
+
+        add_response = self.client.post(
+            "/schedule/crew",
+            data={
+                "work_date": "2026-09-05",
+                "employee_id": str(self.platon_id),
+            },
+        )
+        self.assertEqual(add_response.status_code, 302)
+        with application_module.app.app_context():
+            after_add = application_module.get_db().execute(
+                "SELECT COUNT(*) AS count FROM schedule_day_crew "
+                "WHERE work_date = '2026-09-05' AND employee_id = ?",
+                (self.platon_id,),
+            ).fetchone()["count"]
+        self.assertEqual(after_add, 1)
+
+    def test_employee_with_trip_cannot_be_removed_from_day_schedule(self):
+        self.login()
+        self.create_booking()
+
+        response = self.client.post(
+            f"/schedule/crew/{self.daniil_id}/remove",
+            data={"work_date": "2026-09-05"},
+            follow_redirects=True,
+        )
+
+        self.assertIn(
+            "Сначала переназначьте или удалите рейс",
+            response.get_data(as_text=True),
+        )
+        with application_module.app.app_context():
+            roster_count = application_module.get_db().execute(
+                "SELECT COUNT(*) AS count FROM schedule_day_crew "
+                "WHERE work_date = '2026-09-05' AND employee_id = ?",
+                (self.daniil_id,),
+            ).fetchone()["count"]
+        self.assertEqual(roster_count, 1)
+
+    def test_trip_assignment_automatically_adds_employee_to_day_schedule(self):
+        self.login()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "DELETE FROM schedule_day_crew "
+                "WHERE work_date = '2026-09-05' AND employee_id = ?",
+                (self.daniil_id,),
+            )
+            db.commit()
+
+        self.create_booking()
+
+        with application_module.app.app_context():
+            roster_count = application_module.get_db().execute(
+                "SELECT COUNT(*) AS count FROM schedule_day_crew "
+                "WHERE work_date = '2026-09-05' AND employee_id = ?",
+                (self.daniil_id,),
+            ).fetchone()["count"]
+        self.assertEqual(roster_count, 1)
+
+    def test_empty_day_prompts_admin_to_add_crew(self):
+        self.login()
+        response = self.client.get("/schedule?date=2026-09-08")
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Состав на этот день пока не добавлен", html)
+        self.assertIn("Добавить сотрудников", html)
 
     def test_client_search_returns_only_ranked_excursion_clients(self):
         self.login()
@@ -388,6 +489,36 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(participant["client_name"], "Старый турист")
         self.assertEqual(segment["segment"], "excursion")
+
+    def test_migration_adds_existing_assignments_to_day_schedule(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = db.execute(
+                "INSERT INTO schedule_items "
+                "(kind, boat, service_name, starts_at, ends_at, customer_name, "
+                "customer_phone, created_at, updated_at) VALUES "
+                "('booking', 'Ларус', 'Средний тур', '2026-09-09 12:00', "
+                "'2026-09-09 13:30', 'Турист', '', "
+                "'2026-09-01 09:00', '2026-09-01 09:00')"
+            ).lastrowid
+            db.execute(
+                "INSERT INTO schedule_assignments "
+                "(schedule_item_id, employee_id, employee_name, role, created_at) "
+                "VALUES (?, ?, 'Даниил Галецкий', 'guide_captain', "
+                "'2026-09-01 09:00')",
+                (item_id, self.daniil_id),
+            )
+            db.commit()
+
+        application_module.init_db()
+
+        with application_module.app.app_context():
+            roster = application_module.get_db().execute(
+                "SELECT * FROM schedule_day_crew "
+                "WHERE work_date = '2026-09-09' AND employee_id = ?",
+                (self.daniil_id,),
+            ).fetchone()
+        self.assertIsNotNone(roster)
 
     def test_group_event_rejects_more_clients_than_capacity(self):
         self.login()

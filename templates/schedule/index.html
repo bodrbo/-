@@ -55,11 +55,16 @@
         <span class="sr-only">Показать сотрудника</span>
         <select onchange="changeScheduleEmployee(this.value)">
           <option value="all" {{ 'selected' if selected_employee == 'all' }}>Все сотрудники</option>
-          {% for employee in crew %}
+          {% for employee in day_crew %}
           <option value="{{ employee.id }}" {{ 'selected' if selected_employee == employee.id|string }}>{{ employee.name }}</option>
           {% endfor %}
         </select>
       </label>
+      <button type="button" class="schedule-roster-button" onclick="openScheduleRosterModal()">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="3"/><circle cx="14.5" cy="8" r="2.2"/><path d="M2.5 16c.4-3 2.1-4.6 4.7-4.6s4.4 1.6 4.8 4.6M12 12.2c2.8-.6 4.8.7 5.5 3.8"/></svg>
+        <span>Состав</span>
+        <b>{{ day_crew|length }}</b>
+      </button>
       <div class="schedule-day-total" title="Плановая стоимость рейсов за день">
         <span>{{ items|length }} рейс{{ '' if items|length == 1 else 'а' if items|length in [2, 3, 4] else 'ов' }}</span>
         <strong>{{ '{:,.0f}'.format(items|sum(attribute='revenue')).replace(',', ' ') }} ₽</strong>
@@ -161,9 +166,15 @@
   {% else %}
   <section class="panel empty-state schedule-empty">
     <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+    {% if crew %}
+    <div class="t">Состав на этот день пока не добавлен</div>
+    <div class="s">Добавьте капитанов и гидов, которые работают {{ day_label }}.</div>
+    <button type="button" class="btn-secondary" onclick="openScheduleRosterModal()">Добавить сотрудников</button>
+    {% else %}
     <div class="t">Нет сотрудников для расписания</div>
     <div class="s">Добавьте сотруднику должность «Капитан», «Гид» или «Гид-капитан».</div>
     <a href="{{ url_for('employees.index') }}" class="btn-secondary">Открыть сотрудников</a>
+    {% endif %}
   </section>
   {% endif %}
 </main>
@@ -290,6 +301,70 @@
   </section>
 </div>
 
+<div class="schedule-modal" id="scheduleRosterModal" hidden>
+  <div class="schedule-modal-backdrop" onclick="closeScheduleRosterModal()"></div>
+  <section class="schedule-modal-card schedule-roster-card" role="dialog" aria-modal="true" aria-labelledby="scheduleRosterTitle">
+    <header class="schedule-modal-header">
+      <div>
+        <span>Рабочая смена · {{ day_label }}</span>
+        <h2 id="scheduleRosterTitle">Состав расписания</h2>
+      </div>
+      <button type="button" class="schedule-modal-close" onclick="closeScheduleRosterModal()" aria-label="Закрыть состав">×</button>
+    </header>
+    <div class="schedule-roster-body">
+      {% if day_crew %}
+      <div class="schedule-roster-list" aria-label="Сотрудники в расписании">
+        {% for employee in day_crew %}
+        <article class="schedule-roster-row">
+          {% if employee.avatar_url %}
+          <img src="{{ employee.avatar_url }}" alt="">
+          {% else %}
+          <span class="schedule-roster-avatar">{{ employee.name.split()[0][0] }}{{ employee.name.split()[-1][0] }}</span>
+          {% endif %}
+          <div>
+            <strong>{{ employee.name }}</strong>
+            <small>{{ employee.position_label }}{% if employee.has_day_assignment %}<em> · назначен рейс</em>{% endif %}</small>
+          </div>
+          <form method="post" action="{{ url_for('schedule.remove_crew_member', employee_id=employee.id) }}">
+            <input type="hidden" name="work_date" value="{{ day.isoformat() }}">
+            <button type="{{ 'button' if employee.has_day_assignment else 'submit' }}"
+                    class="schedule-roster-remove"
+                    {{ 'disabled' if employee.has_day_assignment }}
+                    title="{{ 'Сначала переназначьте или удалите рейс' if employee.has_day_assignment else 'Убрать из расписания' }}"
+                    aria-label="Убрать {{ employee.name }} из расписания">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h12M8 3h4l1 3H7l1-3zM6 6l.7 11h6.6L14 6M8.5 9v5M11.5 9v5"/></svg>
+            </button>
+          </form>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="schedule-roster-empty">На эту дату пока никто не добавлен.</div>
+      {% endif %}
+
+      {% if available_crew %}
+      <form method="post" action="{{ url_for('schedule.add_crew_member') }}" class="schedule-roster-add">
+        <input type="hidden" name="work_date" value="{{ day.isoformat() }}">
+        <label class="field">
+          <span>Добавить сотрудника</span>
+          <select name="employee_id" id="scheduleRosterEmployee" required>
+            <option value="" disabled selected>Выберите капитана или гида</option>
+            {% for employee in available_crew %}
+            <option value="{{ employee.id }}">{{ employee.name }} · {{ employee.position_label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit">Добавить</button>
+      </form>
+      {% elif crew %}
+      <div class="schedule-roster-complete">Все сотрудники экипажа уже добавлены.</div>
+      {% else %}
+      <a href="{{ url_for('employees.index') }}" class="btn-secondary">Открыть раздел «Сотрудники»</a>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
 <template id="scheduleAssignmentTemplate">
   <div class="schedule-assignment-row">
     <label class="field">
@@ -347,6 +422,7 @@
   const scheduleClientRequests = new WeakMap();
   let scheduleParticipantSerial = 0;
   let scheduleModalTrigger = null;
+  let scheduleRosterModalTrigger = null;
   let scheduleScrollSync = false;
 
   function changeScheduleDate(value) {
@@ -463,6 +539,34 @@
     setScheduleModalOpen(true);
   }
   function closeScheduleModal() { setScheduleModalOpen(false); }
+  function openScheduleRosterModal() {
+    const modal = document.getElementById('scheduleRosterModal');
+    scheduleRosterModalTrigger = document.activeElement;
+    modal.hidden = false;
+    document.body.classList.add('schedule-modal-open');
+    const header = document.querySelector('.schedule-topbar');
+    const shell = document.querySelector('.schedule-shell');
+    if (header) header.inert = true;
+    if (shell) shell.inert = true;
+    setTimeout(() => {
+      const target = document.getElementById('scheduleRosterEmployee')
+        || modal.querySelector('.schedule-modal-close');
+      target.focus();
+    }, 20);
+  }
+  function closeScheduleRosterModal() {
+    const modal = document.getElementById('scheduleRosterModal');
+    modal.hidden = true;
+    document.body.classList.remove('schedule-modal-open');
+    const header = document.querySelector('.schedule-topbar');
+    const shell = document.querySelector('.schedule-shell');
+    if (header) header.inert = false;
+    if (shell) shell.inert = false;
+    if (scheduleRosterModalTrigger && scheduleRosterModalTrigger !== document.body) {
+      scheduleRosterModalTrigger.focus();
+    }
+    scheduleRosterModalTrigger = null;
+  }
   function syncScheduleKind() {
     const kind = document.querySelector('input[name="kind"]:checked').value;
     const booking = document.getElementById('scheduleBookingFields');
@@ -768,21 +872,24 @@
     syncScheduleRailMetrics();
   }
 
-  function scheduleModalFocusableElements() {
-    return [...document.querySelectorAll(
-      '#scheduleModal button:not([disabled]), #scheduleModal input:not([type="hidden"]):not([disabled]), ' +
-      '#scheduleModal select:not([disabled]), #scheduleModal textarea:not([disabled])'
+  function scheduleModalFocusableElements(modal) {
+    return [...modal.querySelectorAll(
+      'button:not([disabled]), input:not([type="hidden"]):not([disabled]), ' +
+      'select:not([disabled]), textarea:not([disabled]), a[href]'
     )].filter(element => element.getClientRects().length && !element.closest('[hidden]'));
   }
   document.addEventListener('keydown', event => {
-    const modal = document.getElementById('scheduleModal');
-    if (modal.hidden) return;
+    const itemModal = document.getElementById('scheduleModal');
+    const rosterModal = document.getElementById('scheduleRosterModal');
+    const modal = !itemModal.hidden ? itemModal : (!rosterModal.hidden ? rosterModal : null);
+    if (!modal) return;
     if (event.key === 'Escape') {
-      closeScheduleModal();
+      if (modal === rosterModal) closeScheduleRosterModal();
+      else closeScheduleModal();
       return;
     }
     if (event.key !== 'Tab') return;
-    const focusable = scheduleModalFocusableElements();
+    const focusable = scheduleModalFocusableElements(modal);
     if (!focusable.length) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];

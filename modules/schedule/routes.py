@@ -63,6 +63,32 @@ def create_schedule_blueprint(
             "clients": repository.search_clients(get_db(), query, limit=20)
         })
 
+    @blueprint.route("/schedule/crew", methods=["POST"])
+    @admin_login_required
+    def add_crew_member():
+        day = services.parse_day(request.form.get("work_date"))
+        try:
+            employee_id = int(request.form.get("employee_id", ""))
+        except (TypeError, ValueError):
+            employee_id = 0
+        success, message = services.add_day_crew_member(
+            get_db(), day, employee_id
+        )
+        set_notice(message, success)
+        return redirect_to_day(day.isoformat())
+
+    @blueprint.route(
+        "/schedule/crew/<int:employee_id>/remove", methods=["POST"]
+    )
+    @admin_login_required
+    def remove_crew_member(employee_id):
+        day = services.parse_day(request.form.get("work_date"))
+        success, message = services.remove_day_crew_member(
+            get_db(), day, employee_id
+        )
+        set_notice(message, success)
+        return redirect_to_day(day.isoformat())
+
     @blueprint.route("/schedule/items", methods=["POST"])
     @admin_login_required
     def create_item():

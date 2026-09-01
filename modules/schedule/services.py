@@ -366,6 +366,41 @@ def delete_item(db, item_id):
     return (True, "Рейс удалён из расписания.") if deleted else (False, "Рейс не найден.")
 
 
+def add_day_crew_member(db, day, employee_id):
+    eligible = {
+        employee["id"]: employee for employee in repository.list_crew_employees(db)
+    }
+    if employee_id not in eligible:
+        return False, "Сотрудник не найден или его должность не относится к экипажу."
+    added = repository.add_day_crew_member(
+        db, day.isoformat(), employee_id, current_timestamp()
+    )
+    if not added:
+        return True, f"{eligible[employee_id]['name']} уже добавлен в расписание."
+    return True, f"{eligible[employee_id]['name']} добавлен в расписание."
+
+
+def remove_day_crew_member(db, day, employee_id):
+    eligible = {
+        employee["id"]: employee for employee in repository.list_crew_employees(db)
+    }
+    assigned_ids = repository.list_day_assignment_employee_ids(
+        db, day.isoformat()
+    )
+    employee_name = eligible.get(employee_id, {}).get("name", "Сотрудник")
+    if employee_id in assigned_ids:
+        return False, (
+            f"Нельзя убрать {employee_name}: на эту дату уже назначен рейс. "
+            "Сначала переназначьте или удалите рейс."
+        )
+    removed = repository.remove_day_crew_member(
+        db, day.isoformat(), employee_id
+    )
+    if not removed:
+        return False, "Сотрудник уже отсутствует в расписании на эту дату."
+    return True, f"{employee_name} убран из расписания."
+
+
 def _normalise_hex_color(raw_color):
     value = str(raw_color or "").strip().lstrip("#")
     if len(value) == 3:
@@ -408,22 +443,29 @@ def _display_colors_by_boat(boat_colors):
 
 def day_view(db, day, selected_employee, boats, boat_colors, avatar_url):
     crew = repository.list_crew_employees(db)
+    day_crew_ids = set(repository.list_day_crew_ids(db, day.isoformat()))
+    assigned_today_ids = repository.list_day_assignment_employee_ids(
+        db, day.isoformat()
+    )
+    day_crew = [employee for employee in crew if employee["id"] in day_crew_ids]
+    available_crew = [employee for employee in crew if employee["id"] not in day_crew_ids]
     selected_id = None
     if selected_employee not in (None, "", "all"):
         try:
             candidate_id = int(selected_employee)
         except ValueError:
             candidate_id = None
-        if any(employee["id"] == candidate_id for employee in crew):
+        if any(employee["id"] == candidate_id for employee in day_crew):
             selected_id = candidate_id
 
     visible_crew = (
-        [employee for employee in crew if employee["id"] == selected_id]
-        if selected_id is not None else crew
+        [employee for employee in day_crew if employee["id"] == selected_id]
+        if selected_id is not None else day_crew
     )
     for employee in crew:
         employee["avatar_url"] = avatar_url(employee["name"])
         employee["position_label"] = " · ".join(employee["positions"])
+        employee["has_day_assignment"] = employee["id"] in assigned_today_ids
 
     colors_by_boat = _display_colors_by_boat(boat_colors)
     raw_items = repository.list_day_items(db, day.isoformat())
@@ -495,6 +537,8 @@ def day_view(db, day, selected_employee, boats, boat_colors, avatar_url):
 
     return {
         "crew": crew,
+        "day_crew": day_crew,
+        "available_crew": available_crew,
         "visible_crew": visible_crew,
         "items": items,
         "cards_by_employee": cards_by_employee,
