@@ -6552,8 +6552,11 @@ button.captain-command-alert:hover {
 /* ------------------------------------------------------------------
    Client cabinet — authenticated administrative layer
    ------------------------------------------------------------------ */
-.client-dashboard-admin { --client-admin-accent: #6941a5; }
-.client-dashboard-admin .topbar { background: var(--ink); }
+.client-dashboard-admin {
+  --client-admin-accent: #6941a5;
+  --client-admin-accent-strong: #563485;
+  --client-admin-surface: #f8f5fc;
+}
 .client-admin-toolbar {
   display: flex;
   align-items: center;
@@ -6561,19 +6564,20 @@ button.captain-command-alert:hover {
   gap: 24px;
   margin-bottom: 14px;
   padding: 18px 20px;
+  border: 1px solid rgba(105, 65, 165, .2);
   border-left: 5px solid var(--client-admin-accent);
   border-radius: 11px;
-  background: var(--ink);
-  color: var(--paper);
-  box-shadow: var(--shadow);
+  background: linear-gradient(135deg, var(--paper) 0%, var(--client-admin-surface) 100%);
+  color: var(--ink);
+  box-shadow: 0 8px 24px -20px rgba(105, 65, 165, .65);
 }
-.client-admin-toolbar h2 { margin: 2px 0 4px; color: var(--paper); font-size: 19px; }
-.client-admin-toolbar p { max-width: 690px; margin: 0; color: #b9cad5; font-size: 12px; }
+.client-admin-toolbar h2 { margin: 2px 0 4px; color: var(--ink); font-size: 19px; }
+.client-admin-toolbar p { max-width: 690px; margin: 0; color: var(--muted); font-size: 12px; }
 .client-admin-mode-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
 .client-admin-mode-heading h2 { margin-right: 2px; }
-.client-admin-mode-heading .status-badge { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .16); }
+.client-admin-mode-heading .status-badge { box-shadow: inset 0 0 0 1px rgba(15, 42, 53, .08); }
 .client-admin-eyebrow {
-  color: #c4a7ef;
+  color: var(--client-admin-accent);
   font-family: 'PT Mono', monospace;
   font-size: 10px;
   font-weight: 700;
@@ -6595,10 +6599,10 @@ button.captain-command-alert:hover {
   text-decoration: none;
   white-space: nowrap;
 }
-.client-admin-link { border: 1px solid rgba(255, 255, 255, .28); color: var(--paper); }
-.client-admin-link:hover { border-color: rgba(255, 255, 255, .55); background: rgba(255, 255, 255, .08); }
+.client-admin-link { border: 1px solid rgba(105, 65, 165, .35); color: var(--client-admin-accent); }
+.client-admin-link:hover { border-color: var(--client-admin-accent); background: rgba(105, 65, 165, .08); }
 .client-admin-preview-link { border: 1px solid #8e69c7; background: var(--client-admin-accent); color: #fff; }
-.client-admin-preview-link:hover { background: #563485; }
+.client-admin-preview-link:hover { background: var(--client-admin-accent-strong); }
 
 .panel.client-admin-profile { margin-bottom: 18px; padding: 14px 18px; border-color: rgba(105, 65, 165, .25); box-shadow: none; }
 .client-admin-profile dl,

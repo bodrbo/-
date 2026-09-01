@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from support import application_module
 
@@ -214,6 +215,27 @@ class ClientDashboardRoleTests(unittest.TestCase):
             f'/client/{self.CLIENT_TOKEN}/item/{self.item_id}/approve', html
         )
         self.assertNotIn(self.PAYMENT_URL, html)
+
+    def test_admin_cabinet_uses_standard_topbar_and_light_service_panel(self):
+        self.login()
+        response = self.client.get(f"/admin/clients/{self.client_id}/cabinet")
+        html = response.get_data(as_text=True)
+        stylesheet = (
+            Path(application_module.__file__).with_name("static") / "style.css"
+        ).read_text(encoding="utf-8")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("20260901-client-admin-theme", html)
+        self.assertIn("--client-admin-surface: #f8f5fc", stylesheet)
+        self.assertIn(
+            "background: linear-gradient(135deg, var(--paper) 0%, "
+            "var(--client-admin-surface) 100%)",
+            stylesheet,
+        )
+        self.assertNotIn(
+            ".client-dashboard-admin .topbar { background: var(--ink); }",
+            stylesheet,
+        )
 
     def test_tuning_order_list_uses_protected_admin_cabinet_link(self):
         self.login()
