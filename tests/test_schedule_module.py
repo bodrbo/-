@@ -292,7 +292,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         ).get_data(as_text=True)
         self.assertIn("--schedule-card-color: #673ab7", page)
         self.assertIn("--schedule-card-ink: #ffffff", page)
-        self.assertIn("Запись", page)
+        self.assertIn("Аренда катера", page)
 
     def test_individual_booking_allows_client_without_phone(self):
         self.login()
@@ -364,6 +364,10 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             [participant["guests_count"] for participant in participants],
             [3, 2],
         )
+        schedule_page = self.client.get(
+            "/schedule?date=2026-09-05"
+        ).get_data(as_text=True)
+        self.assertIn("Групповая экскурсия", schedule_page)
 
         directory = self.client.get(
             "/admin/clients?section=excursion"

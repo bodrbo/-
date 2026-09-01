@@ -1,8 +1,8 @@
 """Business constants for the internal schedule."""
 
 ITEM_KINDS = {
-    "booking": "Запись",
-    "event": "Групповое событие",
+    "booking": "Аренда катера",
+    "event": "Групповая экскурсия",
 }
 
 CREW_ROLES = {
