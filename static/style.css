@@ -403,6 +403,21 @@ body {
 }
 .excursion-services-notice-success { border-color: rgba(47,107,79,.32); color: var(--success); }
 .excursion-services-notice-error { border-color: rgba(179,64,44,.32); color: var(--danger); }
+.excursion-service-tabs { margin-top: 0; }
+.excursion-service-tabs a { gap: 9px; }
+.excursion-service-tabs b {
+  display: grid;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 6px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--paper-alt);
+  color: var(--muted);
+  font-family: 'PT Mono', monospace;
+  font-size: 9px;
+}
+.excursion-service-tabs a.active b { background: rgba(255,255,255,.2); color: #fff; }
 .panel.excursion-service-create {
   padding: 22px 24px;
   border-top: 4px solid var(--brass);
@@ -446,6 +461,10 @@ body {
 .excursion-service-edit-form {
   grid-template-columns: minmax(270px, 1.8fr) minmax(145px, .58fr) minmax(190px, .8fr) auto;
 }
+.excursion-service-form.is-individual {
+  grid-template-columns: minmax(270px, 1.8fr) minmax(145px, .58fr) auto;
+}
+.excursion-service-form.is-individual > button { grid-column: 3; grid-row: 1; }
 .excursion-service-form label,
 .excursion-service-form label > span:first-child { min-width: 0; }
 .excursion-service-form label > span:first-child {
@@ -493,10 +512,31 @@ body {
   border-radius: 50%;
   background: var(--paper-alt);
   color: var(--brass-strong);
-  font-family: 'PT Mono', monospace;
-  font-size: 11px;
-  font-weight: 700;
 }
+.excursion-service-index svg { width: 21px; height: 21px; }
+.excursion-boat-rates {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 11px;
+  margin: 2px 0 0;
+  padding: 13px 14px 14px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 10px;
+  background: var(--paper-alt);
+}
+.excursion-boat-rates legend {
+  padding: 0 7px;
+  color: var(--ink-soft);
+  font-family: 'PT Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+.excursion-boat-rates label > span:first-child { font-size: 10px; }
+.excursion-boat-rates .excursion-service-price-input input { padding-right: 48px; background: var(--paper); }
+.excursion-boat-rates .excursion-service-price-input b { font-size: 10px; }
 .excursion-service-price-input { position: relative; display: block; }
 .excursion-service-price-input input {
   padding-right: 34px;
@@ -519,7 +559,9 @@ body {
 @media (max-width: 900px) {
   .excursion-service-create-form,
   .excursion-service-edit-form { grid-template-columns: minmax(230px, 1.5fr) repeat(2, minmax(145px, .7fr)); }
+  .excursion-service-form.is-individual { grid-template-columns: minmax(230px, 1.5fr) minmax(145px, .58fr); }
   .excursion-service-form > button { grid-column: 1 / -1; justify-self: end; }
+  .excursion-service-form.is-individual > button { grid-column: 1 / -1; grid-row: auto; }
 }
 @media (max-width: 640px) {
   .panel.excursion-service-create { padding: 18px 16px; }
@@ -529,6 +571,7 @@ body {
   .excursion-services-heading > p { text-align: left; }
   .excursion-service-create-form,
   .excursion-service-edit-form { grid-template-columns: 1fr 1fr; gap: 11px; }
+  .excursion-service-form.is-individual { grid-template-columns: 1fr 1fr; }
   .excursion-service-name { grid-column: 1 / -1; }
   .excursion-service-form > button { width: 100%; }
   .panel.excursion-service-row {
@@ -538,10 +581,13 @@ body {
     padding: 14px 12px;
   }
   .excursion-service-index { width: 32px; height: 32px; font-size: 9px; }
+  .excursion-service-index svg { width: 18px; height: 18px; }
+  .excursion-boat-rates { grid-template-columns: 1fr; }
 }
 @media (max-width: 420px) {
   .excursion-service-create-form,
   .excursion-service-edit-form { grid-template-columns: 1fr; }
+  .excursion-service-form.is-individual { grid-template-columns: 1fr; }
   .excursion-service-name,
   .excursion-service-form > button { grid-column: auto; }
 }

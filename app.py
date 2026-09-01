@@ -3457,6 +3457,7 @@ app.register_blueprint(
     create_excursion_services_blueprint(
         get_db=get_db,
         admin_login_required=admin_login_required,
+        boats=BOATS,
     )
 )
 

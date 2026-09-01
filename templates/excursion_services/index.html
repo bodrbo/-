@@ -40,15 +40,28 @@
   <div class="excursion-services-notice excursion-services-notice-{{ notice.type }}" role="status">{{ notice.message }}</div>
   {% endif %}
 
+  <nav class="sub-tabs excursion-service-tabs" aria-label="Категории услуг">
+    {% for value, label in service_types.items() %}
+    <a href="{{ url_for('excursion_services.index', section=value) }}" class="{{ 'active' if section == value }}">
+      <span>{{ label }}</span><b>{{ service_counts[value] }}</b>
+    </a>
+    {% endfor %}
+  </nav>
+
   <section class="panel excursion-service-create" id="new-service">
     <div class="excursion-service-create-heading">
       <div>
         <p class="excursion-service-eyebrow">Новый продукт</p>
-        <h2>Добавить услугу</h2>
+        <h2>Добавить {{ 'групповую' if section == 'group' else 'индивидуальную' }} экскурсию</h2>
       </div>
-      <p>Название и длительность попадут в форму рейса. Цена подставится при добавлении клиента.</p>
+      {% if section == 'group' %}
+      <p>Цена едина для всех катеров и умножается на общее количество гостей.</p>
+      {% else %}
+      <p>Итоговая стоимость считается по длительности экскурсии и часовому тарифу выбранного катера.</p>
+      {% endif %}
     </div>
-    <form action="{{ url_for('excursion_services.create_service') }}" method="post" class="excursion-service-form excursion-service-create-form">
+    <form action="{{ url_for('excursion_services.create_service') }}" method="post" class="excursion-service-form excursion-service-create-form {{ 'is-individual' if section == 'individual' }}">
+      <input type="hidden" name="service_type" value="{{ section }}">
       <label class="excursion-service-name">
         <span>Название</span>
         <input name="name" maxlength="180" value="{{ create_values.get('name', '') }}" placeholder="Например, Экскурсия по фортам" required>
@@ -57,10 +70,23 @@
         <span>Длительность, ч</span>
         <input type="number" name="hours" min="0.5" max="24" step="0.5" value="{{ create_values.get('hours', '1') }}" required>
       </label>
+      {% if section == 'group' %}
       <label>
         <span>Цена за гостя, ₽</span>
         <input type="number" name="price" min="0" max="10000000" step="1" value="{{ create_values.get('price', '0') }}" required>
       </label>
+      {% else %}
+      <fieldset class="excursion-boat-rates">
+        <legend>Цена за час по катерам</legend>
+        {% for boat in boats %}
+        <label>
+          <span>{{ boat.name }}</span>
+          <input type="hidden" name="boat_name[]" value="{{ boat.name }}">
+          <span class="excursion-service-price-input"><input type="number" name="boat_price[]" min="0" max="10000000" step="1" value="{{ create_values.get('boat_prices', {}).get(boat.name, 0) }}" required><b>₽/ч</b></span>
+        </label>
+        {% endfor %}
+      </fieldset>
+      {% endif %}
       <button type="submit">Добавить услугу</button>
     </form>
   </section>
@@ -68,16 +94,23 @@
   <div class="excursion-services-heading">
     <div>
       <p class="excursion-service-eyebrow">Действующий прайс</p>
-      <h2>{{ services|length }} услуг</h2>
+      <h2>{{ service_types[section] }} · {{ services|length }}</h2>
     </div>
-    <p>Изменения сразу применяются к новым рейсам. Сохранённая ранее стоимость рейса не меняется.</p>
+    <p>Изменения применяются к новым расчётам. Стоимость уже созданных рейсов не меняется.</p>
   </div>
 
   <section class="excursion-service-list" aria-label="Каталог экскурсионных услуг">
     {% for service in services %}
     <article class="panel excursion-service-row" id="service-{{ service.id }}">
-      <div class="excursion-service-index" aria-hidden="true">{{ '%02d'|format(loop.index) }}</div>
-      <form action="{{ url_for('excursion_services.update_service', service_id=service.id) }}" method="post" class="excursion-service-form excursion-service-edit-form">
+      <div class="excursion-service-index" aria-hidden="true">
+        {% if section == 'group' %}
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="6" r="2.2"/><circle cx="14" cy="7" r="1.8"/><path d="M2.8 16c.3-3 1.7-5 4.2-5s3.9 2 4.2 5M11.5 12c2.8-.9 5 .6 5.6 3.6"/></svg>
+        {% else %}
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 13.5h14l-2.2 3H5.2l-2.2-3zM6 13.5V8h7l2 5.5M8 8V5h4v3"/></svg>
+        {% endif %}
+      </div>
+      <form action="{{ url_for('excursion_services.update_service', service_id=service.id) }}" method="post" class="excursion-service-form excursion-service-edit-form {{ 'is-individual' if section == 'individual' }}">
+        <input type="hidden" name="service_type" value="{{ section }}">
         <label class="excursion-service-name">
           <span>Название</span>
           <input name="name" maxlength="180" value="{{ service.name }}" required>
@@ -86,18 +119,31 @@
           <span>Длительность, ч</span>
           <input type="number" name="hours" min="0.5" max="24" step="0.5" value="{{ service.hours|round(2) }}" required>
         </label>
+        {% if section == 'group' %}
         <label class="excursion-service-price">
           <span>Цена за гостя, ₽</span>
           <span class="excursion-service-price-input"><input type="number" name="price" min="0" max="10000000" step="1" value="{{ service.price|round(2) }}" required><b>₽</b></span>
         </label>
+        {% else %}
+        <fieldset class="excursion-boat-rates">
+          <legend>Часовой тариф по катерам</legend>
+          {% for boat in boats %}
+          <label>
+            <span>{{ boat.name }}</span>
+            <input type="hidden" name="boat_name[]" value="{{ boat.name }}">
+            <span class="excursion-service-price-input"><input type="number" name="boat_price[]" min="0" max="10000000" step="1" value="{{ service.boat_prices.get(boat.name, 0)|round(2) }}" required><b>₽/ч</b></span>
+          </label>
+          {% endfor %}
+        </fieldset>
+        {% endif %}
         <button type="submit" class="btn-secondary excursion-service-save">Сохранить</button>
       </form>
     </article>
     {% else %}
     <div class="panel empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">Каталог пока пуст</div>
-      <div class="s">Добавьте первую экскурсионную услугу выше.</div>
+      <div class="t">В этом подразделе пока нет услуг</div>
+      <div class="s">Добавьте первую услугу с нужным способом расчёта выше.</div>
     </div>
     {% endfor %}
   </section>

@@ -3,17 +3,18 @@
 from flask import Blueprint, redirect, render_template, request, session, url_for
 
 from . import repository, services
+from .constants import SERVICE_TYPES
 
 
-def create_blueprint(get_db, admin_login_required):
+def create_blueprint(get_db, admin_login_required, boats):
     blueprint = Blueprint("excursion_services", __name__)
 
-    def redirect_with_notice(message, success, anchor=None):
+    def redirect_with_notice(message, success, section="group", anchor=None):
         session["excursion_services_notice"] = {
             "message": message,
             "type": "success" if success else "error",
         }
-        location = url_for("excursion_services.index")
+        location = url_for("excursion_services.index", section=section)
         if anchor:
             location += f"#{anchor}"
         return redirect(location)
@@ -21,9 +22,26 @@ def create_blueprint(get_db, admin_login_required):
     @blueprint.route("/services")
     @admin_login_required
     def index():
+        section = request.args.get("section", "group")
+        if section not in SERVICE_TYPES:
+            section = "group"
+        catalog = repository.list_services(get_db())
         return render_template(
             "excursion_services/index.html",
-            services=repository.list_services(get_db()),
+            services=[
+                service for service in catalog
+                if service["service_type"] == section
+            ],
+            service_counts={
+                service_type: sum(
+                    service["service_type"] == service_type
+                    for service in catalog
+                )
+                for service_type in SERVICE_TYPES
+            },
+            service_types=SERVICE_TYPES,
+            section=section,
+            boats=boats,
             notice=session.pop("excursion_services_notice", None),
             create_values=session.pop("excursion_services_create_values", {}),
             active_page="services",
@@ -32,19 +50,29 @@ def create_blueprint(get_db, admin_login_required):
     @blueprint.route("/services", methods=["POST"])
     @admin_login_required
     def create_service():
-        success, message, result = services.create_service(get_db(), request.form)
+        section = request.form.get("service_type", "group")
+        success, message, result = services.create_service(
+            get_db(), request.form, boats
+        )
         if not success:
             session["excursion_services_create_values"] = result or {}
         return redirect_with_notice(
-            message, success, f"service-{result}" if success else "new-service"
+            message, success, section,
+            f"service-{result}" if success else "new-service",
         )
 
     @blueprint.route("/services/<int:service_id>", methods=["POST"])
     @admin_login_required
     def update_service(service_id):
-        success, message, _data = services.update_service(
-            get_db(), service_id, request.form
+        existing = repository.get_service(get_db(), service_id)
+        section = (
+            existing["service_type"] if existing is not None else "group"
         )
-        return redirect_with_notice(message, success, f"service-{service_id}")
+        success, message, _data = services.update_service(
+            get_db(), service_id, request.form, boats
+        )
+        return redirect_with_notice(
+            message, success, section, f"service-{service_id}"
+        )
 
     return blueprint

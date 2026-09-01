@@ -4,6 +4,7 @@ import datetime as dt
 import sqlite3
 
 from . import repository
+from .constants import SERVICE_TYPES
 
 
 def current_timestamp():
@@ -26,7 +27,27 @@ def _parse_number(raw_value, label, minimum, maximum, errors):
     return value
 
 
-def validate_form(db, form, service_id=None):
+def _boat_prices_from_form(form, boats, errors):
+    submitted_names = form.getlist("boat_name[]")
+    submitted_prices = form.getlist("boat_price[]")
+    submitted = {
+        name: submitted_prices[index] if index < len(submitted_prices) else ""
+        for index, name in enumerate(submitted_names)
+    }
+    result = {}
+    for boat in boats:
+        boat_name = boat["name"]
+        result[boat_name] = _parse_number(
+            submitted.get(boat_name, "0"),
+            f"Цена для катера «{boat_name}»",
+            0,
+            10_000_000,
+            errors,
+        )
+    return result
+
+
+def validate_form(db, form, boats, service_id=None):
     errors = []
     name = _normalise_name(form.get("name"))
     if len(name) < 2:
@@ -34,15 +55,30 @@ def validate_form(db, form, service_id=None):
     hours = _parse_number(
         form.get("hours"), "Длительность", 0.5, 24, errors
     )
-    price = _parse_number(form.get("price"), "Цена", 0, 10_000_000, errors)
+    service_type = str(form.get("service_type") or "group").strip()
+    if service_type not in SERVICE_TYPES:
+        errors.append("Выберите категорию услуги.")
+        service_type = "group"
+    if service_type == "group":
+        price = _parse_number(form.get("price"), "Цена", 0, 10_000_000, errors)
+        boat_prices = {}
+    else:
+        price = 0.0
+        boat_prices = _boat_prices_from_form(form, boats, errors)
     existing = repository.get_service_by_name(db, name) if name else None
     if existing is not None and existing["id"] != service_id:
         errors.append("Услуга с таким названием уже есть в каталоге.")
-    return errors, {"name": name, "hours": hours, "price": price}
+    return errors, {
+        "name": name,
+        "service_type": service_type,
+        "hours": hours,
+        "price": price,
+        "boat_prices": boat_prices,
+    }
 
 
-def create_service(db, form):
-    errors, data = validate_form(db, form)
+def create_service(db, form, boats):
+    errors, data = validate_form(db, form, boats)
     if errors:
         return False, " ".join(errors), data
     try:
@@ -52,10 +88,10 @@ def create_service(db, form):
     return True, f"Услуга «{data['name']}» добавлена.", service_id
 
 
-def update_service(db, service_id, form):
+def update_service(db, service_id, form, boats):
     if repository.get_service(db, service_id) is None:
         return False, "Услуга не найдена.", None
-    errors, data = validate_form(db, form, service_id=service_id)
+    errors, data = validate_form(db, form, boats, service_id=service_id)
     if errors:
         return False, " ".join(errors), data
     try:

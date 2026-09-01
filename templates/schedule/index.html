@@ -204,13 +204,13 @@
           <select name="service_id" id="scheduleService" required onchange="applyScheduleService()">
             <option value="" disabled selected>Выберите услугу</option>
             {% for service in trip_services %}
-            <option value="{{ service.id }}" data-name="{{ service.name }}" data-hours="{{ service.hours }}" data-price="{{ service.price }}">{{ service.name }}</option>
+            <option value="{{ service.id }}" data-name="{{ service.name }}" data-service-type="{{ service.service_type }}" data-hours="{{ service.hours }}" data-price="{{ service.price }}" data-boat-prices='{{ service.boat_prices|tojson }}'>{{ service.name }}</option>
             {% endfor %}
           </select>
         </label>
         <label class="field">
           <span>Катер</span>
-          <select name="boat" id="scheduleBoat" required>
+          <select name="boat" id="scheduleBoat" required onchange="syncScheduleBoatPrice()">
             <option value="" disabled selected>Выберите катер</option>
             {% for boat in boats %}<option value="{{ boat.name }}">{{ boat.name }}</option>{% endfor %}
           </select>
@@ -225,7 +225,7 @@
         </label>
         <label class="field">
           <span>Окончание</span>
-          <input type="time" name="end_time" id="scheduleEnd" step="1800" required>
+          <input type="time" name="end_time" id="scheduleEnd" step="1800" required onchange="syncScheduleTimingPrice()">
         </label>
       </div>
 
@@ -470,6 +470,7 @@
     form.reset();
     form.action = scheduleCreateUrl;
     form.dataset.revenueMode = 'auto';
+    form.dataset.editing = 'false';
     document.getElementById('scheduleDate').value = {{ day.isoformat()|tojson }};
     document.getElementById('scheduleStart').value = '10:00';
     document.getElementById('scheduleEnd').value = '11:00';
@@ -506,6 +507,7 @@
     const form = document.getElementById('scheduleItemForm');
     form.action = scheduleCreateUrl + '/' + item.id;
     form.dataset.revenueMode = 'manual';
+    form.dataset.editing = 'true';
     form.querySelector(`input[name="kind"][value="${item.kind}"]`).checked = true;
     document.getElementById('scheduleBoat').value = item.boat;
     const serviceSelect = document.getElementById('scheduleService');
@@ -593,10 +595,30 @@
     booking.hidden = kind !== 'booking';
     eventFields.hidden = kind !== 'event';
     document.getElementById('scheduleCustomer').required = kind === 'booking';
+    syncScheduleServiceOptions(
+      !userInitiated && document.getElementById('scheduleItemForm').dataset.editing === 'true'
+    );
     if (kind === 'event' && !document.querySelector('.schedule-participant-row')) {
       addScheduleParticipant();
     }
     syncScheduleParticipantCount();
+  }
+  function syncScheduleServiceOptions(preserveSelected) {
+    const kind = document.querySelector('input[name="kind"]:checked').value;
+    const expectedType = kind === 'event' ? 'group' : 'individual';
+    const select = document.getElementById('scheduleService');
+    [...select.options].forEach(option => {
+      if (!option.value) return;
+      const compatible = option.dataset.serviceType === expectedType;
+      const preserve = preserveSelected && option.selected;
+      option.hidden = !compatible && !preserve;
+      option.disabled = !compatible && !preserve;
+    });
+    const selected = select.selectedOptions[0];
+    if (selected && selected.value && selected.dataset.serviceType !== expectedType && !preserveSelected) {
+      select.value = '';
+      document.getElementById('scheduleRevenue').value = '0';
+    }
   }
   function addScheduleAssignment(employeeId, role) {
     const fragment = document.getElementById('scheduleAssignmentTemplate').content.cloneNode(true);
@@ -793,11 +815,44 @@
     const service = document.getElementById('scheduleService');
     const selected = service.selectedOptions[0];
     if (!selected || !selected.value) return;
-    const unitPrice = Number(selected.dataset.price || 0);
-    const kind = document.querySelector('input[name="kind"]:checked').value;
-    const multiplier = kind === 'event' ? Number(groupGuests || 0) : 1;
-    const total = Math.round(unitPrice * multiplier * 100) / 100;
+    let total = 0;
+    if (selected.dataset.serviceType === 'group') {
+      const guests = groupGuests === undefined
+        ? scheduleGroupGuestCount()
+        : Number(groupGuests || 0);
+      total = Number(selected.dataset.price || 0) * guests;
+    } else {
+      const boat = document.getElementById('scheduleBoat').value;
+      let prices = {};
+      try { prices = JSON.parse(selected.dataset.boatPrices || '{}'); } catch (_error) {}
+      total = Number(prices[boat] || 0) * scheduleSelectedHours();
+    }
+    total = Math.round(total * 100) / 100;
     document.getElementById('scheduleRevenue').value = String(total);
+  }
+  function scheduleGroupGuestCount() {
+    return [...document.querySelectorAll('.schedule-participant-row')].reduce((total, row) => {
+      const filled = row.querySelector('[data-participant-search]').value.trim()
+        || row.querySelector('[name="participant_phone[]"]').value.trim();
+      const count = Number(row.querySelector('[name="participant_guests[]"]').value || 0);
+      return total + (filled && Number.isFinite(count) ? Math.max(0, count) : 0);
+    }, 0);
+  }
+  function scheduleSelectedHours() {
+    const start = document.getElementById('scheduleStart').value;
+    const end = document.getElementById('scheduleEnd').value;
+    if (!start || !end) return 0;
+    const startMinutes = Number(start.slice(0, 2)) * 60 + Number(start.slice(3, 5));
+    const endMinutes = Number(end.slice(0, 2)) * 60 + Number(end.slice(3, 5));
+    return Math.max(0, endMinutes - startMinutes) / 60;
+  }
+  function syncScheduleBoatPrice() {
+    document.getElementById('scheduleItemForm').dataset.revenueMode = 'auto';
+    syncScheduleRevenue();
+  }
+  function syncScheduleTimingPrice() {
+    document.getElementById('scheduleItemForm').dataset.revenueMode = 'auto';
+    syncScheduleRevenue();
   }
   function applyScheduleService() {
     document.getElementById('scheduleItemForm').dataset.revenueMode = 'auto';
@@ -811,6 +866,7 @@
     const hours = Number(service.selectedOptions[0].dataset.hours || 1);
     const startMinutes = Number(start.slice(0, 2)) * 60 + Number(start.slice(3, 5));
     document.getElementById('scheduleEnd').value = minutesToTime(startMinutes + Math.round(hours * 60));
+    syncScheduleRevenue();
   }
   function handleScheduleColumnClick(event, employeeId) {
     if (event.target.closest('.schedule-card')) return;

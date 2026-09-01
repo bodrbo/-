@@ -13,9 +13,15 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
         with application_module.app.app_context():
             db = application_module.get_db()
             db.execute(
+                "DELETE FROM excursion_service_boat_prices WHERE service_id IN ("
+                "SELECT id FROM excursion_services WHERE name IN "
+                "('Ночной тестовый маршрут', 'ночной тестовый маршрут', "
+                "'Тестовая индивидуальная экскурсия'))"
+            )
+            db.execute(
                 "DELETE FROM excursion_services WHERE name IN "
                 "('Ночной тестовый маршрут', 'ночной тестовый маршрут', "
-                "'средний тур')"
+                "'средний тур', 'Тестовая индивидуальная экскурсия')"
             )
             db.execute(
                 "UPDATE excursion_services SET price = 0 "
@@ -27,9 +33,15 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
         with application_module.app.app_context():
             db = application_module.get_db()
             db.execute(
+                "DELETE FROM excursion_service_boat_prices WHERE service_id IN ("
+                "SELECT id FROM excursion_services WHERE name IN "
+                "('Ночной тестовый маршрут', 'ночной тестовый маршрут', "
+                "'Тестовая индивидуальная экскурсия'))"
+            )
+            db.execute(
                 "DELETE FROM excursion_services WHERE name IN "
                 "('Ночной тестовый маршрут', 'ночной тестовый маршрут', "
-                "'средний тур')"
+                "'средний тур', 'Тестовая индивидуальная экскурсия')"
             )
             db.execute(
                 "UPDATE excursion_services SET price = 0 "
@@ -53,9 +65,17 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Экскурсионные продукты", html)
         self.assertIn("Малый тур", html)
-        self.assertIn("Индивидуальная аренда 2 часа", html)
+        self.assertNotIn('value="Индивидуальная аренда 2 часа"', html)
         self.assertIn("Цена за гостя, ₽", html)
+        self.assertIn("Групповая экскурсия", html)
+        self.assertIn("Индивидуальная экскурсия", html)
         self.assertIn('class="active"', html)
+        individual_html = self.client.get(
+            "/services?section=individual"
+        ).get_data(as_text=True)
+        self.assertIn("Индивидуальная аренда 2 часа", individual_html)
+        self.assertIn("Цена за час по катерам", individual_html)
+        self.assertNotIn('value="Малый тур"', individual_html)
 
     def test_bootstrap_does_not_restore_a_renamed_service(self):
         connection = sqlite3.connect(":memory:")
@@ -75,12 +95,36 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
         self.assertEqual(original_count, 0)
         self.assertEqual(total_count, 8)
 
+    def test_existing_catalog_is_classified_during_migration(self):
+        connection = sqlite3.connect(":memory:")
+        connection.execute(
+            "CREATE TABLE excursion_services ("
+            "id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, "
+            "duration_hours REAL NOT NULL, price REAL NOT NULL DEFAULT 0, "
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        connection.executemany(
+            "INSERT INTO excursion_services VALUES (?, ?, ?, 0, '', '')",
+            [
+                (1, "Средний тур", 1.5),
+                (2, "Индивидуальная аренда 2 часа", 2.0),
+            ],
+        )
+        init_schema(connection)
+        types = dict(connection.execute(
+            "SELECT name, service_type FROM excursion_services"
+        ).fetchall())
+        connection.close()
+        self.assertEqual(types["Средний тур"], "group")
+        self.assertEqual(types["Индивидуальная аренда 2 часа"], "individual")
+
     def test_admin_can_create_and_update_service(self):
         self.login()
         response = self.client.post(
             "/services",
             data={
                 "name": "Ночной тестовый маршрут",
+                "service_type": "group",
                 "hours": "2,5",
                 "price": "3 500",
             },
@@ -99,6 +143,7 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
             f"/services/{service['id']}",
             data={
                 "name": "Ночной тестовый маршрут",
+                "service_type": "group",
                 "hours": "3",
                 "price": "4200",
             },
@@ -111,11 +156,44 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
         self.assertEqual(updated["duration_hours"], 3)
         self.assertEqual(updated["price"], 4200)
 
+    def test_admin_can_create_individual_service_with_boat_hourly_rates(self):
+        self.login()
+        boat_names = [boat["name"] for boat in application_module.BOATS]
+        response = self.client.post(
+            "/services",
+            data={
+                "name": "Тестовая индивидуальная экскурсия",
+                "service_type": "individual",
+                "hours": "2",
+                "boat_name[]": boat_names,
+                "boat_price[]": ["4000", "5500", "6200"],
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("section=individual", response.headers["Location"])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            service = db.execute(
+                "SELECT * FROM excursion_services "
+                "WHERE name = 'Тестовая индивидуальная экскурсия'"
+            ).fetchone()
+            prices = {
+                row["boat"]: row["hourly_price"]
+                for row in db.execute(
+                    "SELECT boat, hourly_price FROM excursion_service_boat_prices "
+                    "WHERE service_id = ?",
+                    (service["id"],),
+                ).fetchall()
+            }
+        self.assertEqual(service["service_type"], "individual")
+        self.assertEqual(service["price"], 0)
+        self.assertEqual(prices, dict(zip(boat_names, [4000, 5500, 6200])))
+
     def test_duplicate_and_invalid_values_are_rejected(self):
         self.login()
         duplicate = self.client.post(
             "/services",
-            data={"name": "средний тур", "hours": "1.5", "price": "2500"},
+            data={"name": "средний тур", "service_type": "group", "hours": "1.5", "price": "2500"},
             follow_redirects=True,
         )
         self.assertIn(
@@ -124,7 +202,7 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
         )
         invalid = self.client.post(
             "/services",
-            data={"name": "Ночной тестовый маршрут", "hours": "0", "price": "-1"},
+            data={"name": "Ночной тестовый маршрут", "service_type": "group", "hours": "0", "price": "-1"},
             follow_redirects=True,
         )
         invalid_html = invalid.get_data(as_text=True)
@@ -142,9 +220,11 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
             db.commit()
         html = self.client.get("/schedule?date=2026-09-12").get_data(as_text=True)
         self.assertIn('data-name="Средний тур"', html)
+        self.assertIn('data-service-type="group"', html)
         self.assertIn('data-price="2750.0"', html)
-        self.assertIn("unitPrice * multiplier", html)
-        self.assertIn("kind === 'event'", html)
+        self.assertIn("selected.dataset.serviceType === 'group'", html)
+        self.assertIn("scheduleSelectedHours()", html)
+        self.assertIn("data-boat-prices=", html)
 
 
 if __name__ == "__main__":
