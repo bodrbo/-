@@ -271,11 +271,12 @@ def save_item(db, item_id, data, assignments, participants, timestamp):
             ensure_segment(db, client_id, EXCURSION_SEGMENT, timestamp)
             db.execute(
                 "INSERT INTO schedule_participants "
-                "(schedule_item_id, client_id, client_name, client_phone, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "(schedule_item_id, client_id, client_name, client_phone, "
+                "guests_count, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     item_id, client_id, participant["client_name"],
-                    participant["client_phone"], timestamp,
+                    participant["client_phone"], participant["guests_count"],
+                    timestamp,
                 ),
             )
         db.commit()

@@ -283,6 +283,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertEqual(assignment["employee_name"], "Даниил Галецкий")
         self.assertEqual(assignment["role"], "guide_captain")
         self.assertEqual(participant["client_name"], "Алия")
+        self.assertEqual(participant["guests_count"], 1)
         self.assertEqual(client_segment["segment"], "excursion")
         self.assertIsNone(item["accounting_trip_id"])
 
@@ -327,6 +328,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
                     "participant_client_id[]": ["", ""],
                     "participant_name[]": ["Алия", "Мария"],
                     "participant_phone[]": ["+79998880001", "+79998880002"],
+                    "participant_guests[]": ["3", "2"],
                     "customer_name": "",
                     "customer_phone": "",
                 },
@@ -352,12 +354,16 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             ).fetchone()["count"]
         self.assertEqual(item["kind"], "event")
         self.assertEqual(item["capacity"], 10)
-        self.assertEqual(item["participants_count"], 2)
+        self.assertEqual(item["participants_count"], 5)
         self.assertEqual(item["customer_name"], "")
         self.assertEqual(len(participants), 2)
         self.assertEqual(len(clients), 2)
         self.assertEqual(excursion_segments, 2)
         self.assertEqual(participants[0]["client_name"], "Алия")
+        self.assertEqual(
+            [participant["guests_count"] for participant in participants],
+            [3, 2],
+        )
 
         directory = self.client.get(
             "/admin/clients?section=excursion"
@@ -488,6 +494,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
                 (participant["client_id"],),
             ).fetchone()
         self.assertEqual(participant["client_name"], "Старый турист")
+        self.assertEqual(participant["guests_count"], 1)
         self.assertEqual(segment["segment"], "excursion")
 
     def test_migration_adds_existing_assignments_to_day_schedule(self):
@@ -526,12 +533,13 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             "/schedule/items",
             data=self.booking_data(
                 kind="event",
-                capacity="1",
+                capacity="4",
                 customer_name="",
                 **{
                     "participant_client_id[]": ["", ""],
                     "participant_name[]": ["Алия", "Мария"],
                     "participant_phone[]": ["+79998880001", "+79998880002"],
+                    "participant_guests[]": ["3", "2"],
                 },
             ),
         )
@@ -560,6 +568,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
                     "participant_client_id[]": ["", ""],
                     "participant_name[]": ["Алия", "Мария"],
                     "participant_phone[]": ["+79998880001", "+79998880002"],
+                    "participant_guests[]": ["2", "3"],
                 },
             ),
         )
@@ -581,6 +590,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
                     "participant_client_id[]": [str(client["id"])],
                     "participant_name[]": [client["client_name"]],
                     "participant_phone[]": [client["phone"]],
+                    "participant_guests[]": ["4"],
                 },
             ),
         )
@@ -592,14 +602,42 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
                 (item_id,),
             ).fetchone()
             participants = db.execute(
-                "SELECT client_name FROM schedule_participants "
+                "SELECT client_name, guests_count FROM schedule_participants "
                 "WHERE schedule_item_id = ?",
                 (item_id,),
             ).fetchall()
-        self.assertEqual(item["participants_count"], 1)
+        self.assertEqual(item["participants_count"], 4)
         self.assertEqual(
             [participant["client_name"] for participant in participants], ["Мария"]
         )
+        self.assertEqual(participants[0]["guests_count"], 4)
+
+    def test_group_event_rejects_invalid_guest_count(self):
+        self.login()
+        response = self.client.post(
+            "/schedule/items",
+            data=self.booking_data(
+                kind="event",
+                capacity="10",
+                customer_name="",
+                **{
+                    "participant_client_id[]": [""],
+                    "participant_name[]": ["Алия"],
+                    "participant_phone[]": ["+79998880001"],
+                    "participant_guests[]": ["0"],
+                },
+            ),
+            follow_redirects=True,
+        )
+        self.assertIn(
+            "укажите количество гостей от 1 до 100",
+            response.get_data(as_text=True),
+        )
+        with application_module.app.app_context():
+            item_count = application_module.get_db().execute(
+                "SELECT COUNT(*) AS count FROM schedule_items"
+            ).fetchone()["count"]
+        self.assertEqual(item_count, 0)
 
     def test_edit_moves_trip_and_reassigns_employee(self):
         self.login()

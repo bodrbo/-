@@ -266,11 +266,11 @@
         </div>
         <div class="schedule-form-section-heading">
           <span>Клиенты в рейсе</span>
-          <small>Выберите из базы или введите нового</small>
+          <small>Количество гостей включает самого клиента</small>
         </div>
         <div class="schedule-legacy-participants" id="scheduleLegacyParticipants" hidden></div>
         <div id="scheduleParticipantRows" class="schedule-participant-rows"></div>
-        <button type="button" class="schedule-add-assignment" onclick="addScheduleParticipant('', '', '', true)">+ Добавить клиента</button>
+        <button type="button" class="schedule-add-assignment" onclick="addScheduleParticipant('', '', '', 1, true)">+ Добавить клиента</button>
       </div>
 
       <div class="schedule-form-grid">
@@ -404,6 +404,12 @@
       <span>Телефон</span>
       <input type="tel" name="participant_phone[]" maxlength="40" placeholder="+7 999 000-00-00" oninput="scheduleParticipantPhoneChanged(this)">
     </label>
+    <label class="field schedule-participant-guests" title="Количество человек в группе, включая самого клиента">
+      <span>Гостей</span>
+      <input type="number" name="participant_guests[]" min="1" max="100" value="1"
+             aria-label="Количество гостей, включая клиента"
+             oninput="syncScheduleParticipantCount()">
+    </label>
     <button type="button" class="icon-btn danger" onclick="removeScheduleParticipant(this)" aria-label="Убрать клиента">
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h12M8 3h4l1 3H7l1-3zM6 6l.7 11h6.6L14 6M8.5 9v5M11.5 9v5"/></svg>
     </button>
@@ -519,7 +525,8 @@
     );
     document.getElementById('scheduleCapacity').value = item.capacity || 10;
     (item.participants || []).forEach(participant => addScheduleParticipant(
-      participant.client_id, participant.client_name, participant.client_phone
+      participant.client_id, participant.client_name, participant.client_phone,
+      participant.guests_count || 1
     ));
     const legacyParticipants = document.getElementById('scheduleLegacyParticipants');
     if (item.kind === 'event' && item.participants_count > 0 && !(item.participants || []).length) {
@@ -724,7 +731,7 @@
       picker.querySelector('[data-client-id]').value = '';
     }
   }
-  function addScheduleParticipant(clientId, clientName, clientPhone, focusNew) {
+  function addScheduleParticipant(clientId, clientName, clientPhone, guestsCount, focusNew) {
     const fragment = document.getElementById('scheduleParticipantTemplate').content.cloneNode(true);
     const row = fragment.querySelector('.schedule-participant-row');
     const picker = row.querySelector('[data-client-picker]');
@@ -733,6 +740,7 @@
     results.id = `scheduleParticipantResults${scheduleParticipantSerial}`;
     row.querySelector('[data-participant-search]').setAttribute('aria-controls', results.id);
     row.querySelector('[name="participant_phone[]"]').value = clientPhone || '';
+    row.querySelector('[name="participant_guests[]"]').value = guestsCount || 1;
     document.getElementById('scheduleParticipantRows').appendChild(fragment);
     setScheduleClientSelection(picker, {
       id: clientId || '', client_name: clientName || '', phone: clientPhone || '',
@@ -753,11 +761,15 @@
   }
   function syncScheduleParticipantCount() {
     const rows = [...document.querySelectorAll('.schedule-participant-row')];
-    const filled = rows.filter(row => row.querySelector('[data-participant-search]').value.trim() || row.querySelector('[name="participant_phone[]"]').value.trim()).length;
+    const filled = rows.filter(row => row.querySelector('[data-participant-search]').value.trim() || row.querySelector('[name="participant_phone[]"]').value.trim());
+    const guests = filled.reduce((total, row) => {
+      const count = Number(row.querySelector('[name="participant_guests[]"]').value || 0);
+      return total + (Number.isFinite(count) ? Math.max(0, count) : 0);
+    }, 0);
     const capacity = Number(document.getElementById('scheduleCapacity').value || 0);
     const counter = document.getElementById('scheduleParticipantCounter');
-    counter.textContent = `${filled} из ${capacity} мест`;
-    counter.classList.toggle('over', capacity > 0 && filled > capacity);
+    counter.textContent = `${guests} из ${capacity} мест`;
+    counter.classList.toggle('over', capacity > 0 && guests > capacity);
   }
   function applyScheduleDuration() {
     const service = document.getElementById('scheduleService');

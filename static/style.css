@@ -3506,7 +3506,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-participant-counter.over { background: #fbe7e3; color: var(--danger); }
 .schedule-participant-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) 44px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) 92px 44px;
   align-items: end;
   gap: 9px;
 }
@@ -3516,6 +3516,8 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   border-top: 1px dashed var(--hairline);
 }
 .schedule-participant-row .icon-btn { margin-bottom: 1px; }
+.schedule-participant-guests { flex-basis: 92px; }
+.schedule-participant-guests input { text-align: center; font-variant-numeric: tabular-nums; }
 .schedule-assignment-row .icon-btn,
 .schedule-participant-row .icon-btn {
   display: inline-grid;
@@ -3796,7 +3798,7 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   .schedule-event-capacity { align-items: stretch; flex-direction: column; gap: 9px; }
   .schedule-event-capacity .field { width: 100%; }
   .schedule-participant-counter { align-self: flex-start; }
-  .schedule-participant-row { grid-template-columns: 1fr 44px; }
+  .schedule-participant-row { grid-template-columns: minmax(0, 1fr) 92px 44px; }
   .schedule-participant-row .field:first-of-type { grid-column: 1 / -1; }
   .schedule-form-actions { position: sticky; bottom: -16px; margin-right: -16px; margin-left: -16px; padding: 12px 16px 16px; background: #fff; }
   .schedule-roster-body { padding: 16px; }

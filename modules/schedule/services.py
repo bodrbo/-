@@ -125,6 +125,7 @@ def _validate_booking_client(db, form, errors):
         "client_id": client["id"] if client is not None else None,
         "client_name": name,
         "client_phone": phone,
+        "guests_count": 1,
         "client_token": secrets.token_urlsafe(16) if client is None else None,
     }
     return name, phone, participant
@@ -134,7 +135,10 @@ def _validate_participants(db, form, capacity, errors):
     raw_client_ids = form.getlist("participant_client_id[]")
     raw_names = form.getlist("participant_name[]")
     raw_phones = form.getlist("participant_phone[]")
-    row_count = max(len(raw_client_ids), len(raw_names), len(raw_phones))
+    raw_guests = form.getlist("participant_guests[]")
+    row_count = max(
+        len(raw_client_ids), len(raw_names), len(raw_phones), len(raw_guests)
+    )
     # Search every identity by phone so a tuning client taking an excursion
     # is reused, while only excursion clients appear in the picker itself.
     clients = repository.list_all_clients(db)
@@ -160,6 +164,17 @@ def _validate_participants(db, form, capacity, errors):
             continue
 
         row_label = f"Участник №{index + 1}"
+        try:
+            guests_count = int(
+                str(raw_guests[index] if index < len(raw_guests) else "1").strip()
+            )
+        except (TypeError, ValueError):
+            guests_count = 0
+        if not 1 <= guests_count <= 100:
+            errors.append(
+                f"{row_label}: укажите количество гостей от 1 до 100."
+            )
+            guests_count = 1
         if not name:
             errors.append(f"{row_label}: укажите имя.")
         phone_identity = _normalise_phone_identity(phone)
@@ -203,6 +218,7 @@ def _validate_participants(db, form, capacity, errors):
             "client_id": client["id"] if client is not None else None,
             "client_name": name,
             "client_phone": phone,
+            "guests_count": guests_count,
             "client_token": secrets.token_urlsafe(16) if client is None else None,
         })
         if client is not None:
@@ -210,8 +226,9 @@ def _validate_participants(db, form, capacity, errors):
         if phone_identity:
             seen_phones.add(phone_identity)
 
-    if capacity and len(participants) > capacity:
-        errors.append("Клиентов в рейсе больше, чем доступных мест.")
+    total_guests = sum(participant["guests_count"] for participant in participants)
+    if capacity and total_guests > capacity:
+        errors.append("Гостей в рейсе больше, чем доступных мест.")
     return participants
 
 
@@ -265,7 +282,9 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
         if not 1 <= capacity <= 100:
             errors.append("Вместимость события должна быть от 1 до 100 человек.")
         participants = _validate_participants(db, form, capacity, errors)
-        participants_count = len(participants)
+        participants_count = sum(
+            participant["guests_count"] for participant in participants
+        )
         customer_name = ""
         customer_phone = ""
 

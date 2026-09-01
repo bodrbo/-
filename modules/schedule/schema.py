@@ -47,11 +47,20 @@ def init_schema(conn):
             client_id INTEGER NOT NULL,
             client_name TEXT NOT NULL,
             client_phone TEXT NOT NULL,
+            guests_count INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL,
             UNIQUE(schedule_item_id, client_id)
         )
         """
     )
+    participant_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(schedule_participants)")
+    }
+    if "guests_count" not in participant_columns:
+        conn.execute(
+            "ALTER TABLE schedule_participants "
+            "ADD COLUMN guests_count INTEGER NOT NULL DEFAULT 1"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS schedule_day_crew (
