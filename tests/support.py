@@ -8,6 +8,9 @@ import tempfile
 TEST_DIRECTORY = tempfile.TemporaryDirectory()
 atexit.register(TEST_DIRECTORY.cleanup)
 os.environ.setdefault("SECRET_KEY", "application-test-key")
+os.environ.setdefault("YCLIENTS_PARTNER_TOKEN", "test-partner-token")
+os.environ.setdefault("YCLIENTS_USER_TOKEN", "test-user-token")
+os.environ.setdefault("YCLIENTS_COMPANY_ID", "979343")
 os.environ["WORKHOURS_DB_PATH"] = os.path.join(TEST_DIRECTORY.name, "application-tests.db")
 
 import app as application_module

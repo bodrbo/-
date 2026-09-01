@@ -108,6 +108,20 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertIn("Укажите модель лодки.", boat_errors)
         self.assertIn("Укажите модель мотора.", motor_errors)
 
+    def test_tuning_order_allows_client_without_phone(self):
+        self.login()
+        form = self.valid_form()
+        form.setlist("phone", [""])
+        response = self.client.post("/tuning/add", data=form)
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            client = db.execute(
+                "SELECT * FROM clients WHERE client_name = 'Иван Петров'"
+            ).fetchone()
+        self.assertIsNotNone(client)
+        self.assertEqual(client["phone"], "")
+
     def test_creation_form_searches_catalog_and_creates_new_boat_profile(self):
         self.login()
         existing = self.client.post(

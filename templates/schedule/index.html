@@ -302,7 +302,7 @@
 </template>
 
 <datalist id="scheduleClientOptions">
-  {% for client in clients %}<option value="{{ client.client_name }} · {{ client.phone }}"></option>{% endfor %}
+  {% for client in clients %}<option value="{{ client.client_name }}{{ ' · ' ~ client.phone if client.phone }}"></option>{% endfor %}
 </datalist>
 
 <script>
@@ -426,7 +426,7 @@
   function applyScheduleBookingClient(input) {
     const typed = input.value.trim();
     const selected = scheduleClients.find(
-      client => `${client.client_name} · ${client.phone}` === typed
+      client => `${client.client_name}${client.phone ? ' · ' + client.phone : ''}` === typed
     );
     const idInput = document.getElementById('scheduleCustomerClientId');
     if (!selected) {
@@ -460,7 +460,7 @@
   }
   function applyScheduleClient(input) {
     const row = input.closest('.schedule-participant-row');
-    const selected = scheduleClients.find(client => `${client.client_name} · ${client.phone}` === input.value);
+    const selected = scheduleClients.find(client => `${client.client_name}${client.phone ? ' · ' + client.phone : ''}` === input.value);
     const idInput = row.querySelector('[name="participant_client_id[]"]');
     const nameInput = row.querySelector('[name="participant_name[]"]');
     if (!selected) {

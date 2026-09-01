@@ -72,7 +72,20 @@
       <h2 id="tuning-clients-title">{{ 'Туристы и история рейсов' if client_section == 'excursion' else 'Клиенты и история заказов' }}</h2>
       <p>{% if client_section == 'excursion' %}Сюда автоматически попадают клиенты, добавленные в рейсы. Эта база используется при создании новых записей на экскурсии.{% else %}Эта база используется в тюнинг-заказах и выездной диагностике. Туристы без тюнинг-заказов здесь не показываются.{% endif %}</p>
     </div>
+    {% if client_section == 'excursion' %}
+    <form action="{{ url_for('import_yclients_client_directory') }}" method="post">
+      <button type="submit" class="btn-secondary" {{ 'disabled' if not yclients_import_configured }}>
+        Импортировать из YCLIENTS
+      </button>
+    </form>
+    {% endif %}
   </section>
+
+  {% if client_import_notice %}
+  <div class="alert {{ 'success' if client_import_notice.type == 'success' }}" role="status">
+    {{ client_import_notice.message }}
+  </div>
+  {% endif %}
 
   <div class="totals-grid tuning-clients-totals">
     <div class="panel total-card total-card-grand"><span class="k">Клиентов</span><span class="v">{{ clients_count }}</span></div>
@@ -126,7 +139,7 @@
                 <button type="submit" class="sr-only">Сохранить статус клиента {{ client.client_name }}</button>
               </form>
             </td>
-            <td><a href="tel:{{ client.phone }}" class="tuning-client-phone">{{ client.phone }}</a></td>
+            <td>{% if client.phone %}<a href="tel:{{ client.phone }}" class="tuning-client-phone">{{ client.phone }}</a>{% else %}<span class="muted">Не указан</span>{% endif %}</td>
             {% if client_section == 'excursion' %}
             <td class="amount">{{ client.trip_count }}</td>
             <td class="muted">{{ client.last_trip_at[:10]|ru_date if client.last_trip_at else '—' }}</td>

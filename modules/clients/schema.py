@@ -3,6 +3,87 @@
 import secrets
 
 
+def _migrate_clients_table(conn):
+    """Make phone optional/non-unique while preserving stable local IDs."""
+    columns = {
+        row[1]: row for row in conn.execute("PRAGMA table_info(clients)").fetchall()
+    }
+    table_sql_row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'clients'"
+    ).fetchone()
+    table_sql = (table_sql_row[0] if table_sql_row else "").upper()
+    phone_is_required = bool(columns.get("phone") and columns["phone"][3])
+    phone_is_unique = "PHONE TEXT NOT NULL UNIQUE" in table_sql
+    if phone_is_required or phone_is_unique:
+        conn.execute("DROP TABLE IF EXISTS clients_phone_optional_migration")
+        conn.execute(
+            """
+            CREATE TABLE clients_phone_optional_migration (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_name TEXT NOT NULL,
+                boat_model TEXT NOT NULL DEFAULT '',
+                phone TEXT DEFAULT '',
+                token TEXT NOT NULL UNIQUE,
+                status TEXT NOT NULL DEFAULT 'neutral',
+                created_at TEXT NOT NULL,
+                yclients_client_id INTEGER,
+                email TEXT NOT NULL DEFAULT '',
+                birth_date TEXT NOT NULL DEFAULT '',
+                comment TEXT NOT NULL DEFAULT '',
+                yclients_last_change_date TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        destination_columns = (
+            "id", "client_name", "boat_model", "phone", "token", "status",
+            "created_at", "yclients_client_id", "email", "birth_date",
+            "comment", "yclients_last_change_date",
+        )
+        defaults = {
+            "boat_model": "''",
+            "phone": "''",
+            "status": "'neutral'",
+            "yclients_client_id": "NULL",
+            "email": "''",
+            "birth_date": "''",
+            "comment": "''",
+            "yclients_last_change_date": "''",
+        }
+        select_expressions = [
+            column_name if column_name in columns else defaults[column_name]
+            for column_name in destination_columns
+        ]
+        conn.execute(
+            "INSERT INTO clients_phone_optional_migration "
+            f"({', '.join(destination_columns)}) "
+            f"SELECT {', '.join(select_expressions)} FROM clients"
+        )
+        conn.execute("DROP TABLE clients")
+        conn.execute(
+            "ALTER TABLE clients_phone_optional_migration RENAME TO clients"
+        )
+
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(clients)").fetchall()
+    }
+    additions = (
+        ("yclients_client_id", "INTEGER"),
+        ("email", "TEXT NOT NULL DEFAULT ''"),
+        ("birth_date", "TEXT NOT NULL DEFAULT ''"),
+        ("comment", "TEXT NOT NULL DEFAULT ''"),
+        ("yclients_last_change_date", "TEXT NOT NULL DEFAULT ''"),
+    )
+    for column_name, definition in additions:
+        if column_name not in columns:
+            conn.execute(
+                f"ALTER TABLE clients ADD COLUMN {column_name} {definition}"
+            )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_yclients_id "
+        "ON clients(yclients_client_id) WHERE yclients_client_id IS NOT NULL"
+    )
+
+
 def _phone_identity(phone):
     digits = "".join(character for character in str(phone or "") if character.isdigit())
     if len(digits) == 11 and digits[0] in ("7", "8"):
@@ -57,6 +138,7 @@ def _backfill_booking_participants(conn):
 
 
 def init_schema(conn):
+    _migrate_clients_table(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS client_segments (

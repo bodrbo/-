@@ -95,7 +95,7 @@
                    data-search="{{ (client.client_name ~ ' ' ~ client.phone)|lower }}"
                    data-owner-client-option data-client-id="{{ client.id }}" data-client-phone="{{ client.phone }}">
                 <span class="combo-option-name">{{ client.client_name }}</span>
-                <span class="combo-option-sku">{{ client.phone }}</span>
+                  {% if client.phone %}<span class="combo-option-sku">{{ client.phone }}</span>{% endif %}
               </div>
               {% endfor %}
             </div>
@@ -104,7 +104,7 @@
         </div>
         <div class="field">
           <label for="edit_owner_phone">Номер телефона</label>
-          <input type="tel" id="edit_owner_phone" name="owner_phone" maxlength="50" required inputmode="tel" data-owner-client-phone value="{{ form_values.get('owner_phone', sheet.owner_phone) }}">
+          <input type="tel" id="edit_owner_phone" name="owner_phone" maxlength="50" inputmode="tel" data-owner-client-phone value="{{ form_values.get('owner_phone', sheet.owner_phone) }}">
           <span class="field-context">Номер должен совпадать с выбранным клиентом.</span>
         </div>
         <div class="field">

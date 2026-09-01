@@ -85,9 +85,7 @@ def _validate_booking_client(db, form, errors):
     if not name:
         errors.append("Для записи укажите имя клиента.")
     phone_identity = _normalise_phone_identity(phone)
-    if len(phone_identity) < 7:
-        errors.append("Для записи укажите корректный телефон клиента.")
-    if not name or len(phone_identity) < 7:
+    if not name:
         return name, phone, None
 
     clients = repository.list_all_clients(db)
@@ -104,14 +102,17 @@ def _validate_booking_client(db, form, errors):
         if client is None:
             errors.append("Выбранный клиент больше недоступен.")
             return name, phone, None
-        if _normalise_phone_identity(client["phone"]) != phone_identity:
+        stored_identity = _normalise_phone_identity(client["phone"])
+        if stored_identity and phone_identity and stored_identity != phone_identity:
             errors.append("Телефон не совпадает с выбранным клиентом.")
             return name, phone, None
     else:
-        matches = [
-            candidate for candidate in clients
-            if _normalise_phone_identity(candidate["phone"]) == phone_identity
-        ]
+        matches = []
+        if len(phone_identity) >= 7:
+            matches = [
+                candidate for candidate in clients
+                if _normalise_phone_identity(candidate["phone"]) == phone_identity
+            ]
         if len(matches) > 1:
             errors.append("В базе найдено несколько клиентов с этим телефоном.")
             return name, phone, None
@@ -146,6 +147,7 @@ def _validate_participants(db, form, capacity, errors):
 
     participants = []
     seen_phones = set()
+    seen_client_ids = set()
     for index in range(row_count):
         raw_client_id = raw_client_ids[index] if index < len(raw_client_ids) else ""
         name = _normalise_text(
@@ -161,11 +163,9 @@ def _validate_participants(db, form, capacity, errors):
         if not name:
             errors.append(f"{row_label}: укажите имя.")
         phone_identity = _normalise_phone_identity(phone)
-        if len(phone_identity) < 7:
-            errors.append(f"{row_label}: укажите корректный телефон.")
-        if not name or len(phone_identity) < 7:
+        if not name:
             continue
-        if phone_identity in seen_phones:
+        if phone_identity and phone_identity in seen_phones:
             errors.append(f"{row_label}: этот клиент уже добавлен в рейс.")
             continue
 
@@ -178,13 +178,14 @@ def _validate_participants(db, form, capacity, errors):
             if client is None:
                 errors.append(f"{row_label}: выбранный клиент больше недоступен.")
                 continue
-            if _normalise_phone_identity(client["phone"]) != phone_identity:
+            stored_identity = _normalise_phone_identity(client["phone"])
+            if stored_identity and phone_identity and stored_identity != phone_identity:
                 errors.append(
                     f"{row_label}: телефон не совпадает с выбранным клиентом."
                 )
                 continue
         else:
-            matches = clients_by_phone.get(phone_identity, [])
+            matches = clients_by_phone.get(phone_identity, []) if phone_identity else []
             if len(matches) > 1:
                 errors.append(
                     f"{row_label}: в базе найдено несколько клиентов с этим телефоном."
@@ -193,6 +194,9 @@ def _validate_participants(db, form, capacity, errors):
             client = matches[0] if matches else None
 
         if client is not None:
+            if client["id"] in seen_client_ids:
+                errors.append(f"{row_label}: этот клиент уже добавлен в рейс.")
+                continue
             name = client["client_name"]
             phone = client["phone"]
         participants.append({
@@ -201,7 +205,10 @@ def _validate_participants(db, form, capacity, errors):
             "client_phone": phone,
             "client_token": secrets.token_urlsafe(16) if client is None else None,
         })
-        seen_phones.add(phone_identity)
+        if client is not None:
+            seen_client_ids.add(client["id"])
+        if phone_identity:
+            seen_phones.add(phone_identity)
 
     if capacity and len(participants) > capacity:
         errors.append("Клиентов в рейсе больше, чем доступных мест.")

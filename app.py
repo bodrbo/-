@@ -92,6 +92,7 @@ from modules.schedule import (
 from modules.clients import (
     ensure_segment as ensure_client_segment,
     init_schema as init_client_segments_schema,
+    sync_clients as sync_yclients_clients,
 )
 from modules.clients.constants import EXCURSION_SEGMENT, TUNING_SEGMENT
 from modules.tuning_boat_specs import boat_specification_for, format_parameters
@@ -336,11 +337,10 @@ app.jinja_env.filters["money"] = format_money
 # Yclients — импорт рейсов. Токены НЕ храним в коде (секреты) — задайте их
 # как переменные окружения на хостинге:
 #   YCLIENTS_PARTNER_TOKEN, YCLIENTS_USER_TOKEN, YCLIENTS_COMPANY_ID
-# Локально можно временно вписать значения прямо сюда для проверки.
 # ---------------------------------------------------------------------
-YCLIENTS_PARTNER_TOKEN = os.environ.get("YCLIENTS_PARTNER_TOKEN") or "rtzn97gwz5t6ape37egg"
-YCLIENTS_USER_TOKEN = os.environ.get("YCLIENTS_USER_TOKEN") or "7a61e523fd03f146601add9408f69696"
-YCLIENTS_COMPANY_ID = os.environ.get("YCLIENTS_COMPANY_ID") or "979343"
+YCLIENTS_PARTNER_TOKEN = os.environ.get("YCLIENTS_PARTNER_TOKEN", "").strip()
+YCLIENTS_USER_TOKEN = os.environ.get("YCLIENTS_USER_TOKEN", "").strip()
+YCLIENTS_COMPANY_ID = os.environ.get("YCLIENTS_COMPANY_ID", "").strip()
 
 # ---------------------------------------------------------------------
 # ЮKassa — онлайн-оплата тюнинг-центра и возвраты по экскурсионным рейсам.
@@ -1677,11 +1677,16 @@ def init_db():
         CREATE TABLE IF NOT EXISTS clients (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             client_name TEXT NOT NULL,
-            boat_model TEXT NOT NULL,
-            phone TEXT NOT NULL UNIQUE,
+            boat_model TEXT NOT NULL DEFAULT '',
+            phone TEXT DEFAULT '',
             token TEXT NOT NULL UNIQUE,
             status TEXT NOT NULL DEFAULT 'neutral',
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            yclients_client_id INTEGER,
+            email TEXT NOT NULL DEFAULT '',
+            birth_date TEXT NOT NULL DEFAULT '',
+            comment TEXT NOT NULL DEFAULT '',
+            yclients_last_change_date TEXT NOT NULL DEFAULT ''
         )
         """
     )
@@ -3469,6 +3474,7 @@ def _process_tuning_form(form):
         # a separate catalog entity or carry over a stale serial number.
         motor_serial_number = ""
     phone = form.get("phone", "").strip()
+    raw_client_id = form.get("client_id", "").strip()
     sale_channel = form.get("sale_channel", "direct").strip()
     if sale_channel not in [c["value"] for c in SALE_CHANNELS]:
         sale_channel = "direct"
@@ -3479,8 +3485,6 @@ def _process_tuning_form(form):
         errors.append("Укажите модель лодки.")
     if equipment_type == "motor" and not motor_model:
         errors.append("Укажите модель мотора.")
-    if not phone:
-        errors.append("Укажите номер телефона.")
 
     discount_type = form.get("discount_type", "percent").strip()
     if discount_type not in ("percent", "amount"):
@@ -3557,6 +3561,7 @@ def _process_tuning_form(form):
     total = subtotal - discount_amount
 
     data = dict(
+        client_id=int(raw_client_id) if raw_client_id.isdigit() else None,
         client_name=client_name, equipment_type=equipment_type,
         boat_model=boat_model, boat_registration_number=boat_registration_number,
         motor_model=motor_model, motor_serial_number=motor_serial_number, phone=phone,
@@ -3569,17 +3574,33 @@ def _process_tuning_form(form):
     return errors, data
 
 
-def _get_or_create_client(db, phone, client_name, boat_model):
-    """Find the client cabinet for this phone number, refreshing their name
-    and boat, or create one with a fresh unique link if none exists yet."""
+def _get_or_create_client(db, phone, client_name, boat_model, client_id=None):
+    """Resolve a selected client, then an unambiguous phone, or create one."""
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    row = db.execute(
-        "SELECT id, boat_model FROM clients WHERE phone = ?", (phone,)
-    ).fetchone()
+    row = None
+    if client_id is not None:
+        row = db.execute(
+            "SELECT id, boat_model, phone FROM clients WHERE id = ?", (client_id,)
+        ).fetchone()
+    if row is None and phone:
+        matches = db.execute(
+            "SELECT id, boat_model, phone, client_name FROM clients WHERE phone = ? "
+            "ORDER BY id",
+            (phone,),
+        ).fetchall()
+        if len(matches) == 1:
+            row = matches[0]
+        elif len(matches) > 1:
+            named = [match for match in matches if match["client_name"] == client_name]
+            if len(named) == 1:
+                row = named[0]
     if row:
         db.execute(
-            "UPDATE clients SET client_name = ?, boat_model = ? WHERE id = ?",
-            (client_name, boat_model or row["boat_model"], row["id"]),
+            "UPDATE clients SET client_name = ?, boat_model = ?, phone = ? WHERE id = ?",
+            (
+                client_name, boat_model or row["boat_model"],
+                phone or row["phone"], row["id"],
+            ),
         )
         ensure_client_segment(db, row["id"], TUNING_SEGMENT, now)
         return row["id"]
@@ -4495,6 +4516,8 @@ def tuning_clients():
         tuning_clients_count=segment_counts.get(TUNING_SEGMENT, 0),
         excursion_clients_count=segment_counts.get(EXCURSION_SEGMENT, 0),
         client_section=section,
+        client_import_notice=session.pop("client_import_notice", None),
+        yclients_import_configured=yclients_configured(),
         client_statuses=CLIENT_STATUSES,
         active_page="clients",
     )
@@ -4517,6 +4540,42 @@ def update_tuning_client_status(client_id):
         if section == EXCURSION_SEGMENT
         else url_for("tuning_clients")
     )
+
+
+@app.route("/admin/clients/import-yclients", methods=["POST"])
+@admin_login_required
+def import_yclients_client_directory():
+    if not yclients_configured():
+        session["client_import_notice"] = {
+            "type": "error",
+            "message": "Не настроены токены YCLIENTS в .env.",
+        }
+        return redirect(url_for("tuning_clients", section=EXCURSION_SEGMENT))
+    try:
+        stats = sync_yclients_clients(
+            get_db(),
+            dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            YCLIENTS_API_BASE,
+            YCLIENTS_COMPANY_ID,
+            YCLIENTS_PARTNER_TOKEN,
+            YCLIENTS_USER_TOKEN,
+        )
+        session["client_import_notice"] = {
+            "type": "success",
+            "message": (
+                f"YCLIENTS: получено {stats['received']}, создано "
+                f"{stats['created']}, обновлено {stats['updated']}, "
+                f"связано с существующими {stats['linked']}, "
+                f"пропущено {stats['skipped']}."
+            ),
+        }
+    except Exception as error:
+        app.logger.exception("YCLIENTS client directory import failed")
+        session["client_import_notice"] = {
+            "type": "error",
+            "message": f"Импорт клиентов YCLIENTS не выполнен: {error}",
+        }
+    return redirect(url_for("tuning_clients", section=EXCURSION_SEGMENT))
 
 
 @app.route("/tuning/boats")
@@ -4867,7 +4926,10 @@ def add_tuning_order():
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    client_id = _get_or_create_client(db, data["phone"], data["client_name"], data["boat_model"])
+    client_id = _get_or_create_client(
+        db, data["phone"], data["client_name"], data["boat_model"],
+        data["client_id"],
+    )
     cur = db.execute(
         "INSERT INTO tuning_orders (client_id, client_name, equipment_type, boat_model, "
         "boat_registration_number, motor_model, motor_serial_number, sale_channel, phone, "
@@ -5124,10 +5186,9 @@ def tilda_webhook():
     name, phone, raw_lines = _extract_tilda_lead_fields(request.form)
     client_name = name or "Заявка с сайта"
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    # Only link to a client cabinet when we actually have a phone number —
-    # every lead missing one would otherwise collide onto the same blank-
-    # phone "client" row in _get_or_create_client's lookup.
-    client_id = _get_or_create_client(db, phone, client_name, "") if phone else None
+    # A client cabinet can now be created from a name alone; blank phone
+    # numbers are deliberately not used as an identity key.
+    client_id = _get_or_create_client(db, phone or "", client_name, "") if client_name else None
     cur = db.execute(
         "INSERT INTO tuning_orders (client_id, client_name, boat_model, sale_channel, phone, "
         "discount_pct, discount_type, discount_value, subtotal, total, status, source, source_ref, "
@@ -5288,7 +5349,10 @@ def edit_tuning_order(order_id):
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    client_id = _get_or_create_client(db, data["phone"], data["client_name"], data["boat_model"])
+    client_id = _get_or_create_client(
+        db, data["phone"], data["client_name"], data["boat_model"],
+        data["client_id"],
+    )
     db.execute(
         "UPDATE tuning_orders SET client_id=?, client_name=?, equipment_type=?, boat_model=?, "
         "boat_registration_number=?, motor_model=?, motor_serial_number=?, sale_channel=?, phone=?, "

@@ -64,9 +64,6 @@ def create_blueprint(
         are valid, while the normalized phone number is the stable identity.
         """
         phone_identity = normalize_phone_identity(values["owner_phone"])
-        if len(phone_identity) < 7:
-            return None, "Укажите корректный номер телефона судовладельца."
-
         raw_client_id = values["owner_client_id"]
         if raw_client_id:
             if not raw_client_id.isdigit():
@@ -77,25 +74,34 @@ def create_blueprint(
             ).fetchone()
             if client is None:
                 return None, "Выбранный судовладелец больше не существует."
-            if normalize_phone_identity(client["phone"]) != phone_identity:
+            stored_identity = normalize_phone_identity(client["phone"])
+            if stored_identity and phone_identity and stored_identity != phone_identity:
                 return (
                     None,
                     "Номер телефона не совпадает с выбранным клиентом. "
                     "Выберите клиента заново или введите нового.",
                 )
             values["owner_name"] = client["client_name"]
-            values["owner_phone"] = client["phone"]
+            if not client["phone"] and values["owner_phone"]:
+                db.execute(
+                    "UPDATE clients SET phone = ? WHERE id = ?",
+                    (values["owner_phone"], client["id"]),
+                )
+            else:
+                values["owner_phone"] = client["phone"]
             values["owner_client_id"] = str(client["id"])
             mark_tuning_client(db, client["id"], dt.datetime.now().strftime("%Y-%m-%d %H:%M"))
             return client["id"], None
 
-        matches = [
-            client
-            for client in db.execute(
-                "SELECT id, client_name, boat_model, phone FROM clients ORDER BY id"
-            ).fetchall()
-            if normalize_phone_identity(client["phone"]) == phone_identity
-        ]
+        matches = []
+        if len(phone_identity) >= 7:
+            matches = [
+                client
+                for client in db.execute(
+                    "SELECT id, client_name, boat_model, phone FROM clients ORDER BY id"
+                ).fetchall()
+                if normalize_phone_identity(client["phone"]) == phone_identity
+            ]
         if len(matches) > 1:
             return (
                 None,
@@ -294,9 +300,7 @@ def create_blueprint(
             errors.append("Укажите имя судовладельца.")
         elif len(values["owner_name"]) > OWNER_NAME_LIMIT:
             errors.append("Имя судовладельца должно быть короче 160 символов.")
-        if not values["owner_phone"]:
-            errors.append("Укажите телефон судовладельца.")
-        elif len(values["owner_phone"]) > PHONE_LIMIT:
+        if len(values["owner_phone"]) > PHONE_LIMIT:
             errors.append("Телефон должен быть короче 50 символов.")
         if values["inspection_type"] not in INSPECTION_TYPES:
             errors.append("Выберите тип осмотра.")

@@ -14,8 +14,18 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             db.execute("DELETE FROM schedule_assignments")
             db.execute("DELETE FROM schedule_items")
             db.execute(
+                "DELETE FROM client_segments WHERE client_id IN ("
+                "SELECT id FROM clients WHERE phone IN "
+                "('+79998880001', '+79998880002', '+79998880003', '+79998880004')"
+                ")"
+            )
+            db.execute(
                 "DELETE FROM clients WHERE phone IN "
                 "('+79998880001', '+79998880002', '+79998880003', '+79998880004')"
+            )
+            db.execute(
+                "DELETE FROM client_segments WHERE client_id NOT IN "
+                "(SELECT id FROM clients)"
             )
             self.daniil_id = self.ensure_crew_member(
                 db, "Даниил Галецкий", "Гид-капитан"
@@ -130,6 +140,24 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn("--schedule-card-color: #673ab7", page)
         self.assertIn("--schedule-card-ink: #ffffff", page)
         self.assertIn("Запись", page)
+
+    def test_individual_booking_allows_client_without_phone(self):
+        self.login()
+        response = self.create_booking(
+            customer_name="Турист без телефона", customer_phone=""
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            client = db.execute(
+                "SELECT * FROM clients WHERE client_name = 'Турист без телефона'"
+            ).fetchone()
+            participant = db.execute(
+                "SELECT * FROM schedule_participants WHERE client_id = ?",
+                (client["id"],),
+            ).fetchone()
+        self.assertEqual(client["phone"], "")
+        self.assertEqual(participant["client_phone"], "")
 
     def test_admin_creates_group_event_with_linked_clients(self):
         self.login()
