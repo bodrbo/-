@@ -1,5 +1,8 @@
 """SQL access for the internal trip schedule."""
 
+from modules.clients.constants import EXCURSION_SEGMENT
+from modules.clients.services import ensure_segment
+
 
 def list_crew_employees(db):
     rows = db.execute(
@@ -21,6 +24,21 @@ def list_crew_employees(db):
 
 
 def list_clients(db):
+    return [
+        dict(row)
+        for row in db.execute(
+            "SELECT clients.id, clients.client_name, clients.phone, clients.status "
+            "FROM clients JOIN client_segments "
+            "ON client_segments.client_id = clients.id "
+            "AND client_segments.segment = ? "
+            "ORDER BY clients.client_name COLLATE NOCASE, clients.phone, clients.id",
+            (EXCURSION_SEGMENT,),
+        ).fetchall()
+    ]
+
+
+def list_all_clients(db):
+    """All identities are used only for safe phone deduplication."""
     return [
         dict(row)
         for row in db.execute(
@@ -184,6 +202,7 @@ def save_item(db, item_id, data, assignments, participants, timestamp):
                     ),
                 )
                 client_id = cursor.lastrowid
+            ensure_segment(db, client_id, EXCURSION_SEGMENT, timestamp)
             db.execute(
                 "INSERT INTO schedule_participants "
                 "(schedule_item_id, client_id, client_name, client_phone, created_at) "

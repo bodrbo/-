@@ -15,7 +15,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             db.execute("DELETE FROM schedule_items")
             db.execute(
                 "DELETE FROM clients WHERE phone IN "
-                "('+79998880001', '+79998880002', '+79998880003')"
+                "('+79998880001', '+79998880002', '+79998880003', '+79998880004')"
             )
             self.daniil_id = self.ensure_crew_member(
                 db, "Даниил Галецкий", "Гид-капитан"
@@ -104,6 +104,14 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             assignment = db.execute(
                 "SELECT * FROM schedule_assignments"
             ).fetchone()
+            participant = db.execute(
+                "SELECT * FROM schedule_participants WHERE schedule_item_id = ?",
+                (item["id"],),
+            ).fetchone()
+            client_segment = db.execute(
+                "SELECT segment FROM client_segments WHERE client_id = ?",
+                (participant["client_id"],),
+            ).fetchone()
         self.assertEqual(item["kind"], "booking")
         self.assertEqual(item["boat"], "Бодрый Второй")
         self.assertEqual(item["starts_at"], "2026-09-05 13:00")
@@ -112,6 +120,8 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertEqual(item["revenue"], 18000)
         self.assertEqual(assignment["employee_name"], "Даниил Галецкий")
         self.assertEqual(assignment["role"], "guide_captain")
+        self.assertEqual(participant["client_name"], "Алия")
+        self.assertEqual(client_segment["segment"], "excursion")
         self.assertIsNone(item["accounting_trip_id"])
 
         page = self.client.get(
@@ -155,13 +165,27 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
                 "SELECT * FROM clients WHERE phone IN (?, ?) ORDER BY phone",
                 ("+79998880001", "+79998880002"),
             ).fetchall()
+            excursion_segments = db.execute(
+                "SELECT COUNT(*) AS count FROM client_segments "
+                "WHERE segment = 'excursion' AND client_id IN (?, ?)",
+                (clients[0]["id"], clients[1]["id"]),
+            ).fetchone()["count"]
         self.assertEqual(item["kind"], "event")
         self.assertEqual(item["capacity"], 10)
         self.assertEqual(item["participants_count"], 2)
         self.assertEqual(item["customer_name"], "")
         self.assertEqual(len(participants), 2)
         self.assertEqual(len(clients), 2)
+        self.assertEqual(excursion_segments, 2)
         self.assertEqual(participants[0]["client_name"], "Алия")
+
+        directory = self.client.get(
+            "/admin/clients?section=excursion"
+        ).get_data(as_text=True)
+        tuning_directory = self.client.get("/admin/clients").get_data(as_text=True)
+        self.assertIn("Алия", directory)
+        self.assertIn("Мария", directory)
+        self.assertNotIn("Алия", tuning_directory)
 
     def test_group_event_reuses_existing_client_by_verified_phone(self):
         self.login()
@@ -204,6 +228,87 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertEqual(participant["client_id"], client_id)
         self.assertEqual(participant["client_phone"], "+79998880003")
         self.assertEqual(client_count, 1)
+
+    def test_tuning_identity_is_reused_and_promoted_to_excursion_client(self):
+        self.login()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            cursor = db.execute(
+                "INSERT INTO clients "
+                "(client_name, boat_model, phone, token, created_at) "
+                "VALUES ('Клиент тюнинга', 'Buster XL', '+79998880003', "
+                "'schedule-tuning-client', '2026-08-31 12:00')"
+            )
+            client_id = cursor.lastrowid
+            db.execute(
+                "INSERT INTO client_segments (client_id, segment, created_at) "
+                "VALUES (?, 'tuning', '2026-08-31 12:00')",
+                (client_id,),
+            )
+            db.commit()
+
+        schedule_before = self.client.get(
+            "/schedule?date=2026-09-05"
+        ).get_data(as_text=True)
+        self.assertNotIn("Клиент тюнинга", schedule_before)
+
+        response = self.client.post(
+            "/schedule/items",
+            data=self.booking_data(
+                kind="event",
+                capacity="8",
+                customer_name="",
+                **{
+                    "employee_id[]": [str(self.platon_id)],
+                    "role[]": ["captain"],
+                    "participant_client_id[]": [""],
+                    "participant_name[]": ["Клиент тюнинга"],
+                    "participant_phone[]": ["+7 (999) 888-00-03"],
+                },
+            ),
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            ids = db.execute(
+                "SELECT id FROM clients WHERE phone = '+79998880003'"
+            ).fetchall()
+            segments = {
+                row["segment"] for row in db.execute(
+                    "SELECT segment FROM client_segments WHERE client_id = ?",
+                    (client_id,),
+                ).fetchall()
+            }
+        self.assertEqual([row["id"] for row in ids], [client_id])
+        self.assertEqual(segments, {"tuning", "excursion"})
+
+    def test_migration_links_legacy_individual_booking_to_excursion_client(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            booking_id = db.execute(
+                "INSERT INTO schedule_items "
+                "(kind, boat, service_name, starts_at, ends_at, customer_name, "
+                "customer_phone, created_at, updated_at) VALUES "
+                "('booking', 'Ларус', 'Средний тур', '2026-09-07 12:00', "
+                "'2026-09-07 13:30', 'Старый турист', '+79998880004', "
+                "'2026-09-01 09:00', '2026-09-01 09:00')"
+            ).lastrowid
+            db.commit()
+
+        application_module.init_db()
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            participant = db.execute(
+                "SELECT * FROM schedule_participants WHERE schedule_item_id = ?",
+                (booking_id,),
+            ).fetchone()
+            segment = db.execute(
+                "SELECT segment FROM client_segments WHERE client_id = ?",
+                (participant["client_id"],),
+            ).fetchone()
+        self.assertEqual(participant["client_name"], "Старый турист")
+        self.assertEqual(segment["segment"], "excursion")
 
     def test_group_event_rejects_more_clients_than_capacity(self):
         self.login()
@@ -373,7 +478,8 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(item["deleted_at"])
         self.assertEqual(assignments, 1)
         page = self.client.get("/schedule?date=2026-09-05").get_data(as_text=True)
-        self.assertNotIn("Алия", page)
+        self.assertIn("0 рейсов", page)
+        self.assertIn("const scheduleItems = [];", page)
 
 
 if __name__ == "__main__":

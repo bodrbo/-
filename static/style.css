@@ -6031,6 +6031,19 @@ button.captain-command-alert:hover {
    Tuning clients — administrative customer directory
    ------------------------------------------------------------------ */
 .wrap.tuning-clients-page { max-width: 1280px; }
+.client-directory-tabs { margin-bottom: 18px; }
+.client-directory-tabs a { display: inline-flex; align-items: center; gap: 8px; }
+.client-directory-tabs a span {
+  min-width: 24px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(17, 36, 52, .08);
+  color: inherit;
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: center;
+}
+.client-directory-tabs a.active span { background: rgba(255, 255, 255, .22); }
 .tuning-clients-heading {
   display: flex;
   align-items: flex-end;

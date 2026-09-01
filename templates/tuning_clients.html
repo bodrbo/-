@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Клиенты тюнинга</title>
+<title>{{ 'Клиенты экскурсий' if client_section == 'excursion' else 'Клиенты тюнинга' }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260829-clients">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
@@ -44,7 +44,7 @@
     {% include '_admin_main_nav.html' %}
     <div class="title-block">
       <span class="kicker">Клиентская база</span>
-      <h1>Клиенты тюнинга</h1>
+      <h1>{{ 'Клиенты экскурсий' if client_section == 'excursion' else 'Клиенты тюнинга' }}</h1>
     </div>
     <div class="topbar-actions">
       <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
@@ -57,26 +57,40 @@
 </header>
 
 <main class="wrap tuning-clients-page">
+  <nav class="sub-tabs client-directory-tabs" aria-label="Разделы клиентской базы">
+    <a href="{{ url_for('tuning_clients', section='tuning') }}" class="{{ 'active' if client_section == 'tuning' }}">
+      Клиенты тюнинга <span>{{ tuning_clients_count }}</span>
+    </a>
+    <a href="{{ url_for('tuning_clients', section='excursion') }}" class="{{ 'active' if client_section == 'excursion' }}">
+      Клиенты экскурсий <span>{{ excursion_clients_count }}</span>
+    </a>
+  </nav>
+
   <section class="tuning-clients-heading" aria-labelledby="tuning-clients-title">
     <div>
-      <p class="tuning-clients-eyebrow">Тюнинг-центр · единый список</p>
-      <h2 id="tuning-clients-title">Клиенты и история заказов</h2>
-      <p>Откройте административный вид личного кабинета, чтобы увидеть все заказы, внутренние заметки, платежи и экономику клиента.</p>
+      <p class="tuning-clients-eyebrow">{{ 'Экскурсионные рейсы' if client_section == 'excursion' else 'Тюнинг-центр' }} · отдельная база</p>
+      <h2 id="tuning-clients-title">{{ 'Туристы и история рейсов' if client_section == 'excursion' else 'Клиенты и история заказов' }}</h2>
+      <p>{% if client_section == 'excursion' %}Сюда автоматически попадают клиенты, добавленные в рейсы. Эта база используется при создании новых записей на экскурсии.{% else %}Эта база используется в тюнинг-заказах и выездной диагностике. Туристы без тюнинг-заказов здесь не показываются.{% endif %}</p>
     </div>
   </section>
 
   <div class="totals-grid tuning-clients-totals">
     <div class="panel total-card total-card-grand"><span class="k">Клиентов</span><span class="v">{{ clients_count }}</span></div>
+    {% if client_section == 'excursion' %}
+    <div class="panel total-card"><span class="k">Посещений рейсов</span><span class="v">{{ trips_count }}</span></div>
+    <div class="panel total-card"><span class="k">Будущих записей</span><span class="v">{{ upcoming_count }}</span></div>
+    {% else %}
     <div class="panel total-card"><span class="k">Заказов</span><span class="v">{{ orders_count }}</span></div>
     <div class="panel total-card"><span class="k">Сумма заказов</span><span class="v">{{ order_total|money }} ₽</span></div>
     <div class="panel total-card"><span class="k">К доплате</span><span class="v">{{ outstanding_total|money }} ₽</span></div>
+    {% endif %}
   </div>
 
   <section class="panel tuning-clients-directory">
     <div class="tuning-clients-directory-head">
       <div>
         <h2>Все клиенты</h2>
-        <p>Поиск работает по имени, телефону, модели техники и суммам.</p>
+        <p>Поиск работает по всем данным в таблице.</p>
       </div>
       {% if clients %}
       <label class="tuning-clients-search">
@@ -90,13 +104,18 @@
     {% if clients %}
     <div class="table-scroll">
       <table class="records tuning-clients-table" id="tuning-clients-table">
+        {% if client_section == 'excursion' %}
+        <thead><tr><th>Клиент</th><th>Статус</th><th>Телефон</th><th>Рейсов</th><th>Последний рейс</th><th>Ближайший рейс</th><th>Катера</th></tr></thead>
+        {% else %}
         <thead><tr><th>Клиент</th><th>Статус</th><th>Телефон</th><th>Последняя техника</th><th>Заказов</th><th>Последний заказ</th><th>Сумма</th><th>Оплачено</th><th>К доплате</th></tr></thead>
+        {% endif %}
         <tbody>
           {% for client in clients %}
           <tr>
-            <td><a href="{{ url_for('admin_client_dashboard', client_id=client.id) }}" class="tuning-client-name">{{ client.client_name }}</a><span class="tuning-client-id">ID {{ client.id }}</span></td>
+            <td><a href="{{ url_for('admin_client_dashboard', client_id=client.id, section=client_section) }}" class="tuning-client-name">{{ client.client_name }}</a><span class="tuning-client-id">ID {{ client.id }}</span></td>
             <td>
               <form action="{{ url_for('update_tuning_client_status', client_id=client.id) }}" method="post" class="status-badge status-client-{{ client.status }} tuning-client-status-form">
+                <input type="hidden" name="section" value="{{ client_section }}">
                 <span class="tuning-client-status-label">{{ {'satisfied': 'Довольный', 'neutral': 'Нейтральный', 'dissatisfied': 'Недовольный', 'blacklisted': 'Чёрный список'}.get(client.status, 'Нейтральный') }}</span>
                 <svg class="tuning-client-status-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg>
                 <select name="status" class="tuning-client-status" aria-label="Статус клиента {{ client.client_name }}" onchange="this.form.submit()">
@@ -108,6 +127,12 @@
               </form>
             </td>
             <td><a href="tel:{{ client.phone }}" class="tuning-client-phone">{{ client.phone }}</a></td>
+            {% if client_section == 'excursion' %}
+            <td class="amount">{{ client.trip_count }}</td>
+            <td class="muted">{{ client.last_trip_at[:10]|ru_date if client.last_trip_at else '—' }}</td>
+            <td class="muted">{{ client.next_trip_at[:10]|ru_date if client.next_trip_at else '—' }}</td>
+            <td>{{ client.boats|replace(',', ', ') if client.boats else '—' }}</td>
+            {% else %}
             <td>
               {% if client.latest_equipment_model %}
               <span class="equipment-kind">{{ 'Мотор' if client.latest_equipment_type == 'motor' else 'Лодка' }}</span>
@@ -121,6 +146,7 @@
             <td class="amount">{{ client.order_total|money }}</td>
             <td class="amount tuning-client-paid">{{ client.paid_total|money }}</td>
             <td class="amount {{ 'tuning-client-debt' if client.outstanding > 0 }}">{{ client.outstanding|money }}</td>
+            {% endif %}
           </tr>
           {% endfor %}
         </tbody>
@@ -131,7 +157,7 @@
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
       <div class="t">Клиентов пока нет</div>
-      <div class="s">Они появятся здесь после создания первого тюнинг-заказа.</div>
+      <div class="s">{% if client_section == 'excursion' %}Они появятся здесь после добавления первого клиента в рейс.{% else %}Они появятся здесь после создания первого тюнинг-заказа.{% endif %}</div>
     </div>
     {% endif %}
   </section>

@@ -204,11 +204,16 @@
       <div class="schedule-form-grid schedule-booking-fields" id="scheduleBookingFields">
         <label class="field">
           <span>Имя клиента</span>
-          <input type="text" name="customer_name" id="scheduleCustomer" maxlength="180" placeholder="Имя или ФИО">
+          <input type="hidden" name="customer_client_id" id="scheduleCustomerClientId">
+          <input type="text" name="customer_name" id="scheduleCustomer"
+                 list="scheduleClientOptions" maxlength="180"
+                 placeholder="Выберите из базы или введите нового"
+                 oninput="applyScheduleBookingClient(this)">
         </label>
         <label class="field">
           <span>Телефон</span>
-          <input type="tel" name="customer_phone" id="schedulePhone" maxlength="40" placeholder="+7 999 000-00-00">
+          <input type="tel" name="customer_phone" id="schedulePhone" maxlength="40"
+                 placeholder="+7 999 000-00-00" oninput="scheduleBookingPhoneChanged(this)">
         </label>
       </div>
 
@@ -369,6 +374,9 @@
     document.getElementById('scheduleEnd').value = item.end_time;
     document.getElementById('scheduleCustomer').value = item.customer_name || '';
     document.getElementById('schedulePhone').value = item.customer_phone || '';
+    document.getElementById('scheduleCustomerClientId').value =
+      item.kind === 'booking' && (item.participants || []).length
+        ? item.participants[0].client_id : '';
     document.getElementById('scheduleCapacity').value = item.capacity || 10;
     (item.participants || []).forEach(participant => addScheduleParticipant(
       participant.client_id, participant.client_name, participant.client_phone
@@ -414,6 +422,27 @@
     const rows = document.querySelectorAll('.schedule-assignment-row');
     if (rows.length === 1) return;
     button.closest('.schedule-assignment-row').remove();
+  }
+  function applyScheduleBookingClient(input) {
+    const typed = input.value.trim();
+    const selected = scheduleClients.find(
+      client => `${client.client_name} · ${client.phone}` === typed
+    );
+    const idInput = document.getElementById('scheduleCustomerClientId');
+    if (!selected) {
+      idInput.value = '';
+      return;
+    }
+    idInput.value = selected.id;
+    input.value = selected.client_name;
+    document.getElementById('schedulePhone').value = selected.phone;
+  }
+  function scheduleBookingPhoneChanged(input) {
+    const idInput = document.getElementById('scheduleCustomerClientId');
+    const selected = scheduleClients.find(
+      client => String(client.id) === idInput.value
+    );
+    if (selected && selected.phone !== input.value) idInput.value = '';
   }
   function addScheduleParticipant(clientId, clientName, clientPhone) {
     const fragment = document.getElementById('scheduleParticipantTemplate').content.cloneNode(true);

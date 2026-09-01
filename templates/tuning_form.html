@@ -573,10 +573,32 @@
       <div class="form-group">
         <div class="form-group-label"><span class="n">1</span>Клиент</div>
         <div class="field-row-inner">
-        <div class="field">
-          <label for="client_name">ФИО клиента</label>
-          <input type="text" id="client_name" name="client_name"
-                 value="{{ form_values.client_name if form_values else '' }}" required>
+        <div class="field" data-tuning-client-combo>
+          <label for="client_name_search">Клиент тюнинга</label>
+          {% set current_client_name = form_values.client_name if form_values else '' %}
+          <div class="combo-field" data-combo data-combo-allow-custom>
+            <input type="text" id="client_name_search" class="combo-input" data-combo-input
+                   value="{{ current_client_name }}" data-selected-label="{{ current_client_name }}"
+                   placeholder="Начните вводить имя или телефон…" autocomplete="off"
+                   role="combobox" aria-autocomplete="list" required>
+            <input type="hidden" name="client_name" data-combo-value value="{{ current_client_name }}">
+            <input type="hidden" name="client_id" data-tuning-client-id
+                   value="{{ form_values.client_id if form_values and form_values.client_id else '' }}">
+            <div class="combo-dropdown hidden" data-combo-dropdown>
+              <p class="combo-empty hidden" data-combo-empty>Новый клиент будет добавлен в базу тюнинга.</p>
+              {% for client in tuning_client_choices|default([]) %}
+              <div class="combo-option" data-value="{{ client.client_name }}"
+                   data-label="{{ client.client_name }}"
+                   data-search="{{ (client.client_name ~ ' ' ~ client.phone)|lower }}"
+                   data-tuning-client-option data-client-id="{{ client.id }}"
+                   data-client-phone="{{ client.phone }}">
+                <span class="combo-option-name">{{ client.client_name }}</span>
+                <span class="combo-option-sku">{{ client.phone }}</span>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          <span class="field-context">Выберите клиента из базы тюнинга или введите нового.</span>
         </div>
         <fieldset class="field equipment-type-field">
           <legend>Тип техники</legend>
@@ -646,7 +668,7 @@
         </div>
         <div class="field field-narrow">
           <label for="phone">Телефон</label>
-          <input type="text" id="phone" name="phone" inputmode="tel"
+          <input type="text" id="phone" name="phone" inputmode="tel" data-tuning-client-phone
                  value="{{ form_values.phone if form_values else '' }}" required>
         </div>
         <div class="field">

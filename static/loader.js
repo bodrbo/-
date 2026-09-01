@@ -401,6 +401,29 @@ initTableFilters();
   });
 })();
 
+// Tuning orders use only the tuning directory. Picking an existing client
+// fills the stable phone identity; typing a new name clears the old link.
+(function () {
+  document.querySelectorAll("[data-tuning-client-combo]").forEach(function (wrap) {
+    var input = wrap.querySelector("[data-combo-input]");
+    var clientId = wrap.querySelector("[data-tuning-client-id]");
+    var form = wrap.closest("form");
+    var phone = form && form.querySelector("[data-tuning-client-phone]");
+    if (!input || !clientId || !phone) return;
+
+    wrap.querySelectorAll("[data-tuning-client-option]").forEach(function (option) {
+      option.addEventListener("click", function () {
+        clientId.value = option.getAttribute("data-client-id") || "";
+        phone.value = option.getAttribute("data-client-phone") || "";
+      });
+    });
+
+    input.addEventListener("input", function () {
+      if (input.value !== input.dataset.selectedLabel) clientId.value = "";
+    });
+  });
+})();
+
 // Mobile burger menu — independent of the loader above (some pages, like
 // the plain login screens, have the nav but not the page-loader overlay).
 (function () {

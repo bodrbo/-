@@ -89,6 +89,11 @@ from modules.schedule import (
     create_schedule_blueprint,
     init_schema as init_schedule_schema,
 )
+from modules.clients import (
+    ensure_segment as ensure_client_segment,
+    init_schema as init_client_segments_schema,
+)
+from modules.clients.constants import EXCURSION_SEGMENT, TUNING_SEGMENT
 from modules.tuning_boat_specs import boat_specification_for, format_parameters
 
 # reportlab (PDF generation for "Акт выполненных работ") is imported lazily,
@@ -279,6 +284,20 @@ def _tuning_boat_model_choices(db):
             "ORDER BY model_name COLLATE NOCASE"
         ).fetchall()
     ]
+
+
+def _tuning_client_choices(db):
+    """Clients offered by tuning workflows, excluding excursion-only people."""
+    return db.execute(
+        "SELECT clients.id, clients.client_name, clients.phone FROM clients "
+        "WHERE EXISTS (SELECT 1 FROM client_segments "
+        " WHERE client_segments.client_id = clients.id "
+        " AND client_segments.segment = ?) "
+        "OR NOT EXISTS (SELECT 1 FROM client_segments "
+        " WHERE client_segments.client_id = clients.id) "
+        "ORDER BY clients.client_name COLLATE NOCASE, clients.phone, clients.id",
+        (TUNING_SEGMENT,),
+    ).fetchall()
 
 
 def get_work_item_photos(db, item_id):
@@ -2185,6 +2204,9 @@ def init_db():
             (employee_row[0], str(chat_id), employee_name, now),
         )
     init_offline_schema(conn)
+    # Client relationships are classified only after all legacy tables have
+    # received their newer client_id columns above.
+    init_client_segments_schema(conn)
     conn.commit()
     conn.close()
 
@@ -3550,6 +3572,7 @@ def _process_tuning_form(form):
 def _get_or_create_client(db, phone, client_name, boat_model):
     """Find the client cabinet for this phone number, refreshing their name
     and boat, or create one with a fresh unique link if none exists yet."""
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     row = db.execute(
         "SELECT id, boat_model FROM clients WHERE phone = ?", (phone,)
     ).fetchone()
@@ -3558,14 +3581,15 @@ def _get_or_create_client(db, phone, client_name, boat_model):
             "UPDATE clients SET client_name = ?, boat_model = ? WHERE id = ?",
             (client_name, boat_model or row["boat_model"], row["id"]),
         )
+        ensure_client_segment(db, row["id"], TUNING_SEGMENT, now)
         return row["id"]
-    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     token = secrets.token_urlsafe(16)
     cur = db.execute(
         "INSERT INTO clients (client_name, boat_model, phone, token, created_at) "
         "VALUES (?, ?, ?, ?, ?)",
         (client_name, boat_model, phone, token, now),
     )
+    ensure_client_segment(db, cur.lastrowid, TUNING_SEGMENT, now)
     return cur.lastrowid
 
 
@@ -4387,48 +4411,90 @@ def tuning_index():
 @admin_login_required
 def tuning_clients():
     db = get_db()
-    client_rows = db.execute(
-        "SELECT c.id, c.client_name, c.boat_model, c.phone, c.status, c.created_at, "
-        "COALESCE(os.order_count, 0) AS order_count, "
-        "COALESCE(os.order_total, 0) AS order_total, "
-        "os.last_order_at, COALESCE(ps.paid_total, 0) AS paid_total, "
-        "(SELECT CASE WHEN latest.equipment_type = 'motor' "
-        "        THEN latest.motor_model ELSE latest.boat_model END "
-        " FROM tuning_orders latest WHERE latest.client_id = c.id "
-        " ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) "
-        "AS latest_equipment_model, "
-        "(SELECT latest.equipment_type FROM tuning_orders latest "
-        " WHERE latest.client_id = c.id "
-        " ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) "
-        "AS latest_equipment_type "
-        "FROM clients c "
-        "LEFT JOIN ("
-        " SELECT client_id, COUNT(*) AS order_count, SUM(total) AS order_total, "
-        " MAX(created_at) AS last_order_at FROM tuning_orders "
-        " WHERE client_id IS NOT NULL GROUP BY client_id"
-        ") os ON os.client_id = c.id "
-        "LEFT JOIN ("
-        " SELECT o.client_id, SUM(p.amount) AS paid_total "
-        " FROM tuning_orders o JOIN tuning_payments p ON p.order_id = o.id "
-        " WHERE o.client_id IS NOT NULL GROUP BY o.client_id"
-        ") ps ON ps.client_id = c.id "
-        "ORDER BY COALESCE(os.last_order_at, c.created_at) DESC, c.id DESC"
-    ).fetchall()
-    clients = []
-    for row in client_rows:
-        client = dict(row)
-        client["outstanding"] = max(
-            0.0, client["order_total"] - client["paid_total"]
-        )
-        clients.append(client)
+    section = request.args.get("section", TUNING_SEGMENT).strip().lower()
+    if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
+        section = TUNING_SEGMENT
+    segment_counts = {
+        row["segment"]: row["client_count"]
+        for row in db.execute(
+            "SELECT client_segments.segment, "
+            "COUNT(DISTINCT clients.id) AS client_count "
+            "FROM client_segments JOIN clients "
+            "ON clients.id = client_segments.client_id "
+            "GROUP BY client_segments.segment"
+        ).fetchall()
+    }
+
+    if section == EXCURSION_SEGMENT:
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        client_rows = db.execute(
+            "SELECT c.id, c.client_name, c.boat_model, c.phone, c.status, c.created_at, "
+            "COUNT(DISTINCT si.id) AS trip_count, "
+            "COUNT(DISTINCT CASE WHEN si.starts_at >= ? THEN si.id END) AS upcoming_count, "
+            "MAX(CASE WHEN si.ends_at <= ? THEN si.starts_at END) AS last_trip_at, "
+            "MIN(CASE WHEN si.starts_at >= ? THEN si.starts_at END) AS next_trip_at, "
+            "GROUP_CONCAT(DISTINCT si.boat) AS boats "
+            "FROM clients c JOIN client_segments cs ON cs.client_id = c.id "
+            "AND cs.segment = ? "
+            "LEFT JOIN schedule_participants sp ON sp.client_id = c.id "
+            "LEFT JOIN schedule_items si ON si.id = sp.schedule_item_id "
+            "AND si.deleted_at IS NULL "
+            "GROUP BY c.id ORDER BY COALESCE(MAX(si.starts_at), c.created_at) DESC, c.id DESC",
+            (now, now, now, EXCURSION_SEGMENT),
+        ).fetchall()
+        clients = [dict(row) for row in client_rows]
+    else:
+        client_rows = db.execute(
+            "SELECT c.id, c.client_name, c.boat_model, c.phone, c.status, c.created_at, "
+            "COALESCE(os.order_count, 0) AS order_count, "
+            "COALESCE(os.order_total, 0) AS order_total, "
+            "os.last_order_at, COALESCE(ps.paid_total, 0) AS paid_total, "
+            "(SELECT CASE WHEN latest.equipment_type = 'motor' "
+            "        THEN latest.motor_model ELSE latest.boat_model END "
+            " FROM tuning_orders latest WHERE latest.client_id = c.id "
+            " ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) "
+            "AS latest_equipment_model, "
+            "(SELECT latest.equipment_type FROM tuning_orders latest "
+            " WHERE latest.client_id = c.id "
+            " ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) "
+            "AS latest_equipment_type "
+            "FROM clients c "
+            "LEFT JOIN ("
+            " SELECT client_id, COUNT(*) AS order_count, SUM(total) AS order_total, "
+            " MAX(created_at) AS last_order_at FROM tuning_orders "
+            " WHERE client_id IS NOT NULL GROUP BY client_id"
+            ") os ON os.client_id = c.id "
+            "LEFT JOIN ("
+            " SELECT o.client_id, SUM(p.amount) AS paid_total "
+            " FROM tuning_orders o JOIN tuning_payments p ON p.order_id = o.id "
+            " WHERE o.client_id IS NOT NULL GROUP BY o.client_id"
+            ") ps ON ps.client_id = c.id "
+            "WHERE EXISTS (SELECT 1 FROM client_segments cs "
+            " WHERE cs.client_id = c.id AND cs.segment = ?) "
+            "OR NOT EXISTS (SELECT 1 FROM client_segments cs WHERE cs.client_id = c.id) "
+            "ORDER BY COALESCE(os.last_order_at, c.created_at) DESC, c.id DESC",
+            (TUNING_SEGMENT,),
+        ).fetchall()
+        clients = []
+        for row in client_rows:
+            client = dict(row)
+            client["outstanding"] = max(
+                0.0, client["order_total"] - client["paid_total"]
+            )
+            clients.append(client)
 
     return render_template(
         "tuning_clients.html",
         clients=clients,
         clients_count=len(clients),
-        orders_count=sum(client["order_count"] for client in clients),
-        order_total=sum(client["order_total"] for client in clients),
-        outstanding_total=sum(client["outstanding"] for client in clients),
+        orders_count=sum(client.get("order_count", 0) for client in clients),
+        order_total=sum(client.get("order_total", 0) for client in clients),
+        outstanding_total=sum(client.get("outstanding", 0) for client in clients),
+        trips_count=sum(client.get("trip_count", 0) for client in clients),
+        upcoming_count=sum(client.get("upcoming_count", 0) for client in clients),
+        tuning_clients_count=segment_counts.get(TUNING_SEGMENT, 0),
+        excursion_clients_count=segment_counts.get(EXCURSION_SEGMENT, 0),
+        client_section=section,
         client_statuses=CLIENT_STATUSES,
         active_page="clients",
     )
@@ -4443,7 +4509,14 @@ def update_tuning_client_status(client_id):
         db = get_db()
         db.execute("UPDATE clients SET status = ? WHERE id = ?", (status, client_id))
         db.commit()
-    return redirect(url_for("tuning_clients"))
+    section = request.form.get("section", TUNING_SEGMENT)
+    if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
+        section = TUNING_SEGMENT
+    return redirect(
+        url_for("tuning_clients", section=section)
+        if section == EXCURSION_SEGMENT
+        else url_for("tuning_clients")
+    )
 
 
 @app.route("/tuning/boats")
@@ -4597,6 +4670,9 @@ app.register_blueprint(
         admin_login_required=admin_login_required,
         normalize_boat_model=_normalize_tuning_boat_model,
         boat_model_choices=_tuning_boat_model_choices,
+        mark_tuning_client=lambda db, client_id, created_at: ensure_client_segment(
+            db, client_id, TUNING_SEGMENT, created_at
+        ),
     )
 )
 
@@ -4777,6 +4853,7 @@ def add_tuning_order():
             "tuning_form.html", edit_order=None, errors=None, form_values=None,
             items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
             boat_model_choices=_tuning_boat_model_choices(db),
+            tuning_client_choices=_tuning_client_choices(db),
         )
 
     db = get_db()
@@ -4786,6 +4863,7 @@ def add_tuning_order():
             "tuning_form.html", edit_order=None, errors=errors, form_values=request.form,
             items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
             boat_model_choices=_tuning_boat_model_choices(db),
+            tuning_client_choices=_tuning_client_choices(db),
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -5145,6 +5223,7 @@ def edit_tuning_order(order_id):
             "SELECT * FROM tuning_yookassa_payments WHERE order_id = ? ORDER BY id DESC", (order_id,)
         ).fetchall()
         form_values = {
+            "client_id": order["client_id"] or "",
             "client_name": order["client_name"],
             "equipment_type": order["equipment_type"],
             "boat_model": order["boat_model"],
@@ -5178,6 +5257,7 @@ def edit_tuning_order(order_id):
             notes=notes, admins=admins,
             boat_profile_id=boat_profile_id,
             boat_model_choices=_tuning_boat_model_choices(db),
+            tuning_client_choices=_tuning_client_choices(db),
             modulkassa_configured=_modulkassa_configured(),
         )
 
@@ -5203,6 +5283,7 @@ def edit_tuning_order(order_id):
             hull_sheets=hull_sheets, available_hull_sheets=available_hull_sheets,
             boat_profile_id=boat_profile_id,
             boat_model_choices=_tuning_boat_model_choices(db),
+            tuning_client_choices=_tuning_client_choices(db),
             modulkassa_configured=_modulkassa_configured(),
         ), 400
 
@@ -5638,7 +5719,7 @@ def remove_tuning_order_product(order_id, row_id):
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
-def _render_client_dashboard(db, client, viewer_role):
+def _render_client_dashboard(db, client, viewer_role, client_section=TUNING_SEGMENT):
     """Build the shared cabinet while keeping admin-only data server-side.
 
     The public token route always calls this with ``client``.  Only the
@@ -5646,6 +5727,18 @@ def _render_client_dashboard(db, client, viewer_role):
     payment rows, internal notes and source metadata into the response.
     """
     is_admin_view = viewer_role == "admin"
+    excursion_trips = []
+    if is_admin_view and client_section == EXCURSION_SEGMENT:
+        excursion_trips = [
+            dict(row) for row in db.execute(
+                "SELECT DISTINCT si.id, si.kind, si.boat, si.service_name, "
+                "si.starts_at, si.ends_at, si.status FROM schedule_items si "
+                "JOIN schedule_participants sp ON sp.schedule_item_id = si.id "
+                "WHERE sp.client_id = ? AND si.deleted_at IS NULL "
+                "ORDER BY si.starts_at DESC, si.id DESC",
+                (client["id"],),
+            ).fetchall()
+        ]
     order_columns = (
         "id, equipment_type, boat_model, boat_registration_number, motor_model, "
         "motor_serial_number, discount_type, discount_value, total, status, created_at"
@@ -5742,6 +5835,8 @@ def _render_client_dashboard(db, client, viewer_role):
         ),
         work_photos_by_item=work_photos_by_item, cost_units=SUPPLY_COST_UNITS,
         viewer_role=viewer_role,
+        client_section=client_section,
+        excursion_trips=excursion_trips,
         admin_name=session.get("admin_name") if is_admin_view else None,
     )
 
@@ -5765,7 +5860,10 @@ def admin_client_dashboard(client_id):
     client = db.execute("SELECT * FROM clients WHERE id = ?", (client_id,)).fetchone()
     if client is None:
         return redirect(url_for("tuning_index"))
-    return _render_client_dashboard(db, client, "admin")
+    client_section = request.args.get("section", TUNING_SEGMENT)
+    if client_section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
+        client_section = TUNING_SEGMENT
+    return _render_client_dashboard(db, client, "admin", client_section)
 
 
 @app.route("/client/<token>/item/<int:item_id>/approve", methods=["POST"])

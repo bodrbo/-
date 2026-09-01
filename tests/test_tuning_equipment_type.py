@@ -26,6 +26,7 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         db.execute("DELETE FROM tuning_order_items")
         db.execute("DELETE FROM tuning_boat_profiles")
         db.execute("DELETE FROM projects WHERE tuning_order_id IS NOT NULL")
+        db.execute("DELETE FROM client_segments")
         db.execute("DELETE FROM clients")
         db.execute("DELETE FROM tuning_orders")
         db.commit()
@@ -123,6 +124,14 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertIn('class="combo-option"', form_html)
         self.assertIn("Salute 585 HT", form_html)
         self.assertIn("Создать новую модель", form_html)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            segment = db.execute(
+                "SELECT client_segments.segment FROM client_segments "
+                "JOIN clients ON clients.id = client_segments.client_id "
+                "WHERE clients.phone = '+7 900 000-00-00'"
+            ).fetchone()
+        self.assertEqual(segment["segment"], "tuning")
 
         created = self.client.post(
             "/tuning/add", data=self.valid_form(boat_model="Nimbus 305 Coupe")
@@ -137,6 +146,39 @@ class TuningEquipmentTypeTests(unittest.TestCase):
             ).fetchone()
             self.assertIsNotNone(profile)
             self.assertEqual(profile["model_name"], "Nimbus 305 Coupe")
+
+    def test_tuning_form_uses_only_tuning_clients(self):
+        self.login()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            tuning_id = db.execute(
+                "INSERT INTO clients "
+                "(client_name, boat_model, phone, token, created_at) VALUES "
+                "('Тюнинг Клиент', '', '+79990001111', 'tuning-picker', '2026-09-01 10:00')"
+            ).lastrowid
+            excursion_id = db.execute(
+                "INSERT INTO clients "
+                "(client_name, boat_model, phone, token, created_at) VALUES "
+                "('Турист Экскурсий', '', '+79990002222', 'excursion-picker', '2026-09-01 10:00')"
+            ).lastrowid
+            db.execute(
+                "INSERT INTO client_segments (client_id, segment, created_at) "
+                "VALUES (?, 'tuning', '2026-09-01 10:00')",
+                (tuning_id,),
+            )
+            db.execute(
+                "INSERT INTO client_segments (client_id, segment, created_at) "
+                "VALUES (?, 'excursion', '2026-09-01 10:00')",
+                (excursion_id,),
+            )
+            db.commit()
+
+        html = self.client.get("/tuning/add").get_data(as_text=True)
+        self.assertIn("Тюнинг Клиент", html)
+        self.assertIn("+79990001111", html)
+        self.assertNotIn("Турист Экскурсий", html)
+        self.assertNotIn("+79990002222", html)
+        self.assertIn("data-tuning-client-combo", html)
 
     def test_assigning_tuning_work_notifies_the_employee_immediately(self):
         self.login()

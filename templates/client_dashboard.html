@@ -62,7 +62,7 @@
       <p>Клиент не видит эту панель, внутреннюю экономику, заметки и служебные данные заказов.</p>
     </div>
     <div class="client-admin-toolbar-actions">
-      <a href="{{ url_for('tuning_clients') }}" class="client-admin-link">← К клиентам</a>
+      <a href="{{ url_for('tuning_clients', section=client_section) if client_section == 'excursion' else url_for('tuning_clients') }}" class="client-admin-link">← К клиентам</a>
       <a href="{{ url_for('tuning_index') }}" class="client-admin-link">К заказам</a>
       <a href="{{ url_for('client_dashboard', token=client.token) }}" target="_blank" rel="noopener" class="client-admin-preview-link">Открыть версию клиента</a>
     </div>
@@ -82,6 +82,41 @@
     <span class="investor-name">{{ client.client_name }}</span>
   </div>
 
+  {% if is_admin_view and client_section == 'excursion' %}
+  <div class="totals-grid">
+    <div class="panel total-card total-card-grand">
+      <span class="k">Рейсов</span>
+      <span class="v">{{ excursion_trips|length }}</span>
+    </div>
+    <div class="panel total-card">
+      <span class="k">Последняя запись</span>
+      <span class="v" style="font-size:20px;">{{ excursion_trips[0].starts_at[:10]|ru_date if excursion_trips else '—' }}</span>
+    </div>
+  </div>
+  <section class="panel">
+    <h2>История экскурсионных рейсов</h2>
+    {% if excursion_trips %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead><tr><th>Дата</th><th>Время</th><th>Рейс</th><th>Катер</th><th>Тип</th></tr></thead>
+        <tbody>
+          {% for trip in excursion_trips %}
+          <tr>
+            <td>{{ trip.starts_at[:10]|ru_date }}</td>
+            <td>{{ trip.starts_at[11:16] }}–{{ trip.ends_at[11:16] }}</td>
+            <td>{{ trip.service_name }}</td>
+            <td>{{ trip.boat }}</td>
+            <td>{{ 'Групповой' if trip.kind == 'event' else 'Индивидуальный' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint">Активных рейсов у клиента пока нет.</p>
+    {% endif %}
+  </section>
+  {% else %}
   <div class="totals-grid">
     <div class="panel total-card">
       <span class="k">Техника</span>
@@ -267,6 +302,7 @@
     </div>
     {% endif %}
   </section>
+  {% endif %}
 
   <div id="photo-modal" class="photo-modal hidden" onclick="if (event.target === this) closePhotoModal();">
     <div class="photo-modal-inner">

@@ -64,3 +64,7 @@ def init_schema(conn):
         "CREATE INDEX IF NOT EXISTS idx_schedule_participants_item "
         "ON schedule_participants(schedule_item_id, client_id)"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schedule_participants_client "
+        "ON schedule_participants(client_id, schedule_item_id)"
+    )

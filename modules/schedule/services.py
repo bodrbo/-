@@ -78,12 +78,65 @@ def _normalise_phone_identity(phone):
     return digits
 
 
+def _validate_booking_client(db, form, errors):
+    name = _normalise_text(form.get("customer_name"), 180)
+    phone = _normalise_text(form.get("customer_phone"), 40)
+    raw_client_id = str(form.get("customer_client_id") or "").strip()
+    if not name:
+        errors.append("Для записи укажите имя клиента.")
+    phone_identity = _normalise_phone_identity(phone)
+    if len(phone_identity) < 7:
+        errors.append("Для записи укажите корректный телефон клиента.")
+    if not name or len(phone_identity) < 7:
+        return name, phone, None
+
+    clients = repository.list_all_clients(db)
+    client = None
+    if raw_client_id:
+        try:
+            selected_id = int(raw_client_id)
+        except ValueError:
+            selected_id = None
+        client = next(
+            (candidate for candidate in clients if candidate["id"] == selected_id),
+            None,
+        )
+        if client is None:
+            errors.append("Выбранный клиент больше недоступен.")
+            return name, phone, None
+        if _normalise_phone_identity(client["phone"]) != phone_identity:
+            errors.append("Телефон не совпадает с выбранным клиентом.")
+            return name, phone, None
+    else:
+        matches = [
+            candidate for candidate in clients
+            if _normalise_phone_identity(candidate["phone"]) == phone_identity
+        ]
+        if len(matches) > 1:
+            errors.append("В базе найдено несколько клиентов с этим телефоном.")
+            return name, phone, None
+        client = matches[0] if matches else None
+
+    if client is not None:
+        name = client["client_name"]
+        phone = client["phone"]
+    participant = {
+        "client_id": client["id"] if client is not None else None,
+        "client_name": name,
+        "client_phone": phone,
+        "client_token": secrets.token_urlsafe(16) if client is None else None,
+    }
+    return name, phone, participant
+
+
 def _validate_participants(db, form, capacity, errors):
     raw_client_ids = form.getlist("participant_client_id[]")
     raw_names = form.getlist("participant_name[]")
     raw_phones = form.getlist("participant_phone[]")
     row_count = max(len(raw_client_ids), len(raw_names), len(raw_phones))
-    clients = repository.list_clients(db)
+    # Search every identity by phone so a tuning client taking an excursion
+    # is reused, while only excursion clients appear in the picker itself.
+    clients = repository.list_all_clients(db)
     clients_by_id = {client["id"]: client for client in clients}
     clients_by_phone = {}
     for client in clients:
@@ -192,8 +245,11 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
     participants = []
     participants_count = 0
     if kind == "booking":
-        if not customer_name:
-            errors.append("Для записи укажите имя клиента.")
+        customer_name, customer_phone, participant = _validate_booking_client(
+            db, form, errors
+        )
+        if participant is not None:
+            participants = [participant]
     elif kind == "event":
         try:
             capacity = int(str(form.get("capacity") or "10").strip())

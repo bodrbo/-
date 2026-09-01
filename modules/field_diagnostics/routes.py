@@ -30,6 +30,7 @@ def create_blueprint(
     admin_login_required,
     normalize_boat_model,
     boat_model_choices,
+    mark_tuning_client,
 ):
     blueprint = Blueprint("field_diagnostics", __name__)
 
@@ -40,8 +41,12 @@ def create_blueprint(
 
     def client_choices(db):
         return db.execute(
-            "SELECT id, client_name, phone FROM clients "
-            "ORDER BY client_name COLLATE NOCASE, phone, id"
+            "SELECT clients.id, clients.client_name, clients.phone FROM clients "
+            "WHERE EXISTS (SELECT 1 FROM client_segments "
+            " WHERE client_segments.client_id = clients.id AND segment = 'tuning') "
+            "OR NOT EXISTS (SELECT 1 FROM client_segments "
+            " WHERE client_segments.client_id = clients.id) "
+            "ORDER BY clients.client_name COLLATE NOCASE, clients.phone, clients.id"
         ).fetchall()
 
     def normalize_phone_identity(phone):
@@ -81,6 +86,7 @@ def create_blueprint(
             values["owner_name"] = client["client_name"]
             values["owner_phone"] = client["phone"]
             values["owner_client_id"] = str(client["id"])
+            mark_tuning_client(db, client["id"], dt.datetime.now().strftime("%Y-%m-%d %H:%M"))
             return client["id"], None
 
         matches = [
@@ -101,6 +107,7 @@ def create_blueprint(
             values["owner_name"] = client["client_name"]
             values["owner_phone"] = client["phone"]
             values["owner_client_id"] = str(client["id"])
+            mark_tuning_client(db, client["id"], dt.datetime.now().strftime("%Y-%m-%d %H:%M"))
             return client["id"], None
 
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -117,6 +124,7 @@ def create_blueprint(
             ),
         )
         values["owner_client_id"] = str(cursor.lastrowid)
+        mark_tuning_client(db, cursor.lastrowid, now)
         return cursor.lastrowid, None
 
     def questions_for_sheet(db, diagnostic_sheet):
