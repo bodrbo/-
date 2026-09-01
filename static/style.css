@@ -2257,7 +2257,7 @@ label {
   color: var(--muted);
 }
 
-input[type="text"], input[type="date"], input[type="time"], input[type="datetime-local"],
+input[type="text"], input[type="tel"], input[type="number"], input[type="date"], input[type="time"], input[type="datetime-local"],
 input[type="password"], input[type="search"], select, textarea {
   font-family: inherit;
   font-size: 14px;
@@ -2294,7 +2294,7 @@ textarea { resize: vertical; }
   overflow: hidden;
   white-space: nowrap;
 }
-input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus, input[type="datetime-local"]:focus,
+input[type="text"]:focus, input[type="tel"]:focus, input[type="number"]:focus, input[type="date"]:focus, input[type="time"]:focus, input[type="datetime-local"]:focus,
 input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea:focus {
   outline: 2px solid var(--brass);
   outline-offset: 1px;
@@ -3489,9 +3489,33 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-participant-row .icon-btn { margin-bottom: 1px; }
 .schedule-assignment-row .icon-btn,
 .schedule-participant-row .icon-btn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
   width: 44px;
   height: 44px;
   padding: 0;
+  border: 1px solid #dfc7c1;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+}
+.schedule-assignment-row .icon-btn:hover,
+.schedule-participant-row .icon-btn:hover {
+  border-color: var(--danger);
+  background: #fff1ed;
+}
+.schedule-assignment-row .icon-btn:focus-visible,
+.schedule-participant-row .icon-btn:focus-visible,
+.schedule-delete-form button.icon-btn:focus-visible {
+  outline: 2px solid var(--danger);
+  outline-offset: 2px;
+}
+.schedule-assignment-row .icon-btn svg,
+.schedule-participant-row .icon-btn svg {
+  width: 16px;
+  height: 16px;
 }
 .schedule-client-picker { position: relative; display: block; }
 .schedule-client-results {
@@ -3552,6 +3576,24 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   font-size: 11px;
   font-weight: 700;
 }
+.schedule-delete-form button.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid #dfc7c1;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--danger);
+}
+.schedule-delete-form button.icon-btn:hover {
+  border-color: var(--danger);
+  background: #fbe7e3;
+  color: var(--danger);
+}
+.schedule-delete-form button.icon-btn svg { width: 15px; height: 15px; }
 .schedule-delete-form[hidden] { display: none; }
 .schedule-modal-open { overflow: hidden; }
 
