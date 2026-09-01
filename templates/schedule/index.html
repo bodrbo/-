@@ -20,11 +20,12 @@
     </div>
     {% include '_admin_main_nav.html' %}
     <div class="title-block">
+      {% if manager_view %}<span class="kicker">Менеджер по работе с клиентами</span>{% endif %}
       <h1>Расписание рейсов</h1>
       <p>Оперативное управление катерами и экипажами</p>
     </div>
     <div class="topbar-actions">
-      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
+      <form action="{{ url_for('team_logout') if manager_view else url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
     </div>
   </div>
 </header>

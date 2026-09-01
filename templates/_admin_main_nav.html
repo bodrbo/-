@@ -1,4 +1,25 @@
-<nav class="main-nav" id="mainNav" aria-label="Главное меню">
+<nav class="main-nav{{ ' manager-main-nav' if manager_view }}" id="mainNav" aria-label="Главное меню">
+  {% if manager_view %}
+  <a href="{{ url_for('schedule.index') }}" class="{{ 'active' if active_page == 'schedule' }}">
+    <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2.5" y="4.5" width="15" height="13" rx="2"/><path d="M6 2.5v4M14 2.5v4M2.5 8h15M6 11h2M10 11h2M14 11h.01M6 14h2M10 14h2"/>
+    </svg>
+    <span class="nav-label">Расписание</span>
+  </a>
+  <a href="{{ url_for('tuning_clients', section='excursion') }}" class="{{ 'active' if active_page == 'clients' }}">
+    <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="6.5" cy="6.5" r="2.5"/>
+      <path d="M2.3 16c.4-3.1 1.8-5 4.2-5s3.8 1.9 4.2 5M13 5h4.5M13 9h4.5M13 13h3.2"/>
+    </svg>
+    <span class="nav-label">Клиенты</span>
+  </a>
+  <a href="{{ url_for('excursion_services.index') }}" class="{{ 'active' if active_page == 'services' }}">
+    <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 4.5h14v11H3zM6 8h8M6 11h5"/><circle cx="14.5" cy="13.5" r="1"/>
+    </svg>
+    <span class="nav-label">Услуги</span>
+  </a>
+  {% else %}
   <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'payroll' }}">
     <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
       <rect x="2.3" y="6" width="15.4" height="8" rx="1.8"/>
@@ -65,4 +86,5 @@
     </svg>
     <span class="nav-label">Снабжение</span>
   </a>
+  {% endif %}
 </nav>

@@ -4019,6 +4019,7 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   .schedule-topbar .topbar-actions { margin-left: auto; }
   .schedule-topbar .topbar-logout button { min-height: 44px; padding: 7px 11px; }
   .schedule-topbar .main-nav.open { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .schedule-topbar .manager-main-nav.open { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .schedule-shell { width: min(100% - 12px, 1560px); margin: 6px auto 8px; }
   .schedule-command-bar { padding: 9px; border-radius: 13px; }
   .schedule-date-controls { display: grid; grid-template-columns: auto auto 1fr; gap: 6px; }

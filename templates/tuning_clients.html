@@ -43,28 +43,28 @@
     </div>
     {% include '_admin_main_nav.html' %}
     <div class="title-block">
-      <span class="kicker">Клиентская база</span>
+      <span class="kicker">{{ 'Менеджер по работе с клиентами' if manager_view else 'Клиентская база' }}</span>
       <h1>{{ 'Клиенты экскурсий' if client_section == 'excursion' else 'Клиенты тюнинга' }}</h1>
     </div>
     <div class="topbar-actions">
-      <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
+      {% if not manager_view %}<button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
         <svg class="push-toggle-off" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8zM8.3 16a1.7 1.7 0 003.4 0"/></svg>
         <svg class="push-toggle-on" viewBox="0 0 20 20" fill="currentColor"><path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8z"/></svg>
-      </button>
-      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
+      </button>{% endif %}
+      <form action="{{ url_for('team_logout') if manager_view else url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
     </div>
   </div>
 </header>
 
 <main class="wrap tuning-clients-page">
-  <nav class="sub-tabs client-directory-tabs" aria-label="Разделы клиентской базы">
+  {% if not manager_view %}<nav class="sub-tabs client-directory-tabs" aria-label="Разделы клиентской базы">
     <a href="{{ url_for('tuning_clients', section='tuning') }}" class="{{ 'active' if client_section == 'tuning' }}">
       Клиенты тюнинга <span>{{ tuning_clients_count }}</span>
     </a>
     <a href="{{ url_for('tuning_clients', section='excursion') }}" class="{{ 'active' if client_section == 'excursion' }}">
       Клиенты экскурсий <span>{{ excursion_clients_count }}</span>
     </a>
-  </nav>
+  </nav>{% endif %}
 
   <section class="tuning-clients-heading" aria-labelledby="tuning-clients-title">
     <div>

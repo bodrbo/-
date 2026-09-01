@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html lang="ru">
 {% set is_admin_view = viewer_role == 'admin' %}
+{% set is_manager_view = viewer_role == 'manager' %}
+{% set is_staff_view = is_admin_view or is_manager_view %}
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{ 'ЛК клиента — режим администратора' if is_admin_view else 'Личный кабинет клиента' }}</title>
+<title>{{ 'ЛК клиента — режим администратора' if is_admin_view else 'Карточка экскурсионного клиента' if is_manager_view else 'Личный кабинет клиента' }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260901-client-admin-theme">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
@@ -15,7 +17,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Боцман">
 </head>
-<body class="client-dashboard-body{{ ' client-dashboard-admin' if is_admin_view }}">
+<body class="client-dashboard-body{{ ' client-dashboard-admin' if is_staff_view }}">
 
 <div class="page-loader" id="pageLoader" aria-hidden="true">
   <div class="loader-body">
@@ -42,29 +44,33 @@
       <a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo brand-logo-large"></a>
     </div>
     <div class="title-block">
-      <h1>{{ 'ЛК клиента · администратор' if is_admin_view else 'Личный кабинет клиента' }}</h1>
+      <h1>{{ 'ЛК клиента · администратор' if is_admin_view else 'Экскурсионный клиент' if is_manager_view else 'Личный кабинет клиента' }}</h1>
     </div>
   </div>
 </header>
 
 <main class="wrap">
 
-  {% if is_admin_view %}
+  {% if is_staff_view %}
   <section class="client-admin-toolbar" aria-labelledby="client-admin-mode-title">
     <div>
-      <span class="client-admin-eyebrow">Служебный режим</span>
+      <span class="client-admin-eyebrow">{{ 'Рабочий режим' if is_manager_view else 'Служебный режим' }}</span>
       <div class="client-admin-mode-heading">
-        <h2 id="client-admin-mode-title">Вы смотрите кабинет как администратор</h2>
+        <h2 id="client-admin-mode-title">{{ 'Карточка экскурсионного клиента' if is_manager_view else 'Вы смотрите кабинет как администратор' }}</h2>
         <span class="status-badge status-client-{{ client.status }}">
           {{ {'satisfied': 'Довольный', 'neutral': 'Нейтральный', 'dissatisfied': 'Недовольный', 'blacklisted': 'Чёрный список'}.get(client.status, 'Нейтральный') }}
         </span>
       </div>
-      <p>Клиент не видит эту панель, внутреннюю экономику, заметки и служебные данные заказов.</p>
+      <p>{% if is_manager_view %}Здесь доступны контактные данные клиента и история его экскурсионных рейсов.{% else %}Клиент не видит эту панель, внутреннюю экономику, заметки и служебные данные заказов.{% endif %}</p>
     </div>
     <div class="client-admin-toolbar-actions">
       <a href="{{ url_for('tuning_clients', section=client_section) if client_section == 'excursion' else url_for('tuning_clients') }}" class="client-admin-link">← К клиентам</a>
+      {% if is_manager_view %}
+      <a href="{{ url_for('schedule.index') }}" class="client-admin-preview-link">К расписанию</a>
+      {% else %}
       <a href="{{ url_for('tuning_index') }}" class="client-admin-link">К заказам</a>
       <a href="{{ url_for('client_dashboard', token=client.token) }}" target="_blank" rel="noopener" class="client-admin-preview-link">Открыть версию клиента</a>
+      {% endif %}
     </div>
   </section>
 
@@ -73,7 +79,7 @@
       <div><dt>Клиент в базе</dt><dd>№{{ client.id }}</dd></div>
       <div><dt>Телефон</dt><dd>{{ client.phone }}</dd></div>
       <div><dt>Создан</dt><dd>{{ client.created_at[:10]|ru_date }}</dd></div>
-      <div><dt>Администратор</dt><dd>{{ admin_name or '—' }}</dd></div>
+      <div><dt>{{ 'Менеджер' if is_manager_view else 'Администратор' }}</dt><dd>{{ admin_name or '—' }}</dd></div>
     </dl>
   </section>
   {% endif %}
@@ -82,7 +88,7 @@
     <span class="investor-name">{{ client.client_name }}</span>
   </div>
 
-  {% if is_admin_view and client_section == 'excursion' %}
+  {% if is_staff_view and client_section == 'excursion' %}
   <div class="totals-grid">
     <div class="panel total-card total-card-grand">
       <span class="k">Рейсов</span>

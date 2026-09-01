@@ -61,7 +61,11 @@ from modules.fleet.services import (
 )
 from integrations.telegram import fetch_recent_contacts as fetch_recent_telegram_contacts
 from modules.employees import create_employees_blueprint
-from modules.employees.constants import EMPLOYEES, INITIAL_EMPLOYEE_POSITIONS
+from modules.employees.constants import (
+    CUSTOMER_MANAGER_POSITION,
+    EMPLOYEES,
+    INITIAL_EMPLOYEE_POSITIONS,
+)
 from modules.employees.services import (
     active_employee_names as _active_employee_names,
     telegram_chat_id_for_employee,
@@ -2502,6 +2506,50 @@ def admin_login_required(view):
     return wrapped
 
 
+def _active_team_account(db):
+    team_id = session.get("team_id")
+    if not team_id:
+        return None
+    return db.execute(
+        "SELECT team_accounts.id, team_accounts.employee_id, employees.name "
+        "FROM team_accounts JOIN employees "
+        "ON employees.id = team_accounts.employee_id "
+        "WHERE team_accounts.id = ? AND employees.deleted_at IS NULL",
+        (team_id,),
+    ).fetchone()
+
+
+def _is_customer_manager(db=None):
+    if session.get("admin_id") or not session.get("team_id"):
+        return False
+    db = db or get_db()
+    account = _active_team_account(db)
+    if account is None:
+        return False
+    return db.execute(
+        "SELECT 1 FROM employee_positions WHERE employee_id = ? "
+        "AND position = ?",
+        (account["employee_id"], CUSTOMER_MANAGER_POSITION),
+    ).fetchone() is not None
+
+
+def excursion_manager_or_admin_required(view):
+    """Allow administrators and customer managers into excursion tools."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if session.get("admin_id"):
+            return view(*args, **kwargs)
+        if _is_customer_manager():
+            return view(*args, **kwargs)
+        if session.get("team_id"):
+            if _active_team_account(get_db()) is None:
+                session.clear()
+                return redirect(url_for("team_login"))
+            return redirect(url_for("team_dashboard"))
+        return redirect(url_for("admin_login"))
+    return wrapped
+
+
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     if request.method == "GET":
@@ -3456,7 +3504,8 @@ app.register_blueprint(
 app.register_blueprint(
     create_excursion_services_blueprint(
         get_db=get_db,
-        admin_login_required=admin_login_required,
+        access_required=excursion_manager_or_admin_required,
+        is_manager_view=_is_customer_manager,
         boats=BOATS,
     )
 )
@@ -3468,7 +3517,8 @@ app.register_blueprint(
 app.register_blueprint(
     create_schedule_blueprint(
         get_db=get_db,
-        admin_login_required=admin_login_required,
+        access_required=excursion_manager_or_admin_required,
+        is_manager_view=_is_customer_manager,
         boats=BOATS,
         boat_colors=BOAT_COLORS,
         avatar_url=find_avatar_url,
@@ -4459,12 +4509,16 @@ def tuning_index():
 
 
 @app.route("/admin/clients")
-@admin_login_required
+@excursion_manager_or_admin_required
 def tuning_clients():
     db = get_db()
-    section = request.args.get("section", TUNING_SEGMENT).strip().lower()
-    if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
-        section = TUNING_SEGMENT
+    manager_view = _is_customer_manager(db)
+    if manager_view:
+        section = EXCURSION_SEGMENT
+    else:
+        section = request.args.get("section", TUNING_SEGMENT).strip().lower()
+        if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
+            section = TUNING_SEGMENT
     segment_counts = {
         row["segment"]: row["client_count"]
         for row in db.execute(
@@ -4550,18 +4604,25 @@ def tuning_clients():
         yclients_import_configured=yclients_configured(),
         client_statuses=CLIENT_STATUSES,
         active_page="clients",
+        manager_view=manager_view,
     )
 
 
 @app.route("/admin/clients/<int:client_id>/status", methods=["POST"])
-@admin_login_required
+@excursion_manager_or_admin_required
 def update_tuning_client_status(client_id):
     status = request.form.get("status", "").strip()
     allowed_statuses = {item["value"] for item in CLIENT_STATUSES}
     if status in allowed_statuses:
         db = get_db()
-        db.execute("UPDATE clients SET status = ? WHERE id = ?", (status, client_id))
-        db.commit()
+        if not _is_customer_manager(db) or db.execute(
+            "SELECT 1 FROM client_segments WHERE client_id = ? AND segment = ?",
+            (client_id, EXCURSION_SEGMENT),
+        ).fetchone() is not None:
+            db.execute("UPDATE clients SET status = ? WHERE id = ?", (status, client_id))
+            db.commit()
+    if _is_customer_manager():
+        return redirect(url_for("tuning_clients", section=EXCURSION_SEGMENT))
     section = request.form.get("section", TUNING_SEGMENT)
     if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
         section = TUNING_SEGMENT
@@ -4573,7 +4634,7 @@ def update_tuning_client_status(client_id):
 
 
 @app.route("/admin/clients/import-yclients", methods=["POST"])
-@admin_login_required
+@excursion_manager_or_admin_required
 def import_yclients_client_directory():
     if not yclients_configured():
         session["client_import_notice"] = {
@@ -5814,15 +5875,18 @@ def remove_tuning_order_product(order_id, row_id):
 
 
 def _render_client_dashboard(db, client, viewer_role, client_section=TUNING_SEGMENT):
-    """Build the shared cabinet while keeping admin-only data server-side.
+    """Build the shared cabinet while keeping privileged data server-side.
 
     The public token route always calls this with ``client``.  Only the
-    admin-authenticated route may request ``admin`` and load cost prices,
-    payment rows, internal notes and source metadata into the response.
+    admin-authenticated route may load cost prices, payment rows, internal
+    notes and source metadata. Customer managers receive only excursion
+    contact details and trip history.
     """
     is_admin_view = viewer_role == "admin"
+    is_manager_view = viewer_role == "manager"
+    is_staff_view = is_admin_view or is_manager_view
     excursion_trips = []
-    if is_admin_view and client_section == EXCURSION_SEGMENT:
+    if is_staff_view and client_section == EXCURSION_SEGMENT:
         excursion_trips = [
             dict(row) for row in db.execute(
                 "SELECT DISTINCT si.id, si.kind, si.boat, si.service_name, "
@@ -5839,11 +5903,13 @@ def _render_client_dashboard(db, client, viewer_role, client_section=TUNING_SEGM
     )
     if is_admin_view:
         order_columns += ", sale_channel, updated_at, source, source_ref"
-    order_rows = db.execute(
-        f"SELECT {order_columns} FROM tuning_orders "
-        "WHERE client_id = ? ORDER BY created_at DESC, id DESC",
-        (client["id"],),
-    ).fetchall()
+    order_rows = []
+    if not (is_manager_view and client_section == EXCURSION_SEGMENT):
+        order_rows = db.execute(
+            f"SELECT {order_columns} FROM tuning_orders "
+            "WHERE client_id = ? ORDER BY created_at DESC, id DESC",
+            (client["id"],),
+        ).fetchall()
 
     orders = []
     paid_total = 0.0
@@ -5931,7 +5997,11 @@ def _render_client_dashboard(db, client, viewer_role, client_section=TUNING_SEGM
         viewer_role=viewer_role,
         client_section=client_section,
         excursion_trips=excursion_trips,
-        admin_name=session.get("admin_name") if is_admin_view else None,
+        admin_name=(
+            session.get("admin_name")
+            if is_admin_view
+            else session.get("team_employee_name") if is_manager_view else None
+        ),
     )
 
 
@@ -5948,12 +6018,22 @@ def client_dashboard(token):
 
 
 @app.route("/admin/clients/<int:client_id>/cabinet")
-@admin_login_required
+@excursion_manager_or_admin_required
 def admin_client_dashboard(client_id):
     db = get_db()
     client = db.execute("SELECT * FROM clients WHERE id = ?", (client_id,)).fetchone()
     if client is None:
+        if _is_customer_manager(db):
+            return redirect(url_for("tuning_clients", section=EXCURSION_SEGMENT))
         return redirect(url_for("tuning_index"))
+    if _is_customer_manager(db):
+        is_excursion_client = db.execute(
+            "SELECT 1 FROM client_segments WHERE client_id = ? AND segment = ?",
+            (client_id, EXCURSION_SEGMENT),
+        ).fetchone() is not None
+        if not is_excursion_client:
+            return redirect(url_for("tuning_clients", section=EXCURSION_SEGMENT))
+        return _render_client_dashboard(db, client, "manager", EXCURSION_SEGMENT)
     client_section = request.args.get("section", TUNING_SEGMENT)
     if client_section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
         client_section = TUNING_SEGMENT
@@ -8233,6 +8313,8 @@ def team_logout():
 @team_login_required
 def team_dashboard():
     db = get_db()
+    if _is_customer_manager(db):
+        return redirect(url_for("schedule.index"))
     employee_name = session.get("team_employee_name")
     active_section = request.args.get("section", "").strip()
 

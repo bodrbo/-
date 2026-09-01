@@ -35,7 +35,7 @@ def create_employees_blueprint(
         return render_template(
             "employees/index.html",
             employees=services.employee_directory(db),
-            known_positions=repository.list_known_positions(db),
+            known_positions=services.known_positions(db),
             telegram_contacts=contacts,
             unlinked_telegram_contacts=[
                 contact for contact in contacts if contact["linked_employee_id"] is None

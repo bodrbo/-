@@ -9,6 +9,7 @@ from werkzeug.security import generate_password_hash
 
 from . import repository
 from .constants import (
+    KNOWN_POSITIONS,
     EMPLOYEE_LOGIN_MAX_LENGTH,
     EMPLOYEE_NAME_MAX_LENGTH,
     GENERATED_PASSWORD_LENGTH,
@@ -38,6 +39,13 @@ def _initials(name):
 
 def active_employee_names(db):
     return repository.list_active_employee_names(db)
+
+
+def known_positions(db):
+    return sorted(
+        set(KNOWN_POSITIONS) | set(repository.list_known_positions(db)),
+        key=str.casefold,
+    )
 
 
 def _normalise_position(raw_position):

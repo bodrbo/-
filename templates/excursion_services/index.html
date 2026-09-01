@@ -26,11 +26,11 @@
     </div>
     {% include '_admin_main_nav.html' %}
     <div class="title-block">
-      <span class="kicker">Экскурсионные продукты</span>
+      <span class="kicker">{{ 'Менеджер по работе с клиентами' if manager_view else 'Экскурсионные продукты' }}</span>
       <h1>Услуги</h1>
     </div>
     <div class="topbar-actions">
-      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
+      <form action="{{ url_for('team_logout') if manager_view else url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
     </div>
   </div>
 </header>

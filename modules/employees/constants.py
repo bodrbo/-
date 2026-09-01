@@ -41,3 +41,16 @@ POSITION_MAX_LENGTH = 80
 EMPLOYEE_NAME_MAX_LENGTH = 120
 EMPLOYEE_LOGIN_MAX_LENGTH = 50
 GENERATED_PASSWORD_LENGTH = 14
+
+# The directory keeps runtime positions in the database, but these core
+# positions must always remain available when an administrator creates a new
+# employee — even if nobody currently holds one of them.
+KNOWN_POSITIONS = (
+    "Капитан",
+    "Гид",
+    "Гид-капитан",
+    "Тюнингмэн",
+    "Менеджер по работе с клиентами",
+)
+
+CUSTOMER_MANAGER_POSITION = "Менеджер по работе с клиентами"

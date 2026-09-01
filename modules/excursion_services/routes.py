@@ -6,7 +6,7 @@ from . import repository, services
 from .constants import SERVICE_TYPES
 
 
-def create_blueprint(get_db, admin_login_required, boats):
+def create_blueprint(get_db, access_required, is_manager_view, boats):
     blueprint = Blueprint("excursion_services", __name__)
 
     def redirect_with_notice(message, success, section="group", anchor=None):
@@ -20,7 +20,7 @@ def create_blueprint(get_db, admin_login_required, boats):
         return redirect(location)
 
     @blueprint.route("/services")
-    @admin_login_required
+    @access_required
     def index():
         section = request.args.get("section", "group")
         if section not in SERVICE_TYPES:
@@ -45,10 +45,11 @@ def create_blueprint(get_db, admin_login_required, boats):
             notice=session.pop("excursion_services_notice", None),
             create_values=session.pop("excursion_services_create_values", {}),
             active_page="services",
+            manager_view=is_manager_view(),
         )
 
     @blueprint.route("/services", methods=["POST"])
-    @admin_login_required
+    @access_required
     def create_service():
         section = request.form.get("service_type", "group")
         success, message, result = services.create_service(
@@ -62,7 +63,7 @@ def create_blueprint(get_db, admin_login_required, boats):
         )
 
     @blueprint.route("/services/<int:service_id>", methods=["POST"])
-    @admin_login_required
+    @access_required
     def update_service(service_id):
         existing = repository.get_service(get_db(), service_id)
         section = (
