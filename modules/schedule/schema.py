@@ -59,6 +59,7 @@ def init_schema(conn):
             client_name TEXT NOT NULL,
             client_phone TEXT NOT NULL,
             guests_count INTEGER NOT NULL DEFAULT 1,
+            price REAL NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             UNIQUE(schedule_item_id, client_id)
         )
@@ -71,6 +72,24 @@ def init_schema(conn):
         conn.execute(
             "ALTER TABLE schedule_participants "
             "ADD COLUMN guests_count INTEGER NOT NULL DEFAULT 1"
+        )
+    if "price" not in participant_columns:
+        conn.execute(
+            "ALTER TABLE schedule_participants "
+            "ADD COLUMN price REAL NOT NULL DEFAULT 0"
+        )
+        # Preserve the total of historical trips while moving their single
+        # planned amount down to the client level. A client's share follows
+        # the number of guests attached to that client.
+        conn.execute(
+            "UPDATE schedule_participants SET price = COALESCE(("
+            "SELECT schedule_items.revenue * schedule_participants.guests_count "
+            "/ NULLIF((SELECT SUM(other.guests_count) "
+            "FROM schedule_participants AS other "
+            "WHERE other.schedule_item_id = schedule_participants.schedule_item_id), 0) "
+            "FROM schedule_items "
+            "WHERE schedule_items.id = schedule_participants.schedule_item_id"
+            "), 0)"
         )
     conn.execute(
         """

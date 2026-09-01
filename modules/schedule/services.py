@@ -45,17 +45,17 @@ def _normalise_text(value, limit):
     return " ".join(str(value or "").strip().split())[:limit]
 
 
-def _parse_money(raw_value, errors):
+def _parse_money(raw_value, errors, label="Стоимость"):
     raw_value = str(raw_value or "").strip().replace(" ", "").replace(",", ".")
     if not raw_value:
         return 0.0
     try:
         value = float(raw_value)
     except ValueError:
-        errors.append("Стоимость должна быть числом.")
+        errors.append(f"{label} должна быть числом.")
         return 0.0
     if value < 0 or value > 10_000_000:
-        errors.append("Стоимость должна быть от 0 до 10 000 000 ₽.")
+        errors.append(f"{label} должна быть от 0 до 10 000 000 ₽.")
     return value
 
 
@@ -136,8 +136,10 @@ def _validate_participants(db, form, capacity, errors):
     raw_names = form.getlist("participant_name[]")
     raw_phones = form.getlist("participant_phone[]")
     raw_guests = form.getlist("participant_guests[]")
+    raw_prices = form.getlist("participant_price[]")
     row_count = max(
-        len(raw_client_ids), len(raw_names), len(raw_phones), len(raw_guests)
+        len(raw_client_ids), len(raw_names), len(raw_phones), len(raw_guests),
+        len(raw_prices),
     )
     # Search every identity by phone so a tuning client taking an excursion
     # is reused, while only excursion clients appear in the picker itself.
@@ -164,6 +166,14 @@ def _validate_participants(db, form, capacity, errors):
             continue
 
         row_label = f"Участник №{index + 1}"
+        price = (
+            _parse_money(
+                raw_prices[index] if index < len(raw_prices) else "",
+                errors,
+                f"{row_label}: стоимость",
+            )
+            if raw_prices else None
+        )
         try:
             guests_count = int(
                 str(raw_guests[index] if index < len(raw_guests) else "1").strip()
@@ -219,6 +229,7 @@ def _validate_participants(db, form, capacity, errors):
             "client_name": name,
             "client_phone": phone,
             "guests_count": guests_count,
+            "price": price,
             "client_token": secrets.token_urlsafe(16) if client is None else None,
         })
         if client is not None:
@@ -278,7 +289,7 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
     customer_name = _normalise_text(form.get("customer_name"), 180)
     customer_phone = _normalise_text(form.get("customer_phone"), 40)
     note = str(form.get("note") or "").strip()[:2000]
-    revenue = _parse_money(form.get("revenue"), errors)
+    legacy_revenue = _parse_money(form.get("revenue"), errors)
 
     capacity = None
     participants = []
@@ -288,6 +299,14 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
             db, form, errors
         )
         if participant is not None:
+            raw_customer_price = form.get("customer_price")
+            participant["price"] = (
+                legacy_revenue
+                if raw_customer_price is None
+                else _parse_money(
+                    raw_customer_price, errors, "Стоимость для клиента"
+                )
+            )
             participants = [participant]
     elif kind == "event":
         try:
@@ -297,11 +316,36 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
         if not 1 <= capacity <= 100:
             errors.append("Вместимость события должна быть от 1 до 100 человек.")
         participants = _validate_participants(db, form, capacity, errors)
+        if participants and all(
+            participant["price"] is None for participant in participants
+        ):
+            total_guests = sum(
+                participant["guests_count"] for participant in participants
+            )
+            allocated = 0.0
+            for index, participant in enumerate(participants):
+                if index == len(participants) - 1:
+                    participant["price"] = round(legacy_revenue - allocated, 2)
+                else:
+                    share = round(
+                        legacy_revenue * participant["guests_count"] / total_guests,
+                        2,
+                    )
+                    participant["price"] = share
+                    allocated += share
+        else:
+            for participant in participants:
+                if participant["price"] is None:
+                    participant["price"] = 0.0
         participants_count = sum(
             participant["guests_count"] for participant in participants
         )
         customer_name = ""
         customer_phone = ""
+
+    revenue = round(sum(
+        participant["price"] for participant in participants
+    ), 2)
 
     raw_employee_ids = form.getlist("employee_id[]")
     raw_roles = form.getlist("role[]")

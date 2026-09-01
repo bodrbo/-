@@ -1,6 +1,8 @@
+import sqlite3
 import unittest
 
 from support import application_module
+from modules.schedule.schema import init_schema
 
 
 class ScheduleModuleIntegrationTests(unittest.TestCase):
@@ -285,6 +287,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertEqual(assignment["role"], "guide_captain")
         self.assertEqual(participant["client_name"], "Алия")
         self.assertEqual(participant["guests_count"], 1)
+        self.assertEqual(participant["price"], 18000)
         self.assertEqual(client_segment["segment"], "excursion")
         self.assertIsNone(item["accounting_trip_id"])
 
@@ -365,6 +368,10 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             [participant["guests_count"] for participant in participants],
             [3, 2],
         )
+        self.assertEqual(
+            [participant["price"] for participant in participants],
+            [10800, 7200],
+        )
         schedule_page = self.client.get(
             "/schedule?date=2026-09-05"
         ).get_data(as_text=True)
@@ -377,6 +384,91 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn("Алия", directory)
         self.assertIn("Мария", directory)
         self.assertNotIn("Алия", tuning_directory)
+
+    def test_client_prices_override_legacy_trip_total(self):
+        self.login()
+        response = self.client.post(
+            "/schedule/items",
+            data=self.booking_data(
+                kind="event",
+                boat="Бодрый Первый",
+                service_name="Средний тур",
+                end_time="14:30",
+                revenue="99999",
+                **{
+                    "employee_id[]": [str(self.platon_id)],
+                    "role[]": ["captain"],
+                    "capacity": "10",
+                    "participant_client_id[]": ["", ""],
+                    "participant_name[]": ["Алия", "Мария"],
+                    "participant_phone[]": ["+79998880001", "+79998880002"],
+                    "participant_guests[]": ["3", "2"],
+                    "participant_price[]": ["7200", "4600"],
+                    "customer_name": "",
+                    "customer_phone": "",
+                },
+            ),
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item = db.execute("SELECT * FROM schedule_items").fetchone()
+            prices = [
+                row["price"] for row in db.execute(
+                    "SELECT price FROM schedule_participants ORDER BY id"
+                ).fetchall()
+            ]
+        self.assertEqual(prices, [7200, 4600])
+        self.assertEqual(item["revenue"], 11800)
+
+    def test_schedule_page_places_price_next_to_each_client(self):
+        self.login()
+        html = self.client.get(
+            "/schedule?date=2026-09-05"
+        ).get_data(as_text=True)
+        self.assertIn('name="customer_price"', html)
+        self.assertIn('name="participant_price[]"', html)
+        self.assertIn("Итого по клиентам", html)
+        self.assertNotIn("Плановая стоимость, ₽", html)
+        self.assertIn("syncScheduleClientPrices", html)
+
+    def test_price_migration_preserves_historical_trip_total(self):
+        connection = sqlite3.connect(":memory:")
+        connection.execute(
+            "CREATE TABLE excursion_services (id INTEGER PRIMARY KEY, name TEXT)"
+        )
+        init_schema(connection)
+        connection.execute("DROP TABLE schedule_participants")
+        connection.execute(
+            "CREATE TABLE schedule_participants ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, schedule_item_id INTEGER NOT NULL, "
+            "client_id INTEGER NOT NULL, client_name TEXT NOT NULL, "
+            "client_phone TEXT NOT NULL, guests_count INTEGER NOT NULL DEFAULT 1, "
+            "created_at TEXT NOT NULL, UNIQUE(schedule_item_id, client_id))"
+        )
+        cursor = connection.execute(
+            "INSERT INTO schedule_items "
+            "(kind, boat, service_name, starts_at, ends_at, revenue, created_at, updated_at) "
+            "VALUES ('event', 'Ларус', 'Средний тур', '2026-08-20 12:00', "
+            "'2026-08-20 13:30', 15000, '', '')"
+        )
+        connection.executemany(
+            "INSERT INTO schedule_participants "
+            "(schedule_item_id, client_id, client_name, client_phone, guests_count, created_at) "
+            "VALUES (?, ?, ?, '', ?, '')",
+            [
+                (cursor.lastrowid, 1, "Алия", 3),
+                (cursor.lastrowid, 2, "Мария", 2),
+            ],
+        )
+        init_schema(connection)
+        prices = [
+            row[0] for row in connection.execute(
+                "SELECT price FROM schedule_participants ORDER BY id"
+            ).fetchall()
+        ]
+        connection.close()
+        self.assertEqual(prices, [9000, 6000])
 
     def test_group_event_reuses_existing_client_by_verified_phone(self):
         self.login()

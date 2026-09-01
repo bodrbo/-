@@ -65,7 +65,7 @@
         <span>Состав</span>
         <b>{{ day_crew|length }}</b>
       </button>
-      <div class="schedule-day-total" title="Плановая стоимость рейсов за день">
+      <div class="schedule-day-total" title="Стоимость клиентов по рейсам за день">
         <span>{{ items|length }} рейс{{ '' if items|length == 1 else 'а' if items|length in [2, 3, 4] else 'ов' }}</span>
         <strong>{{ '{:,.0f}'.format(items|sum(attribute='revenue')).replace(',', ' ') }} ₽</strong>
       </div>
@@ -254,6 +254,15 @@
           <input type="tel" name="customer_phone" id="schedulePhone" maxlength="40"
                  placeholder="+7 999 000-00-00" oninput="scheduleBookingPhoneChanged(this)">
         </label>
+        <label class="field schedule-client-price-field">
+          <span>Стоимость, ₽</span>
+          <span class="schedule-money-input">
+            <input type="text" inputmode="decimal" name="customer_price" id="scheduleCustomerPrice"
+                   value="0" data-price-mode="auto"
+                   oninput="markScheduleClientPriceManual(this)">
+            <b>₽</b>
+          </span>
+        </label>
       </div>
 
       <div class="schedule-event-fields" id="scheduleEventFields" hidden>
@@ -273,11 +282,12 @@
         <button type="button" class="schedule-add-assignment" onclick="addScheduleParticipant('', '', '', 1, true)">+ Добавить клиента</button>
       </div>
 
-      <div class="schedule-form-grid">
-        <label class="field">
-          <span>Плановая стоимость, ₽</span>
-          <input type="text" inputmode="decimal" name="revenue" id="scheduleRevenue" value="0" oninput="markScheduleRevenueManual()">
-        </label>
+      <input type="hidden" name="revenue" id="scheduleRevenue" value="0">
+      <div class="schedule-form-grid schedule-summary-grid">
+        <div class="schedule-client-total" aria-live="polite">
+          <span>Итого по клиентам</span>
+          <strong id="scheduleRevenueTotal">0 ₽</strong>
+        </div>
         <label class="field schedule-field-wide">
           <span>Комментарий</span>
           <textarea name="note" id="scheduleNote" maxlength="2000" rows="3" placeholder="Пожелания клиента, место посадки, важные детали"></textarea>
@@ -410,6 +420,15 @@
              aria-label="Количество гостей, включая клиента"
              oninput="syncScheduleParticipantCount()">
     </label>
+    <label class="field schedule-participant-price">
+      <span>Стоимость</span>
+      <span class="schedule-money-input">
+        <input type="text" inputmode="decimal" name="participant_price[]" value="0"
+               data-price-mode="auto" aria-label="Стоимость для клиента"
+               oninput="markScheduleClientPriceManual(this)">
+        <b>₽</b>
+      </span>
+    </label>
     <button type="button" class="icon-btn danger" onclick="removeScheduleParticipant(this)" aria-label="Убрать клиента">
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h12M8 3h4l1 3H7l1-3zM6 6l.7 11h6.6L14 6M8.5 9v5M11.5 9v5"/></svg>
     </button>
@@ -469,12 +488,14 @@
     const form = document.getElementById('scheduleItemForm');
     form.reset();
     form.action = scheduleCreateUrl;
-    form.dataset.revenueMode = 'auto';
     form.dataset.editing = 'false';
     document.getElementById('scheduleDate').value = {{ day.isoformat()|tojson }};
     document.getElementById('scheduleStart').value = '10:00';
     document.getElementById('scheduleEnd').value = '11:00';
     document.getElementById('scheduleRevenue').value = '0';
+    document.getElementById('scheduleRevenueTotal').textContent = '0 ₽';
+    document.getElementById('scheduleCustomerPrice').value = '0';
+    document.getElementById('scheduleCustomerPrice').dataset.priceMode = 'auto';
     document.getElementById('scheduleAssignments').innerHTML = '';
     document.getElementById('scheduleParticipantRows').innerHTML = '';
     document.getElementById('scheduleLegacyParticipants').hidden = true;
@@ -506,7 +527,6 @@
     if (!item) return;
     const form = document.getElementById('scheduleItemForm');
     form.action = scheduleCreateUrl + '/' + item.id;
-    form.dataset.revenueMode = 'manual';
     form.dataset.editing = 'true';
     form.querySelector(`input[name="kind"][value="${item.kind}"]`).checked = true;
     document.getElementById('scheduleBoat').value = item.boat;
@@ -534,17 +554,23 @@
       },
       false,
     );
+    const customerPrice = document.getElementById('scheduleCustomerPrice');
+    customerPrice.value = bookingParticipant
+      ? (bookingParticipant.price ?? item.revenue ?? 0)
+      : (item.revenue || 0);
+    customerPrice.dataset.priceMode = 'manual';
     document.getElementById('scheduleCapacity').value = item.capacity || 10;
-    (item.participants || []).forEach(participant => addScheduleParticipant(
-      participant.client_id, participant.client_name, participant.client_phone,
-      participant.guests_count || 1
-    ));
+    if (item.kind === 'event') {
+      (item.participants || []).forEach(participant => addScheduleParticipant(
+        participant.client_id, participant.client_name, participant.client_phone,
+        participant.guests_count || 1, false, participant.price ?? 0
+      ));
+    }
     const legacyParticipants = document.getElementById('scheduleLegacyParticipants');
     if (item.kind === 'event' && item.participants_count > 0 && !(item.participants || []).length) {
       legacyParticipants.textContent = `Раньше для этого рейса было указано ${item.participants_count} чел. без имён. Добавьте клиентов перед сохранением.`;
       legacyParticipants.hidden = false;
     }
-    document.getElementById('scheduleRevenue').value = item.revenue || 0;
     document.getElementById('scheduleNote').value = item.note || '';
     item.assignment_ids.forEach((employeeId, index) => addScheduleAssignment(employeeId, item.assignment_roles[index]));
     document.getElementById('scheduleModalEyebrow').textContent = item.kind_label;
@@ -586,21 +612,20 @@
     scheduleRosterModalTrigger = null;
   }
   function syncScheduleKind(userInitiated) {
-    if (userInitiated) {
-      document.getElementById('scheduleItemForm').dataset.revenueMode = 'auto';
-    }
     const kind = document.querySelector('input[name="kind"]:checked').value;
     const booking = document.getElementById('scheduleBookingFields');
     const eventFields = document.getElementById('scheduleEventFields');
     booking.hidden = kind !== 'booking';
     eventFields.hidden = kind !== 'event';
     document.getElementById('scheduleCustomer').required = kind === 'booking';
+    document.getElementById('scheduleCustomerPrice').disabled = kind !== 'booking';
     syncScheduleServiceOptions(
       !userInitiated && document.getElementById('scheduleItemForm').dataset.editing === 'true'
     );
     if (kind === 'event' && !document.querySelector('.schedule-participant-row')) {
       addScheduleParticipant();
     }
+    if (userInitiated) markAllSchedulePricesAuto();
     syncScheduleParticipantCount();
   }
   function syncScheduleServiceOptions(preserveSelected) {
@@ -617,7 +642,7 @@
     const selected = select.selectedOptions[0];
     if (selected && selected.value && selected.dataset.serviceType !== expectedType && !preserveSelected) {
       select.value = '';
-      document.getElementById('scheduleRevenue').value = '0';
+      syncScheduleClientPrices(true);
     }
   }
   function addScheduleAssignment(employeeId, role) {
@@ -765,7 +790,7 @@
       picker.querySelector('[data-client-id]').value = '';
     }
   }
-  function addScheduleParticipant(clientId, clientName, clientPhone, guestsCount, focusNew) {
+  function addScheduleParticipant(clientId, clientName, clientPhone, guestsCount, focusNew, price) {
     const fragment = document.getElementById('scheduleParticipantTemplate').content.cloneNode(true);
     const row = fragment.querySelector('.schedule-participant-row');
     const picker = row.querySelector('[data-client-picker]');
@@ -775,6 +800,11 @@
     row.querySelector('[data-participant-search]').setAttribute('aria-controls', results.id);
     row.querySelector('[name="participant_phone[]"]').value = clientPhone || '';
     row.querySelector('[name="participant_guests[]"]').value = guestsCount || 1;
+    const priceInput = row.querySelector('[name="participant_price[]"]');
+    if (price !== undefined && price !== null) {
+      priceInput.value = price;
+      priceInput.dataset.priceMode = 'manual';
+    }
     document.getElementById('scheduleParticipantRows').appendChild(fragment);
     setScheduleClientSelection(picker, {
       id: clientId || '', client_name: clientName || '', phone: clientPhone || '',
@@ -804,39 +834,79 @@
     const counter = document.getElementById('scheduleParticipantCounter');
     counter.textContent = `${guests} из ${capacity} мест`;
     counter.classList.toggle('over', capacity > 0 && guests > capacity);
-    syncScheduleRevenue(guests);
+    syncScheduleClientPrices();
   }
-  function markScheduleRevenueManual() {
-    document.getElementById('scheduleItemForm').dataset.revenueMode = 'manual';
+  function markScheduleClientPriceManual(input) {
+    input.dataset.priceMode = 'manual';
+    syncScheduleRevenueTotal();
   }
-  function syncScheduleRevenue(groupGuests) {
-    const form = document.getElementById('scheduleItemForm');
-    if (form.dataset.revenueMode !== 'auto') return;
+  function markAllSchedulePricesAuto() {
+    document.getElementById('scheduleCustomerPrice').dataset.priceMode = 'auto';
+    document.querySelectorAll('[name="participant_price[]"]').forEach((input) => {
+      input.dataset.priceMode = 'auto';
+    });
+  }
+  function normaliseScheduleMoney(value) {
+    const number = Number(String(value || '').replace(/\s/g, '').replace(',', '.'));
+    return Number.isFinite(number) ? Math.max(0, number) : 0;
+  }
+  function scheduleServicePriceForBooking(selected) {
+    if (!selected || !selected.value) return 0;
+    if (selected.dataset.serviceType === 'group') {
+      return Number(selected.dataset.price || 0);
+    }
+    const boat = document.getElementById('scheduleBoat').value;
+    let prices = {};
+    try { prices = JSON.parse(selected.dataset.boatPrices || '{}'); } catch (_error) {}
+    return Number(prices[boat] || 0) * scheduleSelectedHours();
+  }
+  function syncScheduleClientPrices(forceAuto) {
     const service = document.getElementById('scheduleService');
     const selected = service.selectedOptions[0];
-    if (!selected || !selected.value) return;
-    let total = 0;
-    if (selected.dataset.serviceType === 'group') {
-      const guests = groupGuests === undefined
-        ? scheduleGroupGuestCount()
-        : Number(groupGuests || 0);
-      total = Number(selected.dataset.price || 0) * guests;
+    const kind = document.querySelector('input[name="kind"]:checked').value;
+    if (kind === 'booking') {
+      const input = document.getElementById('scheduleCustomerPrice');
+      if (forceAuto) input.dataset.priceMode = 'auto';
+      if (input.dataset.priceMode !== 'manual') {
+        const price = scheduleServicePriceForBooking(selected);
+        input.value = String(Math.round(price * 100) / 100);
+      }
     } else {
-      const boat = document.getElementById('scheduleBoat').value;
-      let prices = {};
-      try { prices = JSON.parse(selected.dataset.boatPrices || '{}'); } catch (_error) {}
-      total = Number(prices[boat] || 0) * scheduleSelectedHours();
+      const pricePerGuest = selected && selected.value
+        ? Number(selected.dataset.price || 0)
+        : 0;
+      document.querySelectorAll('.schedule-participant-row').forEach((row) => {
+        const input = row.querySelector('[name="participant_price[]"]');
+        if (forceAuto) input.dataset.priceMode = 'auto';
+        if (input.dataset.priceMode === 'manual') return;
+        const filled = row.querySelector('[data-participant-search]').value.trim()
+          || row.querySelector('[name="participant_phone[]"]').value.trim();
+        const guests = Number(row.querySelector('[name="participant_guests[]"]').value || 0);
+        const price = filled && Number.isFinite(guests)
+          ? pricePerGuest * Math.max(0, guests)
+          : 0;
+        input.value = String(Math.round(price * 100) / 100);
+      });
+    }
+    syncScheduleRevenueTotal();
+  }
+  function syncScheduleRevenueTotal() {
+    const kind = document.querySelector('input[name="kind"]:checked').value;
+    let total = 0;
+    if (kind === 'booking') {
+      total = normaliseScheduleMoney(document.getElementById('scheduleCustomerPrice').value);
+    } else {
+      total = [...document.querySelectorAll('.schedule-participant-row')].reduce((sum, row) => {
+        const filled = row.querySelector('[data-participant-search]').value.trim()
+          || row.querySelector('[name="participant_phone[]"]').value.trim();
+        return sum + (filled
+          ? normaliseScheduleMoney(row.querySelector('[name="participant_price[]"]').value)
+          : 0);
+      }, 0);
     }
     total = Math.round(total * 100) / 100;
     document.getElementById('scheduleRevenue').value = String(total);
-  }
-  function scheduleGroupGuestCount() {
-    return [...document.querySelectorAll('.schedule-participant-row')].reduce((total, row) => {
-      const filled = row.querySelector('[data-participant-search]').value.trim()
-        || row.querySelector('[name="participant_phone[]"]').value.trim();
-      const count = Number(row.querySelector('[name="participant_guests[]"]').value || 0);
-      return total + (filled && Number.isFinite(count) ? Math.max(0, count) : 0);
-    }, 0);
+    document.getElementById('scheduleRevenueTotal').textContent = `${total.toLocaleString('ru-RU')} ₽`;
   }
   function scheduleSelectedHours() {
     const start = document.getElementById('scheduleStart').value;
@@ -847,15 +917,13 @@
     return Math.max(0, endMinutes - startMinutes) / 60;
   }
   function syncScheduleBoatPrice() {
-    document.getElementById('scheduleItemForm').dataset.revenueMode = 'auto';
-    syncScheduleRevenue();
+    syncScheduleClientPrices(true);
   }
   function syncScheduleTimingPrice() {
-    document.getElementById('scheduleItemForm').dataset.revenueMode = 'auto';
-    syncScheduleRevenue();
+    syncScheduleClientPrices(true);
   }
   function applyScheduleService() {
-    document.getElementById('scheduleItemForm').dataset.revenueMode = 'auto';
+    markAllSchedulePricesAuto();
     applyScheduleDuration();
     syncScheduleParticipantCount();
   }
@@ -866,7 +934,7 @@
     const hours = Number(service.selectedOptions[0].dataset.hours || 1);
     const startMinutes = Number(start.slice(0, 2)) * 60 + Number(start.slice(3, 5));
     document.getElementById('scheduleEnd').value = minutesToTime(startMinutes + Math.round(hours * 60));
-    syncScheduleRevenue();
+    syncScheduleClientPrices(true);
   }
   function handleScheduleColumnClick(event, employeeId) {
     if (event.target.closest('.schedule-card')) return;

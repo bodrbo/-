@@ -3669,6 +3669,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-kind-switch input:focus-visible + span { outline: 2px solid var(--brass); outline-offset: 1px; }
 .schedule-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
 .schedule-form-grid + .schedule-form-grid { margin-top: 13px; }
+.schedule-booking-fields { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 150px; margin-top: 18px; }
 .schedule-field-wide { grid-column: 1 / -1; }
 .schedule-form .field { margin: 0; }
 .schedule-form .field > span:first-child,
@@ -3730,7 +3731,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-participant-counter.over { background: #fbe7e3; color: var(--danger); }
 .schedule-participant-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) 92px 44px;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, .9fr) 82px 116px 44px;
   align-items: end;
   gap: 9px;
 }
@@ -3740,8 +3741,45 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   border-top: 1px dashed var(--hairline);
 }
 .schedule-participant-row .icon-btn { margin-bottom: 1px; }
-.schedule-participant-guests { flex-basis: 92px; }
+.schedule-participant-guests { flex-basis: 82px; }
 .schedule-participant-guests input { text-align: center; font-variant-numeric: tabular-nums; }
+.schedule-participant-price input,
+.schedule-client-price-field input { font-family: 'PT Mono', monospace; font-weight: 700; font-variant-numeric: tabular-nums; }
+.schedule-money-input { position: relative; display: block; }
+.schedule-money-input input { padding-right: 31px; }
+.schedule-money-input b {
+  position: absolute;
+  top: 50%;
+  right: 11px;
+  color: var(--brass-strong);
+  font-size: 12px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.schedule-client-total {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid #cfe0e8;
+  border-radius: 11px;
+  background: #eef6fa;
+}
+.schedule-client-total span {
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.schedule-client-total strong {
+  color: #176589;
+  font-family: 'PT Mono', monospace;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
 .schedule-assignment-row .icon-btn,
 .schedule-participant-row .icon-btn {
   display: inline-grid;
@@ -4015,6 +4053,7 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   .schedule-modal-header { padding: 16px; }
   .schedule-form { padding: 16px; }
   .schedule-form-grid { grid-template-columns: 1fr; }
+  .schedule-booking-fields { grid-template-columns: 1fr; }
   .schedule-field-wide { grid-column: auto; }
   .schedule-form-section-heading { align-items: flex-start; flex-direction: column; gap: 0; }
   .schedule-assignment-row { grid-template-columns: 1fr 44px; }
@@ -4022,8 +4061,9 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   .schedule-event-capacity { align-items: stretch; flex-direction: column; gap: 9px; }
   .schedule-event-capacity .field { width: 100%; }
   .schedule-participant-counter { align-self: flex-start; }
-  .schedule-participant-row { grid-template-columns: minmax(0, 1fr) 92px 44px; }
+  .schedule-participant-row { grid-template-columns: 82px minmax(0, 1fr) 44px; }
   .schedule-participant-row .field:first-of-type { grid-column: 1 / -1; }
+  .schedule-participant-row .field:nth-of-type(2) { grid-column: 1 / -1; }
   .schedule-form-actions { position: sticky; bottom: -16px; margin-right: -16px; margin-left: -16px; padding: 12px 16px 16px; background: #fff; }
   .schedule-roster-body { padding: 16px; }
   .schedule-roster-add { grid-template-columns: 1fr; }
