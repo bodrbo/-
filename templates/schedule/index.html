@@ -194,17 +194,17 @@
       <input type="hidden" name="return_employee" value="{{ selected_employee }}">
       <div class="schedule-kind-switch" role="group" aria-label="Тип рейса">
         {% for value, label in item_kinds.items() %}
-        <label><input type="radio" name="kind" value="{{ value }}" {{ 'checked' if loop.first }} onchange="syncScheduleKind()"><span>{{ label }}</span></label>
+        <label><input type="radio" name="kind" value="{{ value }}" {{ 'checked' if loop.first }} onchange="syncScheduleKind(true)"><span>{{ label }}</span></label>
         {% endfor %}
       </div>
 
       <div class="schedule-form-grid">
         <label class="field schedule-field-wide">
           <span>Вид рейса</span>
-          <select name="service_name" id="scheduleService" required onchange="applyScheduleDuration()">
+          <select name="service_id" id="scheduleService" required onchange="applyScheduleService()">
             <option value="" disabled selected>Выберите услугу</option>
             {% for service in trip_services %}
-            <option value="{{ service.name }}" data-hours="{{ service.hours }}">{{ service.name }}</option>
+            <option value="{{ service.id }}" data-name="{{ service.name }}" data-hours="{{ service.hours }}" data-price="{{ service.price }}">{{ service.name }}</option>
             {% endfor %}
           </select>
         </label>
@@ -276,7 +276,7 @@
       <div class="schedule-form-grid">
         <label class="field">
           <span>Плановая стоимость, ₽</span>
-          <input type="text" inputmode="decimal" name="revenue" id="scheduleRevenue" value="0">
+          <input type="text" inputmode="decimal" name="revenue" id="scheduleRevenue" value="0" oninput="markScheduleRevenueManual()">
         </label>
         <label class="field schedule-field-wide">
           <span>Комментарий</span>
@@ -469,6 +469,7 @@
     const form = document.getElementById('scheduleItemForm');
     form.reset();
     form.action = scheduleCreateUrl;
+    form.dataset.revenueMode = 'auto';
     document.getElementById('scheduleDate').value = {{ day.isoformat()|tojson }};
     document.getElementById('scheduleStart').value = '10:00';
     document.getElementById('scheduleEnd').value = '11:00';
@@ -504,9 +505,17 @@
     if (!item) return;
     const form = document.getElementById('scheduleItemForm');
     form.action = scheduleCreateUrl + '/' + item.id;
+    form.dataset.revenueMode = 'manual';
     form.querySelector(`input[name="kind"][value="${item.kind}"]`).checked = true;
     document.getElementById('scheduleBoat').value = item.boat;
-    document.getElementById('scheduleService').value = item.service_name;
+    const serviceSelect = document.getElementById('scheduleService');
+    serviceSelect.value = item.service_id ? String(item.service_id) : '';
+    if (!serviceSelect.value) {
+      const matchingOption = [...serviceSelect.options].find(
+        option => option.dataset.name === item.service_name
+      );
+      if (matchingOption) serviceSelect.value = matchingOption.value;
+    }
     document.getElementById('scheduleDate').value = item.trip_date;
     document.getElementById('scheduleStart').value = item.start_time;
     document.getElementById('scheduleEnd').value = item.end_time;
@@ -574,7 +583,10 @@
     }
     scheduleRosterModalTrigger = null;
   }
-  function syncScheduleKind() {
+  function syncScheduleKind(userInitiated) {
+    if (userInitiated) {
+      document.getElementById('scheduleItemForm').dataset.revenueMode = 'auto';
+    }
     const kind = document.querySelector('input[name="kind"]:checked').value;
     const booking = document.getElementById('scheduleBookingFields');
     const eventFields = document.getElementById('scheduleEventFields');
@@ -770,6 +782,27 @@
     const counter = document.getElementById('scheduleParticipantCounter');
     counter.textContent = `${guests} из ${capacity} мест`;
     counter.classList.toggle('over', capacity > 0 && guests > capacity);
+    syncScheduleRevenue(guests);
+  }
+  function markScheduleRevenueManual() {
+    document.getElementById('scheduleItemForm').dataset.revenueMode = 'manual';
+  }
+  function syncScheduleRevenue(groupGuests) {
+    const form = document.getElementById('scheduleItemForm');
+    if (form.dataset.revenueMode !== 'auto') return;
+    const service = document.getElementById('scheduleService');
+    const selected = service.selectedOptions[0];
+    if (!selected || !selected.value) return;
+    const unitPrice = Number(selected.dataset.price || 0);
+    const kind = document.querySelector('input[name="kind"]:checked').value;
+    const multiplier = kind === 'event' ? Number(groupGuests || 0) : 1;
+    const total = Math.round(unitPrice * multiplier * 100) / 100;
+    document.getElementById('scheduleRevenue').value = String(total);
+  }
+  function applyScheduleService() {
+    document.getElementById('scheduleItemForm').dataset.revenueMode = 'auto';
+    applyScheduleDuration();
+    syncScheduleParticipantCount();
   }
   function applyScheduleDuration() {
     const service = document.getElementById('scheduleService');

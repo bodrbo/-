@@ -26,6 +26,17 @@ def init_schema(conn):
         )
         """
     )
+    item_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(schedule_items)")
+    }
+    if "service_id" not in item_columns:
+        conn.execute("ALTER TABLE schedule_items ADD COLUMN service_id INTEGER")
+    conn.execute(
+        "UPDATE schedule_items SET service_id = ("
+        "SELECT excursion_services.id FROM excursion_services "
+        "WHERE excursion_services.name = schedule_items.service_name COLLATE NOCASE"
+        ") WHERE service_id IS NULL"
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS schedule_assignments (

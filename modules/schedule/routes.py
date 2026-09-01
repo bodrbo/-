@@ -4,6 +4,8 @@ import datetime as dt
 
 from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
+from modules.excursion_services import repository as service_repository
+
 from . import repository, services
 from .constants import CREW_ROLES, ITEM_KINDS
 
@@ -13,7 +15,6 @@ def create_schedule_blueprint(
     admin_login_required,
     boats,
     boat_colors,
-    trip_services,
     avatar_url,
 ):
     blueprint = Blueprint("schedule", __name__)
@@ -32,10 +33,11 @@ def create_schedule_blueprint(
     @blueprint.route("/schedule")
     @admin_login_required
     def index():
+        db = get_db()
         day = services.parse_day(request.args.get("date"))
         selected_employee = request.args.get("employee", "all")
         context = services.day_view(
-            get_db(), day, selected_employee, boats, boat_colors, avatar_url
+            db, day, selected_employee, boats, boat_colors, avatar_url
         )
         return render_template(
             "schedule/index.html",
@@ -47,7 +49,7 @@ def create_schedule_blueprint(
             next_day=(day + dt.timedelta(days=1)).isoformat(),
             today=dt.date.today().isoformat(),
             boats=boats,
-            trip_services=trip_services,
+            trip_services=service_repository.list_services(db),
             item_kinds=ITEM_KINDS,
             crew_roles=CREW_ROLES,
             notice=session.pop("schedule_notice", None),
@@ -94,8 +96,9 @@ def create_schedule_blueprint(
     def create_item():
         day = services.parse_day(request.form.get("trip_date")).isoformat()
         selected_employee = request.form.get("return_employee", "all")
+        db = get_db()
         success, message, _item_id = services.save_item(
-            get_db(), request.form, boats, trip_services
+            db, request.form, boats, service_repository.list_services(db),
         )
         set_notice(message, success)
         return redirect_to_day(day, selected_employee)
@@ -105,8 +108,10 @@ def create_schedule_blueprint(
     def update_item(item_id):
         day = services.parse_day(request.form.get("trip_date")).isoformat()
         selected_employee = request.form.get("return_employee", "all")
+        db = get_db()
         success, message, _saved_id = services.save_item(
-            get_db(), request.form, boats, trip_services, item_id=item_id
+            db, request.form, boats, service_repository.list_services(db),
+            item_id=item_id,
         )
         set_notice(message, success)
         return redirect_to_day(day, selected_employee)

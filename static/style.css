@@ -388,6 +388,165 @@ body {
 }
 
 /* ------------------------------------------------------------------
+   Excursion services — a compact operational price ledger
+   ------------------------------------------------------------------ */
+.wrap.excursion-services-page { max-width: 1120px; }
+.excursion-services-notice {
+  margin-bottom: 18px;
+  padding: 13px 16px;
+  border: 1px solid;
+  border-radius: 10px;
+  background: var(--paper);
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: var(--shadow);
+}
+.excursion-services-notice-success { border-color: rgba(47,107,79,.32); color: var(--success); }
+.excursion-services-notice-error { border-color: rgba(179,64,44,.32); color: var(--danger); }
+.panel.excursion-service-create {
+  padding: 22px 24px;
+  border-top: 4px solid var(--brass);
+}
+.excursion-service-create-heading,
+.excursion-services-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+}
+.excursion-service-create-heading { margin-bottom: 18px; }
+.excursion-services-heading { margin: 28px 2px 13px; }
+.excursion-service-create-heading h2,
+.excursion-services-heading h2 { margin: 2px 0 0; font-size: 22px; line-height: 1.2; }
+.excursion-service-create-heading > p,
+.excursion-services-heading > p {
+  max-width: 510px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+}
+.excursion-service-eyebrow {
+  margin: 0;
+  color: var(--brass-strong);
+  font-family: 'PT Mono', monospace;
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.excursion-service-form {
+  display: grid;
+  align-items: end;
+  gap: 14px;
+}
+.excursion-service-create-form {
+  grid-template-columns: minmax(280px, 1.8fr) minmax(150px, .65fr) minmax(190px, .8fr) auto;
+}
+.excursion-service-edit-form {
+  grid-template-columns: minmax(270px, 1.8fr) minmax(145px, .58fr) minmax(190px, .8fr) auto;
+}
+.excursion-service-form label,
+.excursion-service-form label > span:first-child { min-width: 0; }
+.excursion-service-form label > span:first-child {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 700;
+}
+.excursion-service-form input {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 9px 11px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.excursion-service-form input:focus {
+  border-color: var(--brass);
+  outline: 3px solid rgba(52,152,219,.13);
+}
+.excursion-service-form > button { min-height: 42px; white-space: nowrap; }
+.excursion-service-list { display: grid; gap: 9px; }
+.panel.excursion-service-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  margin: 0;
+  padding: 15px 18px 15px 14px;
+  border-left: 3px solid transparent;
+  transition: border-color .2s ease, transform .2s ease;
+}
+.panel.excursion-service-row:hover { border-left-color: var(--brass); transform: translateX(2px); }
+.excursion-service-index {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  background: var(--paper-alt);
+  color: var(--brass-strong);
+  font-family: 'PT Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+.excursion-service-price-input { position: relative; display: block; }
+.excursion-service-price-input input {
+  padding-right: 34px;
+  color: var(--ink);
+  font-family: 'PT Mono', monospace;
+  font-size: 15px;
+  font-weight: 700;
+}
+.excursion-service-price-input b {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  color: var(--brass-strong);
+  font-size: 13px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.excursion-service-save { padding-right: 17px; padding-left: 17px; }
+
+@media (max-width: 900px) {
+  .excursion-service-create-form,
+  .excursion-service-edit-form { grid-template-columns: minmax(230px, 1.5fr) repeat(2, minmax(145px, .7fr)); }
+  .excursion-service-form > button { grid-column: 1 / -1; justify-self: end; }
+}
+@media (max-width: 640px) {
+  .panel.excursion-service-create { padding: 18px 16px; }
+  .excursion-service-create-heading,
+  .excursion-services-heading { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .excursion-service-create-heading > p,
+  .excursion-services-heading > p { text-align: left; }
+  .excursion-service-create-form,
+  .excursion-service-edit-form { grid-template-columns: 1fr 1fr; gap: 11px; }
+  .excursion-service-name { grid-column: 1 / -1; }
+  .excursion-service-form > button { width: 100%; }
+  .panel.excursion-service-row {
+    grid-template-columns: 34px minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
+    padding: 14px 12px;
+  }
+  .excursion-service-index { width: 32px; height: 32px; font-size: 9px; }
+}
+@media (max-width: 420px) {
+  .excursion-service-create-form,
+  .excursion-service-edit-form { grid-template-columns: 1fr; }
+  .excursion-service-name,
+  .excursion-service-form > button { grid-column: auto; }
+}
+
+/* ------------------------------------------------------------------
    Employee directory — crew manifest + personal communication status
    ------------------------------------------------------------------ */
 .wrap.employees-page { max-width: 1120px; }
@@ -926,7 +1085,7 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
 .main-nav {
   display: flex;
   align-items: stretch;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0;
 }
 .main-nav a {
@@ -934,11 +1093,11 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
   flex-direction: column;
   align-items: center;
   gap: 5px;
-  font-size: 12.5px;
+  font-size: 11.5px;
   font-weight: 700;
   color: rgba(255, 255, 255, 0.8);
   text-decoration: none;
-  padding: 7px 18px;
+  padding: 7px 10px;
   border-left: 1px solid rgba(255, 255, 255, 0.25);
   border-right: 1px solid rgba(255, 255, 255, 0.25);
   margin-right: -1px;
@@ -946,8 +1105,8 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
   transition: background-color 0.28s ease, color 0.2s ease, border-color 0.28s ease;
 }
 .main-nav a .nav-icon {
-  width: 18px;
-  height: 18px;
+  width: 17px;
+  height: 17px;
   transition: transform 0.28s ease;
 }
 .main-nav a:hover {
@@ -960,6 +1119,10 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
   background-color: var(--brass-strong);
   color: #ffffff;
   border-color: var(--brass-strong);
+}
+@media (min-width: 561px) and (max-width: 900px) {
+  .main-nav { flex-wrap: wrap; width: 100%; }
+  .main-nav a { flex: 1 0 auto; }
 }
 .sub-tabs {
   display: flex;

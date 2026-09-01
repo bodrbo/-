@@ -13,6 +13,12 @@
     </svg>
     <span class="nav-label">Расписание</span>
   </a>
+  <a href="{{ url_for('excursion_services.index') }}" class="{{ 'active' if active_page == 'services' }}">
+    <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 4.5h14v11H3zM6 8h8M6 11h5"/><circle cx="14.5" cy="13.5" r="1"/>
+    </svg>
+    <span class="nav-label">Услуги</span>
+  </a>
   <a href="{{ url_for('trips_index') }}" class="{{ 'active' if active_page == 'trips' }}">
     <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="10" cy="3.8" r="1.6"/>

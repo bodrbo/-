@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Услуги — Бодрый Боцман</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+</head>
+<body>
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100"><g fill="var(--brass)"><path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/><path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/><path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/></g><circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/></svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="topbar-top-row">
+      <div class="brand"><a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a></div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>
+      </button>
+    </div>
+    {% include '_admin_main_nav.html' %}
+    <div class="title-block">
+      <span class="kicker">Экскурсионные продукты</span>
+      <h1>Услуги</h1>
+    </div>
+    <div class="topbar-actions">
+      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="wrap excursion-services-page">
+  {% if notice %}
+  <div class="excursion-services-notice excursion-services-notice-{{ notice.type }}" role="status">{{ notice.message }}</div>
+  {% endif %}
+
+  <section class="panel excursion-service-create" id="new-service">
+    <div class="excursion-service-create-heading">
+      <div>
+        <p class="excursion-service-eyebrow">Новый продукт</p>
+        <h2>Добавить услугу</h2>
+      </div>
+      <p>Название и длительность попадут в форму рейса. Цена подставится при добавлении клиента.</p>
+    </div>
+    <form action="{{ url_for('excursion_services.create_service') }}" method="post" class="excursion-service-form excursion-service-create-form">
+      <label class="excursion-service-name">
+        <span>Название</span>
+        <input name="name" maxlength="180" value="{{ create_values.get('name', '') }}" placeholder="Например, Экскурсия по фортам" required>
+      </label>
+      <label>
+        <span>Длительность, ч</span>
+        <input type="number" name="hours" min="0.5" max="24" step="0.5" value="{{ create_values.get('hours', '1') }}" required>
+      </label>
+      <label>
+        <span>Цена за гостя, ₽</span>
+        <input type="number" name="price" min="0" max="10000000" step="1" value="{{ create_values.get('price', '0') }}" required>
+      </label>
+      <button type="submit">Добавить услугу</button>
+    </form>
+  </section>
+
+  <div class="excursion-services-heading">
+    <div>
+      <p class="excursion-service-eyebrow">Действующий прайс</p>
+      <h2>{{ services|length }} услуг</h2>
+    </div>
+    <p>Изменения сразу применяются к новым рейсам. Сохранённая ранее стоимость рейса не меняется.</p>
+  </div>
+
+  <section class="excursion-service-list" aria-label="Каталог экскурсионных услуг">
+    {% for service in services %}
+    <article class="panel excursion-service-row" id="service-{{ service.id }}">
+      <div class="excursion-service-index" aria-hidden="true">{{ '%02d'|format(loop.index) }}</div>
+      <form action="{{ url_for('excursion_services.update_service', service_id=service.id) }}" method="post" class="excursion-service-form excursion-service-edit-form">
+        <label class="excursion-service-name">
+          <span>Название</span>
+          <input name="name" maxlength="180" value="{{ service.name }}" required>
+        </label>
+        <label>
+          <span>Длительность, ч</span>
+          <input type="number" name="hours" min="0.5" max="24" step="0.5" value="{{ service.hours|round(2) }}" required>
+        </label>
+        <label class="excursion-service-price">
+          <span>Цена за гостя, ₽</span>
+          <span class="excursion-service-price-input"><input type="number" name="price" min="0" max="10000000" step="1" value="{{ service.price|round(2) }}" required><b>₽</b></span>
+        </label>
+        <button type="submit" class="btn-secondary excursion-service-save">Сохранить</button>
+      </form>
+    </article>
+    {% else %}
+    <div class="panel empty-state">
+      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      <div class="t">Каталог пока пуст</div>
+      <div class="s">Добавьте первую экскурсионную услугу выше.</div>
+    </div>
+    {% endfor %}
+  </section>
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+  const navToggle = document.getElementById('navToggle');
+  const mainNav = document.getElementById('mainNav');
+  if (navToggle && mainNav) {
+    navToggle.addEventListener('click', () => {
+      const open = mainNav.classList.toggle('open');
+      navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+  }
+</script>
+</body>
+</html>

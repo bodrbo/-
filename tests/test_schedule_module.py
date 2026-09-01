@@ -276,6 +276,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(item["kind"], "booking")
         self.assertEqual(item["boat"], "Бодрый Второй")
+        self.assertIsNotNone(item["service_id"])
         self.assertEqual(item["starts_at"], "2026-09-05 13:00")
         self.assertEqual(item["ends_at"], "2026-09-05 15:30")
         self.assertEqual(item["customer_name"], "Алия")
@@ -493,12 +494,17 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
                 "SELECT * FROM schedule_participants WHERE schedule_item_id = ?",
                 (booking_id,),
             ).fetchone()
+            migrated_booking = db.execute(
+                "SELECT service_id FROM schedule_items WHERE id = ?",
+                (booking_id,),
+            ).fetchone()
             segment = db.execute(
                 "SELECT segment FROM client_segments WHERE client_id = ?",
                 (participant["client_id"],),
             ).fetchone()
         self.assertEqual(participant["client_name"], "Старый турист")
         self.assertEqual(participant["guests_count"], 1)
+        self.assertIsNotNone(migrated_booking["service_id"])
         self.assertEqual(segment["segment"], "excursion")
 
     def test_migration_adds_existing_assignments_to_day_schedule(self):

@@ -89,6 +89,10 @@ from modules.schedule import (
     create_schedule_blueprint,
     init_schema as init_schedule_schema,
 )
+from modules.excursion_services import (
+    create_blueprint as create_excursion_services_blueprint,
+    init_schema as init_excursion_services_schema,
+)
 from modules.clients import (
     ensure_segment as ensure_client_segment,
     init_schema as init_client_segments_schema,
@@ -1263,6 +1267,7 @@ def init_db():
             "ADD COLUMN comment TEXT NOT NULL DEFAULT ''"
         )
     init_notification_schema(conn)
+    init_excursion_services_schema(conn)
     init_schedule_schema(conn)
 
     conn.execute(
@@ -3446,6 +3451,17 @@ app.register_blueprint(
 
 
 # =======================================================================
+# Экскурсионные услуги
+# =======================================================================
+app.register_blueprint(
+    create_excursion_services_blueprint(
+        get_db=get_db,
+        admin_login_required=admin_login_required,
+    )
+)
+
+
+# =======================================================================
 # Внутреннее расписание рейсов
 # =======================================================================
 app.register_blueprint(
@@ -3454,11 +3470,6 @@ app.register_blueprint(
         admin_login_required=admin_login_required,
         boats=BOATS,
         boat_colors=BOAT_COLORS,
-        trip_services=[
-            work_type for work_type in WORK_TYPES
-            if "гид" not in work_type["name"].casefold()
-            and "капитан" not in work_type["name"].casefold()
-        ],
         avatar_url=find_avatar_url,
     )
 )

@@ -243,10 +243,25 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
     if boat not in boat_names:
         errors.append("Выберите катер.")
 
-    service_names = {service["name"] for service in services}
-    service_name = _normalise_text(form.get("service_name"), 180)
-    if service_name not in service_names:
+    services_by_id = {service["id"]: service for service in services}
+    services_by_name = {
+        service["name"].casefold(): service for service in services
+    }
+    try:
+        service_id = int(str(form.get("service_id") or "").strip())
+    except ValueError:
+        service_id = None
+    selected_service = services_by_id.get(service_id)
+    if selected_service is None:
+        legacy_service_name = _normalise_text(form.get("service_name"), 180)
+        selected_service = services_by_name.get(legacy_service_name.casefold())
+    if selected_service is None:
         errors.append("Выберите вид рейса.")
+        service_id = None
+        service_name = ""
+    else:
+        service_id = selected_service["id"]
+        service_name = selected_service["name"]
 
     day_raw = str(form.get("trip_date") or "").strip()
     start_time = str(form.get("start_time") or "").strip()
@@ -345,6 +360,7 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
     data = {
         "kind": kind,
         "boat": boat,
+        "service_id": service_id,
         "service_name": service_name,
         "starts_at": starts_at.strftime("%Y-%m-%d %H:%M") if starts_at else "",
         "ends_at": ends_at.strftime("%Y-%m-%d %H:%M") if ends_at else "",
