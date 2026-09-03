@@ -4501,28 +4501,59 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 }
 .boat-profile-identity { min-width: 0; padding: 27px 28px 25px; }
 .boat-profile-identity h2 { font-size: clamp(29px, 4vw, 44px); }
-.boat-profile-name-editor {
-  margin-top: 9px;
-  border: solid var(--hairline-soft);
-  border-width: 1px 0;
+.boat-profile-title-editor {
+  position: relative;
+  z-index: 4;
 }
-.boat-profile-name-editor summary {
-  padding: 9px 0;
-  color: var(--brass-dark);
-  font-size: 11px;
-  font-weight: 700;
+.boat-profile-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.boat-profile-title-line h2 { min-width: 0; margin-right: 0; }
+.boat-profile-name-editor summary { list-style: none; }
+.boat-profile-name-editor summary::-webkit-details-marker { display: none; }
+.boat-profile-name-toggle {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
   cursor: pointer;
+  transition: color .15s ease, border-color .15s ease, background-color .15s ease;
 }
-.boat-profile-name-editor summary:focus-visible {
+.boat-profile-name-toggle svg { width: 16px; height: 16px; }
+.boat-profile-name-toggle:hover,
+.boat-profile-name-editor[open] .boat-profile-name-toggle {
+  border-color: var(--hairline);
+  background: var(--paper-alt);
+  color: var(--brass-dark);
+}
+.boat-profile-name-toggle:focus-visible {
   outline: 2px solid var(--brass);
-  outline-offset: 3px;
+  outline-offset: 2px;
+}
+.boat-profile-name-popover {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  width: min(480px, 100%);
+  padding: 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 12px 28px rgba(15,42,53,.16);
 }
 .boat-profile-name-fields {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 10px;
-  padding: 2px 0 8px;
+  padding: 0;
 }
 .boat-profile-name-fields label,
 .boat-profile-name-fields label > span { display: block; }
@@ -4554,8 +4585,8 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   font-size: 11px;
   white-space: nowrap;
 }
-.boat-profile-name-editor > p {
-  margin: 0 0 10px;
+.boat-profile-name-popover > p {
+  margin: 8px 0 0;
   color: var(--muted);
   font-size: 10px;
   line-height: 1.45;
@@ -4698,6 +4729,8 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   .boat-profile-photo-column { padding: 12px; }
   .boat-photo-control { align-items: flex-start; flex-direction: column; }
   .boat-profile-identity { padding: 22px 16px 19px; }
+  .boat-profile-title-line { align-items: flex-start; }
+  .boat-profile-name-toggle { margin-top: 5px; }
   .boat-profile-name-fields { grid-template-columns: 1fr; }
   .boat-profile-name-fields button { width: 100%; }
   .boat-profile-stats { grid-template-columns: 1fr; }

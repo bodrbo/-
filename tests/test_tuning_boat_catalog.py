@@ -282,6 +282,9 @@ class TuningBoatCatalogTests(unittest.TestCase):
         )
         self.assertIn("New Boat 650", profile_page)
         self.assertIn("Название модели и связанные записи обновлены.", profile_page)
+        self.assertIn('class="boat-profile-name-toggle"', profile_page)
+        self.assertIn('aria-label="Изменить название модели"', profile_page)
+        self.assertNotIn("<summary>Изменить название модели</summary>", profile_page)
         self.assertIn(f"№{first_order_id}", profile_page)
         self.assertIn(f"№{second_order_id}", profile_page)
         orders_page = self.client.get("/tuning").get_data(as_text=True)
@@ -325,7 +328,9 @@ class TuningBoatCatalogTests(unittest.TestCase):
                     follow_redirects=True,
                 )
                 self.assertEqual(response.status_code, 200)
-                self.assertIn(expected_message, response.get_data(as_text=True))
+                html = response.get_data(as_text=True)
+                self.assertIn(expected_message, html)
+                self.assertIn('class="boat-profile-name-editor" open', html)
 
         with application_module.app.app_context():
             db = application_module.get_db()

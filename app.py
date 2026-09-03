@@ -4935,6 +4935,9 @@ def tuning_boat_profile(profile_id):
         profile_orders_total=sum(order["total"] for order in orders),
         profile_notice=session.pop("boat_profile_notice", None),
         profile_error=session.pop("boat_profile_error", None),
+        profile_name_editor_open=session.pop(
+            "boat_profile_name_editor_open", False
+        ),
     )
 
 
@@ -4958,12 +4961,14 @@ def update_tuning_boat_profile(profile_id):
     source_name = request.form.get("specifications_source_name", "").strip()
     if not model_name:
         session["boat_profile_error"] = "Укажите название модели лодки."
+        session["boat_profile_name_editor_open"] = True
         return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
     if len(model_name) > TUNING_BOAT_MODEL_NAME_LIMIT:
         session["boat_profile_error"] = (
             "Название модели не должно превышать "
             f"{TUNING_BOAT_MODEL_NAME_LIMIT} символов."
         )
+        session["boat_profile_name_editor_open"] = True
         return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
     duplicate = db.execute(
         "SELECT id FROM tuning_boat_profiles WHERE model_key = ? AND id != ?",
@@ -4973,6 +4978,7 @@ def update_tuning_boat_profile(profile_id):
         session["boat_profile_error"] = (
             "Модель с таким названием уже есть в каталоге."
         )
+        session["boat_profile_name_editor_open"] = True
         return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
     if len(specifications) > TUNING_BOAT_SPECIFICATIONS_LIMIT:
         session["boat_profile_error"] = (

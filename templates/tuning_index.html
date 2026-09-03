@@ -282,19 +282,31 @@
 
       <div class="boat-profile-identity">
         <p class="boat-catalog-eyebrow">Профиль модели</p>
-        <h2>{{ boat_profile.model_name }}</h2>
-        <details class="boat-profile-name-editor"{% if profile_error %} open{% endif %}>
-          <summary>Изменить название модели</summary>
-          <div class="boat-profile-name-fields">
-            <label for="boatModelName">
-              <span>Название модели</span>
-              <input id="boatModelName" type="text" name="model_name" required maxlength="200"
-                     value="{{ boat_profile.model_name }}" autocomplete="off">
-            </label>
-            <button type="submit">Сохранить название</button>
+        <div class="boat-profile-title-editor">
+          <div class="boat-profile-title-line">
+            <h2>{{ boat_profile.model_name }}</h2>
+            <details class="boat-profile-name-editor"{% if profile_name_editor_open %} open{% endif %}>
+              <summary class="boat-profile-name-toggle" aria-label="Изменить название модели" title="Изменить название модели">
+                <span class="sr-only">Изменить название модели</span>
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M13.5 3.5l3 3L7 16H4v-3L13.5 3.5z"/>
+                  <path d="M11.5 5.5l3 3"/>
+                </svg>
+              </summary>
+              <div class="boat-profile-name-popover">
+                <div class="boat-profile-name-fields">
+                  <label for="boatModelName">
+                    <span>Название модели</span>
+                    <input id="boatModelName" type="text" name="model_name" required maxlength="200"
+                           value="{{ boat_profile.model_name }}" autocomplete="off">
+                  </label>
+                  <button type="submit">Сохранить</button>
+                </div>
+                <p>Связанные записи обновятся автоматически.</p>
+              </div>
+            </details>
           </div>
-          <p>Новое название применится к профилю, связанным тюнинг-заказам, клиентам и диагностическим листам.</p>
-        </details>
+        </div>
 
         <div class="boat-profile-stats">
           <div><strong>{{ profile_orders|length }}</strong><span>Заказов в истории</span></div>
