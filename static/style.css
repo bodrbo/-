@@ -6798,11 +6798,13 @@ button.captain-command-alert:hover {
 .tuning-clients-directory-head h2 { margin: 0 0 3px; font-size: 19px; }
 .tuning-clients-directory-head p { margin: 0; color: var(--muted); font-size: 11.5px; }
 .tuning-clients-search {
-  position: relative;
-  display: block;
-  width: min(340px, 100%);
+  display: flex;
+  align-items: center;
+  width: min(520px, 100%);
   flex: none;
+  gap: 7px;
 }
+.tuning-clients-search-field { position: relative; min-width: 0; flex: 1; }
 .tuning-clients-search svg {
   position: absolute;
   top: 50%;
@@ -6825,10 +6827,33 @@ button.captain-command-alert:hover {
   font-size: 12px;
 }
 .tuning-clients-search input:focus {
-  outline: 2px solid rgba(194, 143, 44, .18);
+  outline: 2px solid rgba(52, 152, 219, .2);
   border-color: var(--brass);
   background: var(--paper);
 }
+.tuning-clients-search-submit,
+.tuning-clients-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 42px;
+  flex: none;
+  border: 1px solid var(--brass);
+  border-radius: 9px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.tuning-clients-search-submit {
+  padding: 0 15px;
+  background: var(--brass);
+  color: var(--paper);
+  cursor: pointer;
+}
+.tuning-clients-search-submit:hover { background: var(--brass-strong); border-color: var(--brass-strong); }
+.tuning-clients-search-clear { width: 42px; background: var(--paper); color: var(--muted); font-size: 20px; }
+.tuning-clients-search-clear:hover { border-color: var(--danger); color: var(--danger); }
 .tuning-clients-directory .table-scroll { margin: 0; }
 .tuning-clients-table { min-width: 1080px; }
 .tuning-clients-table td { vertical-align: middle; }
@@ -6870,6 +6895,45 @@ button.captain-command-alert:hover {
 .tuning-client-debt { color: var(--danger); }
 .tuning-clients-directory > .hint { margin: 0; padding: 18px 22px; }
 .tuning-clients-directory > .empty-state { margin: 0; border: 0; border-radius: 0; }
+.tuning-clients-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 64px;
+  gap: 18px;
+  padding: 12px 22px;
+  border-top: 1px solid var(--hairline-soft);
+  background: #f8fafc;
+}
+.tuning-clients-page-summary {
+  color: var(--ink-soft);
+  font-family: 'PT Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+.tuning-clients-page-summary small { display: block; margin-top: 2px; color: var(--muted); font-family: 'Open Sans', sans-serif; font-size: 10px; font-weight: 400; }
+.tuning-clients-page-links { display: flex; align-items: center; gap: 5px; }
+.tuning-clients-page-links a,
+.tuning-clients-page-links span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-family: 'PT Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.tuning-clients-page-links a:hover { border-color: var(--brass); color: var(--brass-strong); }
+.tuning-clients-page-links .current { border-color: var(--brass); background: var(--brass); color: var(--paper); }
+.tuning-clients-page-links .disabled { color: #aab7c3; background: var(--paper-alt); }
+.tuning-clients-page-links .ellipsis { min-width: 22px; padding: 0; border-color: transparent; background: transparent; color: var(--muted); }
 
 @media (max-width: 780px) {
   .tuning-clients-heading,
@@ -6882,4 +6946,10 @@ button.captain-command-alert:hover {
   .tuning-clients-heading h2 { font-size: 22px; }
   .tuning-clients-directory-head { padding: 17px 16px 14px; }
   .tuning-clients-search input { min-height: 44px; }
+  .tuning-clients-search-submit,
+  .tuning-clients-search-clear { height: 44px; }
+  .tuning-clients-pagination { align-items: flex-start; flex-direction: column; padding: 14px 16px; }
+  .tuning-clients-page-links { width: 100%; justify-content: space-between; }
+  .tuning-clients-page-links a,
+  .tuning-clients-page-links span { min-width: 34px; height: 40px; }
 }

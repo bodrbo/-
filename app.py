@@ -824,6 +824,7 @@ CLIENT_STATUSES = [
     {"value": "blacklisted", "label": "Чёрный список"},
 ]
 DEFAULT_CLIENT_STATUS = "neutral"
+CLIENT_DIRECTORY_PAGE_SIZE = 20
 
 WORK_STATUSES = [
     {"value": "pending", "label": "На согласовании"},
@@ -981,6 +982,9 @@ def get_db():
     if "db" not in g:
         g.db = sqlite3.connect(DB_PATH)
         g.db.row_factory = sqlite3.Row
+        g.db.create_function(
+            "CASEFOLD", 1, lambda value: str(value or "").casefold()
+        )
     return g.db
 
 
@@ -4508,6 +4512,26 @@ def tuning_index():
     )
 
 
+def _client_pagination_items(current_page, total_pages):
+    if total_pages <= 7:
+        return list(range(1, total_pages + 1))
+    visible = sorted({
+        1,
+        total_pages,
+        max(1, current_page - 1),
+        current_page,
+        min(total_pages, current_page + 1),
+    })
+    items = []
+    previous = None
+    for page_number in visible:
+        if previous is not None and page_number - previous > 1:
+            items.append(None)
+        items.append(page_number)
+        previous = page_number
+    return items
+
+
 @app.route("/admin/clients")
 @excursion_manager_or_admin_required
 def tuning_clients():
@@ -4519,6 +4543,14 @@ def tuning_clients():
         section = request.args.get("section", TUNING_SEGMENT).strip().lower()
         if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
             section = TUNING_SEGMENT
+
+    search_query = " ".join(request.args.get("q", "").split())[:120]
+    search_pattern = f"%{search_query.casefold()}%"
+    try:
+        requested_page = max(1, int(request.args.get("page", "1")))
+    except (TypeError, ValueError):
+        requested_page = 1
+
     segment_counts = {
         row["segment"]: row["client_count"]
         for row in db.execute(
@@ -4530,8 +4562,84 @@ def tuning_clients():
         ).fetchall()
     }
 
+    clients_count = 0
+    orders_count = 0
+    order_total = 0.0
+    outstanding_total = 0.0
+    trips_count = 0
+    upcoming_count = 0
+    tuning_scope_sql = (
+        "(EXISTS (SELECT 1 FROM client_segments scope_cs "
+        " WHERE scope_cs.client_id = c.id AND scope_cs.segment = ?) "
+        "OR NOT EXISTS (SELECT 1 FROM client_segments any_cs "
+        " WHERE any_cs.client_id = c.id))"
+    )
+
     if section == EXCURSION_SEGMENT:
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        summary = db.execute(
+            "SELECT COUNT(DISTINCT c.id) AS clients_count, "
+            "COUNT(DISTINCT CASE WHEN si.id IS NOT NULL THEN "
+            " CAST(c.id AS TEXT) || ':' || CAST(si.id AS TEXT) END) AS trips_count, "
+            "COUNT(DISTINCT CASE WHEN si.starts_at >= ? THEN "
+            " CAST(c.id AS TEXT) || ':' || CAST(si.id AS TEXT) END) AS upcoming_count "
+            "FROM clients c JOIN client_segments cs ON cs.client_id = c.id "
+            "AND cs.segment = ? "
+            "LEFT JOIN schedule_participants sp ON sp.client_id = c.id "
+            "LEFT JOIN schedule_items si ON si.id = sp.schedule_item_id "
+            "AND si.deleted_at IS NULL",
+            (now, EXCURSION_SEGMENT),
+        ).fetchone()
+        clients_count = summary["clients_count"]
+        trips_count = summary["trips_count"]
+        upcoming_count = summary["upcoming_count"]
+        filtered_count = db.execute(
+            "SELECT COUNT(DISTINCT c.id) AS client_count "
+            "FROM clients c JOIN client_segments cs ON cs.client_id = c.id "
+            "AND cs.segment = ? "
+            "WHERE CASEFOLD(c.client_name || ' ' || COALESCE(c.phone, '')) LIKE ?",
+            (EXCURSION_SEGMENT, search_pattern),
+        ).fetchone()["client_count"]
+    else:
+        summary = db.execute(
+            "SELECT COUNT(*) AS clients_count, "
+            "COALESCE(SUM(os.order_count), 0) AS orders_count, "
+            "COALESCE(SUM(os.order_total), 0) AS order_total, "
+            "COALESCE(SUM(MAX(COALESCE(os.order_total, 0) - "
+            " COALESCE(ps.paid_total, 0), 0)), 0) AS outstanding_total "
+            "FROM clients c "
+            "LEFT JOIN ("
+            " SELECT client_id, COUNT(*) AS order_count, SUM(total) AS order_total "
+            " FROM tuning_orders WHERE client_id IS NOT NULL GROUP BY client_id"
+            ") os ON os.client_id = c.id "
+            "LEFT JOIN ("
+            " SELECT o.client_id, SUM(p.amount) AS paid_total "
+            " FROM tuning_orders o JOIN tuning_payments p ON p.order_id = o.id "
+            " WHERE o.client_id IS NOT NULL GROUP BY o.client_id"
+            ") ps ON ps.client_id = c.id "
+            f"WHERE {tuning_scope_sql}",
+            (TUNING_SEGMENT,),
+        ).fetchone()
+        clients_count = summary["clients_count"]
+        orders_count = summary["orders_count"]
+        order_total = summary["order_total"]
+        outstanding_total = summary["outstanding_total"]
+        filtered_count = db.execute(
+            "SELECT COUNT(*) AS client_count FROM clients c "
+            f"WHERE {tuning_scope_sql} "
+            "AND CASEFOLD(c.client_name || ' ' || COALESCE(c.phone, '')) LIKE ?",
+            (TUNING_SEGMENT, search_pattern),
+        ).fetchone()["client_count"]
+
+    total_pages = max(
+        1,
+        (filtered_count + CLIENT_DIRECTORY_PAGE_SIZE - 1)
+        // CLIENT_DIRECTORY_PAGE_SIZE,
+    )
+    page = min(requested_page, total_pages)
+    offset = (page - 1) * CLIENT_DIRECTORY_PAGE_SIZE
+
+    if section == EXCURSION_SEGMENT:
         client_rows = db.execute(
             "SELECT c.id, c.client_name, c.boat_model, c.phone, c.status, c.created_at, "
             "COUNT(DISTINCT si.id) AS trip_count, "
@@ -4544,8 +4652,19 @@ def tuning_clients():
             "LEFT JOIN schedule_participants sp ON sp.client_id = c.id "
             "LEFT JOIN schedule_items si ON si.id = sp.schedule_item_id "
             "AND si.deleted_at IS NULL "
-            "GROUP BY c.id ORDER BY COALESCE(MAX(si.starts_at), c.created_at) DESC, c.id DESC",
-            (now, now, now, EXCURSION_SEGMENT),
+            "WHERE CASEFOLD(c.client_name || ' ' || COALESCE(c.phone, '')) LIKE ? "
+            "GROUP BY c.id "
+            "ORDER BY COALESCE(MAX(si.starts_at), c.created_at) DESC, c.id DESC "
+            "LIMIT ? OFFSET ?",
+            (
+                now,
+                now,
+                now,
+                EXCURSION_SEGMENT,
+                search_pattern,
+                CLIENT_DIRECTORY_PAGE_SIZE,
+                offset,
+            ),
         ).fetchall()
         clients = [dict(row) for row in client_rows]
     else:
@@ -4574,11 +4693,16 @@ def tuning_clients():
             " FROM tuning_orders o JOIN tuning_payments p ON p.order_id = o.id "
             " WHERE o.client_id IS NOT NULL GROUP BY o.client_id"
             ") ps ON ps.client_id = c.id "
-            "WHERE EXISTS (SELECT 1 FROM client_segments cs "
-            " WHERE cs.client_id = c.id AND cs.segment = ?) "
-            "OR NOT EXISTS (SELECT 1 FROM client_segments cs WHERE cs.client_id = c.id) "
-            "ORDER BY COALESCE(os.last_order_at, c.created_at) DESC, c.id DESC",
-            (TUNING_SEGMENT,),
+            f"WHERE {tuning_scope_sql} "
+            "AND CASEFOLD(c.client_name || ' ' || COALESCE(c.phone, '')) LIKE ? "
+            "ORDER BY COALESCE(os.last_order_at, c.created_at) DESC, c.id DESC "
+            "LIMIT ? OFFSET ?",
+            (
+                TUNING_SEGMENT,
+                search_pattern,
+                CLIENT_DIRECTORY_PAGE_SIZE,
+                offset,
+            ),
         ).fetchall()
         clients = []
         for row in client_rows:
@@ -4591,12 +4715,12 @@ def tuning_clients():
     return render_template(
         "tuning_clients.html",
         clients=clients,
-        clients_count=len(clients),
-        orders_count=sum(client.get("order_count", 0) for client in clients),
-        order_total=sum(client.get("order_total", 0) for client in clients),
-        outstanding_total=sum(client.get("outstanding", 0) for client in clients),
-        trips_count=sum(client.get("trip_count", 0) for client in clients),
-        upcoming_count=sum(client.get("upcoming_count", 0) for client in clients),
+        clients_count=clients_count,
+        orders_count=orders_count,
+        order_total=order_total,
+        outstanding_total=outstanding_total,
+        trips_count=trips_count,
+        upcoming_count=upcoming_count,
         tuning_clients_count=segment_counts.get(TUNING_SEGMENT, 0),
         excursion_clients_count=segment_counts.get(EXCURSION_SEGMENT, 0),
         client_section=section,
@@ -4605,6 +4729,13 @@ def tuning_clients():
         client_statuses=CLIENT_STATUSES,
         active_page="clients",
         manager_view=manager_view,
+        search_query=search_query,
+        page=page,
+        total_pages=total_pages,
+        pagination_items=_client_pagination_items(page, total_pages),
+        filtered_count=filtered_count,
+        page_first=(offset + 1 if filtered_count else 0),
+        page_last=min(offset + len(clients), filtered_count),
     )
 
 
@@ -4621,16 +4752,24 @@ def update_tuning_client_status(client_id):
         ).fetchone() is not None:
             db.execute("UPDATE clients SET status = ? WHERE id = ?", (status, client_id))
             db.commit()
-    if _is_customer_manager():
-        return redirect(url_for("tuning_clients", section=EXCURSION_SEGMENT))
-    section = request.form.get("section", TUNING_SEGMENT)
+    manager_view = _is_customer_manager()
+    section = (
+        EXCURSION_SEGMENT
+        if manager_view
+        else request.form.get("section", TUNING_SEGMENT)
+    )
     if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
         section = TUNING_SEGMENT
-    return redirect(
-        url_for("tuning_clients", section=section)
-        if section == EXCURSION_SEGMENT
-        else url_for("tuning_clients")
-    )
+    redirect_args = {}
+    if section == EXCURSION_SEGMENT:
+        redirect_args["section"] = section
+    page_value = request.form.get("page", "1")
+    if page_value != "1":
+        redirect_args["page"] = page_value
+    search_query = " ".join(request.form.get("q", "").split())[:120]
+    if search_query:
+        redirect_args["q"] = search_query
+    return redirect(url_for("tuning_clients", **redirect_args))
 
 
 @app.route("/admin/clients/import-yclients", methods=["POST"])

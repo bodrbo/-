@@ -103,14 +103,19 @@
     <div class="tuning-clients-directory-head">
       <div>
         <h2>Все клиенты</h2>
-        <p>Поиск работает по всем данным в таблице.</p>
+        <p>Поиск по имени и номеру телефона во всей клиентской базе.</p>
       </div>
-      {% if clients %}
-      <label class="tuning-clients-search">
-        <span class="sr-only">Поиск по клиентам</span>
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M12.5 12.5L17 17"/></svg>
-        <input type="search" placeholder="Найти клиента…" data-filter-table="#tuning-clients-table" aria-label="Поиск по клиентам">
-      </label>
+      {% if clients or search_query %}
+      <form class="tuning-clients-search" method="get" action="{{ url_for('tuning_clients') }}" role="search">
+        <input type="hidden" name="section" value="{{ client_section }}">
+        <label class="tuning-clients-search-field">
+          <span class="sr-only">Поиск по клиентам</span>
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M12.5 12.5L17 17"/></svg>
+          <input type="search" name="q" value="{{ search_query }}" maxlength="120" placeholder="Имя или телефон" aria-label="Поиск по имени или телефону">
+        </label>
+        <button type="submit" class="tuning-clients-search-submit">Найти</button>
+        {% if search_query %}<a href="{{ url_for('tuning_clients', section=client_section) }}" class="tuning-clients-search-clear" aria-label="Сбросить поиск" title="Сбросить поиск">×</a>{% endif %}
+      </form>
       {% endif %}
     </div>
 
@@ -129,6 +134,8 @@
             <td>
               <form action="{{ url_for('update_tuning_client_status', client_id=client.id) }}" method="post" class="status-badge status-client-{{ client.status }} tuning-client-status-form">
                 <input type="hidden" name="section" value="{{ client_section }}">
+                <input type="hidden" name="page" value="{{ page }}">
+                <input type="hidden" name="q" value="{{ search_query }}">
                 <span class="tuning-client-status-label">{{ {'satisfied': 'Довольный', 'neutral': 'Нейтральный', 'dissatisfied': 'Недовольный', 'blacklisted': 'Чёрный список'}.get(client.status, 'Нейтральный') }}</span>
                 <svg class="tuning-client-status-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg>
                 <select name="status" class="tuning-client-status" aria-label="Статус клиента {{ client.client_name }}" onchange="this.form.submit()">
@@ -165,13 +172,42 @@
         </tbody>
       </table>
     </div>
-    <p id="tuning-clients-table-no-results" class="hint hidden">Клиентов по вашему запросу не найдено.</p>
     {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">Клиентов пока нет</div>
-      <div class="s">{% if client_section == 'excursion' %}Они появятся здесь после добавления первого клиента в рейс.{% else %}Они появятся здесь после создания первого тюнинг-заказа.{% endif %}</div>
+      <div class="t">{{ 'Клиенты не найдены' if search_query else 'Клиентов пока нет' }}</div>
+      <div class="s">{% if search_query %}Измените имя или номер телефона и повторите поиск.{% elif client_section == 'excursion' %}Они появятся здесь после добавления первого клиента в рейс.{% else %}Они появятся здесь после создания первого тюнинг-заказа.{% endif %}</div>
     </div>
+    {% endif %}
+
+    {% if filtered_count %}
+    <nav class="tuning-clients-pagination" aria-label="Страницы клиентов">
+      <span class="tuning-clients-page-summary">
+        {{ page_first }}–{{ page_last }} из {{ filtered_count }}
+        {% if search_query %}<small>по запросу «{{ search_query }}»</small>{% endif %}
+      </span>
+      <div class="tuning-clients-page-links">
+        {% if page > 1 %}
+        <a href="{{ url_for('tuning_clients', section=client_section, page=page - 1, q=search_query) }}" aria-label="Предыдущая страница">←</a>
+        {% else %}
+        <span class="disabled" aria-hidden="true">←</span>
+        {% endif %}
+        {% for page_number in pagination_items %}
+          {% if page_number is none %}
+          <span class="ellipsis" aria-hidden="true">…</span>
+          {% elif page_number == page %}
+          <span class="current" aria-current="page">{{ page_number }}</span>
+          {% else %}
+          <a href="{{ url_for('tuning_clients', section=client_section, page=page_number, q=search_query) }}" aria-label="Страница {{ page_number }}">{{ page_number }}</a>
+          {% endif %}
+        {% endfor %}
+        {% if page < total_pages %}
+        <a href="{{ url_for('tuning_clients', section=client_section, page=page + 1, q=search_query) }}" aria-label="Следующая страница">→</a>
+        {% else %}
+        <span class="disabled" aria-hidden="true">→</span>
+        {% endif %}
+      </div>
+    </nav>
     {% endif %}
   </section>
 </main>
