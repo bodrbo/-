@@ -317,7 +317,7 @@ class TuningBoatCatalogTests(unittest.TestCase):
 
         self.login()
         for invalid_name, expected_message in (
-            ("   ", "Укажите название модели лодки."),
+            ("   ", "Укажите название модели."),
             ("model beta", "Модель с таким названием уже есть в каталоге."),
             ("x" * 201, "Название модели не должно превышать 200 символов."),
         ):
@@ -380,10 +380,15 @@ class TuningBoatCatalogTests(unittest.TestCase):
 
     def test_catalog_and_profiles_require_admin_login(self):
         catalog = self.client.get("/tuning/boats")
+        motor_catalog = self.client.get("/tuning/motors")
         profile = self.client.get("/tuning/boats/1")
+        motor_profile = self.client.get("/tuning/motors/1")
         update = self.client.post("/tuning/boats/1/edit")
+        update_type = self.client.post("/tuning/equipment/1/type")
 
-        for response in (catalog, profile, update):
+        for response in (
+            catalog, motor_catalog, profile, motor_profile, update, update_type
+        ):
             self.assertEqual(response.status_code, 302)
             self.assertIn("/admin/login", response.headers["Location"])
 

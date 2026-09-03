@@ -206,8 +206,16 @@ def _normalize_tuning_boat_model(model_name):
     return " ".join((model_name or "").split()).casefold()
 
 
+def _tuning_equipment_profile_key(equipment_type, model_name):
+    """Namespace model identity so a boat and motor may share a model name."""
+    normalized = _normalize_tuning_boat_model(model_name)
+    if not normalized:
+        return ""
+    return normalized if equipment_type == "boat" else f"motor:{normalized}"
+
+
 def _sync_tuning_boat_profiles(db):
-    """Ensure every non-empty model ever used by an order has a profile.
+    """Ensure every non-empty boat or motor model has a catalog profile.
 
     Newest spelling wins when a model does not have a profile yet; once a
     profile exists its display name and manually entered data stay stable.
@@ -215,20 +223,23 @@ def _sync_tuning_boat_profiles(db):
     seen_keys = set()
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     for row in db.execute(
-        "SELECT boat_model FROM tuning_orders "
-        "WHERE equipment_type = 'boat' AND TRIM(boat_model) != '' "
+        "SELECT equipment_type, boat_model, motor_model FROM tuning_orders "
+        "WHERE (equipment_type = 'boat' AND TRIM(boat_model) != '') "
+        "OR (equipment_type = 'motor' AND TRIM(motor_model) != '') "
         "ORDER BY id DESC"
     ).fetchall():
-        model_name = " ".join(row[0].split())
-        model_key = _normalize_tuning_boat_model(model_name)
+        equipment_type = "motor" if row[0] == "motor" else "boat"
+        raw_model = row[2] if equipment_type == "motor" else row[1]
+        model_name = " ".join(raw_model.split())
+        model_key = _tuning_equipment_profile_key(equipment_type, model_name)
         if not model_key or model_key in seen_keys:
             continue
         seen_keys.add(model_key)
         db.execute(
             "INSERT OR IGNORE INTO tuning_boat_profiles "
-            "(model_key, model_name, specifications, created_at, updated_at) "
-            "VALUES (?, ?, '', ?, ?)",
-            (model_key, model_name, now, now),
+            "(model_key, model_name, equipment_type, specifications, "
+            "created_at, updated_at) VALUES (?, ?, ?, '', ?, ?)",
+            (model_key, model_name, equipment_type, now, now),
         )
     _seed_tuning_boat_profile_specifications(db)
 
@@ -249,7 +260,8 @@ def _seed_tuning_boat_profile_specifications(db):
     updated = 0
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     for profile in db.execute(
-        "SELECT id, model_name, specifications FROM tuning_boat_profiles"
+        "SELECT id, model_name, specifications FROM tuning_boat_profiles "
+        "WHERE equipment_type = 'boat'"
     ).fetchall():
         profile_id, model_name, specifications = profile
         if (specifications or "").strip():
@@ -293,14 +305,20 @@ def _tuning_boat_photo_url(profile):
     )
 
 
-def _tuning_boat_profile_id(db, model_name):
-    model_key = _normalize_tuning_boat_model(model_name)
+def _tuning_equipment_profile_id(db, equipment_type, model_name):
+    model_key = _tuning_equipment_profile_key(equipment_type, model_name)
     if not model_key:
         return None
     row = db.execute(
-        "SELECT id FROM tuning_boat_profiles WHERE model_key = ?", (model_key,)
+        "SELECT id FROM tuning_boat_profiles "
+        "WHERE model_key = ? AND equipment_type = ?",
+        (model_key, equipment_type),
     ).fetchone()
     return row[0] if row else None
+
+
+def _tuning_boat_profile_id(db, model_name):
+    return _tuning_equipment_profile_id(db, "boat", model_name)
 
 
 def _tuning_boat_model_choices(db):
@@ -309,6 +327,7 @@ def _tuning_boat_model_choices(db):
         row[0]
         for row in db.execute(
             "SELECT model_name FROM tuning_boat_profiles "
+            "WHERE equipment_type = 'boat' "
             "ORDER BY model_name COLLATE NOCASE"
         ).fetchall()
     ]
@@ -317,37 +336,44 @@ def _tuning_boat_model_choices(db):
 def _rename_tuning_boat_profile(db, profile, model_name, updated_at):
     """Rename a canonical model without splitting its historical profile."""
     old_key = profile["model_key"]
-    new_key = _normalize_tuning_boat_model(model_name)
+    equipment_type = profile["equipment_type"]
+    new_key = _tuning_equipment_profile_key(equipment_type, model_name)
+    model_column = "motor_model" if equipment_type == "motor" else "boat_model"
 
     order_ids = []
     for row in db.execute(
-        "SELECT id, boat_model FROM tuning_orders WHERE equipment_type = 'boat'"
+        f"SELECT id, {model_column} AS model_name FROM tuning_orders "
+        "WHERE equipment_type = ?",
+        (equipment_type,),
     ).fetchall():
-        if _normalize_tuning_boat_model(row["boat_model"]) == old_key:
+        if _tuning_equipment_profile_key(
+            equipment_type, row["model_name"]
+        ) == old_key:
             order_ids.append(row["id"])
     if order_ids:
         db.executemany(
-            "UPDATE tuning_orders SET boat_model = ?, updated_at = ? WHERE id = ?",
+            f"UPDATE tuning_orders SET {model_column} = ?, updated_at = ? WHERE id = ?",
             [(model_name, updated_at, order_id) for order_id in order_ids],
         )
 
-    client_ids = []
-    for row in db.execute("SELECT id, boat_model FROM clients").fetchall():
-        if _normalize_tuning_boat_model(row["boat_model"]) == old_key:
-            client_ids.append(row["id"])
-    if client_ids:
-        db.executemany(
-            "UPDATE clients SET boat_model = ? WHERE id = ?",
-            [(model_name, client_id) for client_id in client_ids],
-        )
+    if equipment_type == "boat":
+        client_ids = []
+        for row in db.execute("SELECT id, boat_model FROM clients").fetchall():
+            if _normalize_tuning_boat_model(row["boat_model"]) == old_key:
+                client_ids.append(row["id"])
+        if client_ids:
+            db.executemany(
+                "UPDATE clients SET boat_model = ? WHERE id = ?",
+                [(model_name, client_id) for client_id in client_ids],
+            )
 
-    # Field diagnostic sheets retain a direct profile link, so their model
-    # label should follow the same canonical identity as the catalog.
-    db.execute(
-        "UPDATE field_diagnostic_sheets SET boat_model = ? "
-        "WHERE boat_profile_id = ?",
-        (model_name, profile["id"]),
-    )
+        # Field diagnostic sheets retain a direct profile link, so their model
+        # label should follow the same canonical identity as the catalog.
+        db.execute(
+            "UPDATE field_diagnostic_sheets SET boat_model = ? "
+            "WHERE boat_profile_id = ?",
+            (model_name, profile["id"]),
+        )
     db.execute(
         "UPDATE tuning_boat_profiles SET model_key = ?, model_name = ?, "
         "updated_at = ? WHERE id = ?",
@@ -1543,6 +1569,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             model_key TEXT NOT NULL UNIQUE,
             model_name TEXT NOT NULL,
+            equipment_type TEXT NOT NULL DEFAULT 'boat',
             photo_filename TEXT,
             specifications TEXT NOT NULL DEFAULT '',
             specifications_source_url TEXT NOT NULL DEFAULT '',
@@ -2080,6 +2107,15 @@ def init_db():
             "ALTER TABLE tuning_boat_profiles ADD COLUMN "
             "specifications_source_name TEXT NOT NULL DEFAULT ''"
         )
+    if "equipment_type" not in boat_profile_cols:
+        conn.execute(
+            "ALTER TABLE tuning_boat_profiles ADD COLUMN "
+            "equipment_type TEXT NOT NULL DEFAULT 'boat'"
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tuning_equipment_profiles_type_name "
+        "ON tuning_boat_profiles (equipment_type, model_name)"
+    )
     _sync_tuning_boat_profiles(conn)
     conn.execute(
         """
@@ -4539,13 +4575,19 @@ def tuning_index():
     orders = []
     for row in order_rows:
         order = dict(row)
-        order["boat_profile_id"] = (
-            profile_ids_by_model.get(
-                _normalize_tuning_boat_model(order["boat_model"])
-            )
-            if order["equipment_type"] == "boat"
-            else None
+        equipment_type = (
+            "motor" if order["equipment_type"] == "motor" else "boat"
         )
+        model_name = (
+            order["motor_model"] if equipment_type == "motor"
+            else order["boat_model"]
+        )
+        profile_id = profile_ids_by_model.get(
+            _tuning_equipment_profile_key(equipment_type, model_name)
+        )
+        order["equipment_profile_id"] = profile_id
+        order["boat_profile_id"] = profile_id if equipment_type == "boat" else None
+        order["motor_profile_id"] = profile_id if equipment_type == "motor" else None
         orders.append(order)
     grand_total = sum(o["total"] for o in orders)
     return render_template(
@@ -4851,30 +4893,40 @@ def import_yclients_client_directory():
     return redirect(url_for("tuning_clients", section=EXCURSION_SEGMENT))
 
 
-@app.route("/tuning/boats")
-@admin_login_required
-def tuning_boat_catalog():
+def _tuning_equipment_catalog_endpoint(equipment_type):
+    return "tuning_motor_catalog" if equipment_type == "motor" else "tuning_boat_catalog"
+
+
+def _tuning_equipment_profile_endpoint(equipment_type):
+    return "tuning_motor_profile" if equipment_type == "motor" else "tuning_boat_profile"
+
+
+def _render_tuning_equipment_catalog(equipment_type):
     db = get_db()
     _sync_tuning_boat_profiles(db)
     db.commit()
+    model_column = "motor_model" if equipment_type == "motor" else "boat_model"
 
     order_rows = db.execute(
         "SELECT o.*, "
         "(SELECT GROUP_CONCAT(i.work_name, ' · ') FROM tuning_order_items i "
         " WHERE i.order_id = o.id AND i.status != 'removed') AS work_names "
-        "FROM tuning_orders o WHERE o.equipment_type = 'boat' "
-        "AND TRIM(o.boat_model) != '' "
-        "ORDER BY o.created_at DESC, o.id DESC"
+        f"FROM tuning_orders o WHERE o.equipment_type = ? "
+        f"AND TRIM(o.{model_column}) != '' "
+        "ORDER BY o.created_at DESC, o.id DESC",
+        (equipment_type,),
     ).fetchall()
     orders_by_model = {}
     for row in order_rows:
         orders_by_model.setdefault(
-            _normalize_tuning_boat_model(row["boat_model"]), []
+            _tuning_equipment_profile_key(equipment_type, row[model_column]), []
         ).append(row)
 
     profiles = []
     for row in db.execute(
-        "SELECT * FROM tuning_boat_profiles ORDER BY model_name COLLATE NOCASE"
+        "SELECT * FROM tuning_boat_profiles WHERE equipment_type = ? "
+        "ORDER BY model_name COLLATE NOCASE",
+        (equipment_type,),
     ).fetchall():
         profile_orders = orders_by_model.get(row["model_key"], [])
         if not profile_orders:
@@ -4889,45 +4941,65 @@ def tuning_boat_catalog():
     return render_template(
         "tuning_index.html",
         active_page="tuning",
-        sub_page="boat_catalog",
+        sub_page=f"{equipment_type}_catalog",
         catalog_view="list",
-        page_title="Каталог лодок",
+        page_title=("Каталог моторов" if equipment_type == "motor" else "Каталог лодок"),
         boat_profiles=profiles,
         catalog_order_count=sum(profile["order_count"] for profile in profiles),
+        catalog_equipment_type=equipment_type,
     )
 
 
-@app.route("/tuning/boats/<int:profile_id>")
+@app.route("/tuning/boats")
 @admin_login_required
-def tuning_boat_profile(profile_id):
+def tuning_boat_catalog():
+    return _render_tuning_equipment_catalog("boat")
+
+
+@app.route("/tuning/motors")
+@admin_login_required
+def tuning_motor_catalog():
+    return _render_tuning_equipment_catalog("motor")
+
+
+def _render_tuning_equipment_profile(profile_id, expected_type):
     db = get_db()
     profile_row = db.execute(
         "SELECT * FROM tuning_boat_profiles WHERE id = ?", (profile_id,)
     ).fetchone()
     if profile_row is None:
-        return redirect(url_for("tuning_boat_catalog"))
+        return redirect(url_for(_tuning_equipment_catalog_endpoint(expected_type)))
+    if profile_row["equipment_type"] != expected_type:
+        return redirect(url_for(
+            _tuning_equipment_profile_endpoint(profile_row["equipment_type"]),
+            profile_id=profile_id,
+        ))
 
     profile = dict(profile_row)
     profile["photo_url"] = _tuning_boat_photo_url(profile)
     profile["specification_items"] = _parse_boat_specifications(
         profile["specifications"]
     )
+    model_column = "motor_model" if expected_type == "motor" else "boat_model"
     orders = []
     for row in db.execute(
         "SELECT o.*, "
         "(SELECT GROUP_CONCAT(i.work_name, ' · ') FROM tuning_order_items i "
         " WHERE i.order_id = o.id AND i.status != 'removed') AS work_names "
-        "FROM tuning_orders o WHERE o.equipment_type = 'boat' "
-        "AND TRIM(o.boat_model) != '' "
-        "ORDER BY o.created_at DESC, o.id DESC"
+        "FROM tuning_orders o WHERE o.equipment_type = ? "
+        f"AND TRIM(o.{model_column}) != '' "
+        "ORDER BY o.created_at DESC, o.id DESC",
+        (expected_type,),
     ).fetchall():
-        if _normalize_tuning_boat_model(row["boat_model"]) == profile["model_key"]:
+        if _tuning_equipment_profile_key(
+            expected_type, row[model_column]
+        ) == profile["model_key"]:
             orders.append(row)
 
     return render_template(
         "tuning_index.html",
         active_page="tuning",
-        sub_page="boat_catalog",
+        sub_page=f"{expected_type}_catalog",
         catalog_view="profile",
         page_title=profile["model_name"],
         boat_profile=profile,
@@ -4938,10 +5010,27 @@ def tuning_boat_profile(profile_id):
         profile_name_editor_open=session.pop(
             "boat_profile_name_editor_open", False
         ),
+        profile_type_editor_open=session.pop(
+            "boat_profile_type_editor_open", False
+        ),
+        catalog_equipment_type=expected_type,
     )
 
 
+@app.route("/tuning/boats/<int:profile_id>")
+@admin_login_required
+def tuning_boat_profile(profile_id):
+    return _render_tuning_equipment_profile(profile_id, "boat")
+
+
+@app.route("/tuning/motors/<int:profile_id>")
+@admin_login_required
+def tuning_motor_profile(profile_id):
+    return _render_tuning_equipment_profile(profile_id, "motor")
+
+
 @app.route("/tuning/boats/<int:profile_id>/edit", methods=["POST"])
+@app.route("/tuning/equipment/<int:profile_id>/edit", methods=["POST"])
 @admin_login_required
 def update_tuning_boat_profile(profile_id):
     db = get_db()
@@ -4950,26 +5039,27 @@ def update_tuning_boat_profile(profile_id):
     ).fetchone()
     if profile is None:
         return redirect(url_for("tuning_boat_catalog"))
+    profile_endpoint = _tuning_equipment_profile_endpoint(profile["equipment_type"])
 
     raw_model_name = request.form.get("model_name")
     model_name = " ".join(
         (profile["model_name"] if raw_model_name is None else raw_model_name).split()
     )
-    model_key = _normalize_tuning_boat_model(model_name)
+    model_key = _tuning_equipment_profile_key(profile["equipment_type"], model_name)
     specifications = request.form.get("specifications", "").strip()
     source_url = request.form.get("specifications_source_url", "").strip()
     source_name = request.form.get("specifications_source_name", "").strip()
     if not model_name:
-        session["boat_profile_error"] = "Укажите название модели лодки."
+        session["boat_profile_error"] = "Укажите название модели."
         session["boat_profile_name_editor_open"] = True
-        return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
+        return redirect(url_for(profile_endpoint, profile_id=profile_id))
     if len(model_name) > TUNING_BOAT_MODEL_NAME_LIMIT:
         session["boat_profile_error"] = (
             "Название модели не должно превышать "
             f"{TUNING_BOAT_MODEL_NAME_LIMIT} символов."
         )
         session["boat_profile_name_editor_open"] = True
-        return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
+        return redirect(url_for(profile_endpoint, profile_id=profile_id))
     duplicate = db.execute(
         "SELECT id FROM tuning_boat_profiles WHERE model_key = ? AND id != ?",
         (model_key, profile_id),
@@ -4979,24 +5069,24 @@ def update_tuning_boat_profile(profile_id):
             "Модель с таким названием уже есть в каталоге."
         )
         session["boat_profile_name_editor_open"] = True
-        return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
+        return redirect(url_for(profile_endpoint, profile_id=profile_id))
     if len(specifications) > TUNING_BOAT_SPECIFICATIONS_LIMIT:
         session["boat_profile_error"] = (
             "Характеристики не должны превышать "
             f"{TUNING_BOAT_SPECIFICATIONS_LIMIT} символов."
         )
-        return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
+        return redirect(url_for(profile_endpoint, profile_id=profile_id))
     if len(source_url) > TUNING_BOAT_SOURCE_URL_LIMIT or (
         source_url and not source_url.startswith(("https://", "http://"))
     ):
         session["boat_profile_error"] = "Укажите корректную ссылку на источник."
-        return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
+        return redirect(url_for(profile_endpoint, profile_id=profile_id))
     if len(source_name) > TUNING_BOAT_SOURCE_NAME_LIMIT:
         session["boat_profile_error"] = (
             "Название источника не должно превышать "
             f"{TUNING_BOAT_SOURCE_NAME_LIMIT} символов."
         )
-        return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
+        return redirect(url_for(profile_endpoint, profile_id=profile_id))
 
     photo_filename = profile["photo_filename"]
     photo = request.files.get("photo")
@@ -5006,7 +5096,7 @@ def update_tuning_boat_profile(profile_id):
             session["boat_profile_error"] = (
                 "Фотография должна быть в формате JPG, PNG или WebP."
             )
-            return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
+            return redirect(url_for(profile_endpoint, profile_id=profile_id))
         photos_dir = os.path.join(app.static_folder, "tuning_boats")
         os.makedirs(photos_dir, exist_ok=True)
         photo_filename = f"{profile_id}-{secrets.token_hex(6)}{extension}"
@@ -5027,9 +5117,133 @@ def update_tuning_boat_profile(profile_id):
     session["boat_profile_notice"] = (
         "Название модели и связанные записи обновлены."
         if renamed
-        else "Профиль лодки обновлён."
+        else (
+            "Профиль мотора обновлён."
+            if profile["equipment_type"] == "motor"
+            else "Профиль лодки обновлён."
+        )
     )
-    return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
+    return redirect(url_for(profile_endpoint, profile_id=profile_id))
+
+
+@app.route("/tuning/equipment/<int:profile_id>/type", methods=["POST"])
+@admin_login_required
+def update_tuning_equipment_profile_type(profile_id):
+    db = get_db()
+    profile = db.execute(
+        "SELECT * FROM tuning_boat_profiles WHERE id = ?", (profile_id,)
+    ).fetchone()
+    if profile is None:
+        return redirect(url_for("tuning_boat_catalog"))
+
+    source_type = profile["equipment_type"]
+    target_type = request.form.get("equipment_type", "").strip()
+    source_endpoint = _tuning_equipment_profile_endpoint(source_type)
+    if target_type not in ("boat", "motor") or target_type == source_type:
+        return redirect(url_for(source_endpoint, profile_id=profile_id))
+
+    if source_type == "boat":
+        diagnostic_count = db.execute(
+            "SELECT COUNT(*) FROM field_diagnostic_sheets "
+            "WHERE boat_profile_id = ?",
+            (profile_id,),
+        ).fetchone()[0]
+        if diagnostic_count:
+            session["boat_profile_error"] = (
+                "Карточку нельзя перенести в моторы, пока с ней связаны "
+                "диагностические листы лодки."
+            )
+            session["boat_profile_type_editor_open"] = True
+            return redirect(url_for(source_endpoint, profile_id=profile_id))
+
+    target_key = _tuning_equipment_profile_key(target_type, profile["model_name"])
+    target_profile = db.execute(
+        "SELECT * FROM tuning_boat_profiles "
+        "WHERE model_key = ? AND equipment_type = ? AND id != ?",
+        (target_key, target_type, profile_id),
+    ).fetchone()
+    canonical_name = (
+        target_profile["model_name"] if target_profile is not None
+        else profile["model_name"]
+    )
+    source_model_column = "motor_model" if source_type == "motor" else "boat_model"
+    order_rows = db.execute(
+        f"SELECT id, client_id, {source_model_column} AS model_name "
+        "FROM tuning_orders WHERE equipment_type = ?",
+        (source_type,),
+    ).fetchall()
+    order_ids = [
+        row["id"] for row in order_rows
+        if _tuning_equipment_profile_key(source_type, row["model_name"])
+        == profile["model_key"]
+    ]
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    if target_type == "motor":
+        db.executemany(
+            "UPDATE tuning_orders SET equipment_type = 'motor', boat_model = '', "
+            "boat_registration_number = '', motor_model = ?, updated_at = ? "
+            "WHERE id = ?",
+            [(canonical_name, now, order_id) for order_id in order_ids],
+        )
+        for client in db.execute("SELECT id, boat_model FROM clients").fetchall():
+            if _normalize_tuning_boat_model(client["boat_model"]) == profile["model_key"]:
+                db.execute(
+                    "UPDATE clients SET boat_model = '' WHERE id = ?", (client["id"],)
+                )
+    else:
+        db.executemany(
+            "UPDATE tuning_orders SET equipment_type = 'boat', boat_model = ?, "
+            "motor_model = '', motor_serial_number = '', updated_at = ? WHERE id = ?",
+            [(canonical_name, now, order_id) for order_id in order_ids],
+        )
+        linked_client_ids = {
+            row["client_id"] for row in order_rows
+            if row["id"] in order_ids and row["client_id"] is not None
+        }
+        if linked_client_ids:
+            db.executemany(
+                "UPDATE clients SET boat_model = ? WHERE id = ?",
+                [(canonical_name, client_id) for client_id in linked_client_ids],
+            )
+
+    if target_profile is not None:
+        db.execute(
+            "UPDATE tuning_boat_profiles SET photo_filename = ?, specifications = ?, "
+            "specifications_source_url = ?, specifications_source_name = ?, "
+            "updated_at = ? WHERE id = ?",
+            (
+                target_profile["photo_filename"] or profile["photo_filename"],
+                target_profile["specifications"] or profile["specifications"],
+                target_profile["specifications_source_url"]
+                or profile["specifications_source_url"],
+                target_profile["specifications_source_name"]
+                or profile["specifications_source_name"],
+                now,
+                target_profile["id"],
+            ),
+        )
+        db.execute("DELETE FROM tuning_boat_profiles WHERE id = ?", (profile_id,))
+        destination_id = target_profile["id"]
+    else:
+        db.execute(
+            "UPDATE tuning_boat_profiles SET equipment_type = ?, model_key = ?, "
+            "updated_at = ? WHERE id = ?",
+            (target_type, target_key, now, profile_id),
+        )
+        destination_id = profile_id
+
+    if target_type == "boat":
+        _seed_tuning_boat_profile_specifications(db)
+    db.commit()
+    session["boat_profile_notice"] = (
+        "Карточка перенесена в каталог моторов."
+        if target_type == "motor"
+        else "Карточка перенесена в каталог лодок."
+    )
+    return redirect(url_for(
+        _tuning_equipment_profile_endpoint(target_type),
+        profile_id=destination_id,
+    ))
 
 
 app.register_blueprint(
@@ -5553,10 +5767,18 @@ def edit_tuning_order(order_id):
         return redirect(url_for("tuning_index"))
     _sync_tuning_boat_profiles(db)
     db.commit()
+    equipment_profile_id = _tuning_equipment_profile_id(
+        db,
+        order["equipment_type"],
+        order["motor_model"]
+        if order["equipment_type"] == "motor"
+        else order["boat_model"],
+    )
     boat_profile_id = (
-        _tuning_boat_profile_id(db, order["boat_model"])
-        if order["equipment_type"] == "boat"
-        else None
+        equipment_profile_id if order["equipment_type"] == "boat" else None
+    )
+    motor_profile_id = (
+        equipment_profile_id if order["equipment_type"] == "motor" else None
     )
 
     if request.method == "GET":
@@ -5626,6 +5848,7 @@ def edit_tuning_order(order_id):
             cost_units=SUPPLY_COST_UNITS,
             notes=notes, admins=admins,
             boat_profile_id=boat_profile_id,
+            motor_profile_id=motor_profile_id,
             boat_model_choices=_tuning_boat_model_choices(db),
             tuning_client_choices=_tuning_client_choices(db),
             modulkassa_configured=_modulkassa_configured(),
@@ -5652,6 +5875,7 @@ def edit_tuning_order(order_id):
             yookassa_error=None,
             hull_sheets=hull_sheets, available_hull_sheets=available_hull_sheets,
             boat_profile_id=boat_profile_id,
+            motor_profile_id=motor_profile_id,
             boat_model_choices=_tuning_boat_model_choices(db),
             tuning_client_choices=_tuning_client_choices(db),
             modulkassa_configured=_modulkassa_configured(),

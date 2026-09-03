@@ -258,7 +258,7 @@ class TuningEquipmentTypeTests(unittest.TestCase):
             "Согласовать место установки с клиентом".encode(), assigned_page.data
         )
 
-    def test_motor_order_is_saved_but_not_added_to_boat_catalog(self):
+    def test_motor_order_is_saved_in_separate_motor_catalog(self):
         self.login()
         response = self.client.post(
             "/tuning/add",
@@ -284,18 +284,155 @@ class TuningEquipmentTypeTests(unittest.TestCase):
 
         orders_page = self.client.get("/tuning")
         orders_html = orders_page.get_data(as_text=True)
-        catalog = self.client.get("/tuning/boats")
+        boat_catalog = self.client.get("/tuning/boats")
+        motor_catalog = self.client.get("/tuning/motors")
 
         self.assertIn("Mercury F200", orders_html)
         self.assertIn("MRC-200-001", orders_html)
         self.assertIn("Мотор", orders_html)
-        self.assertNotIn("Mercury F200", catalog.get_data(as_text=True))
+        self.assertNotIn("Mercury F200", boat_catalog.get_data(as_text=True))
+        motor_html = motor_catalog.get_data(as_text=True)
+        self.assertIn("Mercury F200", motor_html)
+        self.assertIn("Каталог моторов", motor_html)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            profile = db.execute(
+                "SELECT * FROM tuning_boat_profiles WHERE equipment_type = 'motor'"
+            ).fetchone()
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile["model_key"], "motor:mercury f200")
+        profile_href = f'href="/tuning/motors/{profile["id"]}"'
+        self.assertIn(profile_href, motor_html)
+        self.assertIn(profile_href, orders_html)
         edit_page = self.client.get(f"/tuning/edit/{order_id}")
         edit_html = edit_page.get_data(as_text=True)
         self.assertIn('name="equipment_type" value="motor"', edit_html)
         self.assertIn('value="Mercury F200"', edit_html)
         self.assertIn('value="MRC-200-001"', edit_html)
-        self.assertNotIn("Открыть профиль ↗", edit_html)
+        self.assertIn(profile_href, edit_html)
+        self.assertIn("Открыть профиль ↗", edit_html)
+
+    def test_profile_type_can_move_between_motor_and_boat_catalogs(self):
+        self.login()
+        self.client.post(
+            "/tuning/add",
+            data=self.valid_form(
+                "motor",
+                motor_model="Honda BF15",
+                motor_serial_number="BF15-123",
+            ),
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            profile_id = db.execute(
+                "SELECT id FROM tuning_boat_profiles "
+                "WHERE model_key = 'motor:honda bf15'"
+            ).fetchone()["id"]
+            order_id = db.execute("SELECT id FROM tuning_orders").fetchone()["id"]
+
+        moved_to_boats = self.client.post(
+            f"/tuning/equipment/{profile_id}/type",
+            data={"equipment_type": "boat"},
+        )
+        self.assertEqual(moved_to_boats.status_code, 302)
+        self.assertTrue(
+            moved_to_boats.headers["Location"].endswith(f"/tuning/boats/{profile_id}")
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            profile = db.execute(
+                "SELECT * FROM tuning_boat_profiles WHERE id = ?", (profile_id,)
+            ).fetchone()
+            order = db.execute(
+                "SELECT * FROM tuning_orders WHERE id = ?", (order_id,)
+            ).fetchone()
+            client_row = db.execute(
+                "SELECT boat_model FROM clients WHERE id = ?", (order["client_id"],)
+            ).fetchone()
+        self.assertEqual(profile["equipment_type"], "boat")
+        self.assertEqual(profile["model_key"], "honda bf15")
+        self.assertEqual(order["equipment_type"], "boat")
+        self.assertEqual(order["boat_model"], "Honda BF15")
+        self.assertEqual(order["motor_model"], "")
+        self.assertEqual(order["motor_serial_number"], "")
+        self.assertEqual(client_row["boat_model"], "Honda BF15")
+        self.assertIn(
+            "Honda BF15", self.client.get("/tuning/boats").get_data(as_text=True)
+        )
+        self.assertNotIn(
+            "Honda BF15", self.client.get("/tuning/motors").get_data(as_text=True)
+        )
+
+        moved_to_motors = self.client.post(
+            f"/tuning/equipment/{profile_id}/type",
+            data={"equipment_type": "motor"},
+        )
+        self.assertEqual(moved_to_motors.status_code, 302)
+        self.assertTrue(
+            moved_to_motors.headers["Location"].endswith(f"/tuning/motors/{profile_id}")
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            profile = db.execute(
+                "SELECT * FROM tuning_boat_profiles WHERE id = ?", (profile_id,)
+            ).fetchone()
+            order = db.execute(
+                "SELECT * FROM tuning_orders WHERE id = ?", (order_id,)
+            ).fetchone()
+            client_row = db.execute(
+                "SELECT boat_model FROM clients WHERE id = ?", (order["client_id"],)
+            ).fetchone()
+        self.assertEqual(profile["equipment_type"], "motor")
+        self.assertEqual(profile["model_key"], "motor:honda bf15")
+        self.assertEqual(order["equipment_type"], "motor")
+        self.assertEqual(order["boat_model"], "")
+        self.assertEqual(order["motor_model"], "Honda BF15")
+        self.assertEqual(client_row["boat_model"], "")
+
+    def test_profile_type_change_merges_same_named_destination_profile(self):
+        self.login()
+        self.client.post(
+            "/tuning/add",
+            data=self.valid_form("boat", boat_model="Mercury 15"),
+        )
+        self.client.post(
+            "/tuning/add",
+            data=self.valid_form("motor", motor_model="Mercury 15"),
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            profiles = {
+                row["equipment_type"]: row["id"]
+                for row in db.execute(
+                    "SELECT id, equipment_type FROM tuning_boat_profiles"
+                ).fetchall()
+            }
+
+        response = self.client.post(
+            f"/tuning/equipment/{profiles['boat']}/type",
+            data={"equipment_type": "motor"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response.headers["Location"].endswith(
+                f"/tuning/motors/{profiles['motor']}"
+            )
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            profiles_after = db.execute(
+                "SELECT * FROM tuning_boat_profiles"
+            ).fetchall()
+            orders = db.execute(
+                "SELECT equipment_type, boat_model, motor_model FROM tuning_orders"
+            ).fetchall()
+        self.assertEqual(len(profiles_after), 1)
+        self.assertEqual(profiles_after[0]["equipment_type"], "motor")
+        self.assertEqual(profiles_after[0]["model_key"], "motor:mercury 15")
+        self.assertTrue(all(row["equipment_type"] == "motor" for row in orders))
+        self.assertTrue(all(row["boat_model"] == "" for row in orders))
+        self.assertTrue(all(row["motor_model"] == "Mercury 15" for row in orders))
 
     def test_boat_profile_keeps_motor_on_order_not_on_model_identity(self):
         self.login()
@@ -383,6 +520,18 @@ class TuningEquipmentTypeTests(unittest.TestCase):
             "(client_name, boat_model, sale_channel, phone, subtotal, total, created_at, updated_at) "
             "VALUES ('Клиент', 'Legacy Boat', 'direct', '+7', 0, 0, '2026-01-01', '2026-01-01')"
         )
+        connection.execute(
+            "CREATE TABLE tuning_boat_profiles ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, model_key TEXT NOT NULL UNIQUE, "
+            "model_name TEXT NOT NULL, photo_filename TEXT, "
+            "specifications TEXT NOT NULL DEFAULT '', "
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO tuning_boat_profiles "
+            "(model_key, model_name, created_at, updated_at) "
+            "VALUES ('legacy boat', 'Legacy Boat', '2026-01-01', '2026-01-01')"
+        )
         connection.commit()
         connection.close()
 
@@ -395,12 +544,12 @@ class TuningEquipmentTypeTests(unittest.TestCase):
             "motor_model, motor_serial_number FROM tuning_orders"
         ).fetchone()
         profile = migrated.execute(
-            "SELECT model_name FROM tuning_boat_profiles"
+            "SELECT model_name, equipment_type FROM tuning_boat_profiles"
         ).fetchone()
         migrated.close()
 
         self.assertEqual(row, ("boat", "Legacy Boat", "", "", ""))
-        self.assertEqual(profile[0], "Legacy Boat")
+        self.assertEqual(profile, ("Legacy Boat", "boat"))
 
 
 if __name__ == "__main__":

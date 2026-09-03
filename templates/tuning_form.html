@@ -88,6 +88,7 @@
     <a href="{{ url_for('tuning_index') }}" class="{{ 'active' if sub_page == 'orders' }}">Заказы</a>
     <a href="{{ url_for('tuning_diagnostics') }}" class="{{ 'active' if sub_page == 'diagnostics' }}">Диагностика лодок</a>
     <a href="{{ url_for('tuning_boat_catalog') }}" class="{{ 'active' if sub_page == 'boat_catalog' }}">Каталог лодок</a>
+    <a href="{{ url_for('tuning_motor_catalog') }}" class="{{ 'active' if sub_page == 'motor_catalog' }}">Каталог моторов</a>
   </nav>
 
   {% if errors %}
@@ -652,7 +653,13 @@
           <span class="field-context">Необязательно</span>
         </div>
         <div class="field" id="motorModelField">
-          <label for="motor_model" id="motorModelLabel">{{ 'Модель мотора' if selected_equipment_type == 'motor' else 'Мотор' }}</label>
+          <div class="field-label-with-link">
+            <label for="motor_model" id="motorModelLabel">{{ 'Модель мотора' if selected_equipment_type == 'motor' else 'Мотор' }}</label>
+            {% if motor_profile_id and selected_equipment_type == 'motor' %}
+            <a href="{{ url_for('tuning_motor_profile', profile_id=motor_profile_id) }}"
+               class="tuning-boat-profile-link">Открыть профиль ↗</a>
+            {% endif %}
+          </div>
           <input type="text" id="motor_model" name="motor_model"
                  value="{{ form_values.motor_model if form_values else '' }}"
                  placeholder="Например: Yamaha F150"

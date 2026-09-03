@@ -74,6 +74,7 @@
     <a href="{{ url_for('tuning_index') }}" class="{{ 'active' if sub_page == 'orders' }}">Заказы</a>
     <a href="{{ url_for('tuning_diagnostics') }}" class="{{ 'active' if sub_page == 'diagnostics' }}">Диагностика лодок</a>
     <a href="{{ url_for('tuning_boat_catalog') }}" class="{{ 'active' if sub_page == 'boat_catalog' }}">Каталог лодок</a>
+    <a href="{{ url_for('tuning_motor_catalog') }}" class="{{ 'active' if sub_page == 'motor_catalog' }}">Каталог моторов</a>
   </nav>
 
   {% if sub_page == 'orders' %}
@@ -137,6 +138,9 @@
               {% if o.equipment_type == 'boat' and o.boat_profile_id %}
               <a href="{{ url_for('tuning_boat_profile', profile_id=o.boat_profile_id) }}"
                  class="tuning-boat-profile-link">{{ o.boat_model }}</a>
+              {% elif o.equipment_type == 'motor' and o.motor_profile_id %}
+              <a href="{{ url_for('tuning_motor_profile', profile_id=o.motor_profile_id) }}"
+                 class="tuning-boat-profile-link">{{ o.motor_model }}</a>
               {% elif o.equipment_type == 'motor' %}
               <span class="equipment-model">{{ o.motor_model }}</span>
               {% else %}
@@ -185,13 +189,14 @@
     </div>
     {% endif %}
   </section>
-  {% elif sub_page == 'boat_catalog' and catalog_view == 'list' %}
+  {% elif sub_page in ['boat_catalog', 'motor_catalog'] and catalog_view == 'list' %}
+  {% set is_motor_catalog = catalog_equipment_type == 'motor' %}
   <section class="boat-catalog-page" aria-labelledby="boat-catalog-heading">
     <div class="boat-catalog-heading">
       <div>
         <p class="boat-catalog-eyebrow">Архив тюнинг-центра</p>
-        <h2 id="boat-catalog-heading">Модели, с которыми мы работали</h2>
-        <p>Профиль создаётся автоматически для каждой модели, указанной в заказах.</p>
+        <h2 id="boat-catalog-heading">{{ 'Моторы, с которыми мы работали' if is_motor_catalog else 'Лодки, с которыми мы работали' }}</h2>
+        <p>Профиль создаётся автоматически для каждой модели {{ 'мотора' if is_motor_catalog else 'лодки' }}, указанной в заказах.</p>
       </div>
       <div class="boat-catalog-ledger" aria-label="Сводка каталога">
         <span><strong>{{ boat_profiles|length }}</strong> моделей</span>
@@ -201,26 +206,34 @@
 
     {% if boat_profiles %}
     <div class="boat-catalog-tools">
-      <label class="sr-only" for="boatCatalogSearch">Найти модель лодки</label>
+      <label class="sr-only" for="boatCatalogSearch">Найти модель {{ 'мотора' if is_motor_catalog else 'лодки' }}</label>
       <input id="boatCatalogSearch" type="search" placeholder="Найти модель…" autocomplete="off">
     </div>
     <div class="boat-model-grid" id="boatModelGrid">
       {% for profile in boat_profiles %}
-      <a href="{{ url_for('tuning_boat_profile', profile_id=profile.id) }}"
+      <a href="{{ url_for('tuning_motor_profile' if is_motor_catalog else 'tuning_boat_profile', profile_id=profile.id) }}"
          class="boat-model-card" data-boat-model="{{ profile.model_name|lower }}">
         <div class="boat-model-visual">
           {% if profile.photo_url %}
           <img src="{{ profile.photo_url }}" alt="{{ profile.model_name }}" loading="lazy">
           {% else %}
           <div class="boat-model-placeholder" aria-hidden="true">
+            {% if is_motor_catalog %}
+            <svg viewBox="0 0 120 80" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M43 12h34l9 13-5 29H48l-6-29 1-13z"/>
+              <path d="M50 20h28M55 54v13l-7 6h27l-7-6V54M57 73v-8h9v8"/>
+              <path d="M86 28h10M37 28h-8"/>
+            </svg>
+            {% else %}
             <svg viewBox="0 0 120 70" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 48h96l-13 13H31L12 48z"/>
               <path d="M39 48l9-24h28l14 24M53 24V13h19l8 11"/>
               <path d="M21 66c8 4 16 4 24 0 8 4 16 4 24 0 8 4 16 4 24 0"/>
             </svg>
+            {% endif %}
           </div>
           {% endif %}
-          <span class="boat-model-stamp">MODEL / {{ '%03d'|format(profile.id) }}</span>
+          <span class="boat-model-stamp">{{ 'MOTOR' if is_motor_catalog else 'MODEL' }} / {{ '%03d'|format(profile.id) }}</span>
         </div>
         <div class="boat-model-card-body">
           <h3>{{ profile.model_name }}</h3>
@@ -240,19 +253,27 @@
     {% else %}
     <div class="empty-state boat-catalog-empty">
       <div class="boat-empty-icon" aria-hidden="true">
+        {% if is_motor_catalog %}
+        <svg viewBox="0 0 120 80" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M43 12h34l9 13-5 29H48l-6-29 1-13z"/>
+          <path d="M50 20h28M55 54v13l-7 6h27l-7-6V54M57 73v-8h9v8"/>
+        </svg>
+        {% else %}
         <svg viewBox="0 0 120 70" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 48h96l-13 13H31L12 48z"/><path d="M39 48l9-24h28l14 24M53 24V13h19l8 11"/>
         </svg>
+        {% endif %}
       </div>
-      <div class="t">В заказах пока нет моделей лодок</div>
-      <div class="s">Укажите модель в заказе — её профиль автоматически появится здесь.</div>
+      <div class="t">В заказах пока нет моделей {{ 'моторов' if is_motor_catalog else 'лодок' }}</div>
+      <div class="s">Укажите модель {{ 'мотора' if is_motor_catalog else 'лодки' }} в заказе — её профиль автоматически появится здесь.</div>
     </div>
     {% endif %}
   </section>
 
-  {% elif sub_page == 'boat_catalog' and catalog_view == 'profile' %}
+  {% elif sub_page in ['boat_catalog', 'motor_catalog'] and catalog_view == 'profile' %}
+  {% set is_motor_catalog = catalog_equipment_type == 'motor' %}
   <section class="boat-profile-page">
-    <a href="{{ url_for('tuning_boat_catalog') }}" class="boat-profile-back">← Все модели</a>
+    <a href="{{ url_for('tuning_motor_catalog' if is_motor_catalog else 'tuning_boat_catalog') }}" class="boat-profile-back">← Все модели</a>
 
     {% if profile_notice %}<div class="alert success">{{ profile_notice }}</div>{% endif %}
     {% if profile_error %}<div class="alert">{{ profile_error }}</div>{% endif %}
@@ -265,14 +286,22 @@
           <img src="{{ boat_profile.photo_url }}" alt="{{ boat_profile.model_name }}">
           {% else %}
           <div class="boat-model-placeholder" aria-hidden="true">
+            {% if is_motor_catalog %}
+            <svg viewBox="0 0 120 80" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M43 12h34l9 13-5 29H48l-6-29 1-13z"/>
+              <path d="M50 20h28M55 54v13l-7 6h27l-7-6V54M57 73v-8h9v8"/>
+              <path d="M86 28h10M37 28h-8"/>
+            </svg>
+            {% else %}
             <svg viewBox="0 0 120 70" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 48h96l-13 13H31L12 48z"/>
               <path d="M39 48l9-24h28l14 24M53 24V13h19l8 11"/>
               <path d="M21 66c8 4 16 4 24 0 8 4 16 4 24 0 8 4 16 4 24 0"/>
             </svg>
+            {% endif %}
           </div>
           {% endif %}
-          <span class="boat-model-stamp">MODEL / {{ '%03d'|format(boat_profile.id) }}</span>
+          <span class="boat-model-stamp">{{ 'MOTOR' if is_motor_catalog else 'MODEL' }} / {{ '%03d'|format(boat_profile.id) }}</span>
         </div>
         <label class="boat-photo-control">
           <span>{{ 'Заменить фотографию' if boat_profile.photo_url else 'Добавить фотографию' }}</span>
@@ -281,7 +310,19 @@
       </div>
 
       <div class="boat-profile-identity">
-        <p class="boat-catalog-eyebrow">Профиль модели</p>
+        <div class="boat-profile-kicker-line">
+          <p class="boat-catalog-eyebrow">Профиль модели</p>
+          <details class="boat-profile-type-editor"{% if profile_type_editor_open %} open{% endif %}>
+            <summary>{{ 'Мотор' if is_motor_catalog else 'Лодка' }} <span aria-hidden="true">⌄</span></summary>
+            <div class="boat-profile-type-popover">
+              <strong>Тип карточки</strong>
+              <label><input type="radio" name="equipment_type" value="boat" {{ 'checked' if not is_motor_catalog }}> Лодка</label>
+              <label><input type="radio" name="equipment_type" value="motor" {{ 'checked' if is_motor_catalog }}> Мотор</label>
+              <button type="submit" formaction="{{ url_for('update_tuning_equipment_profile_type', profile_id=boat_profile.id) }}"
+                      formmethod="post" onclick="return confirm('Тип изменится у всех связанных заказов. Несовместимые номера будут очищены. Продолжить?');">Перенести</button>
+            </div>
+          </details>
+        </div>
         <div class="boat-profile-title-editor">
           <div class="boat-profile-title-line">
             <h2>{{ boat_profile.model_name }}</h2>
@@ -315,7 +356,7 @@
         </div>
 
         <div class="boat-profile-specifications">
-          <h3>Характеристики лодки</h3>
+          <h3>Характеристики {{ 'мотора' if is_motor_catalog else 'лодки' }}</h3>
           {% if boat_profile.specification_items %}
           <dl class="boat-specification-grid">
             {% for item in boat_profile.specification_items %}
@@ -373,15 +414,15 @@
       {% if profile_orders %}
       <div class="table-scroll">
         <table class="records">
-          <thead><tr><th>Заказ</th><th>Дата</th><th>Клиент</th><th>Бортовой номер</th><th>Мотор</th><th>Выполненные работы</th><th>Сумма</th><th>Статус</th></tr></thead>
+          <thead><tr><th>Заказ</th><th>Дата</th><th>Клиент</th><th>{{ 'Серийный номер' if is_motor_catalog else 'Бортовой номер' }}</th>{% if not is_motor_catalog %}<th>Мотор</th>{% endif %}<th>Выполненные работы</th><th>Сумма</th><th>Статус</th></tr></thead>
           <tbody>
             {% for order in profile_orders %}
             <tr>
               <td><a href="{{ url_for('edit_tuning_order', order_id=order.id) }}" class="term">№{{ order.id }}</a></td>
               <td class="muted">{{ order.created_at[:10]|ru_date }}</td>
               <td>{{ order.client_name }}</td>
-              <td>{{ order.boat_registration_number or '—' }}</td>
-              <td>{{ order.motor_model or '—' }}</td>
+              <td>{{ (order.motor_serial_number if is_motor_catalog else order.boat_registration_number) or '—' }}</td>
+              {% if not is_motor_catalog %}<td>{{ order.motor_model or '—' }}</td>{% endif %}
               <td class="boat-order-works">{{ order.work_names or 'Работы пока не добавлены' }}</td>
               <td class="amount">{{ order.total|money }}</td>
               <td><span class="status-badge status-{{ order.status }}">{{ order.status|order_status_label }}</span></td>
@@ -399,7 +440,7 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
-{% if sub_page == 'boat_catalog' and catalog_view == 'list' and boat_profiles %}
+{% if sub_page in ['boat_catalog', 'motor_catalog'] and catalog_view == 'list' and boat_profiles %}
 <script>
 (function () {
   var input = document.getElementById('boatCatalogSearch');
