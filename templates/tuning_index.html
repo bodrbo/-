@@ -283,7 +283,18 @@
       <div class="boat-profile-identity">
         <p class="boat-catalog-eyebrow">Профиль модели</p>
         <h2>{{ boat_profile.model_name }}</h2>
-        <p class="boat-profile-name-note">Название формируется из заказов с этой моделью.</p>
+        <details class="boat-profile-name-editor"{% if profile_error %} open{% endif %}>
+          <summary>Изменить название модели</summary>
+          <div class="boat-profile-name-fields">
+            <label for="boatModelName">
+              <span>Название модели</span>
+              <input id="boatModelName" type="text" name="model_name" required maxlength="200"
+                     value="{{ boat_profile.model_name }}" autocomplete="off">
+            </label>
+            <button type="submit">Сохранить название</button>
+          </div>
+          <p>Новое название применится к профилю, связанным тюнинг-заказам, клиентам и диагностическим листам.</p>
+        </details>
 
         <div class="boat-profile-stats">
           <div><strong>{{ profile_orders|length }}</strong><span>Заказов в истории</span></div>

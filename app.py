@@ -195,6 +195,7 @@ def find_diploma_url(username):
 
 WORK_PHOTO_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 TUNING_BOAT_PHOTO_EXTENSIONS = WORK_PHOTO_EXTENSIONS
+TUNING_BOAT_MODEL_NAME_LIMIT = 200
 TUNING_BOAT_SPECIFICATIONS_LIMIT = 8000
 TUNING_BOAT_SOURCE_NAME_LIMIT = 250
 TUNING_BOAT_SOURCE_URL_LIMIT = 2048
@@ -311,6 +312,48 @@ def _tuning_boat_model_choices(db):
             "ORDER BY model_name COLLATE NOCASE"
         ).fetchall()
     ]
+
+
+def _rename_tuning_boat_profile(db, profile, model_name, updated_at):
+    """Rename a canonical model without splitting its historical profile."""
+    old_key = profile["model_key"]
+    new_key = _normalize_tuning_boat_model(model_name)
+
+    order_ids = []
+    for row in db.execute(
+        "SELECT id, boat_model FROM tuning_orders WHERE equipment_type = 'boat'"
+    ).fetchall():
+        if _normalize_tuning_boat_model(row["boat_model"]) == old_key:
+            order_ids.append(row["id"])
+    if order_ids:
+        db.executemany(
+            "UPDATE tuning_orders SET boat_model = ?, updated_at = ? WHERE id = ?",
+            [(model_name, updated_at, order_id) for order_id in order_ids],
+        )
+
+    client_ids = []
+    for row in db.execute("SELECT id, boat_model FROM clients").fetchall():
+        if _normalize_tuning_boat_model(row["boat_model"]) == old_key:
+            client_ids.append(row["id"])
+    if client_ids:
+        db.executemany(
+            "UPDATE clients SET boat_model = ? WHERE id = ?",
+            [(model_name, client_id) for client_id in client_ids],
+        )
+
+    # Field diagnostic sheets retain a direct profile link, so their model
+    # label should follow the same canonical identity as the catalog.
+    db.execute(
+        "UPDATE field_diagnostic_sheets SET boat_model = ? "
+        "WHERE boat_profile_id = ?",
+        (model_name, profile["id"]),
+    )
+    db.execute(
+        "UPDATE tuning_boat_profiles SET model_key = ?, model_name = ?, "
+        "updated_at = ? WHERE id = ?",
+        (new_key, model_name, updated_at, profile["id"]),
+    )
+    return len(order_ids)
 
 
 def _tuning_client_choices(db):
@@ -4905,9 +4948,32 @@ def update_tuning_boat_profile(profile_id):
     if profile is None:
         return redirect(url_for("tuning_boat_catalog"))
 
+    raw_model_name = request.form.get("model_name")
+    model_name = " ".join(
+        (profile["model_name"] if raw_model_name is None else raw_model_name).split()
+    )
+    model_key = _normalize_tuning_boat_model(model_name)
     specifications = request.form.get("specifications", "").strip()
     source_url = request.form.get("specifications_source_url", "").strip()
     source_name = request.form.get("specifications_source_name", "").strip()
+    if not model_name:
+        session["boat_profile_error"] = "Укажите название модели лодки."
+        return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
+    if len(model_name) > TUNING_BOAT_MODEL_NAME_LIMIT:
+        session["boat_profile_error"] = (
+            "Название модели не должно превышать "
+            f"{TUNING_BOAT_MODEL_NAME_LIMIT} символов."
+        )
+        return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
+    duplicate = db.execute(
+        "SELECT id FROM tuning_boat_profiles WHERE model_key = ? AND id != ?",
+        (model_key, profile_id),
+    ).fetchone()
+    if duplicate is not None:
+        session["boat_profile_error"] = (
+            "Модель с таким названием уже есть в каталоге."
+        )
+        return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
     if len(specifications) > TUNING_BOAT_SPECIFICATIONS_LIMIT:
         session["boat_profile_error"] = (
             "Характеристики не должны превышать "
@@ -4941,6 +5007,9 @@ def update_tuning_boat_profile(profile_id):
         photo.save(os.path.join(photos_dir, photo_filename))
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    renamed = model_key != profile["model_key"] or model_name != profile["model_name"]
+    if renamed:
+        _rename_tuning_boat_profile(db, profile, model_name, now)
     db.execute(
         "UPDATE tuning_boat_profiles "
         "SET specifications = ?, specifications_source_url = ?, "
@@ -4949,7 +5018,11 @@ def update_tuning_boat_profile(profile_id):
         (specifications, source_url, source_name, photo_filename, now, profile_id),
     )
     db.commit()
-    session["boat_profile_notice"] = "Профиль лодки обновлён."
+    session["boat_profile_notice"] = (
+        "Название модели и связанные записи обновлены."
+        if renamed
+        else "Профиль лодки обновлён."
+    )
     return redirect(url_for("tuning_boat_profile", profile_id=profile_id))
 
 

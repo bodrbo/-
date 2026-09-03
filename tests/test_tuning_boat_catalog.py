@@ -216,6 +216,130 @@ class TuningBoatCatalogTests(unittest.TestCase):
                 profiles["неизвестная лодка"]["specifications"], ""
             )
 
+    def test_profile_name_can_be_renamed_without_splitting_history(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            first_order_id = self.create_order(
+                db, "Old Boat 600", "Первый клиент", 1000, "2026-08-25 10:00"
+            )
+            second_order_id = self.create_order(
+                db, "  OLD   BOAT 600  ", "Второй клиент", 2000, "2026-08-26 10:00"
+            )
+            client_id = db.execute(
+                "INSERT INTO clients "
+                "(client_name, boat_model, phone, token, created_at) "
+                "VALUES ('Владелец лодки', 'old boat 600', '', "
+                "'boat-catalog-rename-test', '2026-08-25 10:00')"
+            ).lastrowid
+            application_module._sync_tuning_boat_profiles(db)
+            profile_id = db.execute(
+                "SELECT id FROM tuning_boat_profiles WHERE model_key = 'old boat 600'"
+            ).fetchone()["id"]
+            sheet_id = db.execute(
+                "INSERT INTO field_diagnostic_sheets "
+                "(boat_profile_id, boat_model, owner_name, owner_phone, "
+                "inspection_type, status, created_by_name, started_at) "
+                "VALUES (?, 'Old Boat 600', 'Владелец', '', 'water', "
+                "'in_progress', 'Мастер', '2026-08-25 10:00')",
+                (profile_id,),
+            ).lastrowid
+            db.commit()
+
+        self.addCleanup(self._delete_rename_fixture, client_id, sheet_id)
+        self.login()
+        response = self.client.post(
+            f"/tuning/boats/{profile_id}/edit",
+            data={"model_name": "  New   Boat  650  "},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith(f"/tuning/boats/{profile_id}"))
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            profile = db.execute(
+                "SELECT * FROM tuning_boat_profiles WHERE id = ?", (profile_id,)
+            ).fetchone()
+            orders = db.execute(
+                "SELECT id, boat_model FROM tuning_orders WHERE id IN (?, ?) ORDER BY id",
+                (first_order_id, second_order_id),
+            ).fetchall()
+            client_model = db.execute(
+                "SELECT boat_model FROM clients WHERE id = ?", (client_id,)
+            ).fetchone()["boat_model"]
+            sheet_model = db.execute(
+                "SELECT boat_model FROM field_diagnostic_sheets WHERE id = ?",
+                (sheet_id,),
+            ).fetchone()["boat_model"]
+
+        self.assertEqual(profile["model_name"], "New Boat 650")
+        self.assertEqual(profile["model_key"], "new boat 650")
+        self.assertEqual([row["boat_model"] for row in orders], ["New Boat 650"] * 2)
+        self.assertEqual(client_model, "New Boat 650")
+        self.assertEqual(sheet_model, "New Boat 650")
+
+        profile_page = self.client.get(f"/tuning/boats/{profile_id}").get_data(
+            as_text=True
+        )
+        self.assertIn("New Boat 650", profile_page)
+        self.assertIn("Название модели и связанные записи обновлены.", profile_page)
+        self.assertIn(f"№{first_order_id}", profile_page)
+        self.assertIn(f"№{second_order_id}", profile_page)
+        orders_page = self.client.get("/tuning").get_data(as_text=True)
+        self.assertIn("New Boat 650", orders_page)
+        self.assertEqual(
+            orders_page.count(f'href="/tuning/boats/{profile_id}"'), 2
+        )
+
+    @staticmethod
+    def _delete_rename_fixture(client_id, sheet_id):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM field_diagnostic_sheets WHERE id = ?", (sheet_id,))
+            db.execute("DELETE FROM clients WHERE id = ?", (client_id,))
+            db.commit()
+
+    def test_profile_name_rejects_blank_duplicate_and_oversized_values(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.create_order(db, "Model Alpha", "Клиент", 1000, "2026-08-25 10:00")
+            self.create_order(db, "Model Beta", "Клиент", 1000, "2026-08-26 10:00")
+            application_module._sync_tuning_boat_profiles(db)
+            profiles = {
+                row["model_key"]: row["id"]
+                for row in db.execute(
+                    "SELECT id, model_key FROM tuning_boat_profiles"
+                ).fetchall()
+            }
+            db.commit()
+
+        self.login()
+        for invalid_name, expected_message in (
+            ("   ", "Укажите название модели лодки."),
+            ("model beta", "Модель с таким названием уже есть в каталоге."),
+            ("x" * 201, "Название модели не должно превышать 200 символов."),
+        ):
+            with self.subTest(invalid_name=invalid_name[:20]):
+                response = self.client.post(
+                    f"/tuning/boats/{profiles['model alpha']}/edit",
+                    data={"model_name": invalid_name},
+                    follow_redirects=True,
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(expected_message, response.get_data(as_text=True))
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            profile = db.execute(
+                "SELECT model_key, model_name FROM tuning_boat_profiles WHERE id = ?",
+                (profiles["model alpha"],),
+            ).fetchone()
+            order_model = db.execute(
+                "SELECT boat_model FROM tuning_orders WHERE boat_model = 'Model Alpha'"
+            ).fetchone()["boat_model"]
+        self.assertEqual(profile["model_key"], "model alpha")
+        self.assertEqual(profile["model_name"], "Model Alpha")
+        self.assertEqual(order_model, "Model Alpha")
+
     def test_profile_rejects_oversized_characteristics_and_wrong_photo_type(self):
         with application_module.app.app_context():
             db = application_module.get_db()
