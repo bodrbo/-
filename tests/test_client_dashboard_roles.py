@@ -179,6 +179,7 @@ class ClientDashboardRoleTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Личный кабинет клиента", html)
         self.assertIn("Установка эхолота", html)
+        self.assertIn('class="row-pending"', html)
         self.assertIn(
             f'/client/{self.CLIENT_TOKEN}/item/{self.item_id}/approve', html
         )
@@ -193,6 +194,24 @@ class ClientDashboardRoleTests(unittest.TestCase):
             f"/tuning/edit/{self.order_id}",
         ):
             self.assertNotIn(private_value, html)
+
+    def test_pending_work_uses_one_continuous_row_background(self):
+        stylesheet = (
+            Path(application_module.__file__).with_name("static") / "style.css"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "table.records tr.row-pending { background: rgba(212, 141, 74, 0.14); }",
+            stylesheet,
+        )
+        self.assertIn(
+            "table.records tr.row-pending td { background: transparent; }",
+            stylesheet,
+        )
+        self.assertNotIn(
+            "table.records tr.row-pending td { background: rgba",
+            stylesheet,
+        )
 
     def test_admin_cabinet_shows_internal_data_without_client_actions(self):
         self.login()

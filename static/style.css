@@ -5561,9 +5561,12 @@ button.btn-delete:hover { background: var(--danger); color: #fff8f4; border-colo
 .row-actions .icon-btn.approve:hover { background: var(--success); color: #fff8f4; border-color: var(--success); }
 .row-actions .icon-btn svg { width: 13px; height: 13px; }
 
-/* Работа "на согласовании" у клиента — подсветим строку, чтобы бросалась в глаза. */
-table.records tr.row-pending td { background: rgba(212, 141, 74, 0.14); }
-table.records tr.row-pending:hover td { background: rgba(212, 141, 74, 0.2); }
+/* Работа "на согласовании" у клиента — один фон на всю строку без белых
+   швов на дробных границах отдельных ячеек. */
+table.records tr.row-pending { background: rgba(212, 141, 74, 0.14); }
+table.records tr.row-pending td { background: transparent; }
+table.records tr.row-pending:hover { background: rgba(212, 141, 74, 0.2); }
+table.records tr.row-pending:hover td { background: transparent; }
 
 /* Задача снята — гасим строку серым, её стоимость больше не входит в заказ. */
 table.records tr.row-removed td { background: rgba(98, 112, 127, 0.1); color: var(--muted); }
