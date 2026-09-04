@@ -6714,7 +6714,7 @@ table.records tr.row-expense td.amount { color: var(--danger); }
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 9px;
 }
-.captain-command-actions form { margin: 0; }
+.captain-command-actions form { min-width: 0; margin: 0; }
 button.captain-command-button {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) auto;
@@ -7000,9 +7000,13 @@ button.captain-command-alert:hover {
   #captain-defects { scroll-margin-top: 10px; }
 }
 
-@media (max-width: 340px) {
+@media (max-width: 480px) {
   .captain-command-actions { grid-template-columns: 1fr; }
   .captain-command-alert { grid-column: auto; }
+  .captain-command-button strong { overflow-wrap: anywhere; }
+}
+
+@media (max-width: 340px) {
   button.captain-command-button { min-height: 70px; }
   .captain-status-grid { grid-template-columns: 1fr; }
   .captain-status-fuel,
