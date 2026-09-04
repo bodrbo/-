@@ -1,0 +1,32 @@
+<aside class="software-request-widget" data-software-request-widget>
+  <button type="button" class="software-request-launcher" data-software-request-open
+          aria-label="Сообщить об ошибке или предложить доработку"
+          title="Заявка на доработку">
+    <span aria-hidden="true">?</span>
+  </button>
+
+  <dialog class="software-request-dialog" data-software-request-dialog aria-labelledby="software-request-title">
+    <form class="software-request-form" data-software-request-form>
+      <div class="software-request-dialog-head">
+        <div>
+          <span class="software-request-eyebrow">Помочь улучшить систему</span>
+          <h2 id="software-request-title">Заявка на доработку</h2>
+        </div>
+        <button type="button" class="software-request-close" data-software-request-close aria-label="Закрыть окно">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg>
+        </button>
+      </div>
+      <p class="software-request-intro">Опишите ошибку, неудобство или идею. Страница, с которой отправлена заявка, сохранится автоматически.</p>
+      <label class="software-request-field">
+        <span>Что нужно исправить или добавить?</span>
+        <textarea name="description" rows="6" maxlength="4000" placeholder="Например: при сохранении рейса не видно подтверждения…" required></textarea>
+        <small><span data-software-request-length>0</span> / 4000</small>
+      </label>
+      <div class="software-request-feedback" data-software-request-feedback role="status" aria-live="polite"></div>
+      <div class="software-request-actions">
+        <button type="button" class="btn-secondary" data-software-request-close>Отмена</button>
+        <button type="submit" data-software-request-submit>Отправить заявку</button>
+      </div>
+    </form>
+  </dialog>
+</aside>

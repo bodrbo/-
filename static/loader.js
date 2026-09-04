@@ -513,3 +513,165 @@ if ("serviceWorker" in navigator) {
 
   refreshState();
 })();
+
+// Staff feedback widget. The markup is requested from the server instead of
+// being copied into every standalone template; unauthenticated and client
+// pages receive 204 and never get an internal request control.
+(function () {
+  fetch("/software-requests/widget", {
+    credentials: "same-origin",
+    headers: {"X-Requested-With": "XMLHttpRequest"},
+  }).then(function (response) {
+    if (response.status === 204) return "";
+    if (!response.ok) throw new Error("widget unavailable");
+    return response.text();
+  }).then(function (markup) {
+    if (!markup || document.querySelector("[data-software-request-widget]")) return;
+
+    var mount = document.createElement("div");
+    mount.innerHTML = markup.trim();
+    var widget = mount.firstElementChild;
+    if (!widget) return;
+    document.body.appendChild(widget);
+    document.body.classList.add("software-request-widget-enabled");
+
+    var launcher = widget.querySelector("[data-software-request-open]");
+    var dialog = widget.querySelector("[data-software-request-dialog]");
+    var form = widget.querySelector("[data-software-request-form]");
+    var textarea = form && form.querySelector("textarea[name=description]");
+    var counter = widget.querySelector("[data-software-request-length]");
+    var feedback = widget.querySelector("[data-software-request-feedback]");
+    var submitButton = widget.querySelector("[data-software-request-submit]");
+    if (!launcher || !dialog || !form || !textarea || !submitButton) return;
+
+    var placementFrame = null;
+    function avoidVisibleControls() {
+      launcher.style.bottom = "";
+      var initial = launcher.getBoundingClientRect();
+      var baseBottom = window.innerHeight - initial.bottom;
+      var targetTop = initial.top;
+      var gap = 10;
+      var candidates = document.querySelectorAll(
+        "a[href], button, input, select, textarea, summary, [role=button]"
+      );
+
+      // Several controls can be stacked along the same edge. Move above the
+      // first collision, then check again until the launcher's whole touch
+      // target is clear. The cap keeps it in the lower half of the viewport.
+      for (var pass = 0; pass < 8; pass++) {
+        var collisionTop = null;
+        candidates.forEach(function (control) {
+          if (widget.contains(control)) return;
+          var style = window.getComputedStyle(control);
+          if (style.display === "none" || style.visibility === "hidden" || style.pointerEvents === "none") return;
+          var rect = control.getBoundingClientRect();
+          if (!rect.width || !rect.height || rect.bottom <= 0 || rect.top >= window.innerHeight) return;
+          var targetBottom = targetTop + initial.height;
+          var overlaps = !(
+            initial.right + gap <= rect.left
+            || initial.left - gap >= rect.right
+            || targetBottom + gap <= rect.top
+            || targetTop - gap >= rect.bottom
+          );
+          if (overlaps && (collisionTop === null || rect.top < collisionTop)) collisionTop = rect.top;
+        });
+        if (collisionTop === null) break;
+        targetTop = Math.max(Math.round(window.innerHeight * .5), collisionTop - initial.height - gap);
+      }
+      launcher.style.bottom = Math.max(baseBottom, window.innerHeight - targetTop - initial.height) + "px";
+    }
+
+    function schedulePlacement() {
+      if (placementFrame) cancelAnimationFrame(placementFrame);
+      placementFrame = requestAnimationFrame(function () {
+        placementFrame = null;
+        avoidVisibleControls();
+      });
+    }
+    schedulePlacement();
+    window.addEventListener("resize", schedulePlacement);
+    window.addEventListener("scroll", schedulePlacement, true);
+
+    function setFeedback(message, success) {
+      feedback.textContent = message || "";
+      feedback.classList.toggle("is-success", !!success);
+    }
+
+    function openDialog() {
+      setFeedback("", false);
+      if (typeof dialog.showModal === "function") dialog.showModal();
+      else dialog.setAttribute("open", "");
+      requestAnimationFrame(function () { textarea.focus(); });
+    }
+
+    function closeDialog() {
+      if (typeof dialog.close === "function") dialog.close();
+      else dialog.removeAttribute("open");
+      launcher.focus();
+    }
+
+    launcher.addEventListener("click", openDialog);
+    widget.querySelectorAll("[data-software-request-close]").forEach(function (button) {
+      button.addEventListener("click", closeDialog);
+    });
+    dialog.addEventListener("click", function (event) {
+      if (event.target !== dialog) return;
+      var box = dialog.getBoundingClientRect();
+      if (
+        event.clientX < box.left || event.clientX > box.right
+        || event.clientY < box.top || event.clientY > box.bottom
+      ) closeDialog();
+    });
+    textarea.addEventListener("input", function () {
+      if (counter) counter.textContent = String(textarea.value.length);
+      if (feedback.textContent) setFeedback("", false);
+    });
+
+    // Capture phase makes the event defaultPrevented before the shared page
+    // loader's submit handler sees it, so this background request never
+    // covers the current screen with a navigation overlay.
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      var description = textarea.value.trim();
+      if (!description) {
+        setFeedback("Опишите ошибку или желаемую доработку.", false);
+        textarea.focus();
+        return;
+      }
+
+      submitButton.disabled = true;
+      submitButton.textContent = "Отправляем…";
+      setFeedback("", false);
+      fetch("/software-requests", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        body: JSON.stringify({
+          description: description,
+          page_path: location.pathname,
+        }),
+      }).then(function (response) {
+        return response.json().catch(function () { return {}; }).then(function (data) {
+          if (!response.ok) throw new Error(data.error || "Не удалось отправить заявку.");
+          return data;
+        });
+      }).then(function () {
+        setFeedback("Заявка отправлена. Спасибо!", true);
+        textarea.value = "";
+        if (counter) counter.textContent = "0";
+        setTimeout(closeDialog, 1100);
+      }).catch(function (error) {
+        setFeedback(error.message || "Не удалось отправить заявку. Попробуйте ещё раз.", false);
+      }).finally(function () {
+        submitButton.disabled = false;
+        submitButton.textContent = "Отправить заявку";
+      });
+    }, true);
+  }).catch(function () {
+    // The widget is a convenience control: a transient network error must
+    // never interfere with the underlying operational screen.
+  });
+})();

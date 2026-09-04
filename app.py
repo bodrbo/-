@@ -97,6 +97,10 @@ from modules.excursion_services import (
     create_blueprint as create_excursion_services_blueprint,
     init_schema as init_excursion_services_schema,
 )
+from modules.software_requests import (
+    create_blueprint as create_software_requests_blueprint,
+    init_schema as init_software_requests_schema,
+)
 from modules.clients import (
     ensure_segment as ensure_client_segment,
     init_schema as init_client_segments_schema,
@@ -2335,6 +2339,7 @@ def init_db():
             (employee_row[0], str(chat_id), employee_name, now),
         )
     init_offline_schema(conn)
+    init_software_requests_schema(conn)
     # Client relationships are classified only after all legacy tables have
     # received their newer client_id columns above.
     init_client_segments_schema(conn)
@@ -3621,6 +3626,18 @@ app.register_blueprint(
         boats=BOATS,
         boat_colors=BOAT_COLORS,
         avatar_url=find_avatar_url,
+    )
+)
+
+
+# =======================================================================
+# Настройки и заявки сотрудников на доработку системы
+# =======================================================================
+app.register_blueprint(
+    create_software_requests_blueprint(
+        get_db=get_db,
+        admin_login_required=admin_login_required,
+        active_team_account=_active_team_account,
     )
 )
 
