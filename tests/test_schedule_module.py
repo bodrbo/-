@@ -127,6 +127,8 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertNotIn('name="participants_count"', html)
         self.assertNotIn('id="scheduleClientOptions"', html)
         self.assertIn("schedule-board-nav", html)
+        self.assertIn("schedule-board-nav is-contained", html)
+        self.assertIn('data-crew-count="2"', html)
         self.assertIn("/schedule/clients/search", html)
         self.assertRegex(html, r"/static/style\.css\?v=\d+")
 

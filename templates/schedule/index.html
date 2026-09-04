@@ -78,7 +78,7 @@
   </section>
 
   {% if visible_crew %}
-  <div class="schedule-board-nav {{ 'is-single' if visible_crew|length == 1 }}" aria-label="Навигация по сотрудникам">
+  <div class="schedule-board-nav{{ ' is-single' if visible_crew|length == 1 }}{{ ' is-contained' if visible_crew|length <= 3 }}" aria-label="Навигация по сотрудникам">
     <div class="schedule-board-nav-summary">
       <strong>Экипаж</strong>
       <span id="scheduleCrewWindow">{{ visible_crew|length }} сотрудник{{ '' if visible_crew|length == 1 else 'а' if visible_crew|length in [2, 3, 4] else 'ов' }}</span>
@@ -97,7 +97,7 @@
   </div>
   <section class="schedule-board" aria-label="Расписание на {{ day_label }}">
     <div class="schedule-board-scroll" id="scheduleBoardScroll">
-      <div class="schedule-board-inner" style="--crew-count: {{ visible_crew|length }}; --schedule-height: {{ grid_height }}px;">
+      <div class="schedule-board-inner" data-crew-count="{{ visible_crew|length }}" style="--crew-count: {{ visible_crew|length }}; --schedule-mobile-crew-width: calc({{ (visible_crew|length * 100 / 3)|round(6) }}vw - {{ (visible_crew|length * 58 / 3)|round(6) }}px); --schedule-height: {{ grid_height }}px;">
         <div class="schedule-corner">
           <span>Время</span>
           <small>СПБ</small>
@@ -1001,23 +1001,51 @@
     const previous = document.getElementById('scheduleCrewPrevious');
     const next = document.getElementById('scheduleCrewNext');
     if (!board || !heads.length || !label) return;
+    if (board.scrollWidth <= board.clientWidth + 2) {
+      label.textContent = scheduleCrewCount === 1
+        ? '1 сотрудник'
+        : `${scheduleCrewCount} сотрудника`;
+      previous.disabled = true;
+      next.disabled = true;
+      return;
+    }
     const columnWidth = heads[0].getBoundingClientRect().width || 1;
     const axisWidth = document.querySelector('.schedule-time-axis')?.getBoundingClientRect().width || 0;
     const start = Math.min(
       scheduleCrewCount,
-      Math.max(1, Math.floor(Math.max(0, board.scrollLeft - axisWidth) / columnWidth) + 1),
+      Math.max(1, Math.floor(Math.max(0, board.scrollLeft + 1) / columnWidth) + 1),
     );
-    const visible = Math.max(1, Math.floor((board.clientWidth - axisWidth) / columnWidth));
+    const visible = Math.max(1, Math.floor((board.clientWidth - axisWidth + 1) / columnWidth));
     const end = Math.min(scheduleCrewCount, start + visible - 1);
     label.textContent = scheduleCrewCount === 1 ? '1 сотрудник' : `${start}–${end} из ${scheduleCrewCount}`;
     previous.disabled = board.scrollLeft <= 2;
     next.disabled = board.scrollLeft >= board.scrollWidth - board.clientWidth - 2;
+  }
+  function syncScheduleMobileColumns(board) {
+    const inner = board.querySelector('.schedule-board-inner');
+    if (!inner || !window.matchMedia('(max-width: 620px)').matches) return;
+    const axisWidth = Number.parseFloat(
+      getComputedStyle(inner).getPropertyValue('--schedule-mobile-axis'),
+    ) || 44;
+    let columnWidth = Math.max(72, (board.clientWidth - axisWidth) / 3);
+    inner.style.setProperty('--schedule-mobile-column', `${columnWidth}px`);
+    if (scheduleCrewCount > 3) {
+      inner.style.setProperty('--schedule-mobile-crew-width', `${columnWidth * scheduleCrewCount}px`);
+      const settledWidth = board.clientWidth;
+      const settledColumnWidth = Math.max(72, (settledWidth - axisWidth) / 3);
+      if (Math.abs(settledColumnWidth - columnWidth) > 0.25) {
+        columnWidth = settledColumnWidth;
+        inner.style.setProperty('--schedule-mobile-column', `${columnWidth}px`);
+        inner.style.setProperty('--schedule-mobile-crew-width', `${columnWidth * scheduleCrewCount}px`);
+      }
+    }
   }
   function syncScheduleRailMetrics() {
     const board = document.getElementById('scheduleBoardScroll');
     const rail = document.getElementById('scheduleTopScroll');
     const spacer = document.getElementById('scheduleTopScrollSpacer');
     if (!board || !rail || !spacer) return;
+    syncScheduleMobileColumns(board);
     spacer.style.width = `${board.scrollWidth}px`;
     syncScheduleScroll(board, rail);
     updateScheduleCrewWindow();
