@@ -60,6 +60,7 @@ from modules.fleet.services import (
     set_defect_plan_item_status as _set_defect_plan_item_status,
 )
 from integrations.telegram import fetch_recent_contacts as fetch_recent_telegram_contacts
+from integrations.tripster import fetch_orders as fetch_tripster_orders
 from modules.employees import create_employees_blueprint
 from modules.employees.constants import (
     CUSTOMER_MANAGER_POSITION,
@@ -440,6 +441,16 @@ app.jinja_env.filters["money"] = format_money
 YCLIENTS_PARTNER_TOKEN = os.environ.get("YCLIENTS_PARTNER_TOKEN", "").strip()
 YCLIENTS_USER_TOKEN = os.environ.get("YCLIENTS_USER_TOKEN", "").strip()
 YCLIENTS_COMPANY_ID = os.environ.get("YCLIENTS_COMPANY_ID", "").strip()
+
+# Tripster guide orders API. Accept the older KEY/TOKEN names as aliases so
+# production can keep an already-created environment variable; no secret is
+# ever stored in the repository.
+TRIPSTER_API_TOKEN = (
+    os.environ.get("TRIPSTER_API_TOKEN")
+    or os.environ.get("TRIPSTER_API_KEY")
+    or os.environ.get("TRIPSTER_TOKEN")
+    or ""
+).strip()
 
 # ---------------------------------------------------------------------
 # ЮKassa — онлайн-оплата тюнинг-центра и возвраты по экскурсионным рейсам.
@@ -3626,6 +3637,11 @@ app.register_blueprint(
         boats=BOATS,
         boat_colors=BOAT_COLORS,
         avatar_url=find_avatar_url,
+        tripster_fetcher=lambda updated_after=None: fetch_tripster_orders(
+            TRIPSTER_API_TOKEN, updated_after=updated_after
+        ),
+        tripster_configured=lambda: bool(TRIPSTER_API_TOKEN),
+        cron_secret=CRON_SECRET,
     )
 )
 

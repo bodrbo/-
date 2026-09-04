@@ -6,7 +6,7 @@ from flask import Blueprint, jsonify, redirect, render_template, request, sessio
 
 from modules.excursion_services import repository as service_repository
 
-from . import repository, services
+from . import repository, services, tripster_services
 from .constants import CREW_ROLES, ITEM_KINDS
 
 
@@ -17,6 +17,9 @@ def create_schedule_blueprint(
     boats,
     boat_colors,
     avatar_url,
+    tripster_fetcher=None,
+    tripster_configured=lambda: False,
+    cron_secret=None,
 ):
     blueprint = Blueprint("schedule", __name__)
 
@@ -55,6 +58,7 @@ def create_schedule_blueprint(
             crew_roles=CREW_ROLES,
             notice=session.pop("schedule_notice", None),
             manager_view=is_manager_view(),
+            tripster_configured=tripster_configured(),
         )
 
     @blueprint.route("/schedule/clients/search")
@@ -130,5 +134,45 @@ def create_schedule_blueprint(
         success, message = services.delete_item(get_db(), item_id)
         set_notice(message, success)
         return redirect_to_day(day, request.form.get("return_employee", "all"))
+
+    @blueprint.route("/schedule/tripster/sync", methods=["POST"])
+    @access_required
+    def sync_tripster():
+        day = services.parse_day(request.form.get("return_date")).isoformat()
+        selected_employee = request.form.get("return_employee", "all")
+        if not tripster_configured() or tripster_fetcher is None:
+            set_notice("Токен Tripster не настроен на сервере.", False)
+            return redirect_to_day(day, selected_employee)
+        try:
+            stats = tripster_services.sync_orders(get_db(), tripster_fetcher)
+        except (RuntimeError, ValueError) as error:
+            set_notice(f"Не удалось загрузить Tripster: {error}", False)
+        else:
+            set_notice(
+                "Tripster обновлён: "
+                f"новых рейсов — {stats['created']}, "
+                f"обновлено — {stats['updated']}, "
+                f"отмен — {stats['cancelled']}, "
+                f"ожидают оплаты или даты — {stats['pending']}.",
+                True,
+            )
+        return redirect_to_day(day, selected_employee)
+
+    @blueprint.route("/internal/cron/sync-tripster")
+    def cron_sync_tripster():
+        if not cron_secret or request.args.get("token") != cron_secret:
+            return "forbidden", 403
+        if not tripster_configured() or tripster_fetcher is None:
+            return "tripster not configured", 503
+        try:
+            stats = tripster_services.sync_orders(get_db(), tripster_fetcher)
+        except (RuntimeError, ValueError) as error:
+            return f"error: {error}", 502
+        return (
+            f"ok: {stats['received']} received, {stats['created']} created, "
+            f"{stats['updated']} updated, {stats['cancelled']} cancelled, "
+            f"{stats['pending']} pending, {stats['invalid']} invalid",
+            200,
+        )
 
     return blueprint

@@ -3508,6 +3508,24 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 }
 .schedule-create-button:hover { background: #2475aa; }
 .schedule-create-button svg { width: 17px; height: 17px; }
+.schedule-tripster-form { margin: 0; }
+.schedule-tripster-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #d8b76a;
+  border-radius: 11px;
+  background: #fff9e9;
+  color: #75571a;
+  font-weight: 700;
+  cursor: pointer;
+}
+.schedule-tripster-button:hover:not(:disabled) { border-color: #bd8f2a; background: #fff4d3; }
+.schedule-tripster-button:disabled { cursor: not-allowed; opacity: .5; }
+.schedule-tripster-button svg { width: 17px; height: 17px; }
 .schedule-roster-button {
   display: inline-flex;
   align-items: center;
@@ -3661,6 +3679,8 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-crew-head div { display: grid; min-width: 0; }
 .schedule-crew-head strong { overflow: hidden; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .schedule-crew-head small { overflow: hidden; margin-top: 3px; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.schedule-crew-head.is-unassigned { background: #fff9e9; }
+.schedule-crew-head.is-unassigned .schedule-avatar-fallback { background: #f3dfad; color: #75571a; }
 .schedule-time-axis {
   position: sticky;
   z-index: 6;
@@ -3689,6 +3709,11 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   cursor: crosshair;
 }
 .schedule-column:hover { background-color: rgba(52,152,219,.025); }
+.schedule-column.is-unassigned {
+  background-color: #fffdf6;
+  background-image: repeating-linear-gradient(135deg, transparent 0 12px, rgba(189,143,42,.035) 12px 24px);
+  cursor: default;
+}
 .schedule-column:focus-visible {
   z-index: 3;
   box-shadow: inset 0 0 0 2px var(--brass-strong);
@@ -4297,6 +4322,7 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   .schedule-day-total strong { margin-top: 2px; font-size: 13px; }
   .schedule-create-button { width: 44px; min-height: 44px; padding: 0; }
   .schedule-create-button span { position: absolute; overflow: hidden; width: 1px; height: 1px; clip: rect(0,0,0,0); white-space: nowrap; }
+  .schedule-tripster-form { display: none; }
   .schedule-board-nav { grid-template-columns: auto minmax(0, 1fr); gap: 7px; padding-left: 9px; }
   .schedule-board-nav.is-contained { grid-template-columns: 1fr; }
   .schedule-board-nav.is-contained .schedule-board-nav-controls { display: none; }
@@ -4385,8 +4411,7 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
     -webkit-line-clamp: 3;
   }
   .schedule-card.is-medium { padding: 5px 4px 5px 7px; }
-  .schedule-card.is-medium .schedule-card-kind,
-  .schedule-card.is-medium .schedule-card-meta,
+  .schedule-card.is-medium .schedule-card-kind { display: block; }
   .schedule-card.is-compact .schedule-card-kind,
   .schedule-card.is-compact .schedule-card-meta { display: none; }
   .schedule-card.is-medium strong { white-space: normal; text-overflow: clip; -webkit-line-clamp: 2; }

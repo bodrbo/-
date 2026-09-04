@@ -137,9 +137,10 @@ def _validate_participants(db, form, capacity, errors):
     raw_phones = form.getlist("participant_phone[]")
     raw_guests = form.getlist("participant_guests[]")
     raw_prices = form.getlist("participant_price[]")
+    raw_source_refs = form.getlist("participant_source_ref[]")
     row_count = max(
         len(raw_client_ids), len(raw_names), len(raw_phones), len(raw_guests),
-        len(raw_prices),
+        len(raw_prices), len(raw_source_refs),
     )
     # Search every identity by phone so a tuning client taking an excursion
     # is reused, while only excursion clients appear in the picker itself.
@@ -231,6 +232,16 @@ def _validate_participants(db, form, capacity, errors):
             "guests_count": guests_count,
             "price": price,
             "client_token": secrets.token_urlsafe(16) if client is None else None,
+            "source": "tripster" if (
+                index < len(raw_source_refs)
+                and str(raw_source_refs[index]).startswith("orders:")
+            ) else "internal",
+            "source_ref": (
+                _normalise_text(raw_source_refs[index], 500)
+                if index < len(raw_source_refs)
+                and str(raw_source_refs[index]).startswith("orders:")
+                else None
+            ),
         })
         if client is not None:
             seen_client_ids.add(client["id"])
@@ -522,6 +533,17 @@ def _display_colors_by_boat(boat_colors):
 
 def day_view(db, day, selected_employee, boats, boat_colors, avatar_url):
     crew = repository.list_crew_employees(db)
+    raw_items = repository.list_day_items(db, day.isoformat())
+    has_unassigned = any(not item["assignments"] for item in raw_items)
+    unassigned_employee = {
+        "id": 0,
+        "name": "Не назначено",
+        "positions": [],
+        "position_label": "Заказы без катера и экипажа",
+        "avatar_url": None,
+        "has_day_assignment": False,
+        "is_unassigned": True,
+    }
     day_crew_ids = set(repository.list_day_crew_ids(db, day.isoformat()))
     assigned_today_ids = repository.list_day_assignment_employee_ids(
         db, day.isoformat()
@@ -529,6 +551,7 @@ def day_view(db, day, selected_employee, boats, boat_colors, avatar_url):
     day_crew = [employee for employee in crew if employee["id"] in day_crew_ids]
     available_crew = [employee for employee in crew if employee["id"] not in day_crew_ids]
     selected_id = None
+    selected_unassigned = selected_employee == "unassigned" and has_unassigned
     if selected_employee not in (None, "", "all"):
         try:
             candidate_id = int(selected_employee)
@@ -537,17 +560,22 @@ def day_view(db, day, selected_employee, boats, boat_colors, avatar_url):
         if any(employee["id"] == candidate_id for employee in day_crew):
             selected_id = candidate_id
 
-    visible_crew = (
-        [employee for employee in day_crew if employee["id"] == selected_id]
-        if selected_id is not None else day_crew
-    )
+    if selected_unassigned:
+        visible_crew = [unassigned_employee]
+    elif selected_id is not None:
+        visible_crew = [
+            employee for employee in day_crew if employee["id"] == selected_id
+        ]
+    else:
+        visible_crew = list(day_crew)
+        if has_unassigned:
+            visible_crew.append(unassigned_employee)
     for employee in crew:
         employee["avatar_url"] = avatar_url(employee["name"])
         employee["position_label"] = " · ".join(employee["positions"])
         employee["has_day_assignment"] = employee["id"] in assigned_today_ids
 
     colors_by_boat = _display_colors_by_boat(boat_colors)
-    raw_items = repository.list_day_items(db, day.isoformat())
     items = []
     earliest = DEFAULT_DAY_START_HOUR * 60
     latest = DEFAULT_DAY_END_HOUR * 60
@@ -581,7 +609,11 @@ def day_view(db, day, selected_employee, boats, boat_colors, avatar_url):
     px_per_minute = 1.25
     cards_by_employee = {employee["id"]: [] for employee in visible_crew}
     for item in items:
-        for assignment in item["assignments"]:
+        item_assignments = item["assignments"] or [{
+            "employee_id": 0,
+            "role": "unassigned",
+        }]
+        for assignment in item_assignments:
             employee_id = assignment["employee_id"]
             if employee_id not in cards_by_employee:
                 continue
@@ -590,8 +622,10 @@ def day_view(db, day, selected_employee, boats, boat_colors, avatar_url):
             start_minutes = start_dt.hour * 60 + start_dt.minute
             end_minutes = end_dt.hour * 60 + end_dt.minute
             card = dict(item)
-            card["assignment_role"] = CREW_ROLES.get(
-                assignment["role"], assignment["role"]
+            card["assignment_role"] = (
+                "Нужно назначить"
+                if assignment["role"] == "unassigned"
+                else CREW_ROLES.get(assignment["role"], assignment["role"])
             )
             card["top_px"] = round((start_minutes - earliest) * px_per_minute, 2)
             card["height_px"] = round(
@@ -619,9 +653,14 @@ def day_view(db, day, selected_employee, boats, boat_colors, avatar_url):
         "day_crew": day_crew,
         "available_crew": available_crew,
         "visible_crew": visible_crew,
+        "has_unassigned": has_unassigned,
         "items": items,
         "cards_by_employee": cards_by_employee,
-        "selected_employee": str(selected_id) if selected_id is not None else "all",
+        "selected_employee": (
+            "unassigned" if selected_unassigned
+            else str(selected_id) if selected_id is not None
+            else "all"
+        ),
         "hour_marks": hour_marks,
         "grid_height": round(total_minutes * px_per_minute, 2),
         "day_start_minutes": earliest,

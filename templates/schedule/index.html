@@ -56,11 +56,20 @@
         <span class="sr-only">Показать сотрудника</span>
         <select onchange="changeScheduleEmployee(this.value)">
           <option value="all" {{ 'selected' if selected_employee == 'all' }}>Все сотрудники</option>
+          {% if has_unassigned %}<option value="unassigned" {{ 'selected' if selected_employee == 'unassigned' }}>Не назначено</option>{% endif %}
           {% for employee in day_crew %}
           <option value="{{ employee.id }}" {{ 'selected' if selected_employee == employee.id|string }}>{{ employee.name }}</option>
           {% endfor %}
         </select>
       </label>
+      <form method="post" action="{{ url_for('schedule.sync_tripster') }}" class="schedule-tripster-form">
+        <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
+        <input type="hidden" name="return_employee" value="{{ selected_employee }}">
+        <button type="submit" class="schedule-tripster-button" {{ 'disabled' if not tripster_configured }} title="{{ 'Загрузить новые и изменённые заказы Tripster' if tripster_configured else 'Токен Tripster не настроен' }}">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 8A6.8 6.8 0 1 0 17 12"/><path d="M13 4h3.5v4"/></svg>
+          <span>Tripster</span>
+        </button>
+      </form>
       <button type="button" class="schedule-roster-button" onclick="openScheduleRosterModal()">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="3"/><circle cx="14.5" cy="8" r="2.2"/><path d="M2.5 16c.4-3 2.1-4.6 4.7-4.6s4.4 1.6 4.8 4.6M12 12.2c2.8-.6 4.8.7 5.5 3.8"/></svg>
         <span>Состав</span>
@@ -104,7 +113,7 @@
         </div>
         <div class="schedule-crew-heads">
           {% for employee in visible_crew %}
-          <article class="schedule-crew-head" title="{{ employee.name }} · {{ employee.position_label }}">
+          <article class="schedule-crew-head{{ ' is-unassigned' if employee.is_unassigned|default(false) }}" title="{{ employee.name }} · {{ employee.position_label }}">
             {% if employee.avatar_url %}
             <img src="{{ employee.avatar_url }}" alt="">
             {% else %}
@@ -123,12 +132,14 @@
 
         <div class="schedule-columns" style="height: {{ grid_height }}px">
           {% for employee in visible_crew %}
-          <div class="schedule-column" data-employee-id="{{ employee.id }}"
+          <div class="schedule-column{{ ' is-unassigned' if employee.is_unassigned|default(false) }}" data-employee-id="{{ employee.id }}"
                data-employee-name="{{ employee.name }}" tabindex="0" role="region"
-               aria-label="Создать рейс для {{ employee.name }}. Стрелки вверх и вниз меняют время, Enter открывает форму"
+               aria-label="{{ 'Заказы без назначенного экипажа' if employee.is_unassigned|default(false) else 'Создать рейс для ' ~ employee.name ~ '. Стрелки вверх и вниз меняют время, Enter открывает форму' }}"
+               {% if not employee.is_unassigned|default(false) %}
                onclick="handleScheduleColumnClick(event, {{ employee.id }})"
                onfocus="prepareScheduleColumnKeyboard(this)"
-               onkeydown="handleScheduleColumnKeydown(event, {{ employee.id }})">
+               onkeydown="handleScheduleColumnKeydown(event, {{ employee.id }})"
+               {% endif %}>
             {% for mark in hour_marks %}
             <span class="schedule-hour-line" style="top: {{ mark.top_px }}px"></span>
             <span class="schedule-half-line" style="top: {{ mark.top_px + 37.5 }}px"></span>
@@ -404,6 +415,7 @@
       <span class="schedule-client-picker" data-client-picker data-picker-kind="participant">
         <input type="hidden" name="participant_client_id[]" data-client-id>
         <input type="hidden" name="participant_name[]" data-client-name>
+        <input type="hidden" name="participant_source_ref[]" data-participant-source-ref>
         <input type="text" data-participant-search maxlength="180" autocomplete="off"
                role="combobox" aria-autocomplete="list" aria-expanded="false"
                placeholder="Начните вводить имя"
@@ -564,7 +576,8 @@
     if (item.kind === 'event') {
       (item.participants || []).forEach(participant => addScheduleParticipant(
         participant.client_id, participant.client_name, participant.client_phone,
-        participant.guests_count || 1, false, participant.price ?? 0
+        participant.guests_count || 1, false, participant.price ?? 0,
+        participant.source_ref || ''
       ));
     }
     const legacyParticipants = document.getElementById('scheduleLegacyParticipants');
@@ -791,7 +804,7 @@
       picker.querySelector('[data-client-id]').value = '';
     }
   }
-  function addScheduleParticipant(clientId, clientName, clientPhone, guestsCount, focusNew, price) {
+  function addScheduleParticipant(clientId, clientName, clientPhone, guestsCount, focusNew, price, sourceRef) {
     const fragment = document.getElementById('scheduleParticipantTemplate').content.cloneNode(true);
     const row = fragment.querySelector('.schedule-participant-row');
     const picker = row.querySelector('[data-client-picker]');
@@ -801,6 +814,7 @@
     row.querySelector('[data-participant-search]').setAttribute('aria-controls', results.id);
     row.querySelector('[name="participant_phone[]"]').value = clientPhone || '';
     row.querySelector('[name="participant_guests[]"]').value = guestsCount || 1;
+    row.querySelector('[data-participant-source-ref]').value = sourceRef || '';
     const priceInput = row.querySelector('[name="participant_price[]"]');
     if (price !== undefined && price !== null) {
       priceInput.value = price;
