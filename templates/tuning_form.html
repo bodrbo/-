@@ -510,7 +510,7 @@
             {% else %}
             <span class="status-badge status-defect-new">Ожидает</span>
             {% endif %}
-            {{ r.remind_admin_name or 'Неизвестный' }} — {{ r.remind_at[:10]|ru_date }} {{ r.remind_at[11:] }}
+            {{ r.remind_recipient_name or 'Неизвестный' }} — {{ r.remind_at[:10]|ru_date }} {{ r.remind_at[11:] }}
             {% if not r.sent_at %}
             <span class="row-actions" style="display:inline-flex;">
               <form action="{{ url_for('cancel_note_reminder', order_id=edit_order.id, note_id=note.id, reminder_id=r.id) }}"
@@ -529,14 +529,32 @@
         {% endif %}
 
         <form action="{{ url_for('add_note_reminder', order_id=edit_order.id, note_id=note.id) }}" method="post" class="entry-form">
-          <div class="field field-narrow">
-            <label>Напомнить</label>
-            <select name="remind_admin_id" required>
-              <option value="" disabled selected>Кому</option>
-              {% for a in admins %}
-              <option value="{{ a.id }}">{{ a.admin_name }}</option>
-              {% endfor %}
-            </select>
+          <div class="field note-reminder-recipient-field">
+            <label for="remind_recipient_{{ note.id }}">Напомнить сотруднику</label>
+            <div class="combo-field" data-combo>
+              <input type="text" id="remind_recipient_{{ note.id }}"
+                     class="combo-input" data-combo-input
+                     placeholder="Начните вводить имя…" autocomplete="off"
+                     role="combobox" aria-autocomplete="list">
+              <input type="hidden" name="remind_recipient" data-combo-value>
+              <div class="combo-dropdown hidden" data-combo-dropdown>
+                <p class="combo-empty hidden" data-combo-empty>Сотрудник не найден.</p>
+                {% for recipient in reminder_recipients %}
+                <div class="combo-option reminder-recipient-option"
+                     data-value="{{ recipient.value }}"
+                     data-label="{{ recipient.name }}"
+                     data-search="{{ (recipient.name ~ ' ' ~ recipient.subtitle ~ ' ' ~ recipient.telegram_username)|lower }}">
+                  <span class="combo-option-name">
+                    <strong>{{ recipient.name }}</strong>
+                    <small>{{ recipient.subtitle }}</small>
+                  </span>
+                  <span class="reminder-telegram-state{{ ' is-linked' if recipient.telegram_linked }}">
+                    {% if recipient.telegram_username %}@{{ recipient.telegram_username }}{% elif recipient.telegram_linked %}Telegram подключён{% else %}Нет Telegram{% endif %}
+                  </span>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
           </div>
           <div class="field field-narrow">
             <label>&nbsp;</label>

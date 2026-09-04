@@ -5675,6 +5675,46 @@ table.records tr.row-expense td.amount { color: var(--danger); }
 .note-text { margin: 0 0 10px 0; white-space: pre-wrap; font-size: 14px; }
 .note-reminders { list-style: none; margin: 0 0 10px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .note-reminders li { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-soft); }
+.note-reminder-recipient-field { flex: 1 1 320px; min-width: 240px; }
+.reminder-recipient-option { align-items: center; }
+.reminder-recipient-option .combo-option-name strong,
+.reminder-recipient-option .combo-option-name small { display: block; }
+.reminder-recipient-option .combo-option-name strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reminder-recipient-option .combo-option-name small {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reminder-telegram-state {
+  flex: none;
+  max-width: 130px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reminder-telegram-state::before {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--hairline);
+  content: '';
+  vertical-align: 1px;
+}
+.reminder-telegram-state.is-linked { color: var(--success); }
+.reminder-telegram-state.is-linked::before { background: var(--success); }
 
 /* --- generic collapsible <details class="panel ..."> section: the
    Yclients import on the trips page, and anything else (e.g. Флот →

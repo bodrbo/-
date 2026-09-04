@@ -1623,12 +1623,28 @@ def init_db():
         CREATE TABLE IF NOT EXISTS tuning_order_note_reminders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             note_id INTEGER NOT NULL,
-            remind_admin_id INTEGER NOT NULL,
+            remind_admin_id INTEGER,
+            remind_employee_id INTEGER,
             remind_at TEXT NOT NULL,
             sent_at TEXT,
             created_at TEXT NOT NULL
         )
         """
+    )
+    note_reminder_cols = {
+        row[1]
+        for row in conn.execute(
+            "PRAGMA table_info(tuning_order_note_reminders)"
+        ).fetchall()
+    }
+    if "remind_employee_id" not in note_reminder_cols:
+        conn.execute(
+            "ALTER TABLE tuning_order_note_reminders "
+            "ADD COLUMN remind_employee_id INTEGER"
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tuning_note_reminders_employee "
+        "ON tuning_order_note_reminders (remind_employee_id)"
     )
     conn.execute(
         """
@@ -3938,12 +3954,56 @@ def _order_notes(db, order_id):
     ]
     for note in notes:
         note["reminders"] = db.execute(
-            "SELECT r.*, a.admin_name AS remind_admin_name "
-            "FROM tuning_order_note_reminders r LEFT JOIN admin_accounts a ON a.id = r.remind_admin_id "
+            "SELECT r.*, e.name AS remind_employee_name, "
+            "a.admin_name AS remind_admin_name, "
+            "COALESCE(e.name, a.admin_name) AS remind_recipient_name "
+            "FROM tuning_order_note_reminders r "
+            "LEFT JOIN employees e ON e.id = r.remind_employee_id "
+            "LEFT JOIN admin_accounts a ON a.id = r.remind_admin_id "
             "WHERE r.note_id = ? ORDER BY r.remind_at",
             (note["id"],),
         ).fetchall()
     return notes
+
+
+def _note_reminder_recipients(db):
+    """Active employees plus legacy administrator reminder recipients."""
+    recipients = []
+    for row in db.execute(
+        "SELECT e.id, e.name, "
+        "COALESCE((SELECT GROUP_CONCAT(ep.position, ' · ') "
+        " FROM employee_positions ep WHERE ep.employee_id = e.id), '') AS positions, "
+        "eta.chat_id, eta.username "
+        "FROM employees e "
+        "LEFT JOIN employee_telegram_accounts eta ON eta.employee_id = e.id "
+        "WHERE e.deleted_at IS NULL ORDER BY e.name COLLATE NOCASE"
+    ).fetchall():
+        recipients.append({
+            "value": f"employee:{row['id']}",
+            "name": row["name"],
+            "subtitle": row["positions"] or "Сотрудник",
+            "telegram_linked": bool(row["chat_id"]),
+            "telegram_username": row["username"] or "",
+            "kind": "employee",
+        })
+    # Keep administrator accounts in the same picker so the former
+    # self-reminder workflow and existing Telegram links remain available.
+    for row in db.execute(
+        "SELECT id, admin_name, telegram_chat_id FROM admin_accounts "
+        "ORDER BY admin_name COLLATE NOCASE"
+    ).fetchall():
+        recipients.append({
+            "value": f"admin:{row['id']}",
+            "name": row["admin_name"],
+            "subtitle": "Администратор",
+            "telegram_linked": bool(row["telegram_chat_id"]),
+            "telegram_username": "",
+            "kind": "admin",
+        })
+    recipients.sort(key=lambda recipient: (
+        recipient["name"].casefold(), recipient["kind"] != "employee"
+    ))
+    return recipients
 
 
 def _recompute_order_totals(db, order_id):
@@ -5833,7 +5893,7 @@ def edit_tuning_order(order_id):
         ).fetchall()
         work_photos_by_item = {item["id"]: get_work_item_photos(db, item["id"]) for item in items}
         notes = _order_notes(db, order_id)
-        admins = db.execute("SELECT id, admin_name FROM admin_accounts ORDER BY admin_name").fetchall()
+        reminder_recipients = _note_reminder_recipients(db)
         return render_template(
             "tuning_form.html", edit_order=order, errors=None, form_values=form_values,
             items_prefill=items, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
@@ -5846,7 +5906,7 @@ def edit_tuning_order(order_id):
             assignable_employees=assignable_employees,
             goods=goods, goods_subtotal=goods_subtotal, catalog_products=catalog_products,
             cost_units=SUPPLY_COST_UNITS,
-            notes=notes, admins=admins,
+            notes=notes, reminder_recipients=reminder_recipients,
             boat_profile_id=boat_profile_id,
             motor_profile_id=motor_profile_id,
             boat_model_choices=_tuning_boat_model_choices(db),
@@ -6181,10 +6241,38 @@ def add_note_reminder(order_id, note_id):
     if note is None:
         return redirect(url_for("edit_tuning_order", order_id=order_id) + "#notes")
 
-    remind_admin_id_raw = request.form.get("remind_admin_id", "").strip()
+    recipient_raw = request.form.get("remind_recipient", "").strip()
+    legacy_admin_id_raw = request.form.get("remind_admin_id", "").strip()
     remind_at_raw = request.form.get("remind_at", "").strip()
 
-    remind_admin_id = int(remind_admin_id_raw) if remind_admin_id_raw.isdigit() else None
+    remind_employee_id = None
+    remind_admin_id = None
+    recipient_kind, separator, recipient_id_raw = recipient_raw.partition(":")
+    if separator and recipient_id_raw.isdigit():
+        recipient_id = int(recipient_id_raw)
+        if recipient_kind == "employee":
+            employee = db.execute(
+                "SELECT id FROM employees WHERE id = ? AND deleted_at IS NULL",
+                (recipient_id,),
+            ).fetchone()
+            remind_employee_id = employee["id"] if employee else None
+        elif recipient_kind == "admin":
+            admin = db.execute(
+                "SELECT id FROM admin_accounts WHERE id = ?", (recipient_id,)
+            ).fetchone()
+            remind_admin_id = admin["id"] if admin else None
+    elif legacy_admin_id_raw.isdigit():
+        # Backwards compatibility for a form opened before deployment.
+        admin = db.execute(
+            "SELECT id FROM admin_accounts WHERE id = ?",
+            (int(legacy_admin_id_raw),),
+        ).fetchone()
+        remind_admin_id = admin["id"] if admin else None
+
+    # Older production databases retain NOT NULL on remind_admin_id. The
+    # creating administrator is a compatibility value; delivery prefers the
+    # employee column whenever it is populated.
+    legacy_admin_id = remind_admin_id or session.get("admin_id")
     remind_at = None
     if remind_at_raw:
         try:
@@ -6196,12 +6284,13 @@ def add_note_reminder(order_id, note_id):
         except ValueError:
             remind_at = None
 
-    if remind_admin_id and remind_at:
+    if (remind_employee_id or remind_admin_id) and legacy_admin_id and remind_at:
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
         db.execute(
-            "INSERT INTO tuning_order_note_reminders (note_id, remind_admin_id, remind_at, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (note_id, remind_admin_id, remind_at, now),
+            "INSERT INTO tuning_order_note_reminders "
+            "(note_id, remind_admin_id, remind_employee_id, remind_at, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (note_id, legacy_admin_id, remind_employee_id, remind_at, now),
         )
         db.commit()
     return redirect(url_for("edit_tuning_order", order_id=order_id) + "#notes")
@@ -11419,10 +11508,11 @@ def cron_send_note_reminders():
     due = db.execute(
         "SELECT r.*, n.order_id, n.text AS note_text, o.client_name, "
         "o.equipment_type, o.boat_model, o.boat_registration_number, "
-        "o.motor_model, o.motor_serial_number "
+        "o.motor_model, o.motor_serial_number, e.name AS remind_employee_name "
         "FROM tuning_order_note_reminders r "
         "JOIN tuning_order_notes n ON n.id = r.note_id "
         "JOIN tuning_orders o ON o.id = n.order_id "
+        "LEFT JOIN employees e ON e.id = r.remind_employee_id "
         "WHERE r.sent_at IS NULL AND r.remind_at <= ?",
         (now,),
     ).fetchall()
@@ -11435,7 +11525,12 @@ def cron_send_note_reminders():
             f"Клиент: {html.escape(r['client_name'])} ({html.escape(equipment_label)})\n\n"
             f"{html.escape(r['note_text'])}"
         )
-        send_telegram_notification_to_admin(db, r["remind_admin_id"], text)
+        if r["remind_employee_id"] is not None:
+            send_telegram_notification_to_employee(
+                db, r["remind_employee_name"] or "", text
+            )
+        else:
+            send_telegram_notification_to_admin(db, r["remind_admin_id"], text)
         db.execute(
             "UPDATE tuning_order_note_reminders SET sent_at = ? WHERE id = ?",
             (now, r["id"]),
