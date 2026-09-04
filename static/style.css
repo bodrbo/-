@@ -4354,9 +4354,28 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   .schedule-card.event { border-left-width: 4px; }
   .schedule-card-topline { display: block; line-height: 1; }
   .schedule-card-time { display: block; font-size: 8px; line-height: 1.1; white-space: nowrap; }
-  .schedule-card-kind,
+  .schedule-card-kind {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    margin-top: 2px;
+    padding: 1px 3px;
+    font-size: 6.5px;
+    line-height: 1.15;
+    text-overflow: clip;
+    white-space: normal;
+  }
   .schedule-card-boat,
-  .schedule-card-meta { display: none; }
+  .schedule-card.booking .schedule-card-meta { display: none; }
+  .schedule-card.event .schedule-card-meta {
+    display: block;
+    margin-top: 2px;
+    font-size: 7.5px;
+    font-weight: 700;
+    line-height: 1.1;
+    white-space: normal;
+  }
+  .schedule-card-role { display: none; }
   .schedule-card strong {
     width: 100%;
     margin-top: 3px;
@@ -4366,6 +4385,10 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
     -webkit-line-clamp: 3;
   }
   .schedule-card.is-medium { padding: 5px 4px 5px 7px; }
+  .schedule-card.is-medium .schedule-card-kind,
+  .schedule-card.is-medium .schedule-card-meta,
+  .schedule-card.is-compact .schedule-card-kind,
+  .schedule-card.is-compact .schedule-card-meta { display: none; }
   .schedule-card.is-medium strong { white-space: normal; text-overflow: clip; -webkit-line-clamp: 2; }
   .schedule-card.is-compact { padding: 3px 3px 3px 6px; }
   .schedule-card.is-compact .schedule-card-time { font-size: 7px; }

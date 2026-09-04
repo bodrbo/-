@@ -151,7 +151,7 @@
                 {{ card.boat }}
               </span>
               {% if card.kind == 'event' %}
-              <span class="schedule-card-meta">{{ card.participants_count }}/{{ card.capacity }} мест · {{ card.assignment_role }}</span>
+              <span class="schedule-card-meta"><span class="schedule-card-event-count">{{ card.participants_count }}/{{ card.capacity }} мест</span><span class="schedule-card-role"> · {{ card.assignment_role }}</span></span>
               {% else %}
               <span class="schedule-card-meta">{{ card.customer_name }}{% if card.customer_phone %} · {{ card.customer_phone }}{% endif %}</span>
               {% endif %}

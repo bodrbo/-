@@ -378,6 +378,10 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             "/schedule?date=2026-09-05"
         ).get_data(as_text=True)
         self.assertIn("Групповая экскурсия", schedule_page)
+        self.assertIn(
+            '<span class="schedule-card-event-count">5/10 мест</span>',
+            schedule_page,
+        )
 
         directory = self.client.get(
             "/admin/clients?section=excursion"
