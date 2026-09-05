@@ -277,6 +277,7 @@ class AIAssistantTests(unittest.TestCase):
         self.assertNotIn("test-openai-api-key", str(payloads[0]))
         self.assertIn("safety_identifier", payloads[0])
         tool_names = {tool["name"] for tool in payloads[0]["tools"]}
+        self.assertIn("get_data_catalog", tool_names)
         self.assertIn("get_business_overview", tool_names)
         self.assertIn("get_tuning_summary", tool_names)
 
@@ -445,6 +446,21 @@ class AIAssistantTests(unittest.TestCase):
         self.assertIn("get_payroll_summary", names)
         self.assertNotIn("get_tuning_summary", names)
         self.assertNotIn("get_business_overview", names)
+        catalog_tool = next(
+            tool for tool in captured[0]["tools"] if tool["name"] == "get_data_catalog"
+        )
+        catalog_ids = set(
+            catalog_tool["parameters"]["properties"]["dataset"]["enum"]
+        )
+        self.assertIn("schedule", catalog_ids)
+        self.assertNotIn("tuning_orders", catalog_ids)
+        chart_tool = next(
+            tool for tool in captured[0]["tools"] if tool["name"] == "get_bar_chart"
+        )
+        chart_subjects = set(
+            chart_tool["parameters"]["properties"]["subject"]["enum"]
+        )
+        self.assertEqual(chart_subjects, {"schedule", "clients", "payroll"})
         page = self.client.get("/assistant")
         self.assertIn("Менеджер по работе с клиентами", page.get_data(as_text=True))
 

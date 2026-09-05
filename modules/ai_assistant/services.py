@@ -12,6 +12,7 @@ from .constants import (
     MAX_TOOL_RESULT_LENGTH,
     MAX_TOOL_ROUNDS,
 )
+from .data_gateway import run_read_only
 from .tools import execute_tool, tool_definitions
 
 
@@ -54,6 +55,7 @@ def _instructions(user):
 9. В аналитике тюнинга различай полную стоимость заказов, оплаты за период и текущую задолженность. Датой заказа считай business-поле order_date из интерфейса, а не техническую дату добавления created_at.
 10. Не вызывай одну и ту же функцию повторно с теми же аргументами. Получив достаточные данные, сразу сформулируй итоговый ответ пользователю.
 11. Если пользователь просит график или диаграмму, обязательно вызови get_bar_chart с подходящими показателем и группировкой, затем кратко объясни результат.
+12. Для незнакомого или неоднозначного вопроса о данных сначала вызови get_data_catalog. Каталог описывает только разрешённые текущему пользователю данные и не даёт права запрашивать другие.
 """.strip()
 
 
@@ -178,7 +180,12 @@ def run_chat(db, user, conversation_id, message, model, client, boats):
                     force_final_answer = True
                 else:
                     try:
-                        result = execute_tool(db, user, boats, name, arguments)
+                        result = run_read_only(
+                            db,
+                            lambda readonly_db: execute_tool(
+                                readonly_db, user, boats, name, arguments
+                            ),
+                        )
                         result_payload = {"ok": True, "data": result}
                     except (ValueError, TypeError) as error:
                         result_payload = {"ok": False, "error": str(error)}

@@ -3,6 +3,12 @@
 import datetime as dt
 
 from .constants import GUIDE_TOPICS
+from .data_catalog import (
+    DATASET_IDS,
+    catalog_for_user,
+    visible_chart_subjects,
+    visible_dataset_ids,
+)
 from .knowledge import guide_for
 
 
@@ -632,6 +638,20 @@ def _bar_chart(db, arguments, user, boats):
 
 
 TOOL_SCHEMAS = {
+    "get_data_catalog": {
+        "description": (
+            "Получить каталог доступных текущему пользователю наборов бизнес-данных: "
+            "их показатели, группировки, фильтры, даты и ограничения. Используй перед "
+            "аналитикой, если не уверен, какой источник или инструмент подходит."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "dataset": {"type": "string", "enum": list(DATASET_IDS)},
+            },
+            "additionalProperties": False,
+        },
+    },
     "get_system_guide": {
         "description": "Получить справку о работе конкретного раздела Бодрого Бизнеса.",
         "parameters": {
@@ -766,7 +786,8 @@ TOOL_SCHEMAS = {
 
 def allowed_tool_names(user):
     names = [
-        "get_system_guide", "get_payroll_summary", "get_tasks_summary", "get_bar_chart"
+        "get_data_catalog", "get_system_guide", "get_payroll_summary",
+        "get_tasks_summary", "get_bar_chart",
     ]
     if _is_admin(user):
         names.extend([
@@ -784,21 +805,46 @@ def allowed_tool_names(user):
 
 
 def tool_definitions(user):
-    return [
-        {
+    definitions = []
+    for name in allowed_tool_names(user):
+        parameters = TOOL_SCHEMAS[name]["parameters"]
+        if name == "get_data_catalog":
+            parameters = {
+                "type": "object",
+                "properties": {
+                    "dataset": {
+                        "type": "string",
+                        "enum": list(visible_dataset_ids(user)),
+                    },
+                },
+                "additionalProperties": False,
+            }
+        elif name == "get_bar_chart":
+            parameters = {
+                **parameters,
+                "properties": {
+                    **parameters["properties"],
+                    "subject": {
+                        **parameters["properties"]["subject"],
+                        "enum": list(visible_chart_subjects(user)),
+                    },
+                },
+            }
+        definitions.append({
             "type": "function",
             "name": name,
             "description": TOOL_SCHEMAS[name]["description"],
-            "parameters": TOOL_SCHEMAS[name]["parameters"],
-        }
-        for name in allowed_tool_names(user)
-    ]
+            "parameters": parameters,
+        })
+    return definitions
 
 
 def execute_tool(db, user, boats, name, arguments):
     if name not in allowed_tool_names(user):
         raise ToolAccessError("Этот источник данных недоступен для вашей роли.")
     arguments = arguments if isinstance(arguments, dict) else {}
+    if name == "get_data_catalog":
+        return catalog_for_user(user, str(arguments.get("dataset") or "").strip() or None)
     if name == "get_system_guide":
         topic = str(arguments.get("topic") or "overview")
         if topic not in GUIDE_TOPICS:
