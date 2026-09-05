@@ -1,5 +1,6 @@
 import os
 import unittest
+from unittest.mock import patch
 
 from support import application_module
 from modules.ai_assistant.tools import execute_tool
@@ -286,6 +287,52 @@ class AIAssistantTests(unittest.TestCase):
         self.assertEqual(audit["tool_name"], "get_schedule_summary")
         self.assertIn("2026-09-05", audit["arguments_json"])
         self.assertIn('"ok":true', audit["result_json"])
+
+    def test_repeated_tool_call_is_cached_and_forced_to_a_text_answer(self):
+        self.login_admin()
+        payloads = []
+        executions = []
+
+        def fake_create(payload):
+            payloads.append(payload)
+            if "tools" in payload:
+                call_number = len(payloads)
+                return {
+                    "id": f"resp_repeat_{call_number}",
+                    "output": [{
+                        "type": "function_call",
+                        "call_id": f"call_tuning_{call_number}",
+                        "name": "get_tuning_summary",
+                        "arguments": '{"date_from":"2026-06-01","date_to":"2026-06-30"}',
+                    }],
+                    "usage": {"input_tokens": 20, "output_tokens": 5},
+                }
+            return text_response("За июнь найдено два заказа.", 25, 10)
+
+        def fake_execute(db, user, boats, name, arguments):
+            executions.append((name, arguments))
+            return {"orders": 2, "orders_total_rub": 150000}
+
+        application_module._openai_responses_client.create_response = fake_create
+        with patch(
+            "modules.ai_assistant.services.execute_tool", side_effect=fake_execute
+        ):
+            response = self.client.post(
+                "/assistant/api/chat",
+                json={"message": "Сколько было тюнинг-заказов за июнь?"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json()["message"]["content"],
+            "За июнь найдено два заказа.",
+        )
+        self.assertEqual(len(executions), 1)
+        self.assertEqual(len(payloads), 3)
+        self.assertIn("tools", payloads[0])
+        self.assertIn("tools", payloads[1])
+        self.assertNotIn("tools", payloads[2])
+        self.assertNotIn("tool_choice", payloads[2])
 
     def test_employee_tool_scope_changes_with_position(self):
         self.set_position("Менеджер по работе с клиентами")
