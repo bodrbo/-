@@ -102,6 +102,17 @@ from modules.software_requests import (
     create_blueprint as create_software_requests_blueprint,
     init_schema as init_software_requests_schema,
 )
+from modules.ai_assistant import (
+    create_blueprint as create_ai_assistant_blueprint,
+    init_schema as init_ai_assistant_schema,
+)
+from modules.ai_assistant.constants import (
+    DEFAULT_MAX_CONCURRENT_REQUESTS as AI_DEFAULT_MAX_CONCURRENT_REQUESTS,
+    DEFAULT_MODEL as AI_DEFAULT_MODEL,
+    DEFAULT_TIMEOUT_SECONDS as AI_DEFAULT_TIMEOUT_SECONDS,
+    DEFAULT_USER_REQUESTS_PER_MINUTE as AI_DEFAULT_REQUESTS_PER_MINUTE,
+)
+from modules.ai_assistant.openai_client import OpenAIResponsesClient
 from modules.clients import (
     ensure_segment as ensure_client_segment,
     init_schema as init_client_segments_schema,
@@ -148,6 +159,30 @@ app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 
 DB_PATH = os.environ.get("WORKHOURS_DB_PATH") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "workhours.db"
+)
+
+
+def _bounded_env_int(name, default, minimum, maximum):
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+OPENAI_AGENT_MODEL = os.environ.get("OPENAI_AGENT_MODEL", AI_DEFAULT_MODEL).strip() or AI_DEFAULT_MODEL
+OPENAI_AGENT_TIMEOUT = _bounded_env_int(
+    "OPENAI_AGENT_TIMEOUT", AI_DEFAULT_TIMEOUT_SECONDS, 10, 180
+)
+OPENAI_AGENT_MAX_CONCURRENT = _bounded_env_int(
+    "OPENAI_AGENT_MAX_CONCURRENT", AI_DEFAULT_MAX_CONCURRENT_REQUESTS, 1, 20
+)
+OPENAI_AGENT_REQUESTS_PER_MINUTE = _bounded_env_int(
+    "OPENAI_AGENT_REQUESTS_PER_MINUTE", AI_DEFAULT_REQUESTS_PER_MINUTE, 1, 60
+)
+_openai_responses_client = OpenAIResponsesClient(
+    api_key_provider=lambda: os.environ.get("OPENAI_API_KEY", ""),
+    timeout_provider=lambda: OPENAI_AGENT_TIMEOUT,
 )
 
 
@@ -2364,6 +2399,7 @@ def init_db():
     # Client relationships are classified only after all legacy tables have
     # received their newer client_id columns above.
     init_client_segments_schema(conn)
+    init_ai_assistant_schema(conn)
     conn.commit()
     conn.close()
 
@@ -2656,6 +2692,44 @@ def _is_customer_manager(db=None):
         "AND position = ?",
         (account["employee_id"], CUSTOMER_MANAGER_POSITION),
     ).fetchone() is not None
+
+
+def _current_ai_user():
+    """Resolve the signed-in staff member and their data-access scope."""
+    db = get_db()
+    admin_id = session.get("admin_id")
+    if admin_id:
+        row = db.execute(
+            "SELECT id, admin_name FROM admin_accounts WHERE id = ?",
+            (admin_id,),
+        ).fetchone()
+        if row is not None:
+            return {
+                "owner_type": "admin",
+                "owner_id": row["id"],
+                "name": row["admin_name"],
+                "positions": ["Администратор"],
+                "manager_view": False,
+            }
+
+    account = _active_team_account(db)
+    if account is None:
+        return None
+    positions = [
+        row["position"]
+        for row in db.execute(
+            "SELECT position FROM employee_positions "
+            "WHERE employee_id = ? ORDER BY position COLLATE NOCASE",
+            (account["employee_id"],),
+        ).fetchall()
+    ]
+    return {
+        "owner_type": "employee",
+        "owner_id": account["employee_id"],
+        "name": account["name"],
+        "positions": positions,
+        "manager_view": CUSTOMER_MANAGER_POSITION in positions,
+    }
 
 
 def excursion_manager_or_admin_required(view):
@@ -3664,6 +3738,22 @@ app.register_blueprint(
         get_db=get_db,
         admin_login_required=admin_login_required,
         active_team_account=_active_team_account,
+    )
+)
+
+
+# =======================================================================
+# AI-помощник: OpenAI Responses API + role-aware read-only business tools
+# =======================================================================
+app.register_blueprint(
+    create_ai_assistant_blueprint(
+        get_db=get_db,
+        current_user=_current_ai_user,
+        responses_client=_openai_responses_client,
+        model_provider=lambda: OPENAI_AGENT_MODEL,
+        boats=BOATS,
+        max_concurrent_requests=OPENAI_AGENT_MAX_CONCURRENT,
+        requests_per_minute=OPENAI_AGENT_REQUESTS_PER_MINUTE,
     )
 )
 

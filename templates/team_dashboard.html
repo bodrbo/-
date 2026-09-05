@@ -65,6 +65,12 @@
       {% endif %}
       <span class="investor-name">{{ employee_name }}</span>
     </div>
+    <a href="{{ url_for('ai_assistant.index') }}" class="team-ai-entry">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M10 2.5a6.7 6.7 0 0 0-4.4 11.8v2.9l2.8-1.5a7 7 0 0 0 1.6.2 6.7 6.7 0 1 0 0-13.4z"/><path d="M6.8 9.6h.01M10 9.6h.01M13.2 9.6h.01"/>
+      </svg>
+      AI-помощник
+    </a>
     <form action="{{ url_for('team_logout') }}" method="post" data-offline-logout>
       <button type="submit" class="btn-secondary">Выйти</button>
     </form>

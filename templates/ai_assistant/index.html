@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI-помощник — Бодрый Бизнес</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+</head>
+<body class="ai-assistant-body">
+<header class="topbar ai-assistant-topbar">
+  <div class="topbar-inner">
+    <div class="topbar-top-row">
+      <div class="brand">
+        <a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a>
+      </div>
+      {% if current_user.owner_type == 'admin' or manager_view %}
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>
+      </button>
+      {% endif %}
+    </div>
+    {% if current_user.owner_type == 'admin' or manager_view %}
+      {% include '_admin_main_nav.html' %}
+    {% endif %}
+    <div class="title-block ai-title-block">
+      <span class="kicker">Цифровой помощник команды</span>
+      <h1>Боцман AI</h1>
+      <p>Знает устройство системы и анализирует доступные вам рабочие данные</p>
+    </div>
+    <div class="topbar-actions ai-topbar-actions">
+      {% if current_user.owner_type == 'employee' and not manager_view %}
+      <a href="{{ url_for('team_dashboard') }}" class="ai-back-link">В кабинет</a>
+      {% endif %}
+      <form action="{{ url_for('team_logout') if current_user.owner_type == 'employee' else url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="ai-assistant-shell">
+  <aside class="ai-conversation-rail" aria-label="История диалогов">
+    <button type="button" class="ai-new-conversation" id="aiNewConversation">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M10 3v14M3 10h14"/></svg>
+      Новый диалог
+    </button>
+    <div class="ai-rail-heading">
+      <span>Вахтенный журнал</span>
+      <b>{{ conversations|length }}</b>
+    </div>
+    <nav class="ai-conversation-list">
+      {% for conversation in conversations %}
+      <div class="ai-conversation-item{{ ' active' if selected_conversation and selected_conversation.id == conversation.id }}">
+        <a href="{{ url_for('ai_assistant.index', conversation=conversation.id) }}">
+          <span>{{ conversation.title }}</span>
+          <small>{{ conversation.updated_at[:16].replace('-', '.') }}</small>
+        </a>
+        <button type="button" data-delete-conversation="{{ conversation.id }}" aria-label="Удалить диалог «{{ conversation.title }}"" title="Удалить диалог">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h12M8 3.5h4M6 6l.7 10.5h6.6L14 6M8.5 9v4.5M11.5 9v4.5"/></svg>
+        </button>
+      </div>
+      {% else %}
+      <p class="ai-rail-empty">Здесь появятся ваши предыдущие разговоры.</p>
+      {% endfor %}
+    </nav>
+    <div class="ai-access-card">
+      <span>Ваш доступ</span>
+      <strong>{{ current_user.name }}</strong>
+      <small>{{ current_user.positions|join(', ') if current_user.positions else 'Сотрудник' }}</small>
+    </div>
+  </aside>
+
+  <section class="ai-chat-deck" aria-label="Диалог с AI-помощником">
+    <header class="ai-chat-status">
+      <div class="ai-agent-identity">
+        <span class="ai-agent-mark" aria-hidden="true">
+          <i></i><i></i><i></i>
+        </span>
+        <div>
+          <strong>Боцман AI</strong>
+          <span>{{ 'Готов к работе' if assistant_configured else 'Ожидает подключения' }}</span>
+        </div>
+      </div>
+      <div class="ai-model-badge{{ ' is-offline' if not assistant_configured }}"><span></span>{{ assistant_model }}</div>
+    </header>
+
+    {% if not assistant_configured %}
+    <div class="ai-configuration-notice" role="status">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7.5"/><path d="M10 6.2v4.7M10 14h.01"/></svg>
+      <div><strong>Помощник ещё не подключён</strong><span>Администратору сервера нужно добавить переменную <code>OPENAI_API_KEY</code> и перезапустить приложение.</span></div>
+    </div>
+    {% endif %}
+
+    <div class="ai-transcript" id="aiTranscript" aria-live="polite">
+      {% if not messages %}
+      <section class="ai-welcome" id="aiWelcome">
+        <div class="ai-radar" aria-hidden="true"><span></span><i></i></div>
+        <p class="ai-welcome-eyebrow">На связи</p>
+        <h2>С чего начнём?</h2>
+        <p>Спросите, как работает нужный раздел, или попросите сводку по данным. Помощник видит только то, что разрешено вашей роли.</p>
+        <div class="ai-starter-grid">
+          <button type="button" data-ai-prompt="Расскажи, что умеет Бодрый Бизнес и где искать основные функции.">
+            <span>Карта системы</span><small>Кратко объяснить основные разделы</small>
+          </button>
+          {% if current_user.owner_type == 'admin' %}
+          <button type="button" data-ai-prompt="Дай общий обзор бизнеса за последние 7 дней и отметь, на что стоит обратить внимание.">
+            <span>Сводка за неделю</span><small>Расписание, тюнинг, зарплаты и флот</small>
+          </button>
+          <button type="button" data-ai-prompt="Покажи состояние топлива и количество текущих неисправностей по каждому катеру.">
+            <span>Состояние флота</span><small>Топливо и открытые неисправности</small>
+          </button>
+          {% elif manager_view %}
+          <button type="button" data-ai-prompt="Дай сводку расписания на ближайшие 7 дней.">
+            <span>Ближайшие рейсы</span><small>Загрузка, гости и неназначенные рейсы</small>
+          </button>
+          {% else %}
+          <button type="button" data-ai-prompt="Покажи мои начисления за последние 7 дней с разбивкой по видам работ.">
+            <span>Мои начисления</span><small>Сумма и виды выполненных работ</small>
+          </button>
+          {% endif %}
+          <button type="button" data-ai-prompt="Как правильно работать с расписанием и добавлять клиентов в групповой рейс?">
+            <span>Помощь по расписанию</span><small>Пошаговая подсказка по интерфейсу</small>
+          </button>
+        </div>
+      </section>
+      {% endif %}
+
+      {% for message in messages %}
+      <article class="ai-message ai-message-{{ message.role }}">
+        <div class="ai-message-label">{{ current_user.name if message.role == 'user' else 'Боцман AI' }}</div>
+        <div class="ai-message-bubble">{{ message.content }}</div>
+        <time>{{ message.created_at[11:16] }}</time>
+      </article>
+      {% endfor %}
+    </div>
+
+    <footer class="ai-composer-wrap">
+      <form class="ai-composer" id="aiComposer">
+        <label class="sr-only" for="aiMessage">Вопрос AI-помощнику</label>
+        <textarea id="aiMessage" maxlength="4000" rows="1" placeholder="Спросите о системе или рабочих показателях…" {{ 'disabled' if not assistant_configured }}></textarea>
+        <button type="submit" id="aiSend" aria-label="Отправить вопрос" {{ 'disabled' if not assistant_configured }}>
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5L17 3l-4.5 14-2.7-5.2L3 9.5zM9.8 11.8L17 3"/></svg>
+        </button>
+      </form>
+      <p>AI может ошибаться. Проверяйте важные решения по исходным данным системы.</p>
+    </footer>
+  </section>
+</main>
+
+<script>
+(() => {
+  const navToggle = document.getElementById('navToggle');
+  const mainNav = document.getElementById('mainNav');
+  if (navToggle && mainNav) {
+    navToggle.addEventListener('click', () => {
+      const open = mainNav.classList.toggle('open');
+      navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+  }
+
+  const transcript = document.getElementById('aiTranscript');
+  const composer = document.getElementById('aiComposer');
+  const textarea = document.getElementById('aiMessage');
+  const sendButton = document.getElementById('aiSend');
+  let conversationId = {{ selected_conversation.id if selected_conversation else 'null' }};
+
+  function scrollToLatest() {
+    transcript.scrollTop = transcript.scrollHeight;
+  }
+
+  function resizeComposer() {
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, 148) + 'px';
+  }
+
+  function addMessage(role, text, pending = false) {
+    const welcome = document.getElementById('aiWelcome');
+    if (welcome) welcome.remove();
+    const article = document.createElement('article');
+    article.className = `ai-message ai-message-${role}${pending ? ' is-pending' : ''}`;
+    const label = document.createElement('div');
+    label.className = 'ai-message-label';
+    label.textContent = role === 'user' ? {{ current_user.name|tojson }} : 'Боцман AI';
+    const bubble = document.createElement('div');
+    bubble.className = 'ai-message-bubble';
+    if (pending) {
+      bubble.innerHTML = '<span class="ai-thinking-propeller" aria-hidden="true"></span><span>Сверяюсь с бортовым журналом…</span>';
+    } else {
+      bubble.textContent = text;
+    }
+    article.append(label, bubble);
+    if (!pending) {
+      const time = document.createElement('time');
+      time.textContent = new Date().toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'});
+      article.append(time);
+    }
+    transcript.append(article);
+    scrollToLatest();
+    return article;
+  }
+
+  async function askAssistant(question) {
+    const message = question.trim();
+    if (!message || sendButton.disabled) return;
+    addMessage('user', message);
+    textarea.value = '';
+    resizeComposer();
+    sendButton.disabled = true;
+    textarea.disabled = true;
+    const pending = addMessage('assistant', '', true);
+    try {
+      const response = await fetch({{ url_for('ai_assistant.chat')|tojson }}, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message, conversation_id: conversationId})
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) throw new Error(data.error || 'Не удалось получить ответ.');
+      conversationId = data.conversation_id;
+      pending.remove();
+      addMessage('assistant', data.message.content);
+      const url = new URL(window.location.href);
+      url.searchParams.set('conversation', conversationId);
+      window.history.replaceState({}, '', url);
+    } catch (error) {
+      pending.classList.remove('is-pending');
+      pending.classList.add('is-error');
+      pending.querySelector('.ai-message-bubble').textContent = error.message;
+    } finally {
+      sendButton.disabled = false;
+      textarea.disabled = false;
+      textarea.focus();
+    }
+  }
+
+  if (composer) {
+    composer.addEventListener('submit', event => {
+      event.preventDefault();
+      askAssistant(textarea.value);
+    });
+    textarea.addEventListener('input', resizeComposer);
+    textarea.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        composer.requestSubmit();
+      }
+    });
+  }
+
+  document.querySelectorAll('[data-ai-prompt]').forEach(button => {
+    button.addEventListener('click', () => askAssistant(button.dataset.aiPrompt || ''));
+  });
+
+  document.getElementById('aiNewConversation').addEventListener('click', async () => {
+    const response = await fetch({{ url_for('ai_assistant.create_conversation')|tojson }}, {method: 'POST'});
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.ok) {
+      window.location.href = {{ url_for('ai_assistant.index')|tojson }} + '?conversation=' + data.conversation_id;
+    }
+  });
+
+  document.querySelectorAll('[data-delete-conversation]').forEach(button => {
+    button.addEventListener('click', async () => {
+      if (!window.confirm('Удалить этот диалог?')) return;
+      const id = button.dataset.deleteConversation;
+      const response = await fetch('/assistant/api/conversations/' + encodeURIComponent(id), {method: 'DELETE'});
+      if (response.ok) window.location.href = {{ url_for('ai_assistant.index')|tojson }};
+    });
+  });
+
+  resizeComposer();
+  if (transcript.querySelector('.ai-message')) scrollToLatest();
+})();
+</script>
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+</body>
+</html>
