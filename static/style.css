@@ -612,18 +612,20 @@ body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 44px;
   align-items: end;
-  gap: 8px;
+  gap: 6px;
   width: min(790px, 100%);
   margin: 0 auto;
-  padding: 7px 7px 7px 15px;
-  border: 1px solid #bfd0dc;
-  border-radius: 14px;
-  background: #f9fbfd;
-  box-shadow: 0 9px 28px -20px rgba(15, 42, 53, .8);
+  padding: 6px 6px 6px 16px;
+  border: 1px solid #d5e1eb;
+  border-radius: 16px;
+  background: #f5f8fb;
+  box-shadow: 0 8px 24px -22px rgba(15, 42, 53, .7);
+  transition: border-color .18s ease, background .18s ease, box-shadow .18s ease;
 }
 .ai-composer:focus-within {
-  border-color: var(--brass);
-  box-shadow: 0 0 0 3px rgba(52, 152, 219, .12), 0 9px 28px -20px rgba(15, 42, 53, .8);
+  border-color: rgba(52, 152, 219, .72);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, .1), 0 12px 28px -24px rgba(15, 42, 53, .75);
 }
 .ai-composer textarea {
   width: 100%;
@@ -638,6 +640,11 @@ body {
   color: var(--ink);
   font: 400 13px/1.5 'Open Sans', sans-serif;
 }
+.ai-composer textarea:focus {
+  border-color: transparent;
+  outline: 0;
+  box-shadow: none;
+}
 .ai-composer textarea::placeholder { color: #8797a2; }
 .ai-composer > button[type="submit"] {
   display: flex;
@@ -648,7 +655,7 @@ body {
   height: 44px;
   padding: 0;
   border: 0;
-  border-radius: 10px;
+  border-radius: 50%;
   background: var(--brass);
   color: #fff;
   cursor: pointer;
