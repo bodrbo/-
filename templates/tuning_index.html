@@ -125,7 +125,7 @@
           {% for o in orders %}
           <tr data-status="{{ o.status }}">
             <td><a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="term">№{{ o.id }}</a></td>
-            <td class="muted">{{ o.created_at[:10]|ru_date }}</td>
+            <td class="muted">{{ o.order_date|ru_date }}</td>
             <td>
               {% if o.client_id %}
               <a href="{{ url_for('admin_client_dashboard', client_id=o.client_id) }}">{{ o.client_name }}</a>
@@ -352,7 +352,7 @@
         <div class="boat-profile-stats">
           <div><strong>{{ profile_orders|length }}</strong><span>Заказов в истории</span></div>
           <div><strong>{{ profile_orders_total|money }} ₽</strong><span>Общая сумма заказов</span></div>
-          <div><strong>{{ profile_orders[0].created_at[:10]|ru_date if profile_orders else '—' }}</strong><span>Последняя работа</span></div>
+          <div><strong>{{ profile_orders[0].order_date|ru_date if profile_orders else '—' }}</strong><span>Последняя работа</span></div>
         </div>
 
         <div class="boat-profile-specifications">
@@ -419,7 +419,7 @@
             {% for order in profile_orders %}
             <tr>
               <td><a href="{{ url_for('edit_tuning_order', order_id=order.id) }}" class="term">№{{ order.id }}</a></td>
-              <td class="muted">{{ order.created_at[:10]|ru_date }}</td>
+              <td class="muted">{{ order.order_date|ru_date }}</td>
               <td>{{ order.client_name }}</td>
               <td>{{ (order.motor_serial_number if is_motor_catalog else order.boat_registration_number) or '—' }}</td>
               {% if not is_motor_catalog %}<td>{{ order.motor_model or '—' }}</td>{% endif %}

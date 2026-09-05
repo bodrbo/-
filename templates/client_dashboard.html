@@ -170,7 +170,7 @@
       <details class="panel order-card">
         <summary>
           <span class="oc-num">№{{ o.id }}</span>
-          <span class="oc-date">{{ o.created_at[:10]|ru_date }}</span>
+          <span class="oc-date">{{ o.order_date|ru_date }}</span>
           <span class="oc-boat">{{ o|tuning_equipment_label }}</span>
           <span class="status-badge status-{{ o.status }}">{{ o.status|order_status_label }}</span>
           <span class="oc-total">{{ o.total|money }} ₽</span>

@@ -111,6 +111,7 @@ class TuningSiteIntegrationTests(unittest.TestCase):
         self.assertEqual(order["source"], "tuning_site")
         self.assertEqual(order["source_ref"], "tuning_site:lead-2026-0001")
         self.assertEqual(order["sale_channel"], "direct")
+        self.assertEqual(order["order_date"], "2026-08-27")
         self.assertEqual(order["subtotal"], 0)
         self.assertEqual(order["total"], 0)
         self.assertEqual(client["phone"], order["phone"])

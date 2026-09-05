@@ -1612,6 +1612,7 @@ def init_db():
             subtotal REAL NOT NULL,
             total REAL NOT NULL,
             status TEXT NOT NULL DEFAULT 'estimate',
+            order_date TEXT NOT NULL DEFAULT CURRENT_DATE,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
@@ -2169,6 +2170,39 @@ def init_db():
             "ALTER TABLE tuning_orders "
             "ADD COLUMN motor_serial_number TEXT NOT NULL DEFAULT ''"
         )
+    if "order_date" not in tuning_cols:
+        # Business date shown in the interface.  It deliberately remains
+        # separate from created_at: migrated orders may have been inserted
+        # into Bodry Business months after they were originally accepted.
+        conn.execute(
+            "ALTER TABLE tuning_orders "
+            "ADD COLUMN order_date TEXT NOT NULL DEFAULT ''"
+        )
+    conn.execute(
+        "UPDATE tuning_orders SET order_date = CASE "
+        "WHEN created_at GLOB '????-??-??*' THEN substr(created_at, 1, 10) "
+        "WHEN created_at GLOB '??.??.????*' THEN "
+        "substr(created_at, 7, 4) || '-' || substr(created_at, 4, 2) || '-' || substr(created_at, 1, 2) "
+        "ELSE date('now') END "
+        "WHERE order_date IS NULL OR TRIM(order_date) = ''"
+    )
+    # Databases upgraded through ALTER TABLE keep an empty-string default.
+    # The trigger protects integrations or maintenance scripts that omit the
+    # new field, while explicit form/import dates remain untouched.
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS set_tuning_order_date_after_insert "
+        "AFTER INSERT ON tuning_orders "
+        "WHEN NEW.order_date IS NULL OR TRIM(NEW.order_date) = '' "
+        "BEGIN UPDATE tuning_orders SET order_date = CASE "
+        "WHEN NEW.created_at GLOB '????-??-??*' THEN substr(NEW.created_at, 1, 10) "
+        "WHEN NEW.created_at GLOB '??.??.????*' THEN "
+        "substr(NEW.created_at, 7, 4) || '-' || substr(NEW.created_at, 4, 2) || '-' || substr(NEW.created_at, 1, 2) "
+        "ELSE date('now') END WHERE id = NEW.id; END"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tuning_orders_order_date "
+        "ON tuning_orders (order_date)"
+    )
     boat_profile_cols = {
         row[1]
         for row in conn.execute("PRAGMA table_info(tuning_boat_profiles)").fetchall()
@@ -3762,7 +3796,34 @@ app.register_blueprint(
 # Тюнинг-центр
 # =======================================================================
 
-def _process_tuning_form(form):
+def _external_order_date(value, fallback):
+    """Extract an ISO business date from an integration timestamp."""
+    raw = str(value or "").strip()
+    if raw:
+        try:
+            return dt.date.fromisoformat(raw[:10]).isoformat()
+        except ValueError:
+            try:
+                return dt.datetime.fromisoformat(
+                    raw.replace("Z", "+00:00")
+                ).date().isoformat()
+            except ValueError:
+                pass
+    return fallback
+
+
+def _order_business_date(order):
+    """Read the UI date, with a compatibility fallback for legacy payloads."""
+    try:
+        value = order["order_date"]
+    except (KeyError, IndexError):
+        value = None
+    if value:
+        return str(value)[:10]
+    return str(order["created_at"])[:10]
+
+
+def _process_tuning_form(form, default_order_date=None):
     """Validate a tuning-center order form and compute derived amounts.
     Returns (errors, data). data is None if there are errors."""
     errors = []
@@ -3787,6 +3848,13 @@ def _process_tuning_form(form):
         motor_serial_number = ""
     phone = form.get("phone", "").strip()
     raw_client_id = form.get("client_id", "").strip()
+    order_date_raw = form.get("order_date", "").strip()
+    order_date = default_order_date or dt.date.today().isoformat()
+    if order_date_raw:
+        try:
+            order_date = dt.date.fromisoformat(order_date_raw).isoformat()
+        except ValueError:
+            errors.append("Укажите корректную дату заказа.")
     sale_channel = form.get("sale_channel", "direct").strip()
     if sale_channel not in [c["value"] for c in SALE_CHANNELS]:
         sale_channel = "direct"
@@ -3877,6 +3945,7 @@ def _process_tuning_form(form):
         client_name=client_name, equipment_type=equipment_type,
         boat_model=boat_model, boat_registration_number=boat_registration_number,
         motor_model=motor_model, motor_serial_number=motor_serial_number, phone=phone,
+        order_date=order_date,
         sale_channel=sale_channel, discount_type=discount_type, discount_value=discount_value,
         # discount_pct is kept only for older code/rows that still read it —
         # 0 when the discount is a fixed amount, since it isn't a percent.
@@ -4314,9 +4383,9 @@ def _build_act_pdf(order, items, goods=()):
     style_review = ParagraphStyle("review", fontName="OpenSans", fontSize=10, leading=14)
 
     try:
-        order_date = dt.date.fromisoformat(order["created_at"][:10]).strftime("%d.%m.%Y")
+        order_date = dt.date.fromisoformat(_order_business_date(order)).strftime("%d.%m.%Y")
     except ValueError:
-        order_date = order["created_at"][:10]
+        order_date = _order_business_date(order)
 
     flow = []
     logo_path = os.path.join(app.static_folder, "logo-act.png")
@@ -4511,9 +4580,9 @@ def _build_handover_act_pdf(order, items, goods=()):
                                     spaceBefore=4, spaceAfter=8)
 
     try:
-        order_date = dt.date.fromisoformat(order["created_at"][:10]).strftime("%d.%m.%Y")
+        order_date = dt.date.fromisoformat(_order_business_date(order)).strftime("%d.%m.%Y")
     except ValueError:
-        order_date = order["created_at"][:10]
+        order_date = _order_business_date(order)
 
     flow = []
     logo_path = os.path.join(app.static_folder, "logo-act.png")
@@ -4757,7 +4826,7 @@ def tuning_index():
     _sync_tuning_boat_profiles(db)
     db.commit()
     order_rows = db.execute(
-        "SELECT * FROM tuning_orders ORDER BY created_at DESC, id DESC"
+        "SELECT * FROM tuning_orders ORDER BY order_date DESC, id DESC"
     ).fetchall()
     profile_ids_by_model = {
         row["model_key"]: row["id"]
@@ -4954,16 +5023,16 @@ def tuning_clients():
             "(SELECT CASE WHEN latest.equipment_type = 'motor' "
             "        THEN latest.motor_model ELSE latest.boat_model END "
             " FROM tuning_orders latest WHERE latest.client_id = c.id "
-            " ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) "
+            " ORDER BY latest.order_date DESC, latest.id DESC LIMIT 1) "
             "AS latest_equipment_model, "
             "(SELECT latest.equipment_type FROM tuning_orders latest "
             " WHERE latest.client_id = c.id "
-            " ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1) "
+            " ORDER BY latest.order_date DESC, latest.id DESC LIMIT 1) "
             "AS latest_equipment_type "
             "FROM clients c "
             "LEFT JOIN ("
             " SELECT client_id, COUNT(*) AS order_count, SUM(total) AS order_total, "
-            " MAX(created_at) AS last_order_at FROM tuning_orders "
+            " MAX(order_date) AS last_order_at FROM tuning_orders "
             " WHERE client_id IS NOT NULL GROUP BY client_id"
             ") os ON os.client_id = c.id "
             "LEFT JOIN ("
@@ -5106,7 +5175,7 @@ def _render_tuning_equipment_catalog(equipment_type):
         " WHERE i.order_id = o.id AND i.status != 'removed') AS work_names "
         f"FROM tuning_orders o WHERE o.equipment_type = ? "
         f"AND TRIM(o.{model_column}) != '' "
-        "ORDER BY o.created_at DESC, o.id DESC",
+        "ORDER BY o.order_date DESC, o.id DESC",
         (equipment_type,),
     ).fetchall()
     orders_by_model = {}
@@ -5128,7 +5197,7 @@ def _render_tuning_equipment_catalog(equipment_type):
         profile["photo_url"] = _tuning_boat_photo_url(profile)
         profile["order_count"] = len(profile_orders)
         profile["orders_total"] = sum(order["total"] for order in profile_orders)
-        profile["last_order_at"] = profile_orders[0]["created_at"]
+        profile["last_order_at"] = profile_orders[0]["order_date"]
         profiles.append(profile)
 
     return render_template(
@@ -5181,7 +5250,7 @@ def _render_tuning_equipment_profile(profile_id, expected_type):
         " WHERE i.order_id = o.id AND i.status != 'removed') AS work_names "
         "FROM tuning_orders o WHERE o.equipment_type = ? "
         f"AND TRIM(o.{model_column}) != '' "
-        "ORDER BY o.created_at DESC, o.id DESC",
+        "ORDER BY o.order_date DESC, o.id DESC",
         (expected_type,),
     ).fetchall():
         if _tuning_equipment_profile_key(
@@ -5627,6 +5696,7 @@ def add_tuning_order():
         return render_template(
             "tuning_form.html", edit_order=None, errors=None, form_values=None,
             items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
+            today=dt.date.today().isoformat(),
             boat_model_choices=_tuning_boat_model_choices(db),
             tuning_client_choices=_tuning_client_choices(db),
         )
@@ -5637,6 +5707,7 @@ def add_tuning_order():
         return render_template(
             "tuning_form.html", edit_order=None, errors=errors, form_values=request.form,
             items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
+            today=dt.date.today().isoformat(),
             boat_model_choices=_tuning_boat_model_choices(db),
             tuning_client_choices=_tuning_client_choices(db),
         ), 400
@@ -5649,13 +5720,14 @@ def add_tuning_order():
     cur = db.execute(
         "INSERT INTO tuning_orders (client_id, client_name, equipment_type, boat_model, "
         "boat_registration_number, motor_model, motor_serial_number, sale_channel, phone, "
-        "discount_pct, discount_type, discount_value, subtotal, total, status, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "discount_pct, discount_type, discount_value, subtotal, total, status, order_date, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (client_id, data["client_name"], data["equipment_type"], data["boat_model"],
          data["boat_registration_number"], data["motor_model"],
          data["motor_serial_number"], data["sale_channel"], data["phone"],
          data["discount_pct"], data["discount_type"], data["discount_value"],
-         data["subtotal"], data["total"], DEFAULT_ORDER_STATUS, now, now),
+         data["subtotal"], data["total"], DEFAULT_ORDER_STATUS,
+         data["order_date"], now, now),
     )
     order_id = cur.lastrowid
     for item in data["items"]:
@@ -5751,6 +5823,7 @@ def tuning_site_lead_webhook():
     db = get_db()
     source_ref = f"tuning_site:{data['request_id']}"
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    order_date = _external_order_date(data["submitted_at"], now[:10])
     try:
         # Serializing this short check/create transaction makes request_id
         # idempotent even when the site retries concurrently.
@@ -5771,15 +5844,16 @@ def tuning_site_lead_webhook():
             "INSERT INTO tuning_orders "
             "(client_id, client_name, boat_model, sale_channel, phone, "
             "discount_pct, discount_type, discount_value, subtotal, total, "
-            "status, source, source_ref, created_at, updated_at) "
+            "status, source, source_ref, order_date, created_at, updated_at) "
             "VALUES (?, ?, ?, 'direct', ?, 0, 'percent', 0, 0, 0, "
-            "'new_request', 'tuning_site', ?, ?, ?)",
+            "'new_request', 'tuning_site', ?, ?, ?, ?)",
             (
                 client_id,
                 data["name"],
                 data["boat_model"],
                 data["phone"],
                 source_ref,
+                order_date,
                 now,
                 now,
             ),
@@ -5908,9 +5982,9 @@ def tilda_webhook():
     cur = db.execute(
         "INSERT INTO tuning_orders (client_id, client_name, boat_model, sale_channel, phone, "
         "discount_pct, discount_type, discount_value, subtotal, total, status, source, source_ref, "
-        "created_at, updated_at) "
-        "VALUES (?, ?, ?, 'direct', ?, 0, 'percent', 0, 0, 0, 'new_request', 'tilda', ?, ?, ?)",
-        (client_id, client_name, "", phone or "", tranid or None, now, now),
+        "order_date, created_at, updated_at) "
+        "VALUES (?, ?, ?, 'direct', ?, 0, 'percent', 0, 0, 0, 'new_request', 'tilda', ?, ?, ?, ?)",
+        (client_id, client_name, "", phone or "", tranid or None, now[:10], now, now),
     )
     order_id = cur.lastrowid
     db.execute(
@@ -6016,6 +6090,7 @@ def edit_tuning_order(order_id):
             "motor_model": order["motor_model"],
             "motor_serial_number": order["motor_serial_number"],
             "sale_channel": order["sale_channel"], "phone": order["phone"],
+            "order_date": order["order_date"],
             "discount_type": order["discount_type"], "discount_value": order["discount_value"],
         }
         hull_sheets = db.execute(
@@ -6030,6 +6105,7 @@ def edit_tuning_order(order_id):
         return render_template(
             "tuning_form.html", edit_order=order, errors=None, form_values=form_values,
             items_prefill=items, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
+            today=dt.date.today().isoformat(),
             payments=payments, paid_amount=paid_amount, remaining=remaining,
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
             yookassa_payments=yookassa_payments, yookassa_configured=yookassa_configured(),
@@ -6047,7 +6123,9 @@ def edit_tuning_order(order_id):
             modulkassa_configured=_modulkassa_configured(),
         )
 
-    errors, data = _process_tuning_form(request.form)
+    errors, data = _process_tuning_form(
+        request.form, default_order_date=order["order_date"]
+    )
     if errors:
         payments, paid_amount, remaining = _order_payment_totals(db, order_id, order["total"])
         yookassa_payments = db.execute(
@@ -6062,6 +6140,7 @@ def edit_tuning_order(order_id):
         return render_template(
             "tuning_form.html", edit_order=order, errors=errors, form_values=request.form,
             items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
+            today=dt.date.today().isoformat(),
             payments=payments, paid_amount=paid_amount, remaining=remaining,
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
             yookassa_payments=yookassa_payments, yookassa_configured=yookassa_configured(),
@@ -6082,12 +6161,12 @@ def edit_tuning_order(order_id):
     db.execute(
         "UPDATE tuning_orders SET client_id=?, client_name=?, equipment_type=?, boat_model=?, "
         "boat_registration_number=?, motor_model=?, motor_serial_number=?, sale_channel=?, phone=?, "
-        "discount_pct=?, discount_type=?, discount_value=?, subtotal=?, total=?, updated_at=? WHERE id=?",
+        "discount_pct=?, discount_type=?, discount_value=?, subtotal=?, total=?, order_date=?, updated_at=? WHERE id=?",
         (client_id, data["client_name"], data["equipment_type"], data["boat_model"],
          data["boat_registration_number"], data["motor_model"],
          data["motor_serial_number"], data["sale_channel"], data["phone"],
          data["discount_pct"], data["discount_type"], data["discount_value"],
-         data["subtotal"], data["total"], now, order_id),
+         data["subtotal"], data["total"], data["order_date"], now, order_id),
     )
     # Update surviving rows in place instead of delete-all + reinsert-all —
     # the form resubmits every row on every save (even ones untouched
@@ -6571,7 +6650,7 @@ def _render_client_dashboard(db, client, viewer_role, client_section=TUNING_SEGM
     if not (is_manager_view and client_section == EXCURSION_SEGMENT):
         order_rows = db.execute(
             f"SELECT {order_columns} FROM tuning_orders "
-            "WHERE client_id = ? ORDER BY created_at DESC, id DESC",
+            "WHERE client_id = ? ORDER BY order_date DESC, id DESC",
             (client["id"],),
         ).fetchall()
 

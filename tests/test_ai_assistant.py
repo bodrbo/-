@@ -2,6 +2,7 @@ import os
 import unittest
 
 from support import application_module
+from modules.ai_assistant.tools import execute_tool
 
 
 def text_response(text="Готово", input_tokens=120, output_tokens=30):
@@ -65,6 +66,14 @@ class AIAssistantTests(unittest.TestCase):
 
     @classmethod
     def _clear(cls, db):
+        tuning_order_ids = [
+            row["id"] for row in db.execute(
+                "SELECT id FROM tuning_orders WHERE source_ref LIKE 'ai-summary-test:%'"
+            ).fetchall()
+        ]
+        for order_id in tuning_order_ids:
+            db.execute("DELETE FROM tuning_payments WHERE order_id = ?", (order_id,))
+            db.execute("DELETE FROM tuning_orders WHERE id = ?", (order_id,))
         owners = db.execute(
             "SELECT id FROM ai_conversations WHERE "
             "(owner_type = 'admin' AND owner_id IN ("
@@ -86,6 +95,81 @@ class AIAssistantTests(unittest.TestCase):
         db.execute("DELETE FROM employees WHERE name = ?", (cls.EMPLOYEE_NAME,))
         db.execute("DELETE FROM admin_accounts WHERE username = ?", (cls.ADMIN_USERNAME,))
         db.commit()
+
+    def test_tuning_summary_uses_business_date_and_separates_money_metrics(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+
+            def add_order(source_ref, order_date, created_at, total, status, channel):
+                return db.execute(
+                    "INSERT INTO tuning_orders "
+                    "(client_name, boat_model, sale_channel, phone, subtotal, total, "
+                    "status, order_date, source_ref, created_at, updated_at) "
+                    "VALUES ('AI Test Client', 'AI Test Boat', ?, '', ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        channel,
+                        total,
+                        total,
+                        status,
+                        order_date,
+                        source_ref,
+                        created_at,
+                        created_at,
+                    ),
+                ).lastrowid
+
+            june_first = add_order(
+                "ai-summary-test:june-1", "2026-06-05", "2026-09-01 10:00",
+                100000, "in_progress", "direct",
+            )
+            june_second = add_order(
+                "ai-summary-test:june-2", "2026-06-20", "2026-09-02 10:00",
+                50000, "done", "aggregator",
+            )
+            july_order = add_order(
+                "ai-summary-test:july", "2026-07-03", "2026-07-03 10:00",
+                70000, "estimate", "direct",
+            )
+            for order_id, amount, paid_at in (
+                (june_first, 40000, "2026-06-10 12:00"),
+                (june_first, 10000, "2026-07-01 12:00"),
+                (june_second, 50000, "2026-06-25 12:00"),
+                (july_order, 20000, "2026-06-30 12:00"),
+            ):
+                db.execute(
+                    "INSERT INTO tuning_payments "
+                    "(order_id, amount, paid_at, created_at) VALUES (?, ?, ?, ?)",
+                    (order_id, amount, paid_at, paid_at),
+                )
+            db.commit()
+
+            result = execute_tool(
+                db,
+                {
+                    "owner_type": "admin",
+                    "owner_id": self.admin_id,
+                    "name": "AI Администратор",
+                    "positions": [],
+                },
+                application_module.BOATS,
+                "get_tuning_summary",
+                {"date_from": "2026-06-01", "date_to": "2026-06-30"},
+            )
+
+        self.assertEqual(result["date_basis"], "order_date")
+        self.assertEqual(result["orders"], 2)
+        self.assertEqual(result["orders_total_rub"], 150000)
+        self.assertEqual(result["payments_for_selected_orders_rub"], 100000)
+        self.assertEqual(result["current_outstanding_for_selected_orders_rub"], 50000)
+        self.assertEqual(result["payments_received_in_period"], 3)
+        self.assertEqual(result["payments_received_in_period_rub"], 110000)
+        self.assertEqual(result["by_status"], {"in_progress": 1, "done": 1})
+        channels = {
+            row["sale_channel"]: row for row in result["sale_channel_breakdown"]
+        }
+        self.assertEqual(channels["direct"]["orders_total_rub"], 100000)
+        self.assertEqual(channels["direct"]["sale_channel_label"], "Напрямую")
+        self.assertEqual(channels["aggregator"]["orders_total_rub"], 50000)
 
     def login_admin(self):
         with self.client.session_transaction() as session:

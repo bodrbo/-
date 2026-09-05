@@ -697,6 +697,12 @@
                  value="{{ form_values.phone if form_values else '' }}">
           <span class="field-context">Необязательно</span>
         </div>
+        <div class="field field-narrow">
+          <label for="order_date">Дата заказа</label>
+          <input type="date" id="order_date" name="order_date"
+                 value="{{ form_values.order_date if form_values and form_values.order_date else today }}" required>
+          <span class="field-context">Дата принятия заказа, а не добавления в систему</span>
+        </div>
         <div class="field">
           <label for="sale_channel">Канал продажи</label>
           <select id="sale_channel" name="sale_channel">

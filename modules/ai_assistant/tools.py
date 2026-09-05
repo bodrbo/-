@@ -6,6 +6,21 @@ from .constants import GUIDE_TOPICS
 from .knowledge import guide_for
 
 
+TUNING_STATUS_LABELS = {
+    "new_request": "Новая заявка",
+    "estimate": "Предварительный расчёт",
+    "in_progress": "В работе",
+    "qc": "Проходит независимый контроль качества",
+    "done": "Выполнен",
+    "cancelled": "Отменён",
+}
+TUNING_SALE_CHANNEL_LABELS = {
+    "direct": "Напрямую",
+    "aggregator": "Через агрегатора/агента",
+    "mixed": "Смешанно / другое",
+}
+
+
 class ToolAccessError(ValueError):
     pass
 
@@ -141,32 +156,87 @@ def _fleet_status(db, arguments, boats):
 def _tuning_summary(db, arguments):
     date_from, date_to = _date_period(arguments, default_days=30)
     status = str(arguments.get("status") or "").strip()
-    params = [date_from.isoformat(), (date_to + dt.timedelta(days=1)).isoformat()]
-    where = "created_at >= ? AND created_at < ?"
+    params = [date_from.isoformat(), date_to.isoformat()]
+    where = "o.order_date >= ? AND o.order_date <= ?"
     if status:
-        where += " AND status = ?"
+        where += " AND o.status = ?"
         params.append(status)
     totals = db.execute(
-        f"SELECT COUNT(*) AS orders_count, COALESCE(SUM(total), 0) AS total "
-        f"FROM tuning_orders WHERE {where}",
+        "SELECT COUNT(o.id) AS orders_count, "
+        "COALESCE(SUM(o.total), 0) AS total, "
+        "COALESCE(SUM(COALESCE(p.paid_total, 0)), 0) AS paid_total, "
+        "COALESCE(SUM(MAX(o.total - COALESCE(p.paid_total, 0), 0)), 0) AS outstanding_total "
+        "FROM tuning_orders o LEFT JOIN ("
+        " SELECT order_id, SUM(amount) AS paid_total FROM tuning_payments GROUP BY order_id"
+        f") p ON p.order_id = o.id WHERE {where}",
         params,
     ).fetchone()
     statuses = db.execute(
-        f"SELECT status AS label, COUNT(*) AS total FROM tuning_orders "
-        f"WHERE {where} GROUP BY status ORDER BY total DESC",
+        "SELECT o.status AS label, COUNT(*) AS total, "
+        "COALESCE(SUM(o.total), 0) AS amount FROM tuning_orders o "
+        f"WHERE {where} GROUP BY o.status ORDER BY amount DESC",
         params,
     ).fetchall()
     equipment = db.execute(
-        f"SELECT equipment_type AS label, COUNT(*) AS total FROM tuning_orders "
-        f"WHERE {where} GROUP BY equipment_type ORDER BY total DESC",
+        "SELECT o.equipment_type AS label, COUNT(*) AS total FROM tuning_orders o "
+        f"WHERE {where} GROUP BY o.equipment_type ORDER BY total DESC",
         params,
     ).fetchall()
+    channels = db.execute(
+        "SELECT o.sale_channel AS label, COUNT(*) AS total, "
+        "COALESCE(SUM(o.total), 0) AS amount FROM tuning_orders o "
+        f"WHERE {where} GROUP BY o.sale_channel ORDER BY amount DESC",
+        params,
+    ).fetchall()
+    payment_params = [date_from.isoformat(), date_to.isoformat()]
+    payment_where = (
+        "substr(tp.paid_at, 1, 10) >= ? AND substr(tp.paid_at, 1, 10) <= ?"
+    )
+    if status:
+        payment_where += " AND o.status = ?"
+        payment_params.append(status)
+    payments = db.execute(
+        "SELECT COUNT(*) AS payments_count, COALESCE(SUM(amount), 0) AS amount "
+        "FROM tuning_payments tp JOIN tuning_orders o ON o.id = tp.order_id "
+        f"WHERE {payment_where}",
+        payment_params,
+    ).fetchone()
     return {
         "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
+        "date_basis": "order_date",
+        "date_basis_note": "Заказы отобраны по дате заказа из интерфейса, а не по технической дате добавления в базу.",
         "status_filter": status or None,
         "orders": int(totals["orders_count"] or 0),
         "orders_total_rub": _money(totals["total"]),
+        "payments_for_selected_orders_rub": _money(totals["paid_total"]),
+        "current_outstanding_for_selected_orders_rub": _money(
+            totals["outstanding_total"]
+        ),
+        "payments_received_in_period": int(payments["payments_count"] or 0),
+        "payments_received_in_period_rub": _money(payments["amount"]),
         "by_status": _rows_to_counts(statuses),
+        "status_breakdown": [
+            {
+                "status": str(row["label"] or "Не указано"),
+                "status_label": TUNING_STATUS_LABELS.get(
+                    str(row["label"] or ""), "Не указано"
+                ),
+                "orders": int(row["total"] or 0),
+                "orders_total_rub": _money(row["amount"]),
+            }
+            for row in statuses
+        ],
+        "sale_channel_breakdown": [
+            {
+                "sale_channel": str(row["label"] or "Не указано"),
+                "sale_channel_label": TUNING_SALE_CHANNEL_LABELS.get(
+                    str(row["label"] or ""), "Не указано"
+                ),
+                "orders": int(row["total"] or 0),
+                "orders_total_rub": _money(row["amount"]),
+            }
+            for row in channels
+        ],
         "by_equipment_type": _rows_to_counts(equipment),
     }
 
@@ -317,7 +387,10 @@ TOOL_SCHEMAS = {
         },
     },
     "get_tuning_summary": {
-        "description": "Получить агрегированную сводку тюнинг-заказов.",
+        "description": (
+            "Получить агрегированную сводку тюнинг-заказов по бизнес-дате из интерфейса: "
+            "количество и стоимость заказов, оплаты, текущую задолженность, статусы и каналы продаж."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -426,4 +499,3 @@ def execute_tool(db, user, boats, name, arguments):
     if name == "get_business_overview":
         return _business_overview(db, arguments, user, boats)
     raise ValueError("Неизвестный инструмент.")
-

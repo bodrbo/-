@@ -57,6 +57,7 @@ class TuningEquipmentTypeTests(unittest.TestCase):
             ("motor_model", motor_model),
             ("motor_serial_number", motor_serial_number),
             ("phone", "+7 900 000-00-00"),
+            ("order_date", "2026-06-15"),
             ("sale_channel", "direct"),
             ("discount_type", "percent"),
             ("discount_value", "0"),
@@ -90,6 +91,7 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertEqual(boat["boat_registration_number"], "Р 12-34 ЛО")
         self.assertEqual(boat["motor_model"], "Yamaha F150")
         self.assertEqual(boat["motor_serial_number"], "")
+        self.assertEqual(boat["order_date"], "2026-06-15")
         self.assertEqual(motor_errors, [])
         self.assertEqual(motor["equipment_type"], "motor")
         self.assertEqual(motor["boat_model"], "")
@@ -119,8 +121,10 @@ class TuningEquipmentTypeTests(unittest.TestCase):
             client = db.execute(
                 "SELECT * FROM clients WHERE client_name = 'Иван Петров'"
             ).fetchone()
+            order = db.execute("SELECT * FROM tuning_orders").fetchone()
         self.assertIsNotNone(client)
         self.assertEqual(client["phone"], "")
+        self.assertEqual(order["order_date"], "2026-06-15")
 
     def test_creation_form_searches_catalog_and_creates_new_boat_profile(self):
         self.login()
@@ -541,14 +545,14 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         migrated = sqlite3.connect(database_path)
         row = migrated.execute(
             "SELECT equipment_type, boat_model, boat_registration_number, "
-            "motor_model, motor_serial_number FROM tuning_orders"
+            "motor_model, motor_serial_number, order_date FROM tuning_orders"
         ).fetchone()
         profile = migrated.execute(
             "SELECT model_name, equipment_type FROM tuning_boat_profiles"
         ).fetchone()
         migrated.close()
 
-        self.assertEqual(row, ("boat", "Legacy Boat", "", "", ""))
+        self.assertEqual(row, ("boat", "Legacy Boat", "", "", "", "2026-01-01"))
         self.assertEqual(profile, ("Legacy Boat", "boat"))
 
 
