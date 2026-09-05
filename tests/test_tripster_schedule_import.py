@@ -331,6 +331,10 @@ class TripsterScheduleImportTests(unittest.TestCase):
                 "SELECT segment FROM client_segments WHERE client_id = ?",
                 (participants[0]["client_id"],),
             ).fetchone()
+            imported_client = db.execute(
+                "SELECT acquisition_channel FROM clients WHERE id = ?",
+                (participants[0]["client_id"],),
+            ).fetchone()
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["source"], "tripster")
         self.assertEqual(items[0]["source_ref"], "order:7001")
@@ -342,6 +346,7 @@ class TripsterScheduleImportTests(unittest.TestCase):
         self.assertEqual(len(participants), 1)
         self.assertEqual(participants[0]["source"], "tripster")
         self.assertEqual(segment["segment"], "excursion")
+        self.assertEqual(imported_client["acquisition_channel"], "tripster")
 
     def test_manual_full_sync_refreshes_guest_count(self):
         self.sync([self.order(persons_count=2)])

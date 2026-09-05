@@ -107,7 +107,11 @@ from modules.clients import (
     init_schema as init_client_segments_schema,
     sync_clients as sync_yclients_clients,
 )
-from modules.clients.constants import EXCURSION_SEGMENT, TUNING_SEGMENT
+from modules.clients.constants import (
+    CLIENT_ACQUISITION_CHANNELS,
+    EXCURSION_SEGMENT,
+    TUNING_SEGMENT,
+)
 from modules.tuning_boat_specs import boat_specification_for, format_parameters
 
 # reportlab (PDF generation for "Акт выполненных работ") is imported lazily,
@@ -1818,6 +1822,7 @@ def init_db():
             email TEXT NOT NULL DEFAULT '',
             birth_date TEXT NOT NULL DEFAULT '',
             comment TEXT NOT NULL DEFAULT '',
+            acquisition_channel TEXT NOT NULL DEFAULT '',
             yclients_last_change_date TEXT NOT NULL DEFAULT ''
         )
         """
@@ -1826,6 +1831,11 @@ def init_db():
     if "status" not in client_cols:
         conn.execute(
             "ALTER TABLE clients ADD COLUMN status TEXT NOT NULL DEFAULT 'neutral'"
+        )
+    if "acquisition_channel" not in client_cols:
+        conn.execute(
+            "ALTER TABLE clients "
+            "ADD COLUMN acquisition_channel TEXT NOT NULL DEFAULT ''"
         )
     conn.execute(
         """
@@ -6558,6 +6568,7 @@ def _render_client_dashboard(db, client, viewer_role, client_section=TUNING_SEGM
             if orders else (client["boat_model"] or "—")
         ),
         work_photos_by_item=work_photos_by_item, cost_units=SUPPLY_COST_UNITS,
+        client_acquisition_channels=CLIENT_ACQUISITION_CHANNELS,
         viewer_role=viewer_role,
         client_section=client_section,
         excursion_trips=excursion_trips,
@@ -6602,6 +6613,32 @@ def admin_client_dashboard(client_id):
     if client_section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
         client_section = TUNING_SEGMENT
     return _render_client_dashboard(db, client, "admin", client_section)
+
+
+@app.route(
+    "/admin/clients/<int:client_id>/acquisition-channel", methods=["POST"]
+)
+@excursion_manager_or_admin_required
+def update_client_acquisition_channel(client_id):
+    db = get_db()
+    channel = request.form.get("acquisition_channel", "").strip()
+    allowed_channels = {
+        item["value"] for item in CLIENT_ACQUISITION_CHANNELS
+    }
+    is_excursion_client = db.execute(
+        "SELECT 1 FROM client_segments WHERE client_id = ? AND segment = ?",
+        (client_id, EXCURSION_SEGMENT),
+    ).fetchone() is not None
+    if is_excursion_client and (not channel or channel in allowed_channels):
+        db.execute(
+            "UPDATE clients SET acquisition_channel = ? WHERE id = ?",
+            (channel, client_id),
+        )
+        db.commit()
+    return redirect(url_for(
+        "admin_client_dashboard", client_id=client_id,
+        section=EXCURSION_SEGMENT,
+    ))
 
 
 @app.route("/client/<token>/item/<int:item_id>/approve", methods=["POST"])

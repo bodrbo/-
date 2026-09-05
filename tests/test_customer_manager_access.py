@@ -221,6 +221,41 @@ class CustomerManagerAccessTests(unittest.TestCase):
         self.assertEqual(tuning_status, "neutral")
         self.assertEqual(excursion_status, "satisfied")
 
+    def test_manager_can_set_sales_channel_only_for_excursion_client(self):
+        self.login_as_manager()
+
+        card = self.client.get(
+            f"/admin/clients/{self.excursion_client_id}/cabinet"
+        )
+        html = card.get_data(as_text=True)
+        self.assertIn("Канал продаж", html)
+        self.assertIn('<option value="tripster"', html)
+        self.assertIn('<option value="sputnik"', html)
+        self.assertIn('<option value="bodrbo_fort"', html)
+        self.assertIn("Сайт bodrbo-fort.ru", html)
+
+        response = self.client.post(
+            f"/admin/clients/{self.excursion_client_id}/acquisition-channel",
+            data={"acquisition_channel": "sputnik"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.client.post(
+            f"/admin/clients/{self.tuning_client_id}/acquisition-channel",
+            data={"acquisition_channel": "tripster"},
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            excursion_channel = db.execute(
+                "SELECT acquisition_channel FROM clients WHERE id = ?",
+                (self.excursion_client_id,),
+            ).fetchone()["acquisition_channel"]
+            tuning_channel = db.execute(
+                "SELECT acquisition_channel FROM clients WHERE id = ?",
+                (self.tuning_client_id,),
+            ).fetchone()["acquisition_channel"]
+        self.assertEqual(excursion_channel, "sputnik")
+        self.assertEqual(tuning_channel, "")
+
     def test_other_team_roles_cannot_open_manager_sections(self):
         self.login_as_guide()
 

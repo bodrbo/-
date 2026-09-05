@@ -7224,6 +7224,7 @@ button.captain-command-alert:hover {
 .client-admin-profile dl,
 .client-admin-order-facts { display: grid; margin: 0; }
 .client-admin-profile dl { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.client-admin-profile dl.has-acquisition-channel { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .client-admin-profile dl > div { min-width: 0; padding: 3px 14px; border-right: 1px solid var(--hairline-soft); }
 .client-admin-profile dl > div:first-child { padding-left: 0; }
 .client-admin-profile dl > div:last-child { padding-right: 0; border-right: 0; }
@@ -7237,6 +7238,17 @@ button.captain-command-alert:hover {
 }
 .client-admin-profile dd,
 .client-admin-order-facts dd { margin: 4px 0 0; color: var(--ink); font-size: 12px; font-weight: 700; }
+.client-acquisition-channel select {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 30px 7px 10px;
+  border-color: rgba(105, 65, 165, .28);
+  border-radius: 8px;
+  background-color: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
 
 .client-admin-order-panel {
   margin-top: 18px;
@@ -7323,6 +7335,8 @@ button.captain-command-alert:hover {
   .client-admin-profile dl > div { padding: 9px 10px; border-bottom: 1px solid var(--hairline-soft); }
   .client-admin-profile dl > div:nth-child(2n) { border-right: 0; }
   .client-admin-profile dl > div:nth-last-child(-n+2) { border-bottom: 0; }
+  .client-admin-profile dl.has-acquisition-channel > div:nth-last-child(-n+2) { border-bottom: 1px solid var(--hairline-soft); }
+  .client-admin-profile dl.has-acquisition-channel > div:last-child { grid-column: 1 / -1; border-right: 0; border-bottom: 0; }
   .client-admin-order-facts { grid-template-columns: 1fr 1fr; }
   .client-admin-order-facts > div:nth-child(3n) { border-right: 1px solid var(--hairline-soft); }
   .client-admin-order-facts > div:nth-child(2n) { border-right: 0; }

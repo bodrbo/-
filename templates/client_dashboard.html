@@ -75,11 +75,27 @@
   </section>
 
   <section class="panel client-admin-profile" aria-label="Служебные данные клиента">
-    <dl>
+    <dl class="{{ 'has-acquisition-channel' if client_section == 'excursion' }}">
       <div><dt>Клиент в базе</dt><dd>№{{ client.id }}</dd></div>
       <div><dt>Телефон</dt><dd>{{ client.phone }}</dd></div>
       <div><dt>Создан</dt><dd>{{ client.created_at[:10]|ru_date }}</dd></div>
       <div><dt>{{ 'Менеджер' if is_manager_view else 'Администратор' }}</dt><dd>{{ admin_name or '—' }}</dd></div>
+      {% if client_section == 'excursion' %}
+      <div class="client-acquisition-channel">
+        <dt>Канал продаж</dt>
+        <dd>
+          <form method="post" action="{{ url_for('update_client_acquisition_channel', client_id=client.id) }}">
+            <select name="acquisition_channel" aria-label="Канал продаж клиента {{ client.client_name }}" onchange="this.form.submit()">
+              <option value="" {{ 'selected' if not client.acquisition_channel }}>Не указан</option>
+              {% for channel in client_acquisition_channels %}
+              <option value="{{ channel.value }}" {{ 'selected' if client.acquisition_channel == channel.value }}>{{ channel.label }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="sr-only">Сохранить канал продаж</button>
+          </form>
+        </dd>
+      </div>
+      {% endif %}
     </dl>
   </section>
   {% endif %}

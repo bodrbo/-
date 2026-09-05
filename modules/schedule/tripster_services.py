@@ -4,7 +4,7 @@ import datetime as dt
 import json
 import secrets
 
-from modules.clients.constants import EXCURSION_SEGMENT
+from modules.clients.constants import EXCURSION_SEGMENT, TRIPSTER_CHANNEL
 from modules.clients.services import ensure_segment
 from modules.excursion_services import repository as service_repository
 
@@ -310,14 +310,15 @@ def _ensure_client(db, order, timestamp):
     if client_id is None:
         cursor = db.execute(
             "INSERT INTO clients "
-            "(client_name, boat_model, phone, token, created_at, email) "
-            "VALUES (?, '', ?, ?, ?, ?)",
+            "(client_name, boat_model, phone, token, created_at, email, "
+            "acquisition_channel) VALUES (?, '', ?, ?, ?, ?, ?)",
             (
                 name,
                 order["traveler_phone"],
                 secrets.token_urlsafe(16),
                 timestamp,
                 order["traveler_email"],
+                TRIPSTER_CHANNEL,
             ),
         )
         client_id = cursor.lastrowid
@@ -325,8 +326,13 @@ def _ensure_client(db, order, timestamp):
         db.execute(
             "UPDATE clients SET phone = CASE WHEN TRIM(COALESCE(phone, '')) = '' "
             "THEN ? ELSE phone END, email = CASE WHEN TRIM(COALESCE(email, '')) = '' "
-            "THEN ? ELSE email END WHERE id = ?",
-            (order["traveler_phone"], order["traveler_email"], client_id),
+            "THEN ? ELSE email END, acquisition_channel = CASE "
+            "WHEN TRIM(COALESCE(acquisition_channel, '')) = '' THEN ? "
+            "ELSE acquisition_channel END WHERE id = ?",
+            (
+                order["traveler_phone"], order["traveler_email"],
+                TRIPSTER_CHANNEL, client_id,
+            ),
         )
     ensure_segment(db, client_id, EXCURSION_SEGMENT, timestamp)
     if order["traveler_id"] is not None:
