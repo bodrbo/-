@@ -5,7 +5,8 @@ def list_services(db):
     services = [
         dict(row)
         for row in db.execute(
-            "SELECT id, name, service_type, duration_hours AS hours, price, "
+            "SELECT id, name, service_type, tripster_id, "
+            "duration_hours AS hours, price, "
             "created_at, updated_at FROM excursion_services "
             "ORDER BY name COLLATE NOCASE, id"
         ).fetchall()
@@ -41,15 +42,27 @@ def get_service_by_name(db, name):
     )
 
 
+def get_service_by_tripster_id(db, tripster_id):
+    if tripster_id is None:
+        return None
+    return next(
+        (
+            service for service in list_services(db)
+            if service["tripster_id"] == tripster_id
+        ),
+        None,
+    )
+
+
 def create_service(db, data, timestamp):
     try:
         cursor = db.execute(
             "INSERT INTO excursion_services "
-            "(name, service_type, duration_hours, price, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "(name, service_type, tripster_id, duration_hours, price, "
+            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
-                data["name"], data["service_type"], data["hours"], data["price"],
-                timestamp, timestamp,
+                data["name"], data["service_type"], data["tripster_id"],
+                data["hours"], data["price"], timestamp, timestamp,
             ),
         )
         for boat, hourly_price in data["boat_prices"].items():
@@ -69,10 +82,11 @@ def update_service(db, service_id, data, timestamp):
     try:
         cursor = db.execute(
             "UPDATE excursion_services SET name = ?, service_type = ?, "
-            "duration_hours = ?, price = ?, updated_at = ? WHERE id = ?",
+            "tripster_id = ?, duration_hours = ?, price = ?, updated_at = ? "
+            "WHERE id = ?",
             (
-                data["name"], data["service_type"], data["hours"], data["price"],
-                timestamp, service_id,
+                data["name"], data["service_type"], data["tripster_id"],
+                data["hours"], data["price"], timestamp, service_id,
             ),
         )
         db.execute(

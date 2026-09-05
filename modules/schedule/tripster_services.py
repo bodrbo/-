@@ -6,6 +6,7 @@ import secrets
 
 from modules.clients.constants import EXCURSION_SEGMENT
 from modules.clients.services import ensure_segment
+from modules.excursion_services import repository as service_repository
 
 
 PAID_STATUS = "paid"
@@ -117,38 +118,69 @@ def _source_ref(order):
     return f"order:{order['order_id']}"
 
 
+def _mapped_service(db, experience_id):
+    return service_repository.get_service_by_tripster_id(db, experience_id)
+
+
 def _ensure_schedule_item(db, order, timestamp):
     source_ref = _source_ref(order)
+    mapped_service = _mapped_service(db, order["experience_id"])
     existing = db.execute(
         "SELECT * FROM schedule_items WHERE source = ? AND source_ref = ?",
         (SOURCE, source_ref),
     ).fetchone()
     if existing is not None:
-        db.execute(
-            "UPDATE schedule_items SET deleted_at = NULL, status = 'scheduled', "
-            "source_updated_at = ?, updated_at = ? WHERE id = ?",
-            (timestamp, timestamp, existing["id"]),
-        )
+        if mapped_service is not None and existing["service_id"] is None:
+            starts_at = dt.datetime.strptime(
+                order["event_start"], "%Y-%m-%d %H:%M"
+            )
+            ends_at = starts_at + dt.timedelta(hours=mapped_service["hours"])
+            db.execute(
+                "UPDATE schedule_items SET service_id = ?, service_name = ?, "
+                "ends_at = ?, deleted_at = NULL, status = 'scheduled', "
+                "source_updated_at = ?, updated_at = ? WHERE id = ?",
+                (
+                    mapped_service["id"], mapped_service["name"],
+                    ends_at.strftime("%Y-%m-%d %H:%M"), timestamp, timestamp,
+                    existing["id"],
+                ),
+            )
+        else:
+            db.execute(
+                "UPDATE schedule_items SET deleted_at = NULL, status = 'scheduled', "
+                "source_updated_at = ?, updated_at = ? WHERE id = ?",
+                (timestamp, timestamp, existing["id"]),
+            )
         return existing["id"], False
 
     starts_at = dt.datetime.strptime(order["event_start"], "%Y-%m-%d %H:%M")
-    ends_at = starts_at + dt.timedelta(hours=1)
+    duration_hours = mapped_service["hours"] if mapped_service is not None else 1
+    ends_at = starts_at + dt.timedelta(hours=duration_hours)
     kind = "event" if order["is_grouping_enabled"] else "booking"
-    service_name = f"Tripster · экскурсия #{order['experience_id']}"
-    note = (
-        "Импортировано из Tripster. API не передаёт длительность, катер и экипаж — "
-        "проверьте окончание рейса и назначьте услугу, катер и сотрудников."
+    service_id = mapped_service["id"] if mapped_service is not None else None
+    service_name = (
+        mapped_service["name"] if mapped_service is not None
+        else f"Tripster · экскурсия #{order['experience_id']}"
     )
+    if mapped_service is not None:
+        note = (
+            "Импортировано из Tripster. Услуга определена по Tripster ID; "
+            "назначьте катер и сотрудников."
+        )
+    else:
+        note = (
+            "Импортировано из Tripster. API не передаёт длительность, катер и "
+            "экипаж — проверьте окончание рейса и назначьте услугу, катер и "
+            "сотрудников."
+        )
     cursor = db.execute(
         "INSERT INTO schedule_items "
         "(kind, boat, service_id, service_name, starts_at, ends_at, capacity, "
         "participants_count, customer_name, customer_phone, revenue, note, status, "
         "source, source_ref, source_updated_at, created_at, updated_at) "
-        "VALUES (?, ?, NULL, ?, ?, ?, ?, 0, '', '', 0, ?, 'scheduled', ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 0, '', '', 0, ?, 'scheduled', ?, ?, ?, ?, ?)",
         (
-            kind,
-            UNASSIGNED_BOAT,
-            service_name,
+            kind, UNASSIGNED_BOAT, service_id, service_name,
             starts_at.strftime("%Y-%m-%d %H:%M"),
             ends_at.strftime("%Y-%m-%d %H:%M"),
             10 if kind == "event" else None,

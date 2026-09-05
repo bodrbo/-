@@ -16,12 +16,14 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
                 "DELETE FROM excursion_service_boat_prices WHERE service_id IN ("
                 "SELECT id FROM excursion_services WHERE name IN "
                 "('Ночной тестовый маршрут', 'ночной тестовый маршрут', "
-                "'Тестовая индивидуальная экскурсия'))"
+                "'Тестовая индивидуальная экскурсия', "
+                "'Экскурсия с повторным Tripster ID'))"
             )
             db.execute(
                 "DELETE FROM excursion_services WHERE name IN "
                 "('Ночной тестовый маршрут', 'ночной тестовый маршрут', "
-                "'средний тур', 'Тестовая индивидуальная экскурсия')"
+                "'средний тур', 'Тестовая индивидуальная экскурсия', "
+                "'Экскурсия с повторным Tripster ID')"
             )
             db.execute(
                 "UPDATE excursion_services SET service_type = 'group', price = 0 "
@@ -40,12 +42,14 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
                 "DELETE FROM excursion_service_boat_prices WHERE service_id IN ("
                 "SELECT id FROM excursion_services WHERE name IN "
                 "('Ночной тестовый маршрут', 'ночной тестовый маршрут', "
-                "'Тестовая индивидуальная экскурсия'))"
+                "'Тестовая индивидуальная экскурсия', "
+                "'Экскурсия с повторным Tripster ID'))"
             )
             db.execute(
                 "DELETE FROM excursion_services WHERE name IN "
                 "('Ночной тестовый маршрут', 'ночной тестовый маршрут', "
-                "'средний тур', 'Тестовая индивидуальная экскурсия')"
+                "'средний тур', 'Тестовая индивидуальная экскурсия', "
+                "'Экскурсия с повторным Tripster ID')"
             )
             db.execute(
                 "UPDATE excursion_services SET service_type = 'group', price = 0 "
@@ -78,6 +82,8 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
         self.assertIn("Групповая экскурсия", html)
         self.assertIn("Индивидуальная экскурсия", html)
         self.assertIn('name="service_type"', html)
+        self.assertIn('name="tripster_id"', html)
+        self.assertIn("Tripster ID", html)
         self.assertIn('data-pricing-type="group"', html)
         self.assertIn('data-pricing-type="individual"', html)
         self.assertIn('class="active"', html)
@@ -138,6 +144,7 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
                 "service_type": "group",
                 "hours": "2,5",
                 "price": "3 500",
+                "tripster_id": "987654",
             },
         )
         self.assertEqual(response.status_code, 302)
@@ -149,6 +156,7 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(service)
         self.assertEqual(service["duration_hours"], 2.5)
         self.assertEqual(service["price"], 3500)
+        self.assertEqual(service["tripster_id"], 987654)
 
         response = self.client.post(
             f"/services/{service['id']}",
@@ -157,6 +165,7 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
                 "service_type": "group",
                 "hours": "3",
                 "price": "4200",
+                "tripster_id": "987655",
             },
         )
         self.assertEqual(response.status_code, 302)
@@ -166,6 +175,7 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(updated["duration_hours"], 3)
         self.assertEqual(updated["price"], 4200)
+        self.assertEqual(updated["tripster_id"], 987655)
 
     def test_admin_can_create_individual_service_with_boat_hourly_rates(self):
         self.login()
@@ -280,6 +290,52 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
         invalid_html = invalid.get_data(as_text=True)
         self.assertIn("Длительность должна быть от", invalid_html)
         self.assertIn("Цена должна быть от", invalid_html)
+
+    def test_duplicate_and_invalid_tripster_ids_are_rejected(self):
+        self.login()
+        first = self.client.post(
+            "/services",
+            data={
+                "name": "Ночной тестовый маршрут",
+                "service_type": "group",
+                "hours": "2",
+                "price": "3500",
+                "tripster_id": "7654321",
+            },
+        )
+        self.assertEqual(first.status_code, 302)
+
+        duplicate = self.client.post(
+            "/services",
+            data={
+                "name": "Экскурсия с повторным Tripster ID",
+                "service_type": "group",
+                "hours": "1",
+                "price": "2000",
+                "tripster_id": "7654321",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(
+            "Этот Tripster ID уже указан",
+            duplicate.get_data(as_text=True),
+        )
+
+        invalid = self.client.post(
+            "/services",
+            data={
+                "name": "Экскурсия с повторным Tripster ID",
+                "service_type": "group",
+                "hours": "1",
+                "price": "2000",
+                "tripster_id": "не число",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(
+            "Tripster ID должен быть целым числом",
+            invalid.get_data(as_text=True),
+        )
 
     def test_schedule_receives_catalog_price_and_pricing_logic(self):
         self.login()

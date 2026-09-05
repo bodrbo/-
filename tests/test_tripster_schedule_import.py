@@ -91,6 +91,10 @@ class TripsterScheduleImportTests(unittest.TestCase):
             db.execute("DELETE FROM schedule_participants")
             db.execute("DELETE FROM schedule_assignments")
             db.execute("DELETE FROM schedule_items")
+            db.execute(
+                "DELETE FROM excursion_services "
+                "WHERE name = 'Тестовая услуга Tripster'"
+            )
             placeholders = ",".join("?" for _phone in self.PHONES)
             db.execute(
                 "DELETE FROM client_segments WHERE client_id IN "
@@ -105,6 +109,13 @@ class TripsterScheduleImportTests(unittest.TestCase):
 
     def tearDown(self):
         application_module.TRIPSTER_API_TOKEN = self.previous_token
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "DELETE FROM excursion_services "
+                "WHERE name = 'Тестовая услуга Tripster'"
+            )
+            db.commit()
 
     def login(self):
         with self.client.session_transaction() as session:
@@ -163,6 +174,31 @@ class TripsterScheduleImportTests(unittest.TestCase):
         normalised = tripster_services._normalise_order(order)
 
         self.assertEqual(normalised["event_start"], "2026-09-10 13:00")
+
+    def test_tripster_id_maps_order_to_catalog_service_and_duration(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            cursor = db.execute(
+                "INSERT INTO excursion_services "
+                "(name, service_type, tripster_id, duration_hours, price, "
+                "created_at, updated_at) VALUES (?, 'group', ?, ?, ?, ?, ?)",
+                (
+                    "Тестовая услуга Tripster", 321, 2.5, 3000,
+                    "2026-09-05 10:00", "2026-09-05 10:00",
+                ),
+            )
+            service_id = cursor.lastrowid
+            db.commit()
+
+        self.sync([self.order()])
+
+        with application_module.app.app_context():
+            item = application_module.get_db().execute(
+                "SELECT * FROM schedule_items WHERE source_ref = 'order:7001'"
+            ).fetchone()
+        self.assertEqual(item["service_id"], service_id)
+        self.assertEqual(item["service_name"], "Тестовая услуга Tripster")
+        self.assertEqual(item["ends_at"], "2026-09-10 15:30")
 
     def test_paid_order_creates_unassigned_schedule_item_idempotently(self):
         order = self.order()

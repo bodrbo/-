@@ -16,6 +16,7 @@ def init_schema(conn):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL COLLATE NOCASE UNIQUE,
             service_type TEXT NOT NULL DEFAULT 'group',
+            tripster_id INTEGER,
             duration_hours REAL NOT NULL,
             price REAL NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
@@ -36,6 +37,10 @@ def init_schema(conn):
             "UPDATE excursion_services SET service_type = 'individual' "
             "WHERE lower(name) LIKE '%аренд%' "
             "OR lower(name) LIKE '%индивидуаль%'"
+        )
+    if "tripster_id" not in columns:
+        conn.execute(
+            "ALTER TABLE excursion_services ADD COLUMN tripster_id INTEGER"
         )
     if catalog_is_new:
         timestamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -66,4 +71,8 @@ def init_schema(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_excursion_services_type "
         "ON excursion_services(service_type, name COLLATE NOCASE)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_excursion_services_tripster_id "
+        "ON excursion_services(tripster_id)"
     )

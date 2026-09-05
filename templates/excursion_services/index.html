@@ -70,6 +70,10 @@
         <span>Длительность, ч</span>
         <input type="number" name="hours" min="0.5" max="24" step="0.5" value="{{ create_values.get('hours', '1') }}" required>
       </label>
+      <label class="excursion-service-tripster-id">
+        <span>Tripster ID</span>
+        <input type="number" name="tripster_id" min="1" step="1" inputmode="numeric" value="{{ create_values.get('tripster_id') or '' }}" placeholder="Не указан" aria-label="ID экскурсии в Tripster">
+      </label>
       {% if section == 'group' %}
       <label>
         <span>Цена за гостя, ₽</span>
@@ -125,6 +129,10 @@
         <label>
           <span>Длительность, ч</span>
           <input type="number" name="hours" min="0.5" max="24" step="0.5" value="{{ service.hours|round(2) }}" required>
+        </label>
+        <label class="excursion-service-tripster-id">
+          <span>Tripster ID</span>
+          <input type="number" name="tripster_id" min="1" step="1" inputmode="numeric" value="{{ service.tripster_id or '' }}" placeholder="Не указан" aria-label="ID экскурсии Tripster для {{ service.name }}">
         </label>
         <label class="excursion-service-price excursion-service-pricing" data-pricing-type="group" {{ 'hidden' if service.service_type != 'group' }}>
           <span>Цена за гостя, ₽</span>
