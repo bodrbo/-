@@ -152,6 +152,7 @@ def create_schedule_blueprint(
                 "Tripster обновлён: "
                 f"новых рейсов — {stats['created']}, "
                 f"обновлено — {stats['updated']}, "
+                f"сопоставлено с услугами — {stats['matched']}, "
                 f"отмен — {stats['cancelled']}, "
                 f"ожидают оплаты или даты — {stats['pending']}.",
                 True,
@@ -171,7 +172,8 @@ def create_schedule_blueprint(
         return (
             f"ok: {stats['received']} received, {stats['created']} created, "
             f"{stats['updated']} updated, {stats['cancelled']} cancelled, "
-            f"{stats['pending']} pending, {stats['invalid']} invalid",
+            f"{stats['matched']} matched, {stats['pending']} pending, "
+            f"{stats['invalid']} invalid",
             200,
         )
 

@@ -163,6 +163,21 @@ class TripsterScheduleImportTests(unittest.TestCase):
             )
         return response, fetcher
 
+    def add_mapping_service(self, tripster_id=321, hours=2.5):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            cursor = db.execute(
+                "INSERT INTO excursion_services "
+                "(name, service_type, tripster_id, duration_hours, price, "
+                "created_at, updated_at) VALUES (?, 'group', ?, ?, ?, ?, ?)",
+                (
+                    "Тестовая услуга Tripster", tripster_id, hours, 3000,
+                    "2026-09-05 10:00", "2026-09-05 10:00",
+                ),
+            )
+            db.commit()
+            return cursor.lastrowid
+
     def test_utc_event_time_is_converted_to_fixed_moscow_time(self):
         order = self.order(event={
             "aware_start_dt": "2026-09-10T10:00:00Z",
@@ -176,19 +191,7 @@ class TripsterScheduleImportTests(unittest.TestCase):
         self.assertEqual(normalised["event_start"], "2026-09-10 13:00")
 
     def test_tripster_id_maps_order_to_catalog_service_and_duration(self):
-        with application_module.app.app_context():
-            db = application_module.get_db()
-            cursor = db.execute(
-                "INSERT INTO excursion_services "
-                "(name, service_type, tripster_id, duration_hours, price, "
-                "created_at, updated_at) VALUES (?, 'group', ?, ?, ?, ?, ?)",
-                (
-                    "Тестовая услуга Tripster", 321, 2.5, 3000,
-                    "2026-09-05 10:00", "2026-09-05 10:00",
-                ),
-            )
-            service_id = cursor.lastrowid
-            db.commit()
+        service_id = self.add_mapping_service()
 
         self.sync([self.order()])
 
@@ -199,6 +202,52 @@ class TripsterScheduleImportTests(unittest.TestCase):
         self.assertEqual(item["service_id"], service_id)
         self.assertEqual(item["service_name"], "Тестовая услуга Tripster")
         self.assertEqual(item["ends_at"], "2026-09-10 15:30")
+
+    def test_repeat_import_maps_previously_unclassified_order(self):
+        self.sync([self.order()])
+        with application_module.app.app_context():
+            before = application_module.get_db().execute(
+                "SELECT service_id FROM schedule_items "
+                "WHERE source_ref = 'order:7001'"
+            ).fetchone()
+        self.assertIsNone(before["service_id"])
+
+        service_id = self.add_mapping_service()
+        self.sync([])
+
+        with application_module.app.app_context():
+            item = application_module.get_db().execute(
+                "SELECT * FROM schedule_items WHERE source_ref = 'order:7001'"
+            ).fetchone()
+        self.assertEqual(item["service_id"], service_id)
+        self.assertEqual(item["service_name"], "Тестовая услуга Tripster")
+        self.assertEqual(item["ends_at"], "2026-09-10 15:30")
+
+    def test_repeat_import_preserves_manually_selected_service(self):
+        self.sync([self.order()])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            manual_service = db.execute(
+                "SELECT id, name FROM excursion_services "
+                "WHERE name = 'Средний тур'"
+            ).fetchone()
+            db.execute(
+                "UPDATE schedule_items SET service_id = ?, service_name = ? "
+                "WHERE source_ref = 'order:7001'",
+                (manual_service["id"], manual_service["name"]),
+            )
+            db.commit()
+
+        self.add_mapping_service()
+        self.sync([])
+
+        with application_module.app.app_context():
+            item = application_module.get_db().execute(
+                "SELECT service_id, service_name FROM schedule_items "
+                "WHERE source_ref = 'order:7001'"
+            ).fetchone()
+        self.assertEqual(item["service_id"], manual_service["id"])
+        self.assertEqual(item["service_name"], "Средний тур")
 
     def test_paid_order_creates_unassigned_schedule_item_idempotently(self):
         order = self.order()

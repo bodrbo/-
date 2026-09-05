@@ -361,6 +361,47 @@ def _rebuild_item(db, item_id, timestamp):
     return False
 
 
+def _apply_catalog_mappings(db, timestamp):
+    """Attach catalog services to older Tripster items left unclassified."""
+    mappings = {
+        service["tripster_id"]: service
+        for service in service_repository.list_services(db)
+        if service["tripster_id"] is not None
+    }
+    if not mappings:
+        return 0
+    rows = db.execute(
+        "SELECT DISTINCT schedule_items.id, schedule_items.starts_at, "
+        "tripster_orders.experience_id FROM schedule_items "
+        "JOIN tripster_orders ON tripster_orders.schedule_item_id = schedule_items.id "
+        "WHERE schedule_items.source = ? AND schedule_items.deleted_at IS NULL "
+        "AND schedule_items.service_id IS NULL AND tripster_orders.status = ?",
+        (SOURCE, PAID_STATUS),
+    ).fetchall()
+    matched = 0
+    for row in rows:
+        service = mappings.get(row["experience_id"])
+        if service is None:
+            continue
+        try:
+            starts_at = dt.datetime.strptime(row["starts_at"], "%Y-%m-%d %H:%M")
+        except (TypeError, ValueError):
+            continue
+        ends_at = starts_at + dt.timedelta(hours=service["hours"])
+        cursor = db.execute(
+            "UPDATE schedule_items SET service_id = ?, service_name = ?, "
+            "ends_at = ?, source_updated_at = ?, updated_at = ? "
+            "WHERE id = ? AND service_id IS NULL",
+            (
+                service["id"], service["name"],
+                ends_at.strftime("%Y-%m-%d %H:%M"), timestamp, timestamp,
+                row["id"],
+            ),
+        )
+        matched += cursor.rowcount
+    return matched
+
+
 def sync_orders(db, fetcher, now=None):
     """Fetch order deltas and apply paid/cancelled bookings atomically."""
     now = (now or dt.datetime.now()).replace(second=0, microsecond=0)
@@ -386,6 +427,7 @@ def sync_orders(db, fetcher, now=None):
         "cancelled": 0,
         "pending": 0,
         "invalid": 0,
+        "matched": 0,
     }
     affected_item_ids = set()
     try:
@@ -444,6 +486,7 @@ def sync_orders(db, fetcher, now=None):
 
         for item_id in affected_item_ids:
             _rebuild_item(db, item_id, timestamp)
+        stats["matched"] = _apply_catalog_mappings(db, timestamp)
         if state is None:
             db.execute(
                 "INSERT INTO tripster_sync_state (sync_key, last_success_at) "
