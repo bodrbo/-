@@ -1,6 +1,7 @@
 """Authenticated UI and JSON endpoints for the internal AI assistant."""
 
 import datetime as dt
+import json
 import threading
 
 from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
@@ -53,6 +54,17 @@ def create_blueprint(
             db, conversation_id, user["owner_type"], user["owner_id"]
         )
 
+    def message_view(row):
+        message = dict(row)
+        try:
+            visualizations = json.loads(message.get("visualizations_json") or "[]")
+        except (TypeError, ValueError):
+            visualizations = []
+        message["visualizations"] = (
+            visualizations if isinstance(visualizations, list) else []
+        )
+        return message
+
     @blueprint.route("/assistant")
     def index():
         user = user_or_none()
@@ -73,7 +85,10 @@ def create_blueprint(
                 user["owner_type"],
                 user["owner_id"],
             )
-        messages = repository.list_messages(db, selected["id"]) if selected else []
+        messages = (
+            [message_view(row) for row in repository.list_messages(db, selected["id"])]
+            if selected else []
+        )
         return render_template(
             "ai_assistant/index.html",
             active_page="assistant",
@@ -201,4 +216,3 @@ def create_blueprint(
         })
 
     return blueprint
-

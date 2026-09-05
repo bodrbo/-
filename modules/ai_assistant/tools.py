@@ -19,6 +19,21 @@ TUNING_SALE_CHANNEL_LABELS = {
     "aggregator": "Через агрегатора/агента",
     "mixed": "Смешанно / другое",
 }
+CLIENT_STATUS_LABELS = {
+    "satisfied": "Довольные",
+    "neutral": "Нейтральные",
+    "dissatisfied": "Недовольные",
+    "blacklisted": "Чёрный список",
+}
+SCHEDULE_KIND_LABELS = {
+    "booking": "Аренда катера",
+    "event": "Групповая экскурсия",
+}
+EQUIPMENT_TYPE_LABELS = {"boat": "Лодки", "motor": "Моторы"}
+MONTH_NAMES_SHORT = (
+    "янв", "фев", "мар", "апр", "май", "июн",
+    "июл", "авг", "сен", "окт", "ноя", "дек",
+)
 
 
 class ToolAccessError(ValueError):
@@ -354,6 +369,268 @@ def _business_overview(db, arguments, user, boats):
     }
 
 
+def _chart_period_label(date_from, date_to):
+    return "{} — {}".format(
+        date_from.strftime("%d.%m.%Y"), date_to.strftime("%d.%m.%Y")
+    )
+
+
+def _chart_category_label(value, group_by, labels=None):
+    raw = str(value or "Не указано")
+    if labels:
+        return labels.get(raw, raw or "Не указано")
+    if group_by == "day":
+        try:
+            return dt.date.fromisoformat(raw).strftime("%d.%m")
+        except ValueError:
+            return raw
+    if group_by == "month":
+        try:
+            year, month = (int(part) for part in raw.split("-", 1))
+            return f"{MONTH_NAMES_SHORT[month - 1]} {year}"
+        except (ValueError, IndexError):
+            return raw
+    return raw or "Не указано"
+
+
+def _bar_visualization(title, subtitle, dataset_label, value_format, rows, group_by,
+                       labels=None):
+    return {
+        "type": "bar",
+        "title": title,
+        "subtitle": subtitle,
+        "value_format": value_format,
+        "labels": [
+            _chart_category_label(row["category"], group_by, labels) for row in rows
+        ],
+        "datasets": [{
+            "label": dataset_label,
+            "data": [_money(row["value"]) for row in rows],
+        }],
+    }
+
+
+def _grouped_chart_query(db, table, date_column, date_from, date_to, group_expression,
+                         value_expression, temporal, extra_where="", extra_params=None):
+    params = [date_from.isoformat(), date_to.isoformat()]
+    where = f"{date_column} >= ? AND {date_column} <= ?"
+    if extra_where:
+        where += " AND " + extra_where
+        params.extend(extra_params or [])
+    ordering = "category" if temporal else "value DESC, category"
+    return db.execute(
+        f"SELECT {group_expression} AS category, {value_expression} AS value "
+        f"FROM {table} WHERE {where} GROUP BY {group_expression} "
+        f"ORDER BY {ordering} LIMIT 60",
+        params,
+    ).fetchall()
+
+
+def _tuning_bar_chart(db, arguments):
+    date_from, date_to = _date_period(arguments, default_days=30)
+    group_by = str(arguments.get("group_by") or "month")
+    metric = str(arguments.get("metric") or "amount_rub")
+    if group_by == "day" and (date_to - date_from).days >= 60:
+        raise ValueError("Для периода больше 60 дней сгруппируйте график по месяцам.")
+    groups = {
+        "day": ("o.order_date", None),
+        "month": ("substr(o.order_date, 1, 7)", None),
+        "status": ("o.status", TUNING_STATUS_LABELS),
+        "sale_channel": ("o.sale_channel", TUNING_SALE_CHANNEL_LABELS),
+        "equipment_type": ("o.equipment_type", EQUIPMENT_TYPE_LABELS),
+    }
+    metrics = {
+        "orders": ("COUNT(o.id)", "Количество заказов", "integer"),
+        "amount_rub": ("COALESCE(SUM(o.total), 0)", "Стоимость заказов", "currency"),
+    }
+    if group_by not in groups or metric not in metrics:
+        raise ValueError("Для графика тюнинга выбраны несовместимые параметры.")
+    group_expression, labels = groups[group_by]
+    value_expression, dataset_label, value_format = metrics[metric]
+    rows = _grouped_chart_query(
+        db, "tuning_orders o", "o.order_date", date_from, date_to,
+        group_expression, value_expression, group_by in ("day", "month"),
+    )
+    title = "Тюнинг-заказы по " + {
+        "day": "дням", "month": "месяцам", "status": "статусам",
+        "sale_channel": "каналам продаж", "equipment_type": "типам техники",
+    }[group_by]
+    return _bar_visualization(
+        title, _chart_period_label(date_from, date_to), dataset_label, value_format,
+        rows, group_by, labels,
+    )
+
+
+def _schedule_bar_chart(db, arguments):
+    date_from, date_to = _date_period(arguments)
+    group_by = str(arguments.get("group_by") or "day")
+    metric = str(arguments.get("metric") or "trips")
+    if group_by == "day" and (date_to - date_from).days >= 60:
+        raise ValueError("Для периода больше 60 дней сгруппируйте график по месяцам.")
+    groups = {
+        "day": ("substr(i.starts_at, 1, 10)", None),
+        "month": ("substr(i.starts_at, 1, 7)", None),
+        "boat": ("i.boat", None),
+        "service": ("i.service_name", None),
+        "kind": ("i.kind", SCHEDULE_KIND_LABELS),
+    }
+    metrics = {
+        "trips": ("COUNT(i.id)", "Количество рейсов", "integer"),
+        "revenue_rub": ("COALESCE(SUM(i.revenue), 0)", "Плановая выручка", "currency"),
+        "guests": ("COALESCE(SUM(i.participants_count), 0)", "Количество гостей", "integer"),
+    }
+    if group_by not in groups or metric not in metrics:
+        raise ValueError("Для графика расписания выбраны несовместимые параметры.")
+    group_expression, labels = groups[group_by]
+    value_expression, dataset_label, value_format = metrics[metric]
+    rows = _grouped_chart_query(
+        db, "schedule_items i", "substr(i.starts_at, 1, 10)", date_from, date_to,
+        group_expression, value_expression, group_by in ("day", "month"),
+        "i.deleted_at IS NULL",
+    )
+    title = "Расписание по " + {
+        "day": "дням", "month": "месяцам", "boat": "катерам",
+        "service": "услугам", "kind": "видам рейсов",
+    }[group_by]
+    return _bar_visualization(
+        title, _chart_period_label(date_from, date_to), dataset_label, value_format,
+        rows, group_by, labels,
+    )
+
+
+def _payroll_bar_chart(db, arguments, user):
+    date_from, date_to = _date_period(arguments)
+    group_by = str(arguments.get("group_by") or "day")
+    metric = str(arguments.get("metric") or "amount_rub")
+    if group_by == "day" and (date_to - date_from).days >= 60:
+        raise ValueError("Для периода больше 60 дней сгруппируйте график по месяцам.")
+    groups = {
+        "day": "e.work_date",
+        "month": "substr(e.work_date, 1, 7)",
+        "employee": "e.employee",
+        "work_type": "e.work_type",
+    }
+    metrics = {
+        "entries": ("COUNT(e.id)", "Количество начислений", "integer"),
+        "amount_rub": ("COALESCE(SUM(e.amount), 0)", "Начислено", "currency"),
+    }
+    if group_by not in groups or metric not in metrics:
+        raise ValueError("Для графика зарплат выбраны несовместимые параметры.")
+    requested_employee = str(arguments.get("employee_name") or "").strip()
+    employee_name = requested_employee if _is_admin(user) else user["name"]
+    extra_where = ""
+    extra_params = []
+    if employee_name:
+        extra_where = "e.employee = ?"
+        extra_params.append(employee_name)
+    value_expression, dataset_label, value_format = metrics[metric]
+    rows = _grouped_chart_query(
+        db, "entries e", "e.work_date", date_from, date_to, groups[group_by],
+        value_expression, group_by in ("day", "month"), extra_where, extra_params,
+    )
+    title = "Начисления по " + {
+        "day": "дням", "month": "месяцам", "employee": "сотрудникам",
+        "work_type": "видам работ",
+    }[group_by]
+    return _bar_visualization(
+        title, _chart_period_label(date_from, date_to), dataset_label, value_format,
+        rows, group_by,
+    )
+
+
+def _clients_bar_chart(db, arguments, user):
+    segment = str(arguments.get("segment") or "excursion")
+    if segment not in ("excursion", "tuning"):
+        raise ValueError("Сегмент должен быть excursion или tuning.")
+    if not _is_admin(user) and (not _is_manager(user) or segment != "excursion"):
+        raise ToolAccessError("Этот сегмент клиентской базы недоступен для вашей роли.")
+    group_by = str(arguments.get("group_by") or "acquisition_channel")
+    groups = {
+        "status": ("c.status", CLIENT_STATUS_LABELS),
+        "acquisition_channel": ("c.acquisition_channel", None),
+    }
+    if group_by not in groups or str(arguments.get("metric") or "clients") != "clients":
+        raise ValueError("Для графика клиентов выбраны несовместимые параметры.")
+    expression, labels = groups[group_by]
+    rows = db.execute(
+        f"SELECT {expression} AS category, COUNT(DISTINCT c.id) AS value "
+        "FROM clients c JOIN client_segments s ON s.client_id = c.id "
+        f"WHERE s.segment = ? GROUP BY {expression} ORDER BY value DESC, category LIMIT 60",
+        (segment,),
+    ).fetchall()
+    title = "Клиенты по " + (
+        "статусам" if group_by == "status" else "каналам продаж"
+    )
+    subtitle = "Клиенты тюнинга" if segment == "tuning" else "Клиенты экскурсий"
+    return _bar_visualization(
+        title, subtitle, "Количество клиентов", "integer", rows, group_by, labels,
+    )
+
+
+def _fleet_bar_chart(db, arguments, user, boats):
+    if not (_is_admin(user) or _is_captain(user)):
+        raise ToolAccessError("Данные флота недоступны для вашей роли.")
+    metric = str(arguments.get("metric") or "tank_liters")
+    labels = [boat["name"] for boat in boats]
+    if metric in ("tank_liters", "reserve_liters"):
+        column = "liters_delta" if metric == "tank_liters" else "reserve_delta"
+        values_by_boat = {
+            str(row["boat"]): _money(row["value"])
+            for row in db.execute(
+                f"SELECT boat, COALESCE(SUM({column}), 0) AS value "
+                "FROM boat_fuel_transactions WHERE deleted_at IS NULL GROUP BY boat"
+            ).fetchall()
+        }
+        values = [values_by_boat.get(boat, 0) for boat in labels]
+        dataset_label = "В баке" if metric == "tank_liters" else "В резерве"
+        value_format = "liters"
+    elif metric == "defects":
+        values_by_boat = {
+            str(row["boat"]): int(row["value"] or 0)
+            for row in db.execute(
+                "SELECT boat, COUNT(*) AS value FROM boat_defects "
+                "WHERE status != 'resolved' GROUP BY boat"
+            ).fetchall()
+        }
+        values = [values_by_boat.get(boat, 0) for boat in labels]
+        dataset_label = "Текущие неисправности"
+        value_format = "integer"
+    else:
+        raise ValueError("Для графика флота выбран неизвестный показатель.")
+    return {
+        "type": "bar",
+        "title": "Состояние флота",
+        "subtitle": "Текущие данные",
+        "value_format": value_format,
+        "labels": labels,
+        "datasets": [{"label": dataset_label, "data": values}],
+    }
+
+
+def _bar_chart(db, arguments, user, boats):
+    subject = str(arguments.get("subject") or "").strip()
+    if subject == "tuning":
+        if not _is_admin(user):
+            raise ToolAccessError("Аналитика тюнинга доступна только администратору.")
+        chart = _tuning_bar_chart(db, arguments)
+    elif subject == "schedule":
+        if not (_is_admin(user) or _is_manager(user)):
+            raise ToolAccessError("Аналитика расписания недоступна для вашей роли.")
+        chart = _schedule_bar_chart(db, arguments)
+    elif subject == "payroll":
+        chart = _payroll_bar_chart(db, arguments, user)
+    elif subject == "clients":
+        chart = _clients_bar_chart(db, arguments, user)
+    elif subject == "fleet":
+        chart = _fleet_bar_chart(db, arguments, user, boats)
+    else:
+        raise ValueError("Неизвестный раздел данных для графика.")
+    return {
+        "visualization": chart,
+        "note": "Значения рассчитаны сервером по данным системы.",
+    }
+
+
 TOOL_SCHEMAS = {
     "get_system_guide": {
         "description": "Получить справку о работе конкретного раздела Бодрого Бизнеса.",
@@ -443,11 +720,54 @@ TOOL_SCHEMAS = {
             "additionalProperties": False,
         },
     },
+    "get_bar_chart": {
+        "description": (
+            "Построить безопасную столбчатую диаграмму по данным системы. "
+            "Используй эту функцию, когда пользователь просит показать график или диаграмму. "
+            "Допустимые сочетания: tuning — orders/amount_rub по day/month/status/"
+            "sale_channel/equipment_type; schedule — trips/revenue_rub/guests по "
+            "day/month/boat/service/kind; payroll — entries/amount_rub по day/month/"
+            "employee/work_type; clients — clients по status/acquisition_channel; "
+            "fleet — tank_liters/reserve_liters/defects (group_by не нужен)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "subject": {
+                    "type": "string",
+                    "enum": ["tuning", "schedule", "payroll", "clients", "fleet"],
+                },
+                "metric": {
+                    "type": "string",
+                    "enum": [
+                        "orders", "amount_rub", "trips", "revenue_rub", "guests",
+                        "entries", "clients", "tank_liters", "reserve_liters", "defects",
+                    ],
+                },
+                "group_by": {
+                    "type": "string",
+                    "enum": [
+                        "day", "month", "status", "sale_channel", "equipment_type",
+                        "boat", "service", "kind", "employee", "work_type",
+                        "acquisition_channel",
+                    ],
+                },
+                "date_from": {"type": "string", "description": "YYYY-MM-DD"},
+                "date_to": {"type": "string", "description": "YYYY-MM-DD"},
+                "employee_name": {"type": "string"},
+                "segment": {"type": "string", "enum": ["excursion", "tuning"]},
+            },
+            "required": ["subject", "metric"],
+            "additionalProperties": False,
+        },
+    },
 }
 
 
 def allowed_tool_names(user):
-    names = ["get_system_guide", "get_payroll_summary", "get_tasks_summary"]
+    names = [
+        "get_system_guide", "get_payroll_summary", "get_tasks_summary", "get_bar_chart"
+    ]
     if _is_admin(user):
         names.extend([
             "get_schedule_summary",
@@ -498,4 +818,6 @@ def execute_tool(db, user, boats, name, arguments):
         return _tasks_summary(db, arguments, user)
     if name == "get_business_overview":
         return _business_overview(db, arguments, user, boats)
+    if name == "get_bar_chart":
+        return _bar_chart(db, arguments, user, boats)
     raise ValueError("Неизвестный инструмент.")

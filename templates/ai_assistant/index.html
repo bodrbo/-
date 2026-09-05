@@ -126,9 +126,23 @@
       {% endif %}
 
       {% for message in messages %}
-      <article class="ai-message ai-message-{{ message.role }}">
+      <article class="ai-message ai-message-{{ message.role }}{{ ' has-visualization' if message.visualizations }}">
         <div class="ai-message-label">{{ current_user.name if message.role == 'user' else 'Боцман AI' }}</div>
         <div class="ai-message-bubble">{{ message.content }}</div>
+        {% for visualization in message.visualizations %}
+        <section class="ai-chart-card" aria-label="Столбчатая диаграмма">
+          <header>
+            <div>
+              <span>График · данные системы</span>
+              <h3>{{ visualization.title }}</h3>
+            </div>
+            {% if visualization.subtitle %}<small>{{ visualization.subtitle }}</small>{% endif %}
+          </header>
+          <div class="ai-chart-stage">
+            <canvas data-ai-chart="{{ visualization|tojson|forceescape }}">{{ visualization.title }}</canvas>
+          </div>
+        </section>
+        {% endfor %}
         <time>{{ message.created_at[11:16] }}</time>
       </article>
       {% endfor %}
@@ -147,6 +161,7 @@
   </section>
 </main>
 
+<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
 <script>
 (() => {
   const navToggle = document.getElementById('navToggle');
@@ -173,7 +188,161 @@
     textarea.style.height = Math.min(textarea.scrollHeight, 148) + 'px';
   }
 
-  function addMessage(role, text, pending = false) {
+  function formatChartValue(value, format) {
+    if (format === 'currency') {
+      return new Intl.NumberFormat('ru-RU', {
+        style: 'currency', currency: 'RUB', maximumFractionDigits: 0
+      }).format(value);
+    }
+    if (format === 'liters') {
+      return new Intl.NumberFormat('ru-RU', {maximumFractionDigits: 1}).format(value) + ' л';
+    }
+    return new Intl.NumberFormat('ru-RU', {maximumFractionDigits: 1}).format(value);
+  }
+
+  function renderChart(canvas) {
+    let config;
+    try {
+      config = JSON.parse(canvas.dataset.aiChart || '{}');
+    } catch (error) {
+      return;
+    }
+    const card = canvas.closest('.ai-chart-card');
+    const labels = Array.isArray(config.labels) ? config.labels.slice(0, 60) : [];
+    const sourceDataset = Array.isArray(config.datasets) ? config.datasets[0] : null;
+    const values = sourceDataset && Array.isArray(sourceDataset.data)
+      ? sourceDataset.data.slice(0, labels.length).map(value => Number(value) || 0)
+      : [];
+    const accessibleValues = labels.map((label, index) =>
+      `${label}: ${formatChartValue(values[index] || 0, config.value_format)}`
+    ).join('; ');
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', `${config.title || 'График'}. ${accessibleValues}`);
+
+    if (!labels.length) {
+      card.classList.add('is-unavailable');
+      const notice = document.createElement('p');
+      notice.className = 'ai-chart-unavailable';
+      notice.textContent = 'За выбранный период нет данных для построения графика.';
+      card.append(notice);
+      return;
+    }
+
+    if (typeof window.Chart !== 'function') {
+      card.classList.add('is-unavailable');
+      const notice = document.createElement('p');
+      notice.className = 'ai-chart-unavailable';
+      notice.textContent = 'Не удалось загрузить график. Обновите страницу при стабильном подключении.';
+      card.append(notice);
+      return;
+    }
+
+    const context = canvas.getContext('2d');
+    const fill = context.createLinearGradient(0, 0, 0, 280);
+    fill.addColorStop(0, 'rgba(52, 152, 219, .92)');
+    fill.addColorStop(1, 'rgba(46, 134, 193, .58)');
+    new window.Chart(context, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: sourceDataset && sourceDataset.label ? sourceDataset.label : 'Значение',
+          data: values,
+          backgroundColor: fill,
+          borderColor: '#2e86c1',
+          borderWidth: 1,
+          borderRadius: 6,
+          borderSkipped: false,
+          maxBarThickness: 48
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? false : {duration: 420},
+        interaction: {mode: 'index', intersect: false},
+        plugins: {
+          legend: {
+            display: true,
+            align: 'start',
+            labels: {
+              color: '#294c56', boxWidth: 10, boxHeight: 10,
+              useBorderRadius: true, borderRadius: 3,
+              font: {family: 'Open Sans', size: 11, weight: '700'}
+            }
+          },
+          tooltip: {
+            backgroundColor: '#0f2a35',
+            titleFont: {family: 'Open Sans', size: 11, weight: '700'},
+            bodyFont: {family: 'PT Mono', size: 11},
+            padding: 11,
+            callbacks: {
+              label(context) {
+                return `${context.dataset.label}: ${formatChartValue(context.parsed.y, config.value_format)}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: {display: false},
+            border: {display: false},
+            ticks: {
+              color: '#62707f', maxRotation: 35, minRotation: 0,
+              autoSkip: true, maxTicksLimit: 14,
+              font: {family: 'PT Mono', size: 10}
+            }
+          },
+          y: {
+            beginAtZero: true,
+            border: {display: false},
+            grid: {color: 'rgba(15, 42, 53, .08)'},
+            ticks: {
+              color: '#62707f',
+              font: {family: 'PT Mono', size: 10},
+              callback(value) { return formatChartValue(value, config.value_format); }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function appendVisualizations(article, visualizations) {
+    if (!Array.isArray(visualizations) || !visualizations.length) return;
+    article.classList.add('has-visualization');
+    visualizations.forEach(config => {
+      if (!config || config.type !== 'bar') return;
+      const card = document.createElement('section');
+      card.className = 'ai-chart-card';
+      card.setAttribute('aria-label', 'Столбчатая диаграмма');
+      const header = document.createElement('header');
+      const heading = document.createElement('div');
+      const eyebrow = document.createElement('span');
+      eyebrow.textContent = 'График · данные системы';
+      const title = document.createElement('h3');
+      title.textContent = config.title || 'График';
+      heading.append(eyebrow, title);
+      header.append(heading);
+      if (config.subtitle) {
+        const subtitle = document.createElement('small');
+        subtitle.textContent = config.subtitle;
+        header.append(subtitle);
+      }
+      const stage = document.createElement('div');
+      stage.className = 'ai-chart-stage';
+      const canvas = document.createElement('canvas');
+      canvas.dataset.aiChart = JSON.stringify(config);
+      canvas.textContent = config.title || 'График';
+      stage.append(canvas);
+      card.append(header, stage);
+      article.append(card);
+      renderChart(canvas);
+    });
+  }
+
+  function addMessage(role, text, pending = false, visualizations = []) {
     const welcome = document.getElementById('aiWelcome');
     if (welcome) welcome.remove();
     const article = document.createElement('article');
@@ -189,6 +358,7 @@
       bubble.textContent = text;
     }
     article.append(label, bubble);
+    appendVisualizations(article, visualizations);
     if (!pending) {
       const time = document.createElement('time');
       time.textContent = new Date().toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'});
@@ -218,7 +388,7 @@
       if (!response.ok || !data.ok) throw new Error(data.error || 'Не удалось получить ответ.');
       conversationId = data.conversation_id;
       pending.remove();
-      addMessage('assistant', data.message.content);
+      addMessage('assistant', data.message.content, false, data.message.visualizations || []);
       const url = new URL(window.location.href);
       url.searchParams.set('conversation', conversationId);
       window.history.replaceState({}, '', url);
@@ -269,6 +439,7 @@
   });
 
   resizeComposer();
+  document.querySelectorAll('canvas[data-ai-chart]').forEach(renderChart);
   if (transcript.querySelector('.ai-message')) scrollToLatest();
 })();
 </script>

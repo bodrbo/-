@@ -86,11 +86,12 @@ def add_message(
     model=None,
     input_tokens=0,
     output_tokens=0,
+    visualizations_json="[]",
 ):
     cursor = db.execute(
         "INSERT INTO ai_messages "
-        "(conversation_id, role, content, model, input_tokens, output_tokens, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "(conversation_id, role, content, model, input_tokens, output_tokens, "
+        "visualizations_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
             conversation_id,
             role,
@@ -98,6 +99,7 @@ def add_message(
             model,
             int(input_tokens or 0),
             int(output_tokens or 0),
+            visualizations_json or "[]",
             timestamp,
         ),
     )
@@ -122,4 +124,3 @@ def count_recent_user_messages(db, owner_type, owner_id, since_timestamp):
         (owner_type, owner_id, since_timestamp),
     ).fetchone()
     return int(row["total"] if row else 0)
-

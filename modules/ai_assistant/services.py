@@ -53,6 +53,7 @@ def _instructions(user):
 8. Если вопрос относится к работе интерфейса, используй справочник системы.
 9. В аналитике тюнинга различай полную стоимость заказов, оплаты за период и текущую задолженность. Датой заказа считай business-поле order_date из интерфейса, а не техническую дату добавления created_at.
 10. Не вызывай одну и ту же функцию повторно с теми же аргументами. Получив достаточные данные, сразу сформулируй итоговый ответ пользователю.
+11. Если пользователь просит график или диаграмму, обязательно вызови get_bar_chart с подходящими показателем и группировкой, затем кратко объясни результат.
 """.strip()
 
 
@@ -127,6 +128,7 @@ def run_chat(db, user, conversation_id, message, model, client, boats):
     tool_audit = []
     tool_result_cache = {}
     force_final_answer = False
+    visualizations = []
     answer = ""
 
     for _round in range(MAX_TOOL_ROUNDS + 1):
@@ -181,6 +183,18 @@ def run_chat(db, user, conversation_id, message, model, client, boats):
                     except (ValueError, TypeError) as error:
                         result_payload = {"ok": False, "error": str(error)}
                     tool_result_cache[signature] = result_payload
+                result_data = result_payload.get("data")
+                visualization = (
+                    result_data.get("visualization")
+                    if isinstance(result_data, dict) else None
+                )
+                if (
+                    isinstance(visualization, dict)
+                    and visualization.get("type") == "bar"
+                    and visualization not in visualizations
+                    and len(visualizations) < 3
+                ):
+                    visualizations.append(visualization)
             serialized_arguments = _serialized(arguments, maximum=4000)
             serialized_result = _serialized(result_payload)
             tool_audit.append((name, serialized_arguments, serialized_result))
@@ -205,6 +219,9 @@ def run_chat(db, user, conversation_id, message, model, client, boats):
             model=model,
             input_tokens=total_input_tokens,
             output_tokens=total_output_tokens,
+            visualizations_json=json.dumps(
+                visualizations, ensure_ascii=False, separators=(",", ":")
+            ),
         )
         for name, arguments_json, result_json in tool_audit:
             repository.add_tool_run(
@@ -220,6 +237,7 @@ def run_chat(db, user, conversation_id, message, model, client, boats):
         "id": assistant_message_id,
         "content": answer,
         "model": model,
+        "visualizations": visualizations,
         "usage": {
             "input_tokens": total_input_tokens,
             "output_tokens": total_output_tokens,

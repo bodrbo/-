@@ -1,3 +1,4 @@
+import json
 import os
 import unittest
 from unittest.mock import patch
@@ -172,6 +173,50 @@ class AIAssistantTests(unittest.TestCase):
         self.assertEqual(channels["direct"]["sale_channel_label"], "Напрямую")
         self.assertEqual(channels["aggregator"]["orders_total_rub"], 50000)
 
+    def test_bar_chart_uses_server_calculated_tuning_values_and_business_dates(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            for source_ref, order_date, total in (
+                ("ai-summary-test:chart-june-1", "2026-06-05", 100000),
+                ("ai-summary-test:chart-june-2", "2026-06-20", 50000),
+                ("ai-summary-test:chart-july", "2026-07-03", 70000),
+            ):
+                db.execute(
+                    "INSERT INTO tuning_orders "
+                    "(client_name, boat_model, sale_channel, phone, subtotal, total, "
+                    "status, order_date, source_ref, created_at, updated_at) "
+                    "VALUES ('AI Chart Client', 'AI Chart Boat', 'direct', '', ?, ?, "
+                    "'in_progress', ?, ?, '2026-09-05 12:00', '2026-09-05 12:00')",
+                    (total, total, order_date, source_ref),
+                )
+            db.commit()
+
+            result = execute_tool(
+                db,
+                {
+                    "owner_type": "admin",
+                    "owner_id": self.admin_id,
+                    "name": "AI Администратор",
+                    "positions": [],
+                },
+                application_module.BOATS,
+                "get_bar_chart",
+                {
+                    "subject": "tuning",
+                    "metric": "amount_rub",
+                    "group_by": "month",
+                    "date_from": "2026-06-01",
+                    "date_to": "2026-07-31",
+                },
+            )
+
+        chart = result["visualization"]
+        self.assertEqual(chart["type"], "bar")
+        self.assertEqual(chart["value_format"], "currency")
+        self.assertEqual(chart["labels"], ["июн 2026", "июл 2026"])
+        self.assertEqual(chart["datasets"][0]["data"], [150000, 70000])
+        self.assertIn("01.06.2026", chart["subtitle"])
+
     def login_admin(self):
         with self.client.session_transaction() as session:
             session.clear()
@@ -288,6 +333,55 @@ class AIAssistantTests(unittest.TestCase):
         self.assertIn("2026-09-05", audit["arguments_json"])
         self.assertIn('"ok":true', audit["result_json"])
 
+    def test_bar_chart_is_returned_stored_and_rendered_in_conversation_history(self):
+        self.login_admin()
+        payloads = []
+
+        def fake_create(payload):
+            payloads.append(payload)
+            if len(payloads) == 1:
+                return {
+                    "id": "resp_chart",
+                    "output": [{
+                        "type": "function_call",
+                        "call_id": "call_chart",
+                        "name": "get_bar_chart",
+                        "arguments": (
+                            '{"subject":"tuning","metric":"orders",'
+                            '"group_by":"status","date_from":"2026-06-01",'
+                            '"date_to":"2026-06-30"}'
+                        ),
+                    }],
+                    "usage": {"input_tokens": 80, "output_tokens": 10},
+                }
+            return text_response("Построил график заказов по статусам.", 50, 15)
+
+        application_module._openai_responses_client.create_response = fake_create
+        response = self.client.post(
+            "/assistant/api/chat",
+            json={"message": "Покажи график тюнинг-заказов за июнь"},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        charts = data["message"]["visualizations"]
+        self.assertEqual(len(charts), 1)
+        self.assertEqual(charts[0]["type"], "bar")
+
+        with application_module.app.app_context():
+            stored = application_module.get_db().execute(
+                "SELECT visualizations_json FROM ai_messages "
+                "WHERE conversation_id = ? AND role = 'assistant'",
+                (data["conversation_id"],),
+            ).fetchone()
+        self.assertEqual(json.loads(stored["visualizations_json"]), charts)
+
+        page = self.client.get(
+            f"/assistant?conversation={data['conversation_id']}"
+        ).get_data(as_text=True)
+        self.assertIn("data-ai-chart=", page)
+        self.assertIn("vendor/chart.umd.min.js", page)
+        self.assertIn("График · данные системы", page)
+
     def test_repeated_tool_call_is_cached_and_forced_to_a_text_answer(self):
         self.login_admin()
         payloads = []
@@ -353,6 +447,40 @@ class AIAssistantTests(unittest.TestCase):
         self.assertNotIn("get_business_overview", names)
         page = self.client.get("/assistant")
         self.assertIn("Менеджер по работе с клиентами", page.get_data(as_text=True))
+
+    def test_bar_chart_enforces_data_scope_for_employee(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            user = {
+                "owner_type": "employee",
+                "owner_id": self.employee_id,
+                "name": self.EMPLOYEE_NAME,
+                "positions": [],
+            }
+            with self.assertRaisesRegex(ValueError, "тюнинга доступна только"):
+                execute_tool(
+                    db,
+                    user,
+                    application_module.BOATS,
+                    "get_bar_chart",
+                    {
+                        "subject": "tuning",
+                        "metric": "orders",
+                        "group_by": "month",
+                    },
+                )
+            payroll = execute_tool(
+                db,
+                user,
+                application_module.BOATS,
+                "get_bar_chart",
+                {
+                    "subject": "payroll",
+                    "metric": "amount_rub",
+                    "group_by": "employee",
+                },
+            )
+        self.assertEqual(payroll["visualization"]["type"], "bar")
 
     def test_user_cannot_open_or_append_to_another_users_conversation(self):
         self.login_admin()

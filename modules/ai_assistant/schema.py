@@ -25,10 +25,19 @@ def init_schema(conn):
             model TEXT,
             input_tokens INTEGER NOT NULL DEFAULT 0,
             output_tokens INTEGER NOT NULL DEFAULT 0,
+            visualizations_json TEXT NOT NULL DEFAULT '[]',
             created_at TEXT NOT NULL
         )
         """
     )
+    message_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(ai_messages)").fetchall()
+    }
+    if "visualizations_json" not in message_columns:
+        conn.execute(
+            "ALTER TABLE ai_messages ADD COLUMN "
+            "visualizations_json TEXT NOT NULL DEFAULT '[]'"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS ai_tool_runs (
@@ -53,4 +62,3 @@ def init_schema(conn):
         "CREATE INDEX IF NOT EXISTS idx_ai_tool_runs_conversation "
         "ON ai_tool_runs(conversation_id, id)"
     )
-

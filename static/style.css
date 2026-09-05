@@ -502,6 +502,7 @@ body {
   width: min(790px, 88%);
   margin: 0 auto 18px;
 }
+.ai-message.has-visualization { width: min(900px, 96%); }
 .ai-message-user { justify-items: end; }
 .ai-message-assistant { justify-items: start; }
 .ai-message-label {
@@ -528,6 +529,61 @@ body {
   border-radius: 16px 5px 16px 16px;
   background: var(--ink);
   color: #fff;
+}
+.ai-chart-card {
+  width: 100%;
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid #cbdce8;
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(52, 152, 219, .07), transparent 42%),
+    #fff;
+  box-shadow: 0 15px 36px -30px rgba(15, 42, 53, .7);
+}
+.ai-chart-card > header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 70px;
+  padding: 14px 17px 11px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.ai-chart-card > header > div { min-width: 0; }
+.ai-chart-card > header span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--brass-strong);
+  font: 400 9px/1.2 'PT Mono', monospace;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.ai-chart-card h3 {
+  margin: 0;
+  color: var(--ink);
+  font: 700 15px/1.25 'Open Sans', sans-serif;
+}
+.ai-chart-card > header small {
+  flex: 0 0 auto;
+  padding-bottom: 2px;
+  color: var(--muted);
+  font: 400 10px/1.2 'PT Mono', monospace;
+  white-space: nowrap;
+}
+.ai-chart-stage {
+  position: relative;
+  width: 100%;
+  height: clamp(230px, 31vh, 310px);
+  padding: 14px 16px 13px;
+}
+.ai-chart-stage canvas { width: 100% !important; height: 100% !important; }
+.ai-chart-card.is-unavailable .ai-chart-stage { display: none; }
+.ai-chart-unavailable {
+  margin: 0;
+  padding: 16px 17px;
+  color: var(--muted);
+  font-size: 11px;
 }
 .ai-message time {
   margin: 4px 5px 0;
@@ -681,7 +737,17 @@ body {
   .ai-starter-grid { grid-template-columns: 1fr; }
   .ai-starter-grid button { min-height: 58px; }
   .ai-message { width: 94%; }
+  .ai-message.has-visualization { width: 100%; }
   .ai-message-bubble { font-size: 12px; }
+  .ai-chart-card > header {
+    align-items: flex-start;
+    min-height: 0;
+    flex-direction: column;
+    gap: 5px;
+    padding: 12px 13px 9px;
+  }
+  .ai-chart-card > header small { white-space: normal; }
+  .ai-chart-stage { height: 230px; padding: 12px 8px 10px; }
   .ai-composer-wrap { padding: 9px 10px max(10px, env(safe-area-inset-bottom)); }
   .ai-composer { grid-template-columns: minmax(0, 1fr) 40px; padding: 5px 5px 5px 12px; }
   .ai-composer > button[type="submit"] { width: 40px; min-width: 40px; height: 40px; }
