@@ -23,7 +23,7 @@ class AIDataCatalogTests(unittest.TestCase):
             self.dataset_ids(self.user(owner_type="admin")),
             {
                 "schedule", "tuning_orders", "excursion_clients", "tuning_clients",
-                "payroll", "tasks", "fleet",
+                "payroll", "tasks", "fleet", "employees",
             },
         )
         serialized = str(catalog).casefold()
@@ -32,6 +32,10 @@ class AIDataCatalogTests(unittest.TestCase):
         self.assertNotIn("telegram_chat_id", serialized)
         self.assertEqual(catalog["safety"]["raw_sql"], "not_available")
         self.assertTrue(all(not item["write_access"] for item in catalog["datasets"]))
+        employees = catalog_for_user(
+            self.user(owner_type="admin"), "employees"
+        )["datasets"][0]
+        self.assertEqual(employees["personal_data"], "employee_names_admin_only")
 
     def test_catalog_is_filtered_and_scoped_by_role(self):
         employee = self.user()

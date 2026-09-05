@@ -6,7 +6,7 @@ become discoverable through this interface.
 """
 
 
-CATALOG_VERSION = 1
+CATALOG_VERSION = 2
 
 
 DATASETS = (
@@ -143,6 +143,32 @@ DATASETS = (
         "filters": ("boat",),
         "tools": ("get_fleet_status", "get_bar_chart"),
     },
+    {
+        "id": "employees",
+        "name": "Сотрудники",
+        "description": (
+            "Справочник сотрудников, их должностей, активности, наличия личного "
+            "кабинета и привязки Telegram."
+        ),
+        "roles": ("admin",),
+        "scope": "admin_directory",
+        "date_basis": None,
+        "metrics": (
+            ("employees", "Количество сотрудников", "integer"),
+            ("accounts_created", "Созданы личные кабинеты", "integer"),
+            ("telegram_linked", "Привязан Telegram", "integer"),
+        ),
+        "dimensions": (
+            ("employee", "Сотрудник"),
+            ("position", "Должность"),
+            ("activity", "Активный или удалённый"),
+            ("account_state", "Наличие личного кабинета"),
+            ("telegram_state", "Наличие привязки Telegram"),
+        ),
+        "filters": ("position", "activity", "account_state", "telegram_state"),
+        "tools": ("get_employees_directory",),
+        "personal_data": "employee_names_admin_only",
+    },
 )
 
 
@@ -186,7 +212,7 @@ def _public_dataset(dataset, role):
         "dimensions": dimensions,
         "filters": filters,
         "available_tools": list(dataset["tools"]),
-        "personal_data": "excluded",
+        "personal_data": dataset.get("personal_data", "excluded"),
         "write_access": False,
     }
 

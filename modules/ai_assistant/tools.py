@@ -358,6 +358,109 @@ def _tasks_summary(db, arguments, user):
     }
 
 
+def _employees_directory(db, arguments, user):
+    if not _is_admin(user):
+        raise ToolAccessError("Справочник сотрудников доступен только администратору.")
+
+    activity = str(arguments.get("activity") or "active").strip()
+    account_state = str(arguments.get("account_state") or "all").strip()
+    telegram_state = str(arguments.get("telegram_state") or "all").strip()
+    position = str(arguments.get("position") or "").strip()
+    include_names = arguments.get("include_names", True)
+    limit = arguments.get("limit", 100)
+    if activity not in ("active", "deleted", "all"):
+        raise ValueError("Активность должна быть active, deleted или all.")
+    if account_state not in ("all", "created", "missing"):
+        raise ValueError("Состояние кабинета должно быть all, created или missing.")
+    if telegram_state not in ("all", "linked", "missing"):
+        raise ValueError("Состояние Telegram должно быть all, linked или missing.")
+    if len(position) > 80:
+        raise ValueError("Название должности слишком длинное.")
+    if not isinstance(include_names, bool):
+        raise ValueError("include_names должен быть логическим значением.")
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+        raise ValueError("limit должен быть целым числом от 1 до 100.")
+
+    rows = db.execute(
+        "SELECT e.id, e.name, e.deleted_at, "
+        "EXISTS(SELECT 1 FROM team_accounts ta WHERE ta.employee_id = e.id) "
+        "AS account_created, "
+        "(EXISTS(SELECT 1 FROM employee_telegram_accounts eta "
+        "WHERE eta.employee_id = e.id) OR EXISTS("
+        "SELECT 1 FROM team_accounts legacy WHERE legacy.employee_id = e.id "
+        "AND legacy.telegram_chat_id IS NOT NULL AND legacy.telegram_chat_id != ''"
+        ")) AS telegram_linked "
+        "FROM employees e ORDER BY e.name"
+    ).fetchall()
+    position_rows = db.execute(
+        "SELECT employee_id, position FROM employee_positions "
+        "ORDER BY position, employee_id"
+    ).fetchall()
+    positions_by_employee = {}
+    for row in position_rows:
+        positions_by_employee.setdefault(row["employee_id"], []).append(row["position"])
+
+    selected = []
+    requested_position = position.casefold()
+    for row in rows:
+        active = row["deleted_at"] is None
+        account_created = bool(row["account_created"])
+        telegram_linked = bool(row["telegram_linked"])
+        positions = positions_by_employee.get(row["id"], [])
+        if activity == "active" and not active:
+            continue
+        if activity == "deleted" and active:
+            continue
+        if account_state == "created" and not account_created:
+            continue
+        if account_state == "missing" and account_created:
+            continue
+        if telegram_state == "linked" and not telegram_linked:
+            continue
+        if telegram_state == "missing" and telegram_linked:
+            continue
+        if requested_position and requested_position not in {
+            value.casefold() for value in positions
+        }:
+            continue
+        selected.append({
+            "name": row["name"],
+            "positions": positions,
+            "active": active,
+            "account_created": account_created,
+            "telegram_linked": telegram_linked,
+        })
+
+    by_position = {}
+    for employee in selected:
+        for value in employee["positions"]:
+            by_position[value] = by_position.get(value, 0) + 1
+    result = {
+        "filters": {
+            "position": position or None,
+            "activity": activity,
+            "account_state": account_state,
+            "telegram_state": telegram_state,
+        },
+        "employees_total": len(selected),
+        "active_employees": sum(1 for item in selected if item["active"]),
+        "deleted_employees": sum(1 for item in selected if not item["active"]),
+        "accounts_created": sum(1 for item in selected if item["account_created"]),
+        "accounts_missing": sum(1 for item in selected if not item["account_created"]),
+        "telegram_linked": sum(1 for item in selected if item["telegram_linked"]),
+        "telegram_missing": sum(1 for item in selected if not item["telegram_linked"]),
+        "by_position": dict(sorted(by_position.items())),
+        "privacy_note": (
+            "Доступ администратора. Переданы только имена, должности и логические "
+            "признаки кабинета/Telegram; логины, пароли, хеши и Telegram ID исключены."
+        ),
+    }
+    if include_names:
+        result["directory"] = selected[:limit]
+        result["directory_truncated"] = len(selected) > limit
+    return result
+
+
 def _business_overview(db, arguments, user, boats):
     if not _is_admin(user):
         raise ToolAccessError("Общий обзор бизнеса доступен только администратору.")
@@ -729,6 +832,34 @@ TOOL_SCHEMAS = {
             "additionalProperties": False,
         },
     },
+    "get_employees_directory": {
+        "description": (
+            "Получить доступный только администратору справочник сотрудников: имена, "
+            "должности, активность и наличие личного кабинета или привязки Telegram. "
+            "Логины, пароли, хеши и Telegram ID никогда не возвращаются."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "position": {"type": "string", "maxLength": 80},
+                "activity": {
+                    "type": "string",
+                    "enum": ["active", "deleted", "all"],
+                },
+                "account_state": {
+                    "type": "string",
+                    "enum": ["all", "created", "missing"],
+                },
+                "telegram_state": {
+                    "type": "string",
+                    "enum": ["all", "linked", "missing"],
+                },
+                "include_names": {"type": "boolean"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+            },
+            "additionalProperties": False,
+        },
+    },
     "get_business_overview": {
         "description": "Получить общий агрегированный обзор расписания, тюнинга, зарплат и флота.",
         "parameters": {
@@ -795,6 +926,7 @@ def allowed_tool_names(user):
             "get_fleet_status",
             "get_tuning_summary",
             "get_clients_summary",
+            "get_employees_directory",
             "get_business_overview",
         ])
     elif _is_manager(user):
@@ -862,6 +994,8 @@ def execute_tool(db, user, boats, name, arguments):
         return _payroll_summary(db, arguments, user)
     if name == "get_tasks_summary":
         return _tasks_summary(db, arguments, user)
+    if name == "get_employees_directory":
+        return _employees_directory(db, arguments, user)
     if name == "get_business_overview":
         return _business_overview(db, arguments, user, boats)
     if name == "get_bar_chart":

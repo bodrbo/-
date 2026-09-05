@@ -92,6 +92,10 @@ class AIAssistantTests(unittest.TestCase):
             "SELECT id FROM employees WHERE name = ?", (cls.EMPLOYEE_NAME,)
         ).fetchall()
         for row in employee_rows:
+            db.execute(
+                "DELETE FROM employee_telegram_accounts WHERE employee_id = ?",
+                (row["id"],),
+            )
             db.execute("DELETE FROM employee_positions WHERE employee_id = ?", (row["id"],))
             db.execute("DELETE FROM team_accounts WHERE employee_id = ?", (row["id"],))
         db.execute("DELETE FROM employees WHERE name = ?", (cls.EMPLOYEE_NAME,))
@@ -217,6 +221,71 @@ class AIAssistantTests(unittest.TestCase):
         self.assertEqual(chart["datasets"][0]["data"], [150000, 70000])
         self.assertIn("01.06.2026", chart["subtitle"])
 
+    def test_admin_employee_directory_returns_roles_and_safe_link_states(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO employee_positions (employee_id, position, created_at) "
+                "VALUES (?, 'Тестовая должность AI', '2026-09-05 10:00')",
+                (self.employee_id,),
+            )
+            db.execute(
+                "INSERT INTO employee_telegram_accounts "
+                "(employee_id, chat_id, username, display_name, linked_at) "
+                "VALUES (?, 'sensitive-chat-123', 'secret-user', 'AI Test', "
+                "'2026-09-05 10:00')",
+                (self.employee_id,),
+            )
+            db.commit()
+
+            admin = {
+                "owner_type": "admin",
+                "owner_id": self.admin_id,
+                "name": "AI Администратор",
+                "positions": [],
+            }
+            result = execute_tool(
+                db,
+                admin,
+                application_module.BOATS,
+                "get_employees_directory",
+                {"position": "Тестовая должность AI"},
+            )
+
+        self.assertEqual(result["employees_total"], 1)
+        self.assertEqual(result["by_position"], {"Тестовая должность AI": 1})
+        self.assertEqual(result["accounts_created"], 1)
+        self.assertEqual(result["telegram_linked"], 1)
+        self.assertEqual(result["directory"], [{
+            "name": self.EMPLOYEE_NAME,
+            "positions": ["Тестовая должность AI"],
+            "active": True,
+            "account_created": True,
+            "telegram_linked": True,
+        }])
+        serialized = json.dumps(result, ensure_ascii=False)
+        self.assertNotIn(self.TEAM_USERNAME, serialized)
+        self.assertNotIn("test-hash", serialized)
+        self.assertNotIn("sensitive-chat-123", serialized)
+        self.assertNotIn("secret-user", serialized)
+
+    def test_employee_cannot_access_employee_directory(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            with self.assertRaisesRegex(ValueError, "недоступен"):
+                execute_tool(
+                    db,
+                    {
+                        "owner_type": "employee",
+                        "owner_id": self.employee_id,
+                        "name": self.EMPLOYEE_NAME,
+                        "positions": [],
+                    },
+                    application_module.BOATS,
+                    "get_employees_directory",
+                    {},
+                )
+
     def login_admin(self):
         with self.client.session_transaction() as session:
             session.clear()
@@ -280,6 +349,7 @@ class AIAssistantTests(unittest.TestCase):
         self.assertIn("get_data_catalog", tool_names)
         self.assertIn("get_business_overview", tool_names)
         self.assertIn("get_tuning_summary", tool_names)
+        self.assertIn("get_employees_directory", tool_names)
 
         with application_module.app.app_context():
             db = application_module.get_db()
@@ -446,6 +516,7 @@ class AIAssistantTests(unittest.TestCase):
         self.assertIn("get_payroll_summary", names)
         self.assertNotIn("get_tuning_summary", names)
         self.assertNotIn("get_business_overview", names)
+        self.assertNotIn("get_employees_directory", names)
         catalog_tool = next(
             tool for tool in captured[0]["tools"] if tool["name"] == "get_data_catalog"
         )
