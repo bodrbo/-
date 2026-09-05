@@ -51,6 +51,7 @@ class AIDataCatalogTests(unittest.TestCase):
         payroll = catalog_for_user(employee, "payroll")["datasets"][0]
         self.assertEqual(payroll["access_scope"], "own_only")
         self.assertNotIn("employee_name", payroll["filters"])
+        self.assertNotIn("position", payroll["filters"])
         self.assertNotIn("employee", {item["id"] for item in payroll["dimensions"]})
 
     def test_inaccessible_catalog_dataset_is_rejected(self):

@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from support import application_module
+from modules.ai_assistant.data_gateway import run_read_only
 from modules.ai_assistant.tools import execute_tool
 
 
@@ -22,7 +23,9 @@ def text_response(text="Готово", input_tokens=120, output_tokens=30):
 class AIAssistantTests(unittest.TestCase):
     ADMIN_USERNAME = "ai-assistant-admin-test"
     EMPLOYEE_NAME = "Сотрудник AI Тест"
+    SECOND_EMPLOYEE_NAME = "Второй сотрудник AI Тест"
     TEAM_USERNAME = "ai-assistant-team-test"
+    PAYROLL_POSITION_WORK_TYPE = "AI payroll position filter test"
 
     def setUp(self):
         application_module.init_db()
@@ -68,6 +71,10 @@ class AIAssistantTests(unittest.TestCase):
 
     @classmethod
     def _clear(cls, db):
+        db.execute(
+            "DELETE FROM entries WHERE work_type = ?",
+            (cls.PAYROLL_POSITION_WORK_TYPE,),
+        )
         tuning_order_ids = [
             row["id"] for row in db.execute(
                 "SELECT id FROM tuning_orders WHERE source_ref LIKE 'ai-summary-test:%'"
@@ -89,7 +96,8 @@ class AIAssistantTests(unittest.TestCase):
             db.execute("DELETE FROM ai_messages WHERE conversation_id = ?", (row["id"],))
             db.execute("DELETE FROM ai_conversations WHERE id = ?", (row["id"],))
         employee_rows = db.execute(
-            "SELECT id FROM employees WHERE name = ?", (cls.EMPLOYEE_NAME,)
+            "SELECT id FROM employees WHERE name IN (?, ?)",
+            (cls.EMPLOYEE_NAME, cls.SECOND_EMPLOYEE_NAME),
         ).fetchall()
         for row in employee_rows:
             db.execute(
@@ -98,7 +106,10 @@ class AIAssistantTests(unittest.TestCase):
             )
             db.execute("DELETE FROM employee_positions WHERE employee_id = ?", (row["id"],))
             db.execute("DELETE FROM team_accounts WHERE employee_id = ?", (row["id"],))
-        db.execute("DELETE FROM employees WHERE name = ?", (cls.EMPLOYEE_NAME,))
+        db.execute(
+            "DELETE FROM employees WHERE name IN (?, ?)",
+            (cls.EMPLOYEE_NAME, cls.SECOND_EMPLOYEE_NAME),
+        )
         db.execute("DELETE FROM admin_accounts WHERE username = ?", (cls.ADMIN_USERNAME,))
         db.commit()
 
@@ -220,6 +231,85 @@ class AIAssistantTests(unittest.TestCase):
         self.assertEqual(chart["labels"], ["июн 2026", "июл 2026"])
         self.assertEqual(chart["datasets"][0]["data"], [150000, 70000])
         self.assertIn("01.06.2026", chart["subtitle"])
+
+    def test_payroll_chart_filters_all_employees_by_position(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            second_employee_id = db.execute(
+                "INSERT INTO employees (name, created_at, deleted_at) "
+                "VALUES (?, '2026-09-05 10:00', NULL)",
+                (self.SECOND_EMPLOYEE_NAME,),
+            ).lastrowid
+            for employee_id in (self.employee_id, second_employee_id):
+                db.execute(
+                    "INSERT INTO employee_positions (employee_id, position, created_at) "
+                    "VALUES (?, 'Капитан', '2026-09-05 10:00')",
+                    (employee_id,),
+                )
+            entries = (
+                (self.EMPLOYEE_NAME, "2026-06-12", 1200),
+                (self.SECOND_EMPLOYEE_NAME, "2026-07-15", 2300),
+                (self.EMPLOYEE_NAME, "2026-08-18", 3400),
+            )
+            for employee_name, work_date, amount in entries:
+                db.execute(
+                    "INSERT INTO entries "
+                    "(employee, work_type, rate, quantity, amount, work_date, created_at) "
+                    "VALUES (?, ?, ?, 1, ?, ?, '2026-09-05 10:00')",
+                    (
+                        employee_name,
+                        self.PAYROLL_POSITION_WORK_TYPE,
+                        amount,
+                        amount,
+                        work_date,
+                    ),
+                )
+            db.commit()
+
+            admin = {
+                "owner_type": "admin",
+                "owner_id": self.admin_id,
+                "name": "AI Администратор",
+                "positions": [],
+            }
+            arguments = {
+                "subject": "payroll",
+                "metric": "amount_rub",
+                "group_by": "month",
+                "date_from": "2026-06-01",
+                "date_to": "2026-08-31",
+                "position": "капитан",
+            }
+            result = run_read_only(
+                db,
+                lambda readonly_db: execute_tool(
+                    readonly_db,
+                    admin,
+                    application_module.BOATS,
+                    "get_bar_chart",
+                    arguments,
+                ),
+            )
+            # Older model calls used employee_name for a role. Keep that form
+            # compatible so the observed production failure cannot recur.
+            legacy_result = run_read_only(
+                db,
+                lambda readonly_db: execute_tool(
+                    readonly_db,
+                    admin,
+                    application_module.BOATS,
+                    "get_bar_chart",
+                    {**arguments, "position": "", "employee_name": "Капитан"},
+                ),
+            )
+
+        chart = result["visualization"]
+        monthly = dict(zip(chart["labels"], chart["datasets"][0]["data"]))
+        self.assertGreaterEqual(monthly["июн 2026"], 1200)
+        self.assertGreaterEqual(monthly["июл 2026"], 2300)
+        self.assertGreaterEqual(monthly["авг 2026"], 3400)
+        self.assertIn("Должность: Капитан", chart["subtitle"])
+        self.assertEqual(legacy_result["visualization"], chart)
 
     def test_admin_employee_directory_returns_roles_and_safe_link_states(self):
         with application_module.app.app_context():
@@ -351,6 +441,10 @@ class AIAssistantTests(unittest.TestCase):
         self.assertIn("get_business_overview", tool_names)
         self.assertIn("get_tuning_summary", tool_names)
         self.assertIn("get_employees_directory", tool_names)
+        admin_chart_tool = next(
+            tool for tool in payloads[0]["tools"] if tool["name"] == "get_bar_chart"
+        )
+        self.assertIn("position", admin_chart_tool["parameters"]["properties"])
 
         with application_module.app.app_context():
             db = application_module.get_db()
@@ -533,6 +627,8 @@ class AIAssistantTests(unittest.TestCase):
             chart_tool["parameters"]["properties"]["subject"]["enum"]
         )
         self.assertEqual(chart_subjects, {"schedule", "clients", "payroll"})
+        self.assertNotIn("employee_name", chart_tool["parameters"]["properties"])
+        self.assertNotIn("position", chart_tool["parameters"]["properties"])
         page = self.client.get("/assistant")
         self.assertIn("Менеджер по работе с клиентами", page.get_data(as_text=True))
 

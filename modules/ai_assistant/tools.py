@@ -88,6 +88,65 @@ def _money(value):
     return round(float(value or 0), 2)
 
 
+def _casefold_match(values, requested):
+    requested_key = str(requested or "").casefold()
+    return next(
+        (value for value in values if str(value or "").casefold() == requested_key),
+        None,
+    )
+
+
+def _payroll_scope(db, arguments, user):
+    """Resolve a payroll person/position filter without confusing the two."""
+    if not _is_admin(user):
+        return user["name"], None
+
+    requested_employee = str(arguments.get("employee_name") or "").strip()
+    requested_position = str(arguments.get("position") or "").strip()
+    if len(requested_employee) > 160:
+        raise ValueError("Имя сотрудника слишком длинное.")
+    if len(requested_position) > 80:
+        raise ValueError("Название должности слишком длинное.")
+
+    employee_names = [
+        row["name"] for row in db.execute(
+            "SELECT name FROM employees WHERE deleted_at IS NULL ORDER BY name"
+        ).fetchall()
+    ]
+    positions = [
+        row["position"] for row in db.execute(
+            "SELECT DISTINCT ep.position FROM employee_positions ep "
+            "JOIN employees e ON e.id = ep.employee_id "
+            "WHERE e.deleted_at IS NULL ORDER BY ep.position"
+        ).fetchall()
+    ]
+
+    employee_name = _casefold_match(employee_names, requested_employee)
+    if requested_employee and employee_name is None and not requested_position:
+        # Compatibility for earlier tool calls where the model put a role such
+        # as «Капитан» into employee_name.  Prefer a real employee name when it
+        # exists; otherwise reinterpret an exact known position safely.
+        inferred_position = _casefold_match(positions, requested_employee)
+        if inferred_position is not None:
+            return None, inferred_position
+    if requested_employee and employee_name is None:
+        employee_name = requested_employee
+
+    position = _casefold_match(positions, requested_position)
+    if requested_position and position is None:
+        raise ValueError("Такой должности нет в справочнике сотрудников.")
+    return employee_name, position
+
+
+def _payroll_position_condition(employee_column):
+    return (
+        "EXISTS(SELECT 1 FROM employees pe "
+        "JOIN employee_positions pep ON pep.employee_id = pe.id "
+        f"WHERE pe.name = {employee_column} AND pe.deleted_at IS NULL "
+        "AND pep.position = ?)"
+    )
+
+
 def _schedule_summary(db, arguments):
     date_from, date_to = _date_period(arguments)
     boat = str(arguments.get("boat") or "").strip()
@@ -295,29 +354,30 @@ def _clients_summary(db, arguments, user):
 
 def _payroll_summary(db, arguments, user):
     date_from, date_to = _date_period(arguments, default_days=7)
-    requested_employee = str(arguments.get("employee_name") or "").strip()
-    employee_name = requested_employee
-    if not _is_admin(user):
-        employee_name = user["name"]
+    employee_name, position = _payroll_scope(db, arguments, user)
     params = [date_from.isoformat(), date_to.isoformat()]
-    where = "work_date >= ? AND work_date <= ?"
+    where = "e.work_date >= ? AND e.work_date <= ?"
     if employee_name:
-        where += " AND employee = ?"
+        where += " AND e.employee = ?"
         params.append(employee_name)
+    if position:
+        where += " AND " + _payroll_position_condition("e.employee")
+        params.append(position)
     totals = db.execute(
-        f"SELECT COUNT(*) AS entries_count, COALESCE(SUM(amount), 0) AS amount "
-        f"FROM entries WHERE {where}",
+        f"SELECT COUNT(*) AS entries_count, COALESCE(SUM(e.amount), 0) AS amount "
+        f"FROM entries e WHERE {where}",
         params,
     ).fetchone()
     by_work_type = db.execute(
-        f"SELECT work_type AS label, COUNT(*) AS total, "
-        f"COALESCE(SUM(amount), 0) AS amount FROM entries WHERE {where} "
-        "GROUP BY work_type ORDER BY amount DESC LIMIT 20",
+        f"SELECT e.work_type AS label, COUNT(*) AS total, "
+        f"COALESCE(SUM(e.amount), 0) AS amount FROM entries e WHERE {where} "
+        "GROUP BY e.work_type ORDER BY amount DESC LIMIT 20",
         params,
     ).fetchall()
     return {
         "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
         "employee": employee_name or "Все сотрудники",
+        "position": position,
         "entries": int(totals["entries_count"] or 0),
         "amount_rub": _money(totals["amount"]),
         "by_work_type": [
@@ -625,13 +685,17 @@ def _payroll_bar_chart(db, arguments, user):
     }
     if group_by not in groups or metric not in metrics:
         raise ValueError("Для графика зарплат выбраны несовместимые параметры.")
-    requested_employee = str(arguments.get("employee_name") or "").strip()
-    employee_name = requested_employee if _is_admin(user) else user["name"]
+    employee_name, position = _payroll_scope(db, arguments, user)
     extra_where = ""
     extra_params = []
     if employee_name:
         extra_where = "e.employee = ?"
         extra_params.append(employee_name)
+    if position:
+        if extra_where:
+            extra_where += " AND "
+        extra_where += _payroll_position_condition("e.employee")
+        extra_params.append(position)
     value_expression, dataset_label, value_format = metrics[metric]
     rows = _grouped_chart_query(
         db, "entries e", "e.work_date", date_from, date_to, groups[group_by],
@@ -641,8 +705,13 @@ def _payroll_bar_chart(db, arguments, user):
         "day": "дням", "month": "месяцам", "employee": "сотрудникам",
         "work_type": "видам работ",
     }[group_by]
+    subtitle = _chart_period_label(date_from, date_to)
+    if position:
+        subtitle += f" · Должность: {position}"
+    elif employee_name:
+        subtitle += f" · {employee_name}"
     return _bar_visualization(
-        title, _chart_period_label(date_from, date_to), dataset_label, value_format,
+        title, subtitle, dataset_label, value_format,
         rows, group_by,
     )
 
@@ -813,13 +882,27 @@ TOOL_SCHEMAS = {
         },
     },
     "get_payroll_summary": {
-        "description": "Получить сводку начислений. Сотруднику доступны только собственные начисления.",
+        "description": (
+            "Получить сводку начислений. Администратор может отфильтровать её по "
+            "точному ФИО через employee_name или по должности через position. "
+            "Слово «Капитан» является должностью и должно передаваться в position, "
+            "а не в employee_name. Сотруднику доступны только собственные начисления."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "date_from": {"type": "string", "description": "YYYY-MM-DD"},
                 "date_to": {"type": "string", "description": "YYYY-MM-DD"},
-                "employee_name": {"type": "string"},
+                "employee_name": {
+                    "type": "string",
+                    "maxLength": 160,
+                    "description": "Точное ФИО конкретного сотрудника; не должность.",
+                },
+                "position": {
+                    "type": "string",
+                    "maxLength": 80,
+                    "description": "Точная должность из справочника, например Капитан.",
+                },
             },
             "additionalProperties": False,
         },
@@ -879,7 +962,9 @@ TOOL_SCHEMAS = {
             "sale_channel/equipment_type; schedule — trips/revenue_rub/guests по "
             "day/month/boat/service/kind; payroll — entries/amount_rub по day/month/"
             "employee/work_type; clients — clients по status/acquisition_channel; "
-            "fleet — tank_liters/reserve_liters/defects (group_by не нужен)."
+            "fleet — tank_liters/reserve_liters/defects (group_by не нужен). "
+            "Для payroll employee_name означает точное ФИО, а position — должность "
+            "группы сотрудников; должность нельзя передавать как employee_name."
         ),
         "parameters": {
             "type": "object",
@@ -905,7 +990,16 @@ TOOL_SCHEMAS = {
                 },
                 "date_from": {"type": "string", "description": "YYYY-MM-DD"},
                 "date_to": {"type": "string", "description": "YYYY-MM-DD"},
-                "employee_name": {"type": "string"},
+                "employee_name": {
+                    "type": "string",
+                    "maxLength": 160,
+                    "description": "Точное ФИО конкретного сотрудника; не должность.",
+                },
+                "position": {
+                    "type": "string",
+                    "maxLength": 80,
+                    "description": "Фильтр начислений по точной должности, например Капитан.",
+                },
                 "segment": {"type": "string", "enum": ["excursion", "tuning"]},
             },
             "required": ["subject", "metric"],
@@ -952,16 +1046,25 @@ def tool_definitions(user):
                 "additionalProperties": False,
             }
         elif name == "get_bar_chart":
-            parameters = {
-                **parameters,
-                "properties": {
-                    **parameters["properties"],
-                    "subject": {
-                        **parameters["properties"]["subject"],
-                        "enum": list(visible_chart_subjects(user)),
-                    },
+            properties = {
+                **parameters["properties"],
+                "subject": {
+                    **parameters["properties"]["subject"],
+                    "enum": list(visible_chart_subjects(user)),
                 },
             }
+            if not _is_admin(user):
+                properties.pop("employee_name", None)
+                properties.pop("position", None)
+            parameters = {
+                **parameters,
+                "properties": properties,
+            }
+        elif name == "get_payroll_summary" and not _is_admin(user):
+            properties = dict(parameters["properties"])
+            properties.pop("employee_name", None)
+            properties.pop("position", None)
+            parameters = {**parameters, "properties": properties}
         definitions.append({
             "type": "function",
             "name": name,

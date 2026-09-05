@@ -109,7 +109,7 @@ DATASETS = (
             ("employee", "Сотрудник — только администратору"),
             ("work_type", "Вид работы"),
         ),
-        "filters": ("date_from", "date_to", "employee_name"),
+        "filters": ("date_from", "date_to", "employee_name", "position"),
         "tools": ("get_payroll_summary", "get_bar_chart"),
     },
     {
@@ -197,7 +197,7 @@ def _public_dataset(dataset, role):
     ]
     filters = [
         value for value in dataset["filters"]
-        if not (value == "employee_name" and role != "admin")
+        if not (value in ("employee_name", "position") and role != "admin")
     ]
     return {
         "id": dataset["id"],
