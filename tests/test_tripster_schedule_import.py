@@ -356,6 +356,93 @@ class TripsterScheduleImportTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(item["participants_count"], 5)
 
+    def test_full_sync_uses_each_groups_ticket_total_instead_of_copied_value(self):
+        grouping_event = {
+            "aware_start_dt": "2026-09-05T13:00:00+03:00",
+            "date": "2026-09-05",
+            "time": "13:00",
+            "is_grouping_enabled": True,
+        }
+        first = self.order(
+            7301,
+            event=grouping_event,
+            persons_count=2,
+            traveler={
+                "id": 8301,
+                "name": "Группа из двух гостей",
+                "email": "",
+                "phone": self.PHONES[0],
+            },
+            price={"value": 6000, "currency": "RUB", "currency_rate": 1},
+        )
+        second = self.order(
+            7302,
+            event=grouping_event,
+            persons_count=3,
+            traveler={
+                "id": 8302,
+                "name": "Группа из трёх гостей",
+                "email": "",
+                "phone": self.PHONES[1],
+            },
+            price={"value": 6000, "currency": "RUB", "currency_rate": 1},
+        )
+        self.sync([first, second])
+
+        first["price"] = {
+            "value": 6000,
+            "currency": "RUB",
+            "currency_rate": 1,
+            "per_ticket": [
+                {"title": "Стандартный билет", "count": 2, "price": 6000}
+            ],
+        }
+        second["price"] = {
+            "value": 6000,
+            "currency": "RUB",
+            "currency_rate": 1,
+            "per_ticket": [
+                {"title": "Стандартный билет", "count": 3, "price": 9000}
+            ],
+        }
+        self.sync([first, second])
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item = db.execute(
+                "SELECT participants_count, revenue FROM schedule_items "
+                "WHERE source_ref = 'event:321:2026-09-05 13:00'"
+            ).fetchone()
+            participants = db.execute(
+                "SELECT client_name, guests_count, price "
+                "FROM schedule_participants ORDER BY guests_count"
+            ).fetchall()
+        self.assertEqual(item["participants_count"], 5)
+        self.assertEqual(item["revenue"], 15000)
+        self.assertEqual(
+            [
+                (row["client_name"], row["guests_count"], row["price"])
+                for row in participants
+            ],
+            [
+                ("Группа из двух гостей", 2, 6000),
+                ("Группа из трёх гостей", 3, 9000),
+            ],
+        )
+
+    def test_price_falls_back_to_prepay_and_payment_to_guide(self):
+        order = self.order(price={
+            "value": 6000,
+            "pre_pay": 2000,
+            "payment_to_guide": 7000,
+            "currency": "RUB",
+            "currency_rate": 1,
+        })
+
+        normalised = tripster_services._normalise_order(order)
+
+        self.assertEqual(normalised["price_rub"], 9000)
+
     def test_incremental_sync_keeps_updated_after_cursor_for_cron(self):
         first_fetcher = Mock(return_value=[])
         second_fetcher = Mock(return_value=[])

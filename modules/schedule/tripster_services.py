@@ -30,6 +30,13 @@ def _number(value, default=0.0):
         return default
 
 
+def _optional_number(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _integer(value, default=0):
     try:
         return int(value)
@@ -75,7 +82,24 @@ def _event_start(order):
 
 def _price_rub(order):
     price = order.get("price") if isinstance(order.get("price"), dict) else {}
-    value = max(0.0, _number(price.get("value")))
+    ticket_prices = []
+    tickets = price.get("per_ticket")
+    if isinstance(tickets, list):
+        for ticket in tickets:
+            if not isinstance(ticket, dict):
+                continue
+            ticket_price = _optional_number(ticket.get("price"))
+            if ticket_price is not None:
+                ticket_prices.append(max(0.0, ticket_price))
+    if ticket_prices:
+        value = sum(ticket_prices)
+    else:
+        pre_pay = _optional_number(price.get("pre_pay"))
+        payment_to_guide = _optional_number(price.get("payment_to_guide"))
+        if pre_pay is not None and payment_to_guide is not None:
+            value = max(0.0, pre_pay) + max(0.0, payment_to_guide)
+        else:
+            value = max(0.0, _number(price.get("value")))
     currency = _text(price.get("currency"), 12).upper()
     if currency and currency not in {"RUB", "RUR", "₽"}:
         rate = _number(price.get("currency_rate"))
