@@ -301,9 +301,15 @@ body {
   min-height: 0;
   overflow: hidden;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "status"
+    "notice"
+    "transcript"
+    "composer";
   background: var(--paper);
 }
 .ai-chat-status {
+  grid-area: status;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -366,6 +372,7 @@ body {
   box-shadow: 0 0 0 3px rgba(98, 112, 127, .12);
 }
 .ai-configuration-notice {
+  grid-area: notice;
   display: flex;
   align-items: center;
   gap: 11px;
@@ -382,6 +389,7 @@ body {
 .ai-configuration-notice span { font-size: 11px; }
 .ai-configuration-notice code { font-family: 'PT Mono', monospace; }
 .ai-transcript {
+  grid-area: transcript;
   min-height: 0;
   padding: 24px clamp(20px, 5vw, 74px);
   overflow-y: auto;
@@ -548,6 +556,8 @@ body {
   color: var(--danger);
 }
 .ai-composer-wrap {
+  grid-area: composer;
+  min-width: 0;
   padding: 12px clamp(20px, 5vw, 74px) 14px;
   border-top: 1px solid var(--hairline);
   background: rgba(255, 255, 255, .96);
@@ -583,10 +593,12 @@ body {
   font: 400 13px/1.5 'Open Sans', sans-serif;
 }
 .ai-composer textarea::placeholder { color: #8797a2; }
-.ai-composer > button {
-  display: grid;
-  place-items: center;
+.ai-composer > button[type="submit"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 44px;
+  min-width: 44px;
   height: 44px;
   padding: 0;
   border: 0;
@@ -596,9 +608,9 @@ body {
   cursor: pointer;
   transition: background .18s ease, transform .18s ease;
 }
-.ai-composer > button:hover { background: var(--brass-strong); transform: translateY(-1px); }
-.ai-composer > button:disabled { background: #a9bac5; cursor: not-allowed; transform: none; }
-.ai-composer > button svg {
+.ai-composer > button[type="submit"]:hover { background: var(--brass-strong); transform: translateY(-1px); }
+.ai-composer > button[type="submit"]:disabled { background: #a9bac5; cursor: not-allowed; transform: none; }
+.ai-composer > button[type="submit"] svg {
   display: block;
   width: 20px;
   height: 20px;
@@ -672,7 +684,7 @@ body {
   .ai-message-bubble { font-size: 12px; }
   .ai-composer-wrap { padding: 9px 10px max(10px, env(safe-area-inset-bottom)); }
   .ai-composer { grid-template-columns: minmax(0, 1fr) 40px; padding: 5px 5px 5px 12px; }
-  .ai-composer > button { width: 40px; height: 40px; }
+  .ai-composer > button[type="submit"] { width: 40px; min-width: 40px; height: 40px; }
   .team-ai-entry { padding: 8px; font-size: 0; }
   .team-ai-entry svg { width: 20px; height: 20px; }
 }
