@@ -321,6 +321,7 @@ class AIAssistantTests(unittest.TestCase):
         page = self.client.get("/assistant")
         self.assertEqual(page.status_code, 200)
         self.assertIn("Помощник ещё не подключён", page.get_data(as_text=True))
+        self.assertIn("avatars/botsman-ai.jpeg", page.get_data(as_text=True))
         response = self.client.post("/assistant/api/chat", json={"message": "Привет"})
         self.assertEqual(response.status_code, 503)
         self.assertIn("OPENAI_API_KEY", response.get_json()["error"])
