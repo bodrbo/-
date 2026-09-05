@@ -401,7 +401,9 @@ class TripsterScheduleImportTests(unittest.TestCase):
         }
         second["price"] = {
             "value": 11100,
-            "pre_pay": 2800,
+            # The API can expose a non-reconciling commission-adjusted pre_pay.
+            # The customer-facing prepayment is total minus payment_to_guide.
+            "pre_pay": 2966.5,
             "payment_to_guide": 8300,
             "currency": "RUB",
             "currency_rate": 1,
@@ -468,6 +470,19 @@ class TripsterScheduleImportTests(unittest.TestCase):
             "per_ticket": [
                 {"title": "Стандартный билет", "count": 3, "price": 8300}
             ],
+            "currency": "RUB",
+            "currency_rate": 1,
+        }))
+
+        self.assertEqual(normalised["price_rub"], 11100)
+        self.assertEqual(normalised["prepayment_rub"], 2800)
+        self.assertEqual(normalised["payment_due_rub"], 8300)
+
+    def test_prepayment_reconciles_total_with_amount_due(self):
+        normalised = tripster_services._normalise_order(self.order(price={
+            "value": 11100,
+            "pre_pay": 2966.5,
+            "payment_to_guide": 8300,
             "currency": "RUB",
             "currency_rate": 1,
         }))

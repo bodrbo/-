@@ -85,6 +85,8 @@ def _price_components_rub(order):
     total = _optional_number(price.get("value"))
     prepayment = _optional_number(price.get("pre_pay"))
     payment_due = _optional_number(price.get("payment_to_guide"))
+    has_official_total = total is not None
+    has_official_payment_due = payment_due is not None
 
     if total is None and (prepayment is not None or payment_due is not None):
         total = max(0.0, prepayment or 0.0) + max(0.0, payment_due or 0.0)
@@ -114,6 +116,14 @@ def _price_components_rub(order):
             total *= rate
             prepayment *= rate
             payment_due *= rate
+
+    # Tripster may return pre_pay with a conversion/commission adjustment that
+    # does not reconcile with the customer-facing split. When the authoritative
+    # total and the amount payable to the guide are both present, their
+    # difference is the actual amount already paid on the Tripster website.
+    if has_official_total and has_official_payment_due:
+        payment_due = min(total, payment_due)
+        prepayment = max(0.0, total - payment_due)
     return {
         "total": round(total, 2),
         "prepayment": round(prepayment, 2),
