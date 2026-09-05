@@ -144,7 +144,9 @@ def create_schedule_blueprint(
             set_notice("Токен Tripster не настроен на сервере.", False)
             return redirect_to_day(day, selected_employee)
         try:
-            stats = tripster_services.sync_orders(get_db(), tripster_fetcher)
+            stats = tripster_services.sync_orders(
+                get_db(), tripster_fetcher, force_full=True
+            )
         except (RuntimeError, ValueError) as error:
             set_notice(f"Не удалось загрузить Tripster: {error}", False)
         else:

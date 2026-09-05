@@ -1,4 +1,4 @@
-import re
+import datetime as dt
 import unittest
 from unittest.mock import Mock, call, patch
 
@@ -190,6 +190,24 @@ class TripsterScheduleImportTests(unittest.TestCase):
 
         self.assertEqual(normalised["event_start"], "2026-09-10 13:00")
 
+    def test_ticket_breakdown_is_used_when_persons_count_is_missing(self):
+        order = self.order(
+            persons_count=None,
+            price={
+                "value": 9000,
+                "currency": "RUB",
+                "currency_rate": 1,
+                "per_ticket": [
+                    {"title": "Взрослый", "count": 2, "price": 6000},
+                    {"title": "Детский", "count": 1, "price": 3000},
+                ],
+            },
+        )
+
+        normalised = tripster_services._normalise_order(order)
+
+        self.assertEqual(normalised["persons_count"], 3)
+
     def test_tripster_id_maps_order_to_catalog_service_and_duration(self):
         service_id = self.add_mapping_service()
 
@@ -197,11 +215,54 @@ class TripsterScheduleImportTests(unittest.TestCase):
 
         with application_module.app.app_context():
             item = application_module.get_db().execute(
-                "SELECT * FROM schedule_items WHERE source_ref = 'order:7001'"
+                "SELECT * FROM schedule_items WHERE source = 'tripster'"
             ).fetchone()
         self.assertEqual(item["service_id"], service_id)
         self.assertEqual(item["service_name"], "Тестовая услуга Tripster")
         self.assertEqual(item["ends_at"], "2026-09-10 15:30")
+        self.assertEqual(item["kind"], "event")
+        self.assertEqual(
+            item["source_ref"], "event:321:2026-09-10 13:00"
+        )
+
+    def test_catalog_group_type_merges_orders_without_tripster_group_flag(self):
+        service_id = self.add_mapping_service()
+        first = self.order(
+            7201,
+            persons_count=2,
+            traveler={
+                "id": 8201,
+                "name": "Первый турист",
+                "email": "",
+                "phone": self.PHONES[0],
+            },
+        )
+        second = self.order(
+            7202,
+            persons_count=3,
+            traveler={
+                "id": 8202,
+                "name": "Второй турист",
+                "email": "",
+                "phone": self.PHONES[1],
+            },
+        )
+
+        self.sync([first, second])
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            items = db.execute(
+                "SELECT * FROM schedule_items WHERE deleted_at IS NULL"
+            ).fetchall()
+            participants = db.execute(
+                "SELECT * FROM schedule_participants"
+            ).fetchall()
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["service_id"], service_id)
+        self.assertEqual(items[0]["kind"], "event")
+        self.assertEqual(items[0]["participants_count"], 5)
+        self.assertEqual(len(participants), 2)
 
     def test_repeat_import_maps_previously_unclassified_order(self):
         self.sync([self.order()])
@@ -257,10 +318,7 @@ class TripsterScheduleImportTests(unittest.TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 302)
         self.assertEqual(first_fetcher.call_args.kwargs["updated_after"], None)
-        self.assertRegex(
-            second_fetcher.call_args.kwargs["updated_after"],
-            re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$"),
-        )
+        self.assertEqual(second_fetcher.call_args.kwargs["updated_after"], None)
         html = first.get_data(as_text=True)
         self.assertIn("Не назначено", html)
         self.assertIn("Tripster · экскурсия #321", html)
@@ -284,6 +342,35 @@ class TripsterScheduleImportTests(unittest.TestCase):
         self.assertEqual(len(participants), 1)
         self.assertEqual(participants[0]["source"], "tripster")
         self.assertEqual(segment["segment"], "excursion")
+
+    def test_manual_full_sync_refreshes_guest_count(self):
+        self.sync([self.order(persons_count=2)])
+        response, fetcher = self.sync([self.order(persons_count=5)])
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(fetcher.call_args.kwargs["updated_after"], None)
+        with application_module.app.app_context():
+            item = application_module.get_db().execute(
+                "SELECT participants_count FROM schedule_items "
+                "WHERE source_ref = 'order:7001'"
+            ).fetchone()
+        self.assertEqual(item["participants_count"], 5)
+
+    def test_incremental_sync_keeps_updated_after_cursor_for_cron(self):
+        first_fetcher = Mock(return_value=[])
+        second_fetcher = Mock(return_value=[])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            tripster_services.sync_orders(
+                db, first_fetcher, now=dt.datetime(2026, 9, 5, 12, 0)
+            )
+            tripster_services.sync_orders(
+                db, second_fetcher, now=dt.datetime(2026, 9, 5, 13, 0)
+            )
+        first_fetcher.assert_called_once_with(updated_after=None)
+        second_fetcher.assert_called_once_with(
+            updated_after="2026-09-05 11:50"
+        )
 
     def test_group_orders_at_same_time_merge_into_one_event(self):
         grouping_event = {

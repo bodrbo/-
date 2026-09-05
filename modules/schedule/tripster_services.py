@@ -84,6 +84,23 @@ def _price_rub(order):
     return round(value, 2)
 
 
+def _persons_count(order):
+    """Read the order total, falling back to Tripster ticket breakdown."""
+    direct_count = _integer(order.get("persons_count"))
+    if direct_count > 0:
+        return max(1, min(100, direct_count))
+    price = order.get("price") if isinstance(order.get("price"), dict) else {}
+    tickets = price.get("per_ticket")
+    if not isinstance(tickets, list):
+        tickets = []
+    ticket_count = sum(
+        max(0, _integer(ticket.get("count")))
+        for ticket in tickets
+        if isinstance(ticket, dict)
+    )
+    return max(1, min(100, ticket_count or 1))
+
+
 def _normalise_order(order):
     order_id = _integer(order.get("id"))
     experience_id = _integer(order.get("experience_id"))
@@ -101,7 +118,7 @@ def _normalise_order(order):
         "status": _text(order.get("status"), 40).lower(),
         "event_start": _event_start(order),
         "is_grouping_enabled": 1 if event.get("is_grouping_enabled") else 0,
-        "persons_count": max(1, min(100, _integer(order.get("persons_count"), 1))),
+        "persons_count": _persons_count(order),
         "traveler_id": _integer(traveler.get("id")) or None,
         "traveler_name": _text(traveler.get("name"), 180),
         "traveler_phone": _text(traveler.get("phone"), 40),
@@ -112,8 +129,10 @@ def _normalise_order(order):
     }
 
 
-def _source_ref(order):
-    if order["is_grouping_enabled"]:
+def _source_ref(order, is_group_order=None):
+    if is_group_order is None:
+        is_group_order = bool(order["is_grouping_enabled"])
+    if is_group_order:
         return f"event:{order['experience_id']}:{order['event_start']}"
     return f"order:{order['order_id']}"
 
@@ -123,8 +142,15 @@ def _mapped_service(db, experience_id):
 
 
 def _ensure_schedule_item(db, order, timestamp):
-    source_ref = _source_ref(order)
     mapped_service = _mapped_service(db, order["experience_id"])
+    is_group_order = bool(
+        order["is_grouping_enabled"]
+        or (
+            mapped_service is not None
+            and mapped_service["service_type"] == "group"
+        )
+    )
+    source_ref = _source_ref(order, is_group_order)
     existing = db.execute(
         "SELECT * FROM schedule_items WHERE source = ? AND source_ref = ?",
         (SOURCE, source_ref),
@@ -156,7 +182,7 @@ def _ensure_schedule_item(db, order, timestamp):
     starts_at = dt.datetime.strptime(order["event_start"], "%Y-%m-%d %H:%M")
     duration_hours = mapped_service["hours"] if mapped_service is not None else 1
     ends_at = starts_at + dt.timedelta(hours=duration_hours)
-    kind = "event" if order["is_grouping_enabled"] else "booking"
+    kind = "event" if is_group_order else "booking"
     service_id = mapped_service["id"] if mapped_service is not None else None
     service_name = (
         mapped_service["name"] if mapped_service is not None
@@ -402,7 +428,7 @@ def _apply_catalog_mappings(db, timestamp):
     return matched
 
 
-def sync_orders(db, fetcher, now=None):
+def sync_orders(db, fetcher, now=None, force_full=False):
     """Fetch order deltas and apply paid/cancelled bookings atomically."""
     now = (now or dt.datetime.now()).replace(second=0, microsecond=0)
     timestamp = now.strftime("%Y-%m-%d %H:%M")
@@ -410,7 +436,7 @@ def sync_orders(db, fetcher, now=None):
         "SELECT last_success_at FROM tripster_sync_state WHERE sync_key = 'orders'"
     ).fetchone()
     updated_after = None
-    if state is not None and state["last_success_at"]:
+    if not force_full and state is not None and state["last_success_at"]:
         try:
             cursor = dt.datetime.strptime(state["last_success_at"], "%Y-%m-%d %H:%M")
             updated_after = (cursor - dt.timedelta(minutes=10)).strftime(

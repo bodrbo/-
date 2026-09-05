@@ -65,7 +65,7 @@
       <form method="post" action="{{ url_for('schedule.sync_tripster') }}" class="schedule-tripster-form">
         <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
         <input type="hidden" name="return_employee" value="{{ selected_employee }}">
-        <button type="submit" class="schedule-tripster-button" {{ 'disabled' if not tripster_configured }} title="{{ 'Загрузить новые и изменённые заказы Tripster' if tripster_configured else 'Токен Tripster не настроен' }}">
+        <button type="submit" class="schedule-tripster-button" {{ 'disabled' if not tripster_configured }} title="{{ 'Полностью сверить заказы, услуги и количество гостей с Tripster' if tripster_configured else 'Токен Tripster не настроен' }}">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 8A6.8 6.8 0 1 0 17 12"/><path d="M13 4h3.5v4"/></svg>
           <span>Tripster</span>
         </button>
