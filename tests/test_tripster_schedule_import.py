@@ -4,6 +4,7 @@ from unittest.mock import Mock, call, patch
 
 from support import application_module
 from integrations.tripster import API_URL, TripsterAPIError, fetch_orders
+from modules.schedule import tripster_services
 
 
 class TripsterClientTests(unittest.TestCase):
@@ -150,6 +151,18 @@ class TripsterScheduleImportTests(unittest.TestCase):
                 follow_redirects=follow_redirects,
             )
         return response, fetcher
+
+    def test_utc_event_time_is_converted_to_fixed_moscow_time(self):
+        order = self.order(event={
+            "aware_start_dt": "2026-09-10T10:00:00Z",
+            "date": "2026-09-10",
+            "time": "10:00",
+            "is_grouping_enabled": False,
+        })
+
+        normalised = tripster_services._normalise_order(order)
+
+        self.assertEqual(normalised["event_start"], "2026-09-10 13:00")
 
     def test_paid_order_creates_unassigned_schedule_item_idempotently(self):
         order = self.order()

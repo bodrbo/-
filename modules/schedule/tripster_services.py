@@ -3,7 +3,6 @@
 import datetime as dt
 import json
 import secrets
-from zoneinfo import ZoneInfo
 
 from modules.clients.constants import EXCURSION_SEGMENT
 from modules.clients.services import ensure_segment
@@ -13,7 +12,10 @@ PAID_STATUS = "paid"
 CANCELLED_STATUS = "cancelled"
 SOURCE = "tripster"
 UNASSIGNED_BOAT = "Не назначен"
-MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+# Moscow has observed UTC+3 year-round since 2014.  A fixed offset is enough
+# for current Tripster bookings and, unlike zoneinfo, remains importable in
+# Beget's Python 3.7 Passenger environment.
+MOSCOW_TZ = dt.timezone(dt.timedelta(hours=3))
 
 
 def _text(value, limit=500):
@@ -216,12 +218,22 @@ def _ensure_client(db, order, timestamp):
         )
     ensure_segment(db, client_id, EXCURSION_SEGMENT, timestamp)
     if order["traveler_id"] is not None:
-        db.execute(
-            "INSERT INTO tripster_travelers (traveler_id, client_id, updated_at) "
-            "VALUES (?, ?, ?) ON CONFLICT(traveler_id) DO UPDATE SET "
-            "client_id = excluded.client_id, updated_at = excluded.updated_at",
-            (order["traveler_id"], client_id, timestamp),
-        )
+        linked = db.execute(
+            "SELECT traveler_id FROM tripster_travelers WHERE traveler_id = ?",
+            (order["traveler_id"],),
+        ).fetchone()
+        if linked is None:
+            db.execute(
+                "INSERT INTO tripster_travelers "
+                "(traveler_id, client_id, updated_at) VALUES (?, ?, ?)",
+                (order["traveler_id"], client_id, timestamp),
+            )
+        else:
+            db.execute(
+                "UPDATE tripster_travelers SET client_id = ?, updated_at = ? "
+                "WHERE traveler_id = ?",
+                (client_id, timestamp, order["traveler_id"]),
+            )
     return client_id, name
 
 
@@ -370,37 +382,48 @@ def sync_orders(db, fetcher, now=None):
             else:
                 stats["pending"] += 1
 
-            db.execute(
-                "INSERT INTO tripster_orders "
-                "(order_id, experience_id, status, event_start, is_grouping_enabled, "
-                "persons_count, traveler_id, traveler_name, traveler_phone, traveler_email, "
-                "price_rub, order_url, raw_payload, schedule_item_id, first_seen_at, last_seen_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(order_id) DO UPDATE SET experience_id = excluded.experience_id, "
-                "status = excluded.status, event_start = excluded.event_start, "
-                "is_grouping_enabled = excluded.is_grouping_enabled, "
-                "persons_count = excluded.persons_count, traveler_id = excluded.traveler_id, "
-                "traveler_name = excluded.traveler_name, traveler_phone = excluded.traveler_phone, "
-                "traveler_email = excluded.traveler_email, price_rub = excluded.price_rub, "
-                "order_url = excluded.order_url, raw_payload = excluded.raw_payload, "
-                "schedule_item_id = excluded.schedule_item_id, last_seen_at = excluded.last_seen_at",
-                (
-                    order["order_id"], order["experience_id"], order["status"],
-                    order["event_start"], order["is_grouping_enabled"],
-                    order["persons_count"], order["traveler_id"], order["traveler_name"],
-                    order["traveler_phone"], order["traveler_email"], order["price_rub"],
-                    order["order_url"], order["raw_payload"], schedule_item_id,
-                    timestamp, timestamp,
-                ),
+            order_values = (
+                order["experience_id"], order["status"], order["event_start"],
+                order["is_grouping_enabled"], order["persons_count"],
+                order["traveler_id"], order["traveler_name"],
+                order["traveler_phone"], order["traveler_email"],
+                order["price_rub"], order["order_url"], order["raw_payload"],
+                schedule_item_id,
             )
+            if existing is None:
+                db.execute(
+                    "INSERT INTO tripster_orders "
+                    "(order_id, experience_id, status, event_start, "
+                    "is_grouping_enabled, persons_count, traveler_id, traveler_name, "
+                    "traveler_phone, traveler_email, price_rub, order_url, raw_payload, "
+                    "schedule_item_id, first_seen_at, last_seen_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (order["order_id"],) + order_values + (timestamp, timestamp),
+                )
+            else:
+                db.execute(
+                    "UPDATE tripster_orders SET experience_id = ?, status = ?, "
+                    "event_start = ?, is_grouping_enabled = ?, persons_count = ?, "
+                    "traveler_id = ?, traveler_name = ?, traveler_phone = ?, "
+                    "traveler_email = ?, price_rub = ?, order_url = ?, raw_payload = ?, "
+                    "schedule_item_id = ?, last_seen_at = ? WHERE order_id = ?",
+                    order_values + (timestamp, order["order_id"]),
+                )
 
         for item_id in affected_item_ids:
             _rebuild_item(db, item_id, timestamp)
-        db.execute(
-            "INSERT INTO tripster_sync_state (sync_key, last_success_at) VALUES ('orders', ?) "
-            "ON CONFLICT(sync_key) DO UPDATE SET last_success_at = excluded.last_success_at",
-            (timestamp,),
-        )
+        if state is None:
+            db.execute(
+                "INSERT INTO tripster_sync_state (sync_key, last_success_at) "
+                "VALUES ('orders', ?)",
+                (timestamp,),
+            )
+        else:
+            db.execute(
+                "UPDATE tripster_sync_state SET last_success_at = ? "
+                "WHERE sync_key = 'orders'",
+                (timestamp,),
+            )
         db.commit()
     except Exception:
         db.rollback()
