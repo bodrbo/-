@@ -4026,6 +4026,39 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   border-top: 1px dashed var(--hairline);
 }
 .schedule-participant-row .icon-btn { margin-bottom: 1px; }
+.schedule-tripster-payment {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 0;
+  margin-top: 3px;
+  overflow: hidden;
+  border: 1px solid #cfe0e8;
+  border-radius: 10px;
+  background: #fff;
+}
+.schedule-tripster-payment[hidden] { display: none; }
+.schedule-tripster-payment > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 34px;
+  padding: 7px 11px;
+}
+.schedule-tripster-payment > div + div { border-top: 1px solid #e1ebf0; }
+.schedule-tripster-payment span {
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+.schedule-tripster-payment strong {
+  color: var(--ink);
+  font-family: 'PT Mono', monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.schedule-tripster-payment > div:nth-child(2) strong { color: #176589; }
+.schedule-tripster-payment > div:nth-child(3) strong { color: var(--brass-strong); }
 .schedule-participant-guests { flex-basis: 82px; }
 .schedule-participant-guests input { text-align: center; font-variant-numeric: tabular-nums; }
 .schedule-participant-price input,

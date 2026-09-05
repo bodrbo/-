@@ -80,32 +80,49 @@ def _event_start(order):
     return None
 
 
-def _price_rub(order):
+def _price_components_rub(order):
     price = order.get("price") if isinstance(order.get("price"), dict) else {}
-    ticket_prices = []
-    tickets = price.get("per_ticket")
-    if isinstance(tickets, list):
-        for ticket in tickets:
-            if not isinstance(ticket, dict):
-                continue
-            ticket_price = _optional_number(ticket.get("price"))
-            if ticket_price is not None:
-                ticket_prices.append(max(0.0, ticket_price))
-    if ticket_prices:
-        value = sum(ticket_prices)
+    total = _optional_number(price.get("value"))
+    prepayment = _optional_number(price.get("pre_pay"))
+    payment_due = _optional_number(price.get("payment_to_guide"))
+
+    if total is None and (prepayment is not None or payment_due is not None):
+        total = max(0.0, prepayment or 0.0) + max(0.0, payment_due or 0.0)
+    if total is None:
+        ticket_prices = []
+        tickets = price.get("per_ticket")
+        if isinstance(tickets, list):
+            for ticket in tickets:
+                if not isinstance(ticket, dict):
+                    continue
+                ticket_price = _optional_number(ticket.get("price"))
+                if ticket_price is not None:
+                    ticket_prices.append(max(0.0, ticket_price))
+        total = sum(ticket_prices)
+
+    total = max(0.0, total)
+    prepayment = max(0.0, prepayment or 0.0)
+    if payment_due is None:
+        payment_due = max(0.0, total - prepayment)
     else:
-        pre_pay = _optional_number(price.get("pre_pay"))
-        payment_to_guide = _optional_number(price.get("payment_to_guide"))
-        if pre_pay is not None and payment_to_guide is not None:
-            value = max(0.0, pre_pay) + max(0.0, payment_to_guide)
-        else:
-            value = max(0.0, _number(price.get("value")))
+        payment_due = max(0.0, payment_due)
+
     currency = _text(price.get("currency"), 12).upper()
     if currency and currency not in {"RUB", "RUR", "₽"}:
         rate = _number(price.get("currency_rate"))
         if rate > 0:
-            value *= rate
-    return round(value, 2)
+            total *= rate
+            prepayment *= rate
+            payment_due *= rate
+    return {
+        "total": round(total, 2),
+        "prepayment": round(prepayment, 2),
+        "payment_due": round(payment_due, 2),
+    }
+
+
+def _price_rub(order):
+    return _price_components_rub(order)["total"]
 
 
 def _persons_count(order):
@@ -136,6 +153,7 @@ def _normalise_order(order):
         else {}
     )
     event = order.get("event") if isinstance(order.get("event"), dict) else {}
+    price_components = _price_components_rub(order)
     return {
         "order_id": order_id,
         "experience_id": experience_id,
@@ -147,7 +165,9 @@ def _normalise_order(order):
         "traveler_name": _text(traveler.get("name"), 180),
         "traveler_phone": _text(traveler.get("phone"), 40),
         "traveler_email": _text(traveler.get("email"), 180),
-        "price_rub": _price_rub(order),
+        "price_rub": price_components["total"],
+        "prepayment_rub": price_components["prepayment"],
+        "payment_due_rub": price_components["payment_due"],
         "order_url": _text(order.get("url"), 500),
         "raw_payload": json.dumps(order, ensure_ascii=False, sort_keys=True),
     }
@@ -352,10 +372,14 @@ def _rebuild_item(db, item_id, timestamp):
             "client_phone": order["traveler_phone"],
             "guests_count": 0,
             "price": 0.0,
+            "prepayment": 0.0,
+            "payment_due": 0.0,
             "order_ids": [],
         })
         entry["guests_count"] += order["persons_count"]
         entry["price"] += order["price_rub"]
+        entry["prepayment"] += order["prepayment_rub"]
+        entry["payment_due"] += order["payment_due_rub"]
         entry["order_ids"].append(str(order["order_id"]))
 
     for participant in grouped.values():
@@ -367,10 +391,13 @@ def _rebuild_item(db, item_id, timestamp):
         if existing is not None:
             db.execute(
                 "UPDATE schedule_participants SET client_name = ?, client_phone = ?, "
-                "guests_count = ?, price = ? WHERE id = ?",
+                "guests_count = ?, price = ?, prepayment = ?, payment_due = ? "
+                "WHERE id = ?",
                 (
                     participant["client_name"], participant["client_phone"],
                     participant["guests_count"], round(participant["price"], 2),
+                    round(participant["prepayment"], 2),
+                    round(participant["payment_due"], 2),
                     existing["id"],
                 ),
             )
@@ -378,11 +405,14 @@ def _rebuild_item(db, item_id, timestamp):
         db.execute(
             "INSERT INTO schedule_participants "
             "(schedule_item_id, client_id, client_name, client_phone, guests_count, "
-            "price, created_at, source, source_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "price, prepayment, payment_due, created_at, source, source_ref) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 item_id, participant["client_id"], participant["client_name"],
                 participant["client_phone"], participant["guests_count"],
-                round(participant["price"], 2), timestamp, SOURCE,
+                round(participant["price"], 2),
+                round(participant["prepayment"], 2),
+                round(participant["payment_due"], 2), timestamp, SOURCE,
                 "orders:" + ",".join(participant["order_ids"]),
             ),
         )
@@ -511,7 +541,8 @@ def sync_orders(db, fetcher, now=None, force_full=False):
                 order["is_grouping_enabled"], order["persons_count"],
                 order["traveler_id"], order["traveler_name"],
                 order["traveler_phone"], order["traveler_email"],
-                order["price_rub"], order["order_url"], order["raw_payload"],
+                order["price_rub"], order["prepayment_rub"],
+                order["payment_due_rub"], order["order_url"], order["raw_payload"],
                 schedule_item_id,
             )
             if existing is None:
@@ -519,9 +550,10 @@ def sync_orders(db, fetcher, now=None, force_full=False):
                     "INSERT INTO tripster_orders "
                     "(order_id, experience_id, status, event_start, "
                     "is_grouping_enabled, persons_count, traveler_id, traveler_name, "
-                    "traveler_phone, traveler_email, price_rub, order_url, raw_payload, "
+                    "traveler_phone, traveler_email, price_rub, prepayment_rub, "
+                    "payment_due_rub, order_url, raw_payload, "
                     "schedule_item_id, first_seen_at, last_seen_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (order["order_id"],) + order_values + (timestamp, timestamp),
                 )
             else:
@@ -529,7 +561,8 @@ def sync_orders(db, fetcher, now=None, force_full=False):
                     "UPDATE tripster_orders SET experience_id = ?, status = ?, "
                     "event_start = ?, is_grouping_enabled = ?, persons_count = ?, "
                     "traveler_id = ?, traveler_name = ?, traveler_phone = ?, "
-                    "traveler_email = ?, price_rub = ?, order_url = ?, raw_payload = ?, "
+                    "traveler_email = ?, price_rub = ?, prepayment_rub = ?, "
+                    "payment_due_rub = ?, order_url = ?, raw_payload = ?, "
                     "schedule_item_id = ?, last_seen_at = ? WHERE order_id = ?",
                     order_values + (timestamp, order["order_id"]),
                 )

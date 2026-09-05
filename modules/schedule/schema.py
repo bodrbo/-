@@ -64,6 +64,8 @@ def init_schema(conn):
             client_phone TEXT NOT NULL,
             guests_count INTEGER NOT NULL DEFAULT 1,
             price REAL NOT NULL DEFAULT 0,
+            prepayment REAL NOT NULL DEFAULT 0,
+            payment_due REAL NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             UNIQUE(schedule_item_id, client_id)
         )
@@ -103,6 +105,19 @@ def init_schema(conn):
     if "source_ref" not in participant_columns:
         conn.execute(
             "ALTER TABLE schedule_participants ADD COLUMN source_ref TEXT"
+        )
+    if "prepayment" not in participant_columns:
+        conn.execute(
+            "ALTER TABLE schedule_participants "
+            "ADD COLUMN prepayment REAL NOT NULL DEFAULT 0"
+        )
+    if "payment_due" not in participant_columns:
+        conn.execute(
+            "ALTER TABLE schedule_participants "
+            "ADD COLUMN payment_due REAL NOT NULL DEFAULT 0"
+        )
+        conn.execute(
+            "UPDATE schedule_participants SET payment_due = price"
         )
     conn.execute(
         """
@@ -166,6 +181,8 @@ def init_schema(conn):
             traveler_phone TEXT NOT NULL DEFAULT '',
             traveler_email TEXT NOT NULL DEFAULT '',
             price_rub REAL NOT NULL DEFAULT 0,
+            prepayment_rub REAL NOT NULL DEFAULT 0,
+            payment_due_rub REAL NOT NULL DEFAULT 0,
             order_url TEXT NOT NULL DEFAULT '',
             raw_payload TEXT NOT NULL,
             schedule_item_id INTEGER,
@@ -178,6 +195,19 @@ def init_schema(conn):
         "CREATE INDEX IF NOT EXISTS idx_tripster_orders_schedule_item "
         "ON tripster_orders(schedule_item_id, status)"
     )
+    tripster_order_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(tripster_orders)")
+    }
+    if "prepayment_rub" not in tripster_order_columns:
+        conn.execute(
+            "ALTER TABLE tripster_orders "
+            "ADD COLUMN prepayment_rub REAL NOT NULL DEFAULT 0"
+        )
+    if "payment_due_rub" not in tripster_order_columns:
+        conn.execute(
+            "ALTER TABLE tripster_orders "
+            "ADD COLUMN payment_due_rub REAL NOT NULL DEFAULT 0"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tripster_travelers (

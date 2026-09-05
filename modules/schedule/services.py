@@ -138,9 +138,12 @@ def _validate_participants(db, form, capacity, errors):
     raw_guests = form.getlist("participant_guests[]")
     raw_prices = form.getlist("participant_price[]")
     raw_source_refs = form.getlist("participant_source_ref[]")
+    raw_prepayments = form.getlist("participant_prepayment[]")
+    raw_payment_dues = form.getlist("participant_payment_due[]")
     row_count = max(
         len(raw_client_ids), len(raw_names), len(raw_phones), len(raw_guests),
-        len(raw_prices), len(raw_source_refs),
+        len(raw_prices), len(raw_source_refs), len(raw_prepayments),
+        len(raw_payment_dues),
     )
     # Search every identity by phone so a tuning client taking an excursion
     # is reused, while only excursion clients appear in the picker itself.
@@ -225,23 +228,32 @@ def _validate_participants(db, form, capacity, errors):
                 continue
             name = client["client_name"]
             phone = client["phone"]
+        source_ref = (
+            _normalise_text(raw_source_refs[index], 500)
+            if index < len(raw_source_refs)
+            and str(raw_source_refs[index]).startswith("orders:")
+            else None
+        )
+        is_tripster = source_ref is not None
         participants.append({
             "client_id": client["id"] if client is not None else None,
             "client_name": name,
             "client_phone": phone,
             "guests_count": guests_count,
             "price": price,
+            "prepayment": _parse_money(
+                raw_prepayments[index] if index < len(raw_prepayments) else "0",
+                errors,
+                f"{row_label}: предоплата Tripster",
+            ) if is_tripster else 0.0,
+            "payment_due": _parse_money(
+                raw_payment_dues[index] if index < len(raw_payment_dues) else "0",
+                errors,
+                f"{row_label}: сумма к доплате",
+            ) if is_tripster else None,
             "client_token": secrets.token_urlsafe(16) if client is None else None,
-            "source": "tripster" if (
-                index < len(raw_source_refs)
-                and str(raw_source_refs[index]).startswith("orders:")
-            ) else "internal",
-            "source_ref": (
-                _normalise_text(raw_source_refs[index], 500)
-                if index < len(raw_source_refs)
-                and str(raw_source_refs[index]).startswith("orders:")
-                else None
-            ),
+            "source": "tripster" if is_tripster else "internal",
+            "source_ref": source_ref,
         })
         if client is not None:
             seen_client_ids.add(client["id"])
@@ -318,6 +330,23 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
                     raw_customer_price, errors, "Стоимость для клиента"
                 )
             )
+            source_ref = _normalise_text(form.get("customer_source_ref"), 500)
+            if source_ref.startswith("orders:"):
+                participant["source"] = "tripster"
+                participant["source_ref"] = source_ref
+                participant["prepayment"] = _parse_money(
+                    form.get("customer_prepayment"), errors,
+                    "Предоплата Tripster",
+                )
+                participant["payment_due"] = _parse_money(
+                    form.get("customer_payment_due"), errors,
+                    "Сумма к доплате",
+                )
+            else:
+                participant["source"] = "internal"
+                participant["source_ref"] = None
+                participant["prepayment"] = 0.0
+                participant["payment_due"] = participant["price"]
             participants = [participant]
     elif kind == "event":
         try:
@@ -348,6 +377,10 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
             for participant in participants:
                 if participant["price"] is None:
                     participant["price"] = 0.0
+        for participant in participants:
+            if participant["source"] != "tripster":
+                participant["prepayment"] = 0.0
+                participant["payment_due"] = participant["price"]
         participants_count = sum(
             participant["guests_count"] for participant in participants
         )

@@ -275,6 +275,14 @@
             <b>₽</b>
           </span>
         </label>
+        <input type="hidden" name="customer_source_ref" id="scheduleCustomerSourceRef">
+        <input type="hidden" name="customer_prepayment" id="scheduleCustomerPrepayment" value="0">
+        <input type="hidden" name="customer_payment_due" id="scheduleCustomerPaymentDue" value="0">
+        <div class="schedule-tripster-payment" id="scheduleBookingPaymentBreakdown" hidden>
+          <div><span>Общая сумма заказа</span><strong data-payment-total>0 ₽</strong></div>
+          <div><span>Предоплата на Tripster</span><strong data-payment-prepayment>0 ₽</strong></div>
+          <div><span>Сумма к доплате</span><strong data-payment-due>0 ₽</strong></div>
+        </div>
       </div>
 
       <div class="schedule-event-fields" id="scheduleEventFields" hidden>
@@ -416,6 +424,8 @@
         <input type="hidden" name="participant_client_id[]" data-client-id>
         <input type="hidden" name="participant_name[]" data-client-name>
         <input type="hidden" name="participant_source_ref[]" data-participant-source-ref>
+        <input type="hidden" name="participant_prepayment[]" data-participant-prepayment value="0">
+        <input type="hidden" name="participant_payment_due[]" data-participant-payment-due value="0">
         <input type="text" data-participant-search maxlength="180" autocomplete="off"
                role="combobox" aria-autocomplete="list" aria-expanded="false"
                placeholder="Начните вводить имя"
@@ -445,6 +455,11 @@
     <button type="button" class="icon-btn danger" onclick="removeScheduleParticipant(this)" aria-label="Убрать клиента">
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h12M8 3h4l1 3H7l1-3zM6 6l.7 11h6.6L14 6M8.5 9v5M11.5 9v5"/></svg>
     </button>
+    <div class="schedule-tripster-payment" data-payment-breakdown hidden>
+      <div><span>Общая сумма заказа</span><strong data-payment-total>0 ₽</strong></div>
+      <div><span>Предоплата на Tripster</span><strong data-payment-prepayment>0 ₽</strong></div>
+      <div><span>Сумма к доплате</span><strong data-payment-due>0 ₽</strong></div>
+    </div>
   </div>
 </template>
 
@@ -509,6 +524,10 @@
     document.getElementById('scheduleRevenueTotal').textContent = '0 ₽';
     document.getElementById('scheduleCustomerPrice').value = '0';
     document.getElementById('scheduleCustomerPrice').dataset.priceMode = 'auto';
+    document.getElementById('scheduleCustomerSourceRef').value = '';
+    document.getElementById('scheduleCustomerPrepayment').value = '0';
+    document.getElementById('scheduleCustomerPaymentDue').value = '0';
+    document.getElementById('scheduleBookingPaymentBreakdown').hidden = true;
     document.getElementById('scheduleAssignments').innerHTML = '';
     document.getElementById('scheduleParticipantRows').innerHTML = '';
     document.getElementById('scheduleLegacyParticipants').hidden = true;
@@ -572,12 +591,24 @@
       ? (bookingParticipant.price ?? item.revenue ?? 0)
       : (item.revenue || 0);
     customerPrice.dataset.priceMode = 'manual';
+    if (bookingParticipant && String(bookingParticipant.source_ref || '').startsWith('orders:')) {
+      document.getElementById('scheduleCustomerSourceRef').value = bookingParticipant.source_ref;
+      document.getElementById('scheduleCustomerPrepayment').value = bookingParticipant.prepayment || 0;
+      document.getElementById('scheduleCustomerPaymentDue').value = bookingParticipant.payment_due || 0;
+      renderSchedulePaymentBreakdown(
+        document.getElementById('scheduleBookingPaymentBreakdown'),
+        bookingParticipant.price || 0,
+        bookingParticipant.prepayment || 0,
+        bookingParticipant.payment_due || 0,
+      );
+    }
     document.getElementById('scheduleCapacity').value = item.capacity || 10;
     if (item.kind === 'event') {
       (item.participants || []).forEach(participant => addScheduleParticipant(
         participant.client_id, participant.client_name, participant.client_phone,
         participant.guests_count || 1, false, participant.price ?? 0,
-        participant.source_ref || ''
+        participant.source_ref || '', participant.prepayment || 0,
+        participant.payment_due || 0
       ));
     }
     const legacyParticipants = document.getElementById('scheduleLegacyParticipants');
@@ -804,7 +835,7 @@
       picker.querySelector('[data-client-id]').value = '';
     }
   }
-  function addScheduleParticipant(clientId, clientName, clientPhone, guestsCount, focusNew, price, sourceRef) {
+  function addScheduleParticipant(clientId, clientName, clientPhone, guestsCount, focusNew, price, sourceRef, prepayment, paymentDue) {
     const fragment = document.getElementById('scheduleParticipantTemplate').content.cloneNode(true);
     const row = fragment.querySelector('.schedule-participant-row');
     const picker = row.querySelector('[data-client-picker]');
@@ -815,10 +846,18 @@
     row.querySelector('[name="participant_phone[]"]').value = clientPhone || '';
     row.querySelector('[name="participant_guests[]"]').value = guestsCount || 1;
     row.querySelector('[data-participant-source-ref]').value = sourceRef || '';
+    row.querySelector('[data-participant-prepayment]').value = prepayment || 0;
+    row.querySelector('[data-participant-payment-due]').value = paymentDue || 0;
     const priceInput = row.querySelector('[name="participant_price[]"]');
     if (price !== undefined && price !== null) {
       priceInput.value = price;
       priceInput.dataset.priceMode = 'manual';
+    }
+    if (String(sourceRef || '').startsWith('orders:')) {
+      renderSchedulePaymentBreakdown(
+        row.querySelector('[data-payment-breakdown]'),
+        price || 0, prepayment || 0, paymentDue || 0,
+      );
     }
     document.getElementById('scheduleParticipantRows').appendChild(fragment);
     setScheduleClientSelection(picker, {
@@ -853,6 +892,7 @@
   }
   function markScheduleClientPriceManual(input) {
     input.dataset.priceMode = 'manual';
+    syncScheduleImportedPayment(input);
     syncScheduleRevenueTotal();
   }
   function markAllSchedulePricesAuto() {
@@ -864,6 +904,46 @@
   function normaliseScheduleMoney(value) {
     const number = Number(String(value || '').replace(/\s/g, '').replace(',', '.'));
     return Number.isFinite(number) ? Math.max(0, number) : 0;
+  }
+  function formatScheduleMoney(value) {
+    return `${normaliseScheduleMoney(value).toLocaleString('ru-RU')} ₽`;
+  }
+  function renderSchedulePaymentBreakdown(container, total, prepayment, paymentDue) {
+    if (!container) return;
+    container.querySelector('[data-payment-total]').textContent = formatScheduleMoney(total);
+    container.querySelector('[data-payment-prepayment]').textContent = formatScheduleMoney(prepayment);
+    container.querySelector('[data-payment-due]').textContent = formatScheduleMoney(paymentDue);
+    container.hidden = false;
+  }
+  function syncScheduleImportedPayment(input) {
+    if (input.id === 'scheduleCustomerPrice') {
+      const sourceRef = document.getElementById('scheduleCustomerSourceRef').value;
+      if (!sourceRef.startsWith('orders:')) return;
+      const prepayment = normaliseScheduleMoney(
+        document.getElementById('scheduleCustomerPrepayment').value
+      );
+      const total = normaliseScheduleMoney(input.value);
+      const paymentDue = Math.max(0, total - prepayment);
+      document.getElementById('scheduleCustomerPaymentDue').value = String(paymentDue);
+      renderSchedulePaymentBreakdown(
+        document.getElementById('scheduleBookingPaymentBreakdown'),
+        total, prepayment, paymentDue,
+      );
+      return;
+    }
+    const row = input.closest('.schedule-participant-row');
+    if (!row) return;
+    const sourceRef = row.querySelector('[data-participant-source-ref]').value;
+    if (!sourceRef.startsWith('orders:')) return;
+    const prepayment = normaliseScheduleMoney(
+      row.querySelector('[data-participant-prepayment]').value
+    );
+    const total = normaliseScheduleMoney(input.value);
+    const paymentDue = Math.max(0, total - prepayment);
+    row.querySelector('[data-participant-payment-due]').value = String(paymentDue);
+    renderSchedulePaymentBreakdown(
+      row.querySelector('[data-payment-breakdown]'), total, prepayment, paymentDue,
+    );
   }
   function scheduleServicePriceForBooking(selected) {
     if (!selected || !selected.value) return 0;

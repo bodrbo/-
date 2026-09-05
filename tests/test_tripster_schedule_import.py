@@ -356,7 +356,7 @@ class TripsterScheduleImportTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(item["participants_count"], 5)
 
-    def test_full_sync_uses_each_groups_ticket_total_instead_of_copied_value(self):
+    def test_full_sync_updates_totals_and_keeps_tripster_payment_breakdown(self):
         grouping_event = {
             "aware_start_dt": "2026-09-05T13:00:00+03:00",
             "date": "2026-09-05",
@@ -390,19 +390,23 @@ class TripsterScheduleImportTests(unittest.TestCase):
         self.sync([first, second])
 
         first["price"] = {
-            "value": 6000,
+            "value": 11100,
+            "pre_pay": 0,
+            "payment_to_guide": 11100,
             "currency": "RUB",
             "currency_rate": 1,
             "per_ticket": [
-                {"title": "Стандартный билет", "count": 2, "price": 6000}
+                {"title": "Стандартный билет", "count": 2, "price": 8300}
             ],
         }
         second["price"] = {
-            "value": 6000,
+            "value": 11100,
+            "pre_pay": 2800,
+            "payment_to_guide": 8300,
             "currency": "RUB",
             "currency_rate": 1,
             "per_ticket": [
-                {"title": "Стандартный билет", "count": 3, "price": 9000}
+                {"title": "Стандартный билет", "count": 3, "price": 8300}
             ],
         }
         self.sync([first, second])
@@ -414,25 +418,36 @@ class TripsterScheduleImportTests(unittest.TestCase):
                 "WHERE source_ref = 'event:321:2026-09-05 13:00'"
             ).fetchone()
             participants = db.execute(
-                "SELECT client_name, guests_count, price "
+                "SELECT client_name, guests_count, price, prepayment, payment_due "
                 "FROM schedule_participants ORDER BY guests_count"
             ).fetchall()
         self.assertEqual(item["participants_count"], 5)
-        self.assertEqual(item["revenue"], 15000)
+        self.assertEqual(item["revenue"], 22200)
         self.assertEqual(
             [
-                (row["client_name"], row["guests_count"], row["price"])
+                (
+                    row["client_name"], row["guests_count"], row["price"],
+                    row["prepayment"], row["payment_due"],
+                )
                 for row in participants
             ],
             [
-                ("Группа из двух гостей", 2, 6000),
-                ("Группа из трёх гостей", 3, 9000),
+                ("Группа из двух гостей", 2, 11100, 0, 11100),
+                ("Группа из трёх гостей", 3, 11100, 2800, 8300),
             ],
         )
+        self.login()
+        page = self.client.get(
+            "/schedule?date=2026-09-05"
+        ).get_data(as_text=True)
+        self.assertIn("Общая сумма заказа", page)
+        self.assertIn("Предоплата на Tripster", page)
+        self.assertIn("Сумма к доплате", page)
+        self.assertIn('"prepayment": 2800.0', page)
+        self.assertIn('"payment_due": 8300.0', page)
 
     def test_price_falls_back_to_prepay_and_payment_to_guide(self):
         order = self.order(price={
-            "value": 6000,
             "pre_pay": 2000,
             "payment_to_guide": 7000,
             "currency": "RUB",
@@ -442,6 +457,24 @@ class TripsterScheduleImportTests(unittest.TestCase):
         normalised = tripster_services._normalise_order(order)
 
         self.assertEqual(normalised["price_rub"], 9000)
+        self.assertEqual(normalised["prepayment_rub"], 2000)
+        self.assertEqual(normalised["payment_due_rub"], 7000)
+
+    def test_official_total_has_priority_over_ticket_breakdown(self):
+        normalised = tripster_services._normalise_order(self.order(price={
+            "value": 11100,
+            "pre_pay": 2800,
+            "payment_to_guide": 8300,
+            "per_ticket": [
+                {"title": "Стандартный билет", "count": 3, "price": 8300}
+            ],
+            "currency": "RUB",
+            "currency_rate": 1,
+        }))
+
+        self.assertEqual(normalised["price_rub"], 11100)
+        self.assertEqual(normalised["prepayment_rub"], 2800)
+        self.assertEqual(normalised["payment_due_rub"], 8300)
 
     def test_incremental_sync_keeps_updated_after_cursor_for_cron(self):
         first_fetcher = Mock(return_value=[])

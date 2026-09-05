@@ -473,8 +473,14 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
                 "SELECT price FROM schedule_participants ORDER BY id"
             ).fetchall()
         ]
+        payment_dues = [
+            row[0] for row in connection.execute(
+                "SELECT payment_due FROM schedule_participants ORDER BY id"
+            ).fetchall()
+        ]
         connection.close()
         self.assertEqual(prices, [9000, 6000])
+        self.assertEqual(payment_dues, [9000, 6000])
 
     def test_group_event_reuses_existing_client_by_verified_phone(self):
         self.login()

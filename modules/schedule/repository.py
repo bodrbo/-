@@ -272,12 +272,13 @@ def save_item(db, item_id, data, assignments, participants, timestamp):
             db.execute(
                 "INSERT INTO schedule_participants "
                 "(schedule_item_id, client_id, client_name, client_phone, "
-                "guests_count, price, created_at, source, source_ref) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "guests_count, price, prepayment, payment_due, created_at, "
+                "source, source_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     item_id, client_id, participant["client_name"],
                     participant["client_phone"], participant["guests_count"],
-                    participant["price"], timestamp,
+                    participant["price"], participant.get("prepayment", 0),
+                    participant.get("payment_due", participant["price"]), timestamp,
                     participant.get("source", "internal"),
                     participant.get("source_ref"),
                 ),
