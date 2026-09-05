@@ -438,6 +438,18 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertNotIn("Плановая стоимость, ₽", html)
         self.assertIn("syncScheduleClientPrices", html)
 
+    def test_tripster_sync_shows_propeller_loader(self):
+        self.login()
+        html = self.client.get(
+            "/schedule?date=2026-09-05"
+        ).get_data(as_text=True)
+
+        self.assertIn('class="page-loader hidden" id="pageLoader"', html)
+        self.assertIn('class="propeller"', html)
+        self.assertIn('onsubmit="showScheduleTripsterLoader(this)"', html)
+        self.assertIn("Переимпорт рейсов…", html)
+        self.assertIn("button.disabled = true", html)
+
     def test_price_migration_preserves_historical_trip_total(self):
         connection = sqlite3.connect(":memory:")
         connection.execute(
