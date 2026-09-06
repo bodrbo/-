@@ -40,6 +40,13 @@ def format_timestamp(value):
     return value.strftime("%Y-%m-%d %H:%M")
 
 
+def resolve_operation_timestamp(raw_value, automatic=False):
+    """Refresh untouched form timestamps while preserving deliberate history edits."""
+    if automatic:
+        return format_timestamp(current_datetime().replace(second=0, microsecond=0))
+    return raw_value
+
+
 def _parse_local_datetime(raw_value):
     raw = (raw_value or "").strip().replace("T", " ")
     try:

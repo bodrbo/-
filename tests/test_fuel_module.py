@@ -462,6 +462,101 @@ class FuelModuleIntegrationTests(unittest.TestCase):
                 7,
             )
 
+    def test_untouched_operation_time_sees_reserve_received_after_page_load(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            success, message = fuel_services.record_refill(
+                db,
+                "Ларус",
+                "60",
+                "2026-08-18T07:00",
+                True,
+                "admin",
+                "Администратор теста",
+            )
+            self.assertTrue(success, message)
+            fuel_repository.add_transaction(
+                db,
+                "Ларус",
+                "group_consumption",
+                -30,
+                30,
+                "2026-08-18 08:00",
+                "fuel-trip:test-stale-form",
+                "Тестовый рейс",
+                "system",
+                "YCLIENTS",
+                "2026-08-18 08:00",
+            )
+            fuel_services.record_refill(
+                db,
+                "Ларус",
+                "5",
+                "2026-08-18T08:00",
+                False,
+                "admin",
+                "Администратор теста",
+                "reserve",
+            )
+            fuel_services.record_refill(
+                db,
+                "Бодрый Первый",
+                "20",
+                "2026-08-18T08:00",
+                False,
+                "admin",
+                "Администратор теста",
+                "reserve",
+            )
+            success, message = fuel_services.transfer_reserve_between_boats(
+                db,
+                "Бодрый Первый",
+                "Ларус",
+                "20",
+                "2026-08-18T10:00",
+                "admin",
+                "Администратор теста",
+            )
+            self.assertTrue(success, message)
+            db.commit()
+
+        self.log_in_as_admin()
+        historical_attempt = self.client.post(
+            "/fleet/0/fuel/refill",
+            data={
+                "fuel_operation": "reserve_to_tank",
+                "liters": "20",
+                "occurred_at": "2026-08-18T09:00",
+                "occurred_at_auto": "0",
+            },
+        )
+        self.assertEqual(historical_attempt.status_code, 302)
+        historical_page = self.client.get(
+            historical_attempt.headers["Location"]
+        ).get_data(as_text=True)
+        self.assertIn("В резерве только 5 л", historical_page)
+
+        automatic_attempt = self.client.post(
+            "/fleet/0/fuel/refill",
+            data={
+                "fuel_operation": "reserve_to_tank",
+                "liters": "20",
+                "occurred_at": "2026-08-18T09:00",
+                "occurred_at_auto": "1",
+            },
+        )
+        self.assertEqual(automatic_attempt.status_code, 302)
+        automatic_page = self.client.get(
+            automatic_attempt.headers["Location"]
+        ).get_data(as_text=True)
+        self.assertIn("перелито 20 л", automatic_page)
+        with application_module.app.app_context():
+            summary = fuel_services.fuel_summary(
+                application_module.get_db(), "Ларус"
+            )
+            self.assertEqual(summary["balance_liters"], 50)
+            self.assertEqual(summary["reserve_liters"], 5)
+
     def test_red_activity_removes_previous_automatic_fuel_debit(self):
         success, _ = self.activate_boat()
         self.assertTrue(success)

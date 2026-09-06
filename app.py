@@ -9357,13 +9357,17 @@ def team_add_fuel_refill():
     if boat is None:
         return redirect(url_for("team_dashboard"))
     operation = request.form.get("fuel_operation", "tank")
+    occurred_at = fuel_services.resolve_operation_timestamp(
+        request.form.get("occurred_at", ""),
+        request.form.get("occurred_at_auto") == "1",
+    )
     if operation == "reserve_to_boat":
         success, message = fuel_services.transfer_reserve_between_boats(
             db,
             boat,
             request.form.get("destination_boat", ""),
             request.form.get("liters", ""),
-            request.form.get("occurred_at", ""),
+            occurred_at,
             "team",
             session.get("team_employee_name") or "Капитан",
         )
@@ -9372,7 +9376,7 @@ def team_add_fuel_refill():
             db,
             boat,
             request.form.get("liters", ""),
-            request.form.get("occurred_at", ""),
+            occurred_at,
             request.form.get("fill_to_full") == "1",
             "team",
             session.get("team_employee_name") or "Капитан",

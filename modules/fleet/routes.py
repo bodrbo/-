@@ -158,13 +158,17 @@ def create_fleet_blueprint(
         if boat is None:
             return redirect(url_for("fleet.index"))
         operation = request.form.get("fuel_operation", "tank")
+        occurred_at = fuel_services.resolve_operation_timestamp(
+            request.form.get("occurred_at", ""),
+            request.form.get("occurred_at_auto") == "1",
+        )
         if operation == "reserve_to_boat":
             success, message = fuel_services.transfer_reserve_between_boats(
                 get_db(),
                 boat,
                 request.form.get("destination_boat", ""),
                 request.form.get("liters", ""),
-                request.form.get("occurred_at", ""),
+                occurred_at,
                 "admin",
                 session.get("admin_name") or "Администратор",
             )
@@ -173,7 +177,7 @@ def create_fleet_blueprint(
                 get_db(),
                 boat,
                 request.form.get("liters", ""),
-                request.form.get("occurred_at", ""),
+                occurred_at,
                 request.form.get("fill_to_full") == "1",
                 "admin",
                 session.get("admin_name") or "Администратор",

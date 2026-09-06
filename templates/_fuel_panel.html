@@ -96,7 +96,8 @@
         </label>
         <label>
           <span>Дата и время</span>
-          <input type="datetime-local" name="occurred_at" value="{{ fuel.now_local }}" required>
+          <input type="datetime-local" name="occurred_at" value="{{ fuel.now_local }}" data-fuel-occurred-at required>
+          <input type="hidden" name="occurred_at_auto" value="1" data-fuel-occurred-auto>
         </label>
         <label class="fuel-full-toggle" data-fuel-full-toggle>
           <input type="checkbox" name="fill_to_full" value="1" {{ 'checked' if not fuel.activated }}>
@@ -191,7 +192,10 @@
     var operation = panel && panel.querySelector('[data-fuel-operation]');
     var fullToggle = panel && panel.querySelector('[data-fuel-full-toggle]');
     var destination = panel && panel.querySelector('[data-fuel-destination]');
-    if (!operation || !fullToggle || !destination) return;
+    var occurredAt = panel && panel.querySelector('[data-fuel-occurred-at]');
+    var occurredAuto = panel && panel.querySelector('[data-fuel-occurred-auto]');
+    var form = operation && operation.form;
+    if (!operation || !fullToggle || !destination || !occurredAt || !occurredAuto || !form) return;
     var checkbox = fullToggle.querySelector('input');
     var destinationSelect = destination.querySelector('select');
     function updateFuelOperation() {
@@ -203,6 +207,15 @@
       destinationSelect.disabled = !boatTransfer;
     }
     operation.addEventListener('change', updateFuelOperation);
+    occurredAt.addEventListener('input', function () {
+      occurredAuto.value = '0';
+    });
+    form.addEventListener('submit', function () {
+      if (occurredAuto.value !== '1') return;
+      var now = new Date();
+      var localNow = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+      occurredAt.value = localNow.toISOString().slice(0, 16);
+    });
     updateFuelOperation();
   })();
   </script>
