@@ -9356,16 +9356,28 @@ def team_add_fuel_refill():
     boat_index, boat = _team_selected_boat(db)
     if boat is None:
         return redirect(url_for("team_dashboard"))
-    success, message = fuel_services.record_refill(
-        db,
-        boat,
-        request.form.get("liters", ""),
-        request.form.get("occurred_at", ""),
-        request.form.get("fill_to_full") == "1",
-        "team",
-        session.get("team_employee_name") or "Капитан",
-        request.form.get("fuel_operation", "tank"),
-    )
+    operation = request.form.get("fuel_operation", "tank")
+    if operation == "reserve_to_boat":
+        success, message = fuel_services.transfer_reserve_between_boats(
+            db,
+            boat,
+            request.form.get("destination_boat", ""),
+            request.form.get("liters", ""),
+            request.form.get("occurred_at", ""),
+            "team",
+            session.get("team_employee_name") or "Капитан",
+        )
+    else:
+        success, message = fuel_services.record_refill(
+            db,
+            boat,
+            request.form.get("liters", ""),
+            request.form.get("occurred_at", ""),
+            request.form.get("fill_to_full") == "1",
+            "team",
+            session.get("team_employee_name") or "Капитан",
+            operation,
+        )
     session["fuel_notice"] = {
         "type": "success" if success else "error",
         "message": message,

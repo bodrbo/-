@@ -46,6 +46,15 @@ def reserve_balance_at(db, boat, occurred_at=None):
     return float(db.execute(query, params).fetchone()["balance"] or 0)
 
 
+def list_reserve_transactions(db, boat):
+    return db.execute(
+        "SELECT id, reserve_delta, occurred_at FROM boat_fuel_transactions "
+        "WHERE boat = ? AND deleted_at IS NULL AND ABS(reserve_delta) > 0.0001 "
+        "ORDER BY occurred_at, id",
+        (boat,),
+    ).fetchall()
+
+
 def add_transaction(
     db,
     boat,

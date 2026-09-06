@@ -56,6 +56,7 @@ def create_fleet_blueprint(
             "fleet_boat.html",
             boat=boat,
             boat_index=boat_index,
+            boats=BOATS,
             boat_photo_url=services.boat_photo_url(profile),
             boat_photo_notice=session.pop("boat_photo_notice", None),
             checklists=services.fleet_boat_checklists(db, boat),
@@ -156,16 +157,28 @@ def create_fleet_blueprint(
         boat = services.boat_by_index(boat_index)
         if boat is None:
             return redirect(url_for("fleet.index"))
-        success, message = fuel_services.record_refill(
-            get_db(),
-            boat,
-            request.form.get("liters", ""),
-            request.form.get("occurred_at", ""),
-            request.form.get("fill_to_full") == "1",
-            "admin",
-            session.get("admin_name") or "Администратор",
-            request.form.get("fuel_operation", "tank"),
-        )
+        operation = request.form.get("fuel_operation", "tank")
+        if operation == "reserve_to_boat":
+            success, message = fuel_services.transfer_reserve_between_boats(
+                get_db(),
+                boat,
+                request.form.get("destination_boat", ""),
+                request.form.get("liters", ""),
+                request.form.get("occurred_at", ""),
+                "admin",
+                session.get("admin_name") or "Администратор",
+            )
+        else:
+            success, message = fuel_services.record_refill(
+                get_db(),
+                boat,
+                request.form.get("liters", ""),
+                request.form.get("occurred_at", ""),
+                request.form.get("fill_to_full") == "1",
+                "admin",
+                session.get("admin_name") or "Администратор",
+                operation,
+            )
         session["fuel_notice"] = {
             "type": "success" if success else "error",
             "message": message,

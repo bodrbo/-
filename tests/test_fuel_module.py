@@ -272,6 +272,196 @@ class FuelModuleIntegrationTests(unittest.TestCase):
                 20,
             )
 
+    def test_reserve_can_be_transferred_between_boats_and_deleted_as_pair(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            success, message = fuel_services.record_refill(
+                db,
+                "Бодрый Первый",
+                "30",
+                "2026-08-18T08:00",
+                False,
+                "admin",
+                "Администратор теста",
+                "reserve",
+            )
+            self.assertTrue(success, message)
+
+        self.log_in_as_admin()
+        response = self.client.post(
+            "/fleet/2/fuel/refill",
+            data={
+                "fuel_operation": "reserve_to_boat",
+                "destination_boat": "Ларус",
+                "liters": "12,5",
+                "occurred_at": "2026-08-18T09:00",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            source = fuel_services.fuel_summary(db, "Бодрый Первый")
+            destination = fuel_services.fuel_summary(db, "Ларус")
+            outgoing = db.execute(
+                "SELECT * FROM boat_fuel_transactions "
+                "WHERE kind = 'reserve_boat_transfer_out'"
+            ).fetchone()
+            incoming = db.execute(
+                "SELECT * FROM boat_fuel_transactions "
+                "WHERE kind = 'reserve_boat_transfer_in'"
+            ).fetchone()
+            self.assertEqual(source["reserve_liters"], 17.5)
+            self.assertEqual(destination["reserve_liters"], 12.5)
+            self.assertEqual(outgoing["boat"], "Бодрый Первый")
+            self.assertEqual(outgoing["reserve_delta"], -12.5)
+            self.assertEqual(incoming["boat"], "Ларус")
+            self.assertEqual(incoming["reserve_delta"], 12.5)
+            self.assertEqual(
+                outgoing["source_ref"][:-4],
+                incoming["source_ref"][:-3],
+            )
+
+        source_page = self.client.get("/fleet/2").get_data(as_text=True)
+        destination_page = self.client.get("/fleet/0").get_data(as_text=True)
+        self.assertIn("Передать резерв другому катеру", source_page)
+        self.assertIn("Передано на катер «Ларус»", source_page)
+        self.assertIn("Получено с катера «Бодрый Первый»", destination_page)
+
+        deleted = self.client.post(
+            f"/fleet/2/fuel/transactions/{outgoing['id']}/delete"
+        )
+        self.assertEqual(deleted.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.assertEqual(
+                fuel_services.fuel_summary(db, "Бодрый Первый")["reserve_liters"],
+                30,
+            )
+            self.assertEqual(
+                fuel_services.fuel_summary(db, "Ларус")["reserve_liters"], 0
+            )
+            deleted_rows = db.execute(
+                "SELECT COUNT(*) AS count FROM boat_fuel_transactions "
+                "WHERE kind LIKE 'reserve_boat_transfer_%' AND deleted_at IS NOT NULL"
+            ).fetchone()["count"]
+            self.assertEqual(deleted_rows, 2)
+
+    def test_cross_boat_reserve_transfer_validates_history_and_linked_deletion(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            fuel_services.record_refill(
+                db, "Бодрый Первый", "10", "2026-08-18T08:00", False,
+                "admin", "Администратор теста", "reserve",
+            )
+            success, message = fuel_services.transfer_reserve_between_boats(
+                db,
+                "Бодрый Первый",
+                "Ларус",
+                "8",
+                "2026-08-18T10:00",
+                "admin",
+                "Администратор теста",
+            )
+            self.assertTrue(success, message)
+            fuel_services.record_refill(
+                db, "Бодрый Первый", "10", "2026-08-18T11:00", False,
+                "admin", "Администратор теста", "reserve",
+            )
+
+            success, message = fuel_services.transfer_reserve_between_boats(
+                db,
+                "Бодрый Первый",
+                "Бодрый Второй",
+                "5",
+                "2026-08-18T09:00",
+                "admin",
+                "Администратор теста",
+            )
+            self.assertFalse(success)
+            self.assertIn("задним числом", message)
+            self.assertEqual(
+                fuel_services.fuel_summary(db, "Бодрый Второй")["reserve_liters"],
+                0,
+            )
+
+            outgoing = db.execute(
+                "SELECT * FROM boat_fuel_transactions "
+                "WHERE kind = 'reserve_boat_transfer_out' AND deleted_at IS NULL"
+            ).fetchone()
+            incoming = db.execute(
+                "SELECT * FROM boat_fuel_transactions "
+                "WHERE kind = 'reserve_boat_transfer_in' AND deleted_at IS NULL"
+            ).fetchone()
+            fuel_repository.add_transaction(
+                db,
+                "Ларус",
+                "reserve_transfer",
+                6,
+                6,
+                "2026-08-18 10:30",
+                "manual:test-used-transfer",
+                "Перелив из резервных канистр",
+                "admin",
+                "Администратор теста",
+                "2026-08-18 10:30",
+                reserve_delta=-6,
+            )
+            db.commit()
+
+            removed, message = fuel_services.delete_transaction(
+                db,
+                outgoing["boat"],
+                outgoing["id"],
+                "Администратор теста",
+            )
+            self.assertFalse(removed)
+            self.assertIn("уже использован", message)
+            self.assertIsNone(
+                fuel_repository.get_transaction(db, outgoing["id"])["deleted_at"]
+            )
+            self.assertIsNone(
+                fuel_repository.get_transaction(db, incoming["id"])["deleted_at"]
+            )
+
+    def test_captain_can_transfer_reserve_to_another_boat(self):
+        with application_module.app.app_context():
+            fuel_services.record_refill(
+                application_module.get_db(),
+                "Ларус",
+                "20",
+                "2026-08-18T08:00",
+                False,
+                "admin",
+                "Администратор теста",
+                "reserve",
+            )
+        with self.client.session_transaction() as session:
+            session["team_id"] = 1
+            session["team_employee_name"] = "Дмитрий Тарусов"
+            session["team_username"] = "captain-test"
+
+        response = self.client.post(
+            "/team/fuel/refill",
+            data={
+                "boat_index": "0",
+                "fuel_operation": "reserve_to_boat",
+                "destination_boat": "Бодрый Второй",
+                "liters": "7",
+                "occurred_at": "2026-08-18T09:00",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.assertEqual(
+                fuel_services.fuel_summary(db, "Ларус")["reserve_liters"], 13
+            )
+            self.assertEqual(
+                fuel_services.fuel_summary(db, "Бодрый Второй")["reserve_liters"],
+                7,
+            )
+
     def test_red_activity_removes_previous_automatic_fuel_debit(self):
         success, _ = self.activate_boat()
         self.assertTrue(success)

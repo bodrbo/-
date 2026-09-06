@@ -66,7 +66,7 @@
   <div class="fuel-workspace">
     <section class="fuel-refill-card">
       <h3>Добавить операцию с топливом</h3>
-      <p>Заправьте бак или канистры либо отметьте перелив резерва в бак.</p>
+      <p>Заправьте бак или канистры, перелейте резерв в бак либо передайте его на другой катер.</p>
       {% if viewer_role == 'admin' %}
       <form action="{{ url_for('fleet.add_fuel_refill', boat_index=boat_index) }}" method="post" class="fuel-refill-form">
       {% else %}
@@ -79,6 +79,15 @@
             <option value="tank">Заправка в бак</option>
             <option value="reserve">Заправка канистр</option>
             <option value="reserve_to_tank" {{ 'disabled' if not fuel.activated or fuel.reserve_liters <= 0 }}>Перелить из канистр в бак</option>
+            <option value="reserve_to_boat" {{ 'disabled' if fuel.reserve_liters <= 0 }}>Передать резерв другому катеру</option>
+          </select>
+        </label>
+        <label data-fuel-destination hidden>
+          <span>Катер-получатель</span>
+          <select name="destination_boat" disabled>
+            {% for destination in boats if destination.name != fuel.boat %}
+            <option value="{{ destination.name }}">{{ destination.name }}</option>
+            {% endfor %}
           </select>
         </label>
         <label>
@@ -154,11 +163,13 @@
               {% if transaction.kind == 'calibration' %}= {{ fuel.capacity_liters|round(1) }} л в баке
               {% elif transaction.kind == 'reserve_refill' %}+{{ transaction.reserve_delta|round(1) }} л в резерве
               {% elif transaction.kind == 'reserve_transfer' %}+{{ transaction.liters_delta|round(1) }} л в баке<br><small>{{ transaction.reserve_delta|round(1) }} л из резерва</small>
+              {% elif transaction.kind == 'reserve_boat_transfer_in' %}+{{ transaction.reserve_delta|round(1) }} л в резерве
+              {% elif transaction.kind == 'reserve_boat_transfer_out' %}{{ transaction.reserve_delta|round(1) }} л из резерва
               {% else %}{{ '+' if transaction.liters_delta > 0 }}{{ transaction.liters_delta|round(1) }} л в баке{% endif %}
             </td>
             {% if viewer_role == 'admin' %}
             <td class="fuel-history-actions row-actions">
-              <form action="{{ url_for('fleet.delete_fuel_transaction', boat_index=boat_index, transaction_id=transaction.id) }}" method="post" onsubmit="return confirm('Удалить эту запись из журнала топлива? Остаток будет пересчитан. Для рейса YCLIENTS удалённое списание не появится снова.');">
+              <form action="{{ url_for('fleet.delete_fuel_transaction', boat_index=boat_index, transaction_id=transaction.id) }}" method="post" onsubmit="return confirm('{{ 'Отменить перевод резерва? Связанные записи будут удалены из журналов обоих катеров.' if transaction.kind in ['reserve_boat_transfer_out', 'reserve_boat_transfer_in'] else 'Удалить эту запись из журнала топлива? Остаток будет пересчитан. Для рейса YCLIENTS удалённое списание не появится снова.' }}');">
                 <button type="submit" class="icon-btn danger" title="Удалить запись" aria-label="Удалить запись {{ transaction.label }}">
                   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
@@ -179,12 +190,17 @@
     var panel = document.currentScript.closest('.fuel-panel');
     var operation = panel && panel.querySelector('[data-fuel-operation]');
     var fullToggle = panel && panel.querySelector('[data-fuel-full-toggle]');
-    if (!operation || !fullToggle) return;
+    var destination = panel && panel.querySelector('[data-fuel-destination]');
+    if (!operation || !fullToggle || !destination) return;
     var checkbox = fullToggle.querySelector('input');
+    var destinationSelect = destination.querySelector('select');
     function updateFuelOperation() {
       var tankRefill = operation.value === 'tank';
+      var boatTransfer = operation.value === 'reserve_to_boat';
       fullToggle.hidden = !tankRefill;
       checkbox.disabled = !tankRefill;
+      destination.hidden = !boatTransfer;
+      destinationSelect.disabled = !boatTransfer;
     }
     operation.addEventListener('change', updateFuelOperation);
     updateFuelOperation();

@@ -18,11 +18,18 @@ TRANSACTION_LABELS = {
     "refill": "Заправка",
     "reserve_refill": "Заправка канистр",
     "reserve_transfer": "Перелив из резерва в бак",
+    "reserve_boat_transfer_out": "Резерв передан на другой катер",
+    "reserve_boat_transfer_in": "Резерв получен с другого катера",
     "group_consumption": "Групповой рейс",
     "individual_consumption": "Индивидуальный рейс",
 }
 
 MAX_RESERVE_OPERATION_LITERS = 1000.0
+CROSS_BOAT_TRANSFER_PREFIX = "reserve-boat-transfer:"
+CROSS_BOAT_TRANSFER_KINDS = {
+    "reserve_boat_transfer_out",
+    "reserve_boat_transfer_in",
+}
 
 
 def current_datetime():
@@ -238,6 +245,102 @@ def record_refill(
     return True, f"Заправка {liters:g} л добавлена в журнал катера «{boat}»."
 
 
+def _reserve_stays_nonnegative(db, boat, excluded_transaction_ids=()):
+    excluded = set(excluded_transaction_ids)
+    balance = 0.0
+    for transaction in repository.list_reserve_transactions(db, boat):
+        if transaction["id"] in excluded:
+            continue
+        balance += transaction["reserve_delta"]
+        if balance < -0.01:
+            return False
+    return True
+
+
+def transfer_reserve_between_boats(
+    db,
+    source_boat,
+    destination_boat,
+    raw_liters,
+    raw_occurred_at,
+    actor_role,
+    actor_name,
+):
+    """Move canister fuel between vessels as one atomic ledger operation."""
+    if source_boat not in FUEL_CONFIG or destination_boat not in FUEL_CONFIG:
+        return False, "Не удалось определить катер для перевода резерва."
+    if source_boat == destination_boat:
+        return False, "Выберите другой катер для передачи резерва."
+
+    liters = _parse_positive_liters(raw_liters)
+    if liters is None:
+        return False, "Укажите объём перевода больше нуля."
+    if liters > MAX_RESERVE_OPERATION_LITERS:
+        return False, "Объём перевода резервных канистр слишком большой."
+
+    occurred = _parse_local_datetime(raw_occurred_at)
+    now = current_datetime().replace(second=0, microsecond=0)
+    if occurred is None:
+        return False, "Укажите дату и время перевода."
+    if occurred > now + dt.timedelta(minutes=5):
+        return False, "Дата перевода не может быть в будущем."
+
+    occurred_at = format_timestamp(occurred)
+    available_at_transfer = repository.reserve_balance_at(
+        db, source_boat, occurred_at
+    )
+    if available_at_transfer + 0.01 < liters:
+        return False, (
+            f"На выбранный момент в резерве катера «{source_boat}» "
+            f"только {max(0, available_at_transfer):g} л."
+        )
+
+    transfer_ref = f"{CROSS_BOAT_TRANSFER_PREFIX}{uuid.uuid4().hex}"
+    created_at = format_timestamp(now)
+    try:
+        with db:
+            repository.add_transaction(
+                db,
+                source_boat,
+                "reserve_boat_transfer_out",
+                0,
+                liters,
+                occurred_at,
+                f"{transfer_ref}:out",
+                f"Передано на катер «{destination_boat}»",
+                actor_role,
+                actor_name,
+                created_at,
+                reserve_delta=-liters,
+            )
+            repository.add_transaction(
+                db,
+                destination_boat,
+                "reserve_boat_transfer_in",
+                0,
+                liters,
+                occurred_at,
+                f"{transfer_ref}:in",
+                f"Получено с катера «{source_boat}»",
+                actor_role,
+                actor_name,
+                created_at,
+                reserve_delta=liters,
+            )
+            if not _reserve_stays_nonnegative(db, source_boat):
+                raise ValueError
+    except ValueError:
+        return False, (
+            "Перевод нельзя провести задним числом: после выбранной даты "
+            "резерв исходного катера станет отрицательным."
+        )
+
+    return True, (
+        f"{liters:g} л резерва передано с катера «{source_boat}» "
+        f"на катер «{destination_boat}»."
+    )
+
+
 def record_individual_consumption(db, boat, event_id, raw_liters, actor_role, actor_name):
     liters = _parse_positive_liters(raw_liters)
     if liters is None:
@@ -290,10 +393,50 @@ def delete_transaction(db, boat, transaction_id, actor_name):
             "Начальную заправку нельзя удалить, пока после неё есть другие операции. "
             "Сначала удалите более поздние записи журнала."
         )
-    reserve_after_delete = (
-        repository.reserve_balance_at(db, boat) - transaction["reserve_delta"]
-    )
-    if reserve_after_delete < -0.01:
+    if transaction["kind"] in CROSS_BOAT_TRANSFER_KINDS:
+        suffix = ":out" if transaction["kind"].endswith("_out") else ":in"
+        counterpart_suffix = ":in" if suffix == ":out" else ":out"
+        if not transaction["source_ref"].startswith(CROSS_BOAT_TRANSFER_PREFIX) or not transaction[
+            "source_ref"
+        ].endswith(suffix):
+            return False, "Связанная запись перевода резерва не найдена."
+        counterpart_ref = transaction["source_ref"][: -len(suffix)] + counterpart_suffix
+        counterpart = repository.get_transaction_by_source(db, counterpart_ref)
+        if counterpart is None or counterpart["deleted_at"]:
+            return False, "Связанная запись перевода резерва не найдена."
+        excluded_by_boat = {
+            transaction["boat"]: {transaction["id"]},
+            counterpart["boat"]: {counterpart["id"]},
+        }
+        if not all(
+            _reserve_stays_nonnegative(db, paired_boat, ids)
+            for paired_boat, ids in excluded_by_boat.items()
+        ):
+            return False, (
+                "Этот перевод нельзя удалить: полученный резерв уже использован, "
+                "и остаток одного из катеров станет отрицательным."
+            )
+        deleted_at = format_timestamp(current_datetime())
+        with db:
+            repository.soft_delete_transaction(
+                db,
+                transaction["id"],
+                transaction["boat"],
+                deleted_at,
+                actor_name,
+            )
+            repository.soft_delete_transaction(
+                db,
+                counterpart["id"],
+                counterpart["boat"],
+                deleted_at,
+                actor_name,
+            )
+        return True, "Перевод резерва между катерами отменён в обоих журналах."
+
+    if transaction["reserve_delta"] and not _reserve_stays_nonnegative(
+        db, boat, {transaction_id}
+    ):
         return False, (
             "Эту заправку канистр нельзя удалить: резерв станет отрицательным. "
             "Сначала удалите более поздние переливы в бак."
