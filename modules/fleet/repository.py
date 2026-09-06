@@ -5,6 +5,35 @@ service layer owns validations and domain transitions.
 """
 
 
+def list_boat_profiles(db):
+    return db.execute(
+        "SELECT * FROM fleet_boat_profiles ORDER BY boat"
+    ).fetchall()
+
+
+def get_boat_profile(db, boat):
+    return db.execute(
+        "SELECT * FROM fleet_boat_profiles WHERE boat = ?", (boat,)
+    ).fetchone()
+
+
+def save_boat_photo(db, boat, filename, updated_at):
+    existing = get_boat_profile(db, boat)
+    if existing is None:
+        db.execute(
+            "INSERT INTO fleet_boat_profiles (boat, photo_filename, updated_at) "
+            "VALUES (?, ?, ?)",
+            (boat, filename, updated_at),
+        )
+    else:
+        db.execute(
+            "UPDATE fleet_boat_profiles SET photo_filename = ?, updated_at = ? "
+            "WHERE boat = ?",
+            (filename, updated_at, boat),
+        )
+    db.commit()
+
+
 def list_checklists(db, boat):
     return db.execute(
         "SELECT * FROM boat_checklists WHERE boat = ? ORDER BY started_at DESC, id DESC",

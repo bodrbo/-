@@ -2819,70 +2819,94 @@ body.modal-open { overflow: hidden; }
 }
 .fleet-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(220px, 320px));
-  gap: 26px;
-}
-@media (max-width: 980px) {
-  .fleet-grid { grid-template-columns: repeat(2, minmax(220px, 320px)); }
-}
-@media (max-width: 640px) {
-  .fleet-grid { grid-template-columns: 1fr; max-width: 340px; }
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
 }
 .fleet-card {
-  aspect-ratio: 1 / 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  gap: 16px;
-  padding: 30px;
+  display: block;
+  overflow: hidden;
   background: var(--paper);
   border: 1px solid var(--hairline);
-  border-radius: 18px;
-  box-shadow: var(--shadow);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 42, 53, .04);
   text-decoration: none;
   color: var(--ink);
-  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
 }
 .fleet-card:hover {
-  transform: translateY(-3px);
-  border-color: var(--brass);
-  box-shadow: 0 4px 8px rgba(15, 42, 53, 0.1), 0 18px 36px -18px rgba(15, 42, 53, 0.38);
+  transform: translateY(-2px);
+  border-color: rgba(52, 152, 219, .72);
+  box-shadow: var(--shadow);
 }
-.fleet-card:focus-visible { outline: 2px solid var(--brass); outline-offset: 3px; }
-.fleet-card-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 86px;
-  height: 86px;
-  border-radius: 50%;
-  background: var(--paper-alt);
-  border: 1px solid var(--hairline);
+.fleet-card:focus-visible { outline: 3px solid rgba(52, 152, 219, .25); outline-offset: 3px; }
+.fleet-card-visual {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  aspect-ratio: 16 / 10;
+  background: #dce7ef;
+}
+.fleet-card-visual > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform .25s ease;
+}
+.fleet-card:hover .fleet-card-visual > img { transform: scale(1.025); }
+.fleet-card-placeholder {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  background: var(--ink);
+  color: rgba(255, 255, 255, .72);
+}
+.fleet-card-placeholder svg { width: 48%; max-width: 150px; }
+.fleet-card-stamp {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, .32);
+  border-radius: 4px;
+  background: rgba(15, 42, 53, .88);
+  color: #fff;
+  font-family: 'PT Mono', monospace;
+  font-size: 9px;
+  letter-spacing: .08em;
+}
+.fleet-card-body { display: block; padding: 15px 16px 16px; }
+.fleet-card-kicker {
+  display: block;
+  margin-bottom: 3px;
   color: var(--brass-strong);
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  font-family: 'PT Mono', monospace;
+  font-size: 9px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
 }
-.fleet-card:hover .fleet-card-icon {
-  background: var(--brass);
-  color: var(--on-accent);
-  border-color: var(--brass);
-}
-.fleet-card-icon svg { width: 40px; height: 40px; }
 .fleet-card-name {
+  display: block;
   font-family: 'Open Sans', -apple-system, sans-serif;
-  font-size: 21px;
+  font-size: 19px;
   font-weight: 700;
+  line-height: 1.25;
   color: var(--ink);
 }
 .fleet-card-sub {
-  font-size: 12.5px;
+  display: block;
+  min-height: 34px;
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.45;
   color: var(--muted);
 }
 .fleet-fuel-mini {
   display: block;
-  width: min(150px, 82%);
-  height: 8px;
+  width: 100%;
+  height: 6px;
+  margin-top: 10px;
   border: 1px solid var(--hairline);
   border-radius: 999px;
   background: var(--paper-alt);
@@ -2891,6 +2915,101 @@ body.modal-open { overflow: hidden; }
 .fleet-fuel-mini i { display: block; width: var(--fuel-level); height: 100%; background: var(--success); }
 .fleet-fuel-mini.fuel-mini-low i { background: var(--warning); }
 .fleet-fuel-mini.fuel-mini-critical i { background: var(--danger); }
+.fleet-card-open {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 13px;
+  padding-top: 11px;
+  border-top: 1px solid var(--hairline-soft);
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 700;
+}
+.fleet-card-open span { color: var(--brass-strong); font-size: 16px; line-height: 1; }
+
+.fleet-vessel-profile {
+  display: grid;
+  grid-template-columns: minmax(210px, 320px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: center;
+}
+.fleet-vessel-photo {
+  overflow: hidden;
+  aspect-ratio: 16 / 10;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--ink);
+}
+.fleet-vessel-photo > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.fleet-vessel-photo-placeholder {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: rgba(255, 255, 255, .72);
+}
+.fleet-vessel-photo-placeholder svg { width: 50%; }
+.fleet-vessel-profile-body { min-width: 0; }
+.fleet-vessel-eyebrow {
+  color: var(--brass-strong);
+  font-family: 'PT Mono', monospace;
+  font-size: 9px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.fleet-vessel-profile-body h2 { margin: 4px 0 5px; font-size: clamp(24px, 3vw, 34px); }
+.fleet-vessel-profile-body > p { margin: 0 0 15px; color: var(--muted); font-size: 12px; }
+.fleet-photo-notice {
+  margin-bottom: 12px;
+  padding: 9px 11px;
+  border: 1px solid rgba(47, 107, 79, .25);
+  border-radius: 8px;
+  background: rgba(47, 107, 79, .08);
+  color: var(--success);
+  font-size: 11px;
+}
+.fleet-photo-notice-error {
+  border-color: rgba(166, 61, 47, .25);
+  background: rgba(166, 61, 47, .07);
+  color: var(--danger);
+}
+.fleet-photo-form > label { display: block; margin-bottom: 6px; color: var(--ink-soft); font-size: 11px; font-weight: 700; }
+.fleet-photo-form-controls { display: flex; align-items: center; gap: 9px; }
+.fleet-photo-form input {
+  min-width: 0;
+  max-width: 330px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 10px;
+}
+.fleet-photo-form input::file-selector-button {
+  margin-right: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--paper-alt);
+  color: var(--ink-soft);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.fleet-photo-form button { flex: none; padding: 9px 13px; }
+.fleet-photo-form > span { display: block; margin-top: 5px; color: var(--muted); font-size: 9px; }
+
+@media (max-width: 680px) {
+  .fleet-grid { grid-template-columns: 1fr; }
+  .fleet-vessel-profile { grid-template-columns: 1fr; gap: 16px; }
+  .fleet-vessel-photo { max-width: 360px; }
+  .fleet-photo-form-controls { align-items: stretch; flex-direction: column; }
+  .fleet-photo-form input { max-width: 100%; }
+  .fleet-photo-form button { align-self: flex-start; }
+}
 
 /* Fuel is presented as one vessel instrument, not a dashboard of abstract
    KPIs: the ruled sight glass carries the current operational truth. */

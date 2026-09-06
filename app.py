@@ -1264,6 +1264,15 @@ def init_db():
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS fleet_boat_profiles (
+            boat TEXT PRIMARY KEY,
+            photo_filename TEXT,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
     boat_defects_is_new = conn.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'boat_defects'"
     ).fetchone() is None

@@ -1,6 +1,8 @@
 """Fleet reference data shared by admin and team workflows."""
 
 BOAT_DOCUMENT_EXTENSIONS = (".pdf", ".jpg", ".jpeg", ".png", ".webp", ".doc", ".docx")
+BOAT_PHOTO_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+BOAT_PHOTO_MAX_BYTES = 8 * 1024 * 1024
 
 BOATS = [
     {

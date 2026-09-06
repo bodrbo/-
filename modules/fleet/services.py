@@ -29,6 +29,33 @@ def boat_by_index(boat_index):
     return None
 
 
+def boat_photo_url(profile):
+    if profile is None or not profile["photo_filename"]:
+        return None
+    return url_for(
+        "static", filename=f"fleet_boats/{profile['photo_filename']}"
+    )
+
+
+def fleet_boat_cards(db, fuel_summary):
+    """Build the fleet index view models without mutating reference data."""
+    profiles = {
+        row["boat"]: row for row in repository.list_boat_profiles(db)
+    }
+    cards = []
+    for index, boat in enumerate(BOATS):
+        name = boat["name"]
+        cards.append(
+            {
+                **boat,
+                "index": index,
+                "photo_url": boat_photo_url(profiles.get(name)),
+                "fuel": fuel_summary(db, name, 0),
+            }
+        )
+    return cards
+
+
 def checklist_questions_for(checklist_type, boat):
     section = CHECKLIST_QUESTIONS.get(checklist_type) or {}
     return list(section.get("common", [])) + list(section.get("by_boat", {}).get(boat, []))

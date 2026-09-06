@@ -66,6 +66,10 @@ class FleetModuleIntegrationTests(unittest.TestCase):
             fleet_rules["fleet.transfer_defect"],
             "/fleet/<int:boat_index>/defects/<int:defect_id>/transfer",
         )
+        self.assertEqual(
+            fleet_rules["fleet.upload_boat_photo"],
+            "/fleet/<int:boat_index>/photo",
+        )
         self.assertNotIn("fleet_index", fleet_rules)
 
     def test_fleet_requires_admin_session(self):
@@ -82,6 +86,96 @@ class FleetModuleIntegrationTests(unittest.TestCase):
         response = self.client.get("/fleet/0")
         self.assertEqual(response.status_code, 200)
         self.assertIn("Ларус".encode(), response.data)
+
+    def test_admin_can_add_and_replace_fleet_boat_photo(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM fleet_boat_profiles WHERE boat = ?", ("Ларус",))
+            db.commit()
+
+        unauthenticated = self.client.post(
+            "/fleet/0/photo",
+            data={"photo": (io.BytesIO(b"first"), "larus.jpg")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(unauthenticated.status_code, 302)
+        self.assertTrue(unauthenticated.headers["Location"].endswith("/admin/login"))
+
+        self.log_in_as_admin()
+        response = self.client.post(
+            "/fleet/0/photo",
+            data={"photo": (io.BytesIO(b"first"), "larus.jpg")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/fleet/0"))
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            profile = db.execute(
+                "SELECT * FROM fleet_boat_profiles WHERE boat = ?", ("Ларус",)
+            ).fetchone()
+            self.assertIsNotNone(profile)
+            first_filename = profile["photo_filename"]
+            first_path = os.path.join(
+                application_module.app.static_folder,
+                "fleet_boats",
+                first_filename,
+            )
+            self.assertTrue(first_filename.endswith(".jpg"))
+            self.assertTrue(os.path.exists(first_path))
+
+        detail_page = self.client.get("/fleet/0").get_data(as_text=True)
+        fleet_page = self.client.get("/fleet").get_data(as_text=True)
+        self.assertIn(f"fleet_boats/{first_filename}", detail_page)
+        self.assertIn(f"fleet_boats/{first_filename}", fleet_page)
+        self.assertIn("Фотография катера обновлена.", detail_page)
+
+        replacement = self.client.post(
+            "/fleet/0/photo",
+            data={"photo": (io.BytesIO(b"second"), "larus.webp")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(replacement.status_code, 302)
+        with application_module.app.app_context():
+            profile = application_module.get_db().execute(
+                "SELECT * FROM fleet_boat_profiles WHERE boat = ?", ("Ларус",)
+            ).fetchone()
+            replacement_path = os.path.join(
+                application_module.app.static_folder,
+                "fleet_boats",
+                profile["photo_filename"],
+            )
+            self.assertTrue(profile["photo_filename"].endswith(".webp"))
+            self.assertTrue(os.path.exists(replacement_path))
+            self.assertFalse(os.path.exists(first_path))
+
+    def test_fleet_boat_photo_rejects_unsupported_file(self):
+        self.log_in_as_admin()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            before = db.execute(
+                "SELECT photo_filename FROM fleet_boat_profiles WHERE boat = ?",
+                ("Ларус",),
+            ).fetchone()
+            before_filename = before["photo_filename"] if before else None
+
+        response = self.client.post(
+            "/fleet/0/photo",
+            data={"photo": (io.BytesIO(b"not-an-image"), "larus.svg")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 302)
+
+        page = self.client.get(response.headers["Location"]).get_data(as_text=True)
+        self.assertIn("JPG, PNG или WebP", page)
+        with application_module.app.app_context():
+            after = application_module.get_db().execute(
+                "SELECT photo_filename FROM fleet_boat_profiles WHERE boat = ?",
+                ("Ларус",),
+            ).fetchone()
+            after_filename = after["photo_filename"] if after else None
+            self.assertEqual(after_filename, before_filename)
 
     def test_defect_case_and_plan_use_shared_fleet_services(self):
         defect_id = self.create_defect()

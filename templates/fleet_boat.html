@@ -73,6 +73,39 @@
 
   <a href="{{ url_for('fleet.index') }}" class="term" style="display:inline-block; margin-bottom:14px;">← Флот</a>
 
+  <section class="panel fleet-vessel-profile">
+    <div class="fleet-vessel-photo">
+      {% if boat_photo_url %}
+      <img src="{{ boat_photo_url }}" alt="Катер {{ boat }}">
+      {% else %}
+      <div class="fleet-vessel-photo-placeholder" aria-hidden="true">
+        <svg viewBox="0 0 120 70" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 48h96l-13 13H31L12 48z"/>
+          <path d="M39 48l9-24h28l14 24M53 24V13h19l8 11"/>
+          <path d="M21 66c8 4 16 4 24 0 8 4 16 4 24 0 8 4 16 4 24 0"/>
+        </svg>
+      </div>
+      {% endif %}
+    </div>
+    <div class="fleet-vessel-profile-body">
+      <span class="fleet-vessel-eyebrow">Профиль судна</span>
+      <h2>{{ boat }}</h2>
+      <p>Фотография используется как аватар катера в общем разделе «Флот».</p>
+      {% if boat_photo_notice %}
+      <div class="fleet-photo-notice fleet-photo-notice-{{ boat_photo_notice.type }}" role="alert">{{ boat_photo_notice.message }}</div>
+      {% endif %}
+      <form action="{{ url_for('fleet.upload_boat_photo', boat_index=boat_index) }}"
+            method="post" enctype="multipart/form-data" class="fleet-photo-form">
+        <label for="fleetBoatPhoto">{{ 'Заменить фотографию' if boat_photo_url else 'Добавить фотографию' }}</label>
+        <div class="fleet-photo-form-controls">
+          <input id="fleetBoatPhoto" type="file" name="photo" accept="image/jpeg,image/png,image/webp" required>
+          <button type="submit">Сохранить фото</button>
+        </div>
+        <span>JPG, PNG или WebP, до 8 МБ.</span>
+      </form>
+    </div>
+  </section>
+
   {% include '_fuel_panel.html' %}
 
   <details id="current-defects" class="panel collapsible-panel"{{ ' open' if defects_open }}>

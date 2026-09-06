@@ -17,6 +17,8 @@ from flask import (
 from . import fuel_services, repository, services
 from .constants import (
     BOAT_DOCUMENT_EXTENSIONS,
+    BOAT_PHOTO_EXTENSIONS,
+    BOAT_PHOTO_MAX_BYTES,
     BOATS,
     CHECKLIST_TYPE_LABELS,
     DEFECT_STATUSES,
@@ -35,11 +37,7 @@ def create_fleet_blueprint(
         db = get_db()
         return render_template(
             "fleet_index.html",
-            boats=BOATS,
-            fuel_by_boat={
-                boat["name"]: fuel_services.fuel_summary(db, boat["name"], 0)
-                for boat in BOATS
-            },
+            boats=services.fleet_boat_cards(db, fuel_services.fuel_summary),
             active_page="fleet",
         )
 
@@ -51,12 +49,15 @@ def create_fleet_blueprint(
             return redirect(url_for("fleet.index"))
 
         db = get_db()
+        profile = repository.get_boat_profile(db, boat)
         defects = services.defects_for_boat(db, boat)
         current_defects, archived_defects = services.split_defects(defects)
         return render_template(
             "fleet_boat.html",
             boat=boat,
             boat_index=boat_index,
+            boat_photo_url=services.boat_photo_url(profile),
+            boat_photo_notice=session.pop("boat_photo_notice", None),
             checklists=services.fleet_boat_checklists(db, boat),
             documents=repository.list_documents(db, boat),
             current_defects=current_defects,
@@ -72,6 +73,60 @@ def create_fleet_blueprint(
             viewer_role="admin",
             active_page="fleet",
         )
+
+    @blueprint.route("/fleet/<int:boat_index>/photo", methods=["POST"])
+    @admin_login_required
+    def upload_boat_photo(boat_index):
+        boat = services.boat_by_index(boat_index)
+        if boat is None:
+            return redirect(url_for("fleet.index"))
+
+        if request.content_length and request.content_length > BOAT_PHOTO_MAX_BYTES:
+            session["boat_photo_notice"] = {
+                "type": "error",
+                "message": "Фотография должна быть меньше 8 МБ.",
+            }
+            return redirect(url_for("fleet.boat_detail", boat_index=boat_index))
+
+        photo = request.files.get("photo")
+        if photo is None or not photo.filename:
+            session["boat_photo_notice"] = {
+                "type": "error",
+                "message": "Выберите фотографию катера.",
+            }
+            return redirect(url_for("fleet.boat_detail", boat_index=boat_index))
+
+        extension = os.path.splitext(photo.filename)[1].lower()
+        if extension not in BOAT_PHOTO_EXTENSIONS:
+            session["boat_photo_notice"] = {
+                "type": "error",
+                "message": "Фотография должна быть в формате JPG, PNG или WebP.",
+            }
+            return redirect(url_for("fleet.boat_detail", boat_index=boat_index))
+
+        db = get_db()
+        previous_profile = repository.get_boat_profile(db, boat)
+        previous_filename = (
+            previous_profile["photo_filename"] if previous_profile else None
+        )
+        photos_dir = os.path.join(current_app.static_folder, "fleet_boats")
+        os.makedirs(photos_dir, exist_ok=True)
+        filename = f"{boat_index}-{secrets.token_hex(8)}{extension}"
+        photo.save(os.path.join(photos_dir, filename))
+        repository.save_boat_photo(
+            db, boat, filename, services.current_timestamp()
+        )
+        if previous_filename and previous_filename != filename:
+            try:
+                os.remove(os.path.join(photos_dir, previous_filename))
+            except OSError:
+                pass
+
+        session["boat_photo_notice"] = {
+            "type": "success",
+            "message": "Фотография катера обновлена.",
+        }
+        return redirect(url_for("fleet.boat_detail", boat_index=boat_index))
 
     @blueprint.route("/fleet/<int:boat_index>/defects", methods=["POST"])
     @admin_login_required
