@@ -390,6 +390,10 @@
                 <button type="submit" class="btn-secondary">Повторить чек</button>
               </form>
               {% endif %}
+              {% if p.receipt_pdf_available %}
+              <a href="{{ url_for('admin_modulkassa_receipt_pdf', order_id=edit_order.id, payment_id=p.id) }}"
+                 target="_blank" rel="noopener" class="btn-secondary">PDF чека</a>
+              {% endif %}
               <form action="{{ url_for('delete_tuning_payment', order_id=edit_order.id, payment_id=p.id) }}" method="post"
                     onsubmit="return confirm('Удалить этот платёж?');">
                 <button type="submit" class="icon-btn danger" title="Удалить">

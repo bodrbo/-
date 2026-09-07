@@ -4270,10 +4270,12 @@ def _get_or_create_client(db, phone, client_name, boat_model, client_id=None):
 
 
 def _order_payment_totals(db, order_id, total):
-    payments = db.execute(
+    payment_rows = db.execute(
         "SELECT tuning_payments.*, "
+        "modulkassa_receipts.id AS receipt_id, "
         "modulkassa_receipts.status AS receipt_status, "
-        "modulkassa_receipts.failure_message AS receipt_failure_message "
+        "modulkassa_receipts.failure_message AS receipt_failure_message, "
+        "modulkassa_receipts.fiscal_info_json AS receipt_fiscal_info_json "
         "FROM tuning_payments "
         # A retry adds another modulkassa_receipts row for the same
         # payment rather than overwriting the old one (keeps history of
@@ -4288,6 +4290,17 @@ def _order_payment_totals(db, order_id, total):
         "ORDER BY tuning_payments.paid_at DESC, tuning_payments.id DESC",
         (order_id,),
     ).fetchall()
+    payments = []
+    for row in payment_rows:
+        payment = dict(row)
+        fiscal_info = _modulkassa_fiscal_info(payment)
+        payment["receipt_pdf_available"] = bool(
+            (payment["receipt_status"] or "").lower()
+            in MODULKASSA_SUCCESS_STATUSES
+            and fiscal_info
+            and fiscal_info.get("qr")
+        )
+        payments.append(payment)
     paid_amount = sum(p["amount"] for p in payments)
     remaining = max(0.0, total - paid_amount)
     return payments, paid_amount, remaining
@@ -4387,6 +4400,69 @@ MODULKASSA_STATUS_DISPLAY = {
     "completed": ("Пробит", "done"),
     "failed": ("Ошибка", "cancelled"),
 }
+MODULKASSA_SUCCESS_STATUSES = {"printed", "wait_for_callback", "completed"}
+FNS_RECEIPT_CHECK_URL = "https://kkt-online.nalog.ru/#check-bill"
+
+
+def _modulkassa_fiscal_info(receipt):
+    """Parse the stored API payload, accepting both joined and raw rows."""
+    keys = receipt.keys()
+    raw = (
+        receipt["receipt_fiscal_info_json"]
+        if "receipt_fiscal_info_json" in keys
+        else receipt["fiscal_info_json"] if "fiscal_info_json" in keys else None
+    )
+    if not raw:
+        return None
+    try:
+        info = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return None
+    return info if isinstance(info, dict) else None
+
+
+def _modulkassa_receipt_for_payment(db, order_id, payment_id):
+    """Return one successful fiscal receipt tied to the requested payment."""
+    return db.execute(
+        "SELECT tp.id AS payment_id, tp.order_id, tp.amount, tp.paid_at, "
+        "tp.payment_type, o.client_id, o.client_name, "
+        "mr.id AS receipt_id, mr.status AS receipt_status, "
+        "mr.fiscal_info_json, mr.created_at AS receipt_created_at "
+        "FROM tuning_payments tp "
+        "JOIN tuning_orders o ON o.id = tp.order_id "
+        "JOIN modulkassa_receipts mr ON mr.id = ("
+        "  SELECT id FROM modulkassa_receipts mr2 "
+        "  WHERE mr2.payment_id = tp.id "
+        "  AND LOWER(mr2.status) IN ('printed', 'wait_for_callback', 'completed') "
+        "  AND mr2.fiscal_info_json IS NOT NULL "
+        "  ORDER BY mr2.id DESC LIMIT 1"
+        ") "
+        "WHERE tp.order_id = ? AND tp.id = ?",
+        (order_id, payment_id),
+    ).fetchone()
+
+
+def _modulkassa_receipts_for_client_order(db, order_id):
+    """Public-safe receipt list: no ModulKassa credentials or internal IDs."""
+    receipts = []
+    rows = db.execute(
+        "SELECT tp.id AS payment_id, tp.amount, tp.paid_at, tp.payment_type, "
+        "mr.status AS receipt_status, mr.fiscal_info_json "
+        "FROM tuning_payments tp "
+        "JOIN modulkassa_receipts mr ON mr.id = ("
+        "  SELECT id FROM modulkassa_receipts mr2 "
+        "  WHERE mr2.payment_id = tp.id "
+        "  AND LOWER(mr2.status) IN ('printed', 'wait_for_callback', 'completed') "
+        "  AND mr2.fiscal_info_json IS NOT NULL "
+        "  ORDER BY mr2.id DESC LIMIT 1"
+        ") WHERE tp.order_id = ? ORDER BY tp.paid_at DESC, tp.id DESC",
+        (order_id,),
+    ).fetchall()
+    for row in rows:
+        fiscal_info = _modulkassa_fiscal_info(row)
+        if fiscal_info and fiscal_info.get("qr"):
+            receipts.append(dict(row))
+    return receipts
 
 
 def _modulkassa_check_status(db, receipt):
@@ -4609,6 +4685,258 @@ TUNING_REVIEW_URL = (
     "https://yandex.ru/maps/org/bodry_botsman/15778336383/reviews/"
     "?add-review=true"
 )
+
+
+def _build_fiscal_receipt_qr(qr_payload, size):
+    """Build the exact fiscal QR payload returned by ModulKassa as vector art."""
+    from reportlab.graphics.barcode import qr
+    from reportlab.graphics.shapes import Drawing
+
+    qr_code = qr.QrCodeWidget(
+        qr_payload,
+        barWidth=size,
+        barHeight=size,
+        barBorder=1,
+    )
+    drawing = Drawing(size, size)
+    drawing.add(qr_code)
+    return drawing
+
+
+def _receipt_money(value):
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    return f"{amount:,.2f}".replace(",", " ").replace(".", ",") + " руб."
+
+
+def _receipt_datetime(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return "—"
+    try:
+        parsed = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return raw
+    return parsed.strftime("%d.%m.%Y %H:%M")
+
+
+def _receipt_datetime_from_qr(qr_payload):
+    """Read the local receipt time encoded in the standard fiscal QR."""
+    qr_fields = {}
+    for part in str(qr_payload or "").split("&"):
+        key, separator, value = part.partition("=")
+        if separator:
+            qr_fields[key] = value
+    try:
+        return dt.datetime.strptime(
+            qr_fields.get("t", ""), "%Y%m%dT%H%M%S"
+        ).strftime("%d.%m.%Y %H:%M")
+    except ValueError:
+        return None
+
+
+def _build_modulkassa_receipt_pdf(receipt):
+    """Create a readable PDF copy from the authoritative fiscalInfo payload."""
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+    )
+
+    fiscal_info = _modulkassa_fiscal_info(receipt)
+    qr_payload = str((fiscal_info or {}).get("qr") or "").strip()
+    if not fiscal_info or not qr_payload:
+        raise ValueError("МодульКасса ещё не передала данные QR-кода чека.")
+
+    _register_act_fonts()
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=24 * mm,
+        rightMargin=24 * mm,
+        topMargin=12 * mm,
+        bottomMargin=12 * mm,
+        title=f"Кассовый чек по заказу №{receipt['order_id']}",
+        author=COMPANY_NAME,
+    )
+    ink = colors.HexColor("#153845")
+    blue = colors.HexColor("#3498db")
+    pale_blue = colors.HexColor("#eef6fb")
+    line = colors.HexColor("#cbdbe4")
+    muted = colors.HexColor("#657984")
+    safe = lambda value: html.escape(str(value or "—"), quote=False)
+
+    title = ParagraphStyle(
+        "receipt-title", fontName="OpenSans-Bold", fontSize=22, leading=28,
+        textColor=ink, alignment=TA_CENTER, spaceAfter=4,
+    )
+    subtitle = ParagraphStyle(
+        "receipt-subtitle", fontName="OpenSans", fontSize=10, leading=14,
+        textColor=muted, alignment=TA_CENTER,
+    )
+    label = ParagraphStyle(
+        "receipt-label", fontName="OpenSans", fontSize=9, leading=12,
+        textColor=muted, alignment=TA_LEFT,
+    )
+    value = ParagraphStyle(
+        "receipt-value", fontName="OpenSans-Bold", fontSize=10, leading=13,
+        textColor=ink, alignment=TA_RIGHT,
+    )
+    body = ParagraphStyle(
+        "receipt-body", fontName="OpenSans", fontSize=10, leading=14,
+        textColor=ink,
+    )
+    total_style = ParagraphStyle(
+        "receipt-total", fontName="OpenSans-Bold", fontSize=17, leading=22,
+        textColor=ink, alignment=TA_RIGHT,
+    )
+    center = ParagraphStyle(
+        "receipt-center", fontName="OpenSans", fontSize=9.5, leading=13,
+        textColor=muted, alignment=TA_CENTER,
+    )
+
+    logo_path = os.path.join(app.static_folder, "logo-act.png")
+    logo = Image(logo_path, width=132, height=132 * 230 / 836)
+    logo.hAlign = "CENTER"
+    flow = [
+        logo,
+        Spacer(1, 10),
+        Paragraph(safe(COMPANY_NAME), center),
+        Paragraph(safe(COMPANY_ADDRESS), center),
+        Spacer(1, 18),
+        Paragraph("Кассовый чек", title),
+        Paragraph("Электронная копия данных фискализации", subtitle),
+        Spacer(1, 18),
+    ]
+
+    check_type = str(fiscal_info.get("checkType") or "SALE").upper()
+    check_type_label = {
+        "SALE": "Приход",
+        "SALE_RETURN": "Возврат прихода",
+        "PURCHASE": "Расход",
+        "PURCHASE_RETURN": "Возврат расхода",
+    }.get(check_type, check_type)
+    fiscal_amount = fiscal_info.get("sum")
+    if fiscal_amount in (None, ""):
+        fiscal_amount = receipt["amount"]
+
+    overview = Table(
+        [
+            [Paragraph("Заказ", label), Paragraph(f"№{receipt['order_id']}", value)],
+            [Paragraph("Клиент", label), Paragraph(safe(receipt["client_name"]), value)],
+            [
+                Paragraph("Дата расчёта", label),
+                Paragraph(
+                    _receipt_datetime_from_qr(qr_payload)
+                    or _receipt_datetime(fiscal_info.get("date")),
+                    value,
+                ),
+            ],
+            [Paragraph("Тип операции", label), Paragraph(safe(check_type_label), value)],
+            [
+                Paragraph("Способ оплаты", label),
+                Paragraph(
+                    {
+                        "CASH": "Наличные",
+                        "CARD": "Безналичный",
+                    }.get(receipt["payment_type"], "Не указан"),
+                    value,
+                ),
+            ],
+        ],
+        colWidths=[58 * mm, 100 * mm],
+    )
+    overview.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), pale_blue),
+        ("BOX", (0, 0), (-1, -1), 0.7, line),
+        ("INNERGRID", (0, 0), (-1, -1), 0.4, line),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+    ]))
+    flow.extend([overview, Spacer(1, 18)])
+
+    item_table = Table(
+        [
+            [Paragraph("Наименование", label), Paragraph("Сумма", label)],
+            [Paragraph(f"Оплата по заказу №{receipt['order_id']}", body), Paragraph(_receipt_money(fiscal_amount), value)],
+            [Paragraph("ИТОГО", ParagraphStyle("total-label", parent=total_style, alignment=TA_LEFT)), Paragraph(_receipt_money(fiscal_amount), total_style)],
+        ],
+        colWidths=[105 * mm, 53 * mm],
+    )
+    item_table.setStyle(TableStyle([
+        ("LINEBELOW", (0, 0), (-1, 1), 0.5, line),
+        ("BACKGROUND", (0, 2), (-1, 2), colors.HexColor("#f7fbfd")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    flow.extend([item_table, Spacer(1, 20)])
+
+    fiscal_rows = [
+        ("Смена", fiscal_info.get("shiftNumber")),
+        ("Чек за смену", fiscal_info.get("checkNumber")),
+        ("ФН", fiscal_info.get("fnNumber")),
+        ("ФД", fiscal_info.get("fnDocNumber")),
+        ("ФП", fiscal_info.get("fnDocMark")),
+        (
+            "РН ККТ",
+            fiscal_info.get("ecrRegistrationNumber")
+            or fiscal_info.get("ercRegistrationNumber"),
+        ),
+    ]
+    fiscal_table = Table(
+        [[Paragraph(name, label), Paragraph(safe(field_value), value)] for name, field_value in fiscal_rows],
+        colWidths=[58 * mm, 100 * mm],
+    )
+    fiscal_table.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.7, line),
+        ("INNERGRID", (0, 0), (-1, -1), 0.4, line),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 9),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    flow.extend([fiscal_table, Spacer(1, 18)])
+
+    qr_size = 40 * mm
+    qr_table = Table(
+        [[
+            _build_fiscal_receipt_qr(qr_payload, qr_size),
+            Paragraph(
+                "<b>Проверка подлинности</b><br/>"
+                "Отсканируйте QR-код в приложении ФНС России или откройте "
+                f'<link href="{FNS_RECEIPT_CHECK_URL}" color="#3498db">сервис проверки чека ФНС</link> '
+                "и введите фискальные реквизиты.",
+                body,
+            ),
+        ]],
+        colWidths=[48 * mm, 110 * mm],
+    )
+    qr_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+        ("BOX", (0, 0), (-1, -1), 1, blue),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    flow.append(qr_table)
+
+    doc.build(flow)
+    return buf.getvalue()
 
 
 def _build_tuning_review_qr(size):
@@ -6763,6 +7091,52 @@ def retry_modulkassa_receipt(order_id, payment_id):
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
+def _modulkassa_receipt_pdf_response(receipt):
+    fiscal_info = _modulkassa_fiscal_info(receipt)
+    if not fiscal_info or not fiscal_info.get("qr"):
+        return "Фискальные данные чека ещё не получены.", 404
+    try:
+        pdf_bytes = _build_modulkassa_receipt_pdf(receipt)
+    except ImportError:
+        return (
+            "Формирование PDF временно недоступно: на сервере не установлена "
+            "библиотека reportlab.",
+            503,
+        )
+    response = app.response_class(pdf_bytes, mimetype="application/pdf")
+    response.headers["Content-Disposition"] = (
+        f'inline; filename="Receipt-{receipt["order_id"]}-{receipt["payment_id"]}.pdf"'
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@app.route("/tuning/<int:order_id>/pay/<int:payment_id>/receipt.pdf")
+@admin_login_required
+def admin_modulkassa_receipt_pdf(order_id, payment_id):
+    receipt = _modulkassa_receipt_for_payment(get_db(), order_id, payment_id)
+    if receipt is None:
+        return "Фискальный чек не найден.", 404
+    return _modulkassa_receipt_pdf_response(receipt)
+
+
+@app.route(
+    "/client/<token>/orders/<int:order_id>/payments/<int:payment_id>/receipt.pdf"
+)
+def client_modulkassa_receipt_pdf(token, order_id, payment_id):
+    db = get_db()
+    client = db.execute(
+        "SELECT id FROM clients WHERE token = ?", (token,)
+    ).fetchone()
+    if client is None:
+        return redirect(url_for("home"))
+    receipt = _modulkassa_receipt_for_payment(db, order_id, payment_id)
+    if receipt is None or receipt["client_id"] != client["id"]:
+        return "Фискальный чек не найден.", 404
+    return _modulkassa_receipt_pdf_response(receipt)
+
+
 @app.route("/internal/cron/check-modulkassa-receipts")
 def cron_check_modulkassa_receipts():
     """Hit every couple of minutes by a cron job on the host — polls
@@ -7060,6 +7434,9 @@ def _render_client_dashboard(db, client, viewer_role, client_section=TUNING_SEGM
         order["remaining"] = remaining
         order["work_items"] = items
         order["goods_items"] = goods_items
+        order["receipt_payments"] = _modulkassa_receipts_for_client_order(
+            db, o["id"]
+        )
         order["hull_sheets"] = db.execute(
             "SELECT * FROM hull_diagnostic_sheets WHERE tuning_order_id = ? ORDER BY id", (o["id"],)
         ).fetchall()

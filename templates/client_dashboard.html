@@ -253,6 +253,24 @@
             Скидка {{ (o.discount_value|float|round(1)|string ~ '%') if o.discount_type != 'amount' else (o.discount_value|money ~ ' ₽') }} · Оплачено {{ o.paid_amount|money }} ₽ ·
             К доплате {{ o.remaining|money }} ₽
           </p>
+          {% if o.receipt_payments %}
+          <div class="client-receipts" aria-label="Кассовые чеки по заказу №{{ o.id }}">
+            <div class="client-receipts-heading">
+              <span>Оплачено</span>
+              <strong>{{ o.paid_amount|money }} ₽</strong>
+            </div>
+            <div class="client-receipts-list">
+              {% for receipt in o.receipt_payments %}
+              <a href="{{ url_for('client_modulkassa_receipt_pdf', token=client.token, order_id=o.id, payment_id=receipt.payment_id) }}"
+                 target="_blank" rel="noopener">
+                <span>Кассовый чек от {{ receipt.paid_at[:10]|ru_date }}</span>
+                <strong>{{ receipt.amount|money }} ₽</strong>
+                <span class="client-receipt-open">Открыть PDF</span>
+              </a>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
           {% if o.yookassa_pending and o.remaining > 0 and not is_admin_view %}
           <a href="{{ o.yookassa_pending.confirmation_url }}" target="_blank" rel="noopener" class="btn-pay" style="margin-top:6px;">
             Оплатить онлайн {{ o.yookassa_pending.amount|money }} ₽
