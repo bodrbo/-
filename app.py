@@ -584,6 +584,8 @@ TBANK_PAYOUT_STATUS_LABELS = {
 TBANK_PAYOUT_FAILED_STATUSES = {
     "ERROR", "PART_EXEC", "REJECTED", "CANCELLED", "DELETED",
 }
+TBANK_PAYOUT_TERMINAL_STATUSES = TBANK_PAYOUT_FAILED_STATUSES | {"EXECUTED"}
+TBANK_PAYOUT_AUTO_CHECK_LIMIT = 50
 
 # ---------------------------------------------------------------------
 # Секрет для эндпоинта, который раз в день дёргает cron на хостинге, чтобы
@@ -878,6 +880,20 @@ def _decorate_tbank_payout(payout, now=None):
         next_check_at is None or (now or dt.datetime.now()) >= next_check_at
     )
     return payout
+
+
+def _tbank_payout_auto_check_due(payout, now):
+    """Whether cron may query this registry without exceeding T-Bank limits."""
+    bank_status = (payout["bank_status"] or "").strip().upper()
+    if bank_status in TBANK_PAYOUT_TERMINAL_STATUSES:
+        return False
+
+    # For a newly created registry the first automatic request is delayed by
+    # the same ten minutes as subsequent checks. A manual administrator check
+    # remains available immediately when diagnosing a specific payout.
+    anchor = payout["status_checked_at"] or payout["created_at"]
+    next_check_at = _tbank_payout_next_check_at(anchor)
+    return next_check_at is None or now >= next_check_at
 
 
 # Красная "запись-блокер": менеджер ставит её сотруднику вместо реального
@@ -3173,32 +3189,7 @@ def tbank_check_payout_status(payout_id):
     if next_check_at is not None and now_dt < next_check_at:
         return redirect(url_for("index", **redirect_args))
 
-    checked_at = now_dt.strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        bank_status = _tbank_fetch_payout_registry_status(
-            payout["payment_registry_id"]
-        )
-    except Exception as error:
-        db.execute(
-            "UPDATE tbank_payout_registries SET status_checked_at = ?, "
-            "status_error = ? WHERE id = ?",
-            (checked_at, str(error)[:1000], payout_id),
-        )
-    else:
-        db.execute(
-            "UPDATE tbank_payout_registries SET bank_status = ?, "
-            "status_checked_at = ?, status_error = NULL WHERE id = ?",
-            (bank_status, checked_at, payout_id),
-        )
-        if bank_status == "EXECUTED":
-            # This is deliberately the same record used by a manual click on
-            # the payroll card. The unique employee+period key makes repeated
-            # bank checks idempotent.
-            db.execute(
-                "INSERT OR IGNORE INTO payments "
-                "(employee, period_key, paid_at) VALUES (?, ?, ?)",
-                (payout["employee"], payout["period_key"], checked_at),
-            )
+    _tbank_update_payout_status(db, payout, now=now_dt)
     db.commit()
     return redirect(url_for("index", **redirect_args))
 
@@ -10384,6 +10375,83 @@ def _tbank_fetch_payout_registry_status(payment_registry_id):
     return bank_status
 
 
+def _tbank_update_payout_status(db, payout, now=None):
+    """Fetch and persist one registry status; never mark money paid on error."""
+    now = now or dt.datetime.now()
+    checked_at = now.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        bank_status = _tbank_fetch_payout_registry_status(
+            payout["payment_registry_id"]
+        )
+    except Exception as error:
+        db.execute(
+            "UPDATE tbank_payout_registries SET status_checked_at = ?, "
+            "status_error = ? WHERE id = ?",
+            (checked_at, str(error)[:1000], payout["id"]),
+        )
+        return {"bank_status": None, "paid": False, "error": str(error)}
+
+    db.execute(
+        "UPDATE tbank_payout_registries SET bank_status = ?, "
+        "status_checked_at = ?, status_error = NULL WHERE id = ?",
+        (bank_status, checked_at, payout["id"]),
+    )
+    paid = bank_status == "EXECUTED"
+    if paid:
+        # Manual and automatic checks deliberately update the same marker.
+        # The unique employee+period key keeps every retry idempotent.
+        db.execute(
+            "INSERT OR IGNORE INTO payments "
+            "(employee, period_key, paid_at) VALUES (?, ?, ?)",
+            (payout["employee"], payout["period_key"], checked_at),
+        )
+    return {"bank_status": bank_status, "paid": paid, "error": None}
+
+
+def _sync_tbank_payout_statuses(db, now=None, limit=None, sleep_func=time.sleep):
+    """Check due non-terminal payout registries for the automatic cron job.
+
+    One bad registry is recorded and does not block the others. Requests are
+    spaced by one second to respect T-Bank's per-method rate limit.
+    """
+    stats = {
+        "configured": tbank_payment_configured(),
+        "checked": 0,
+        "executed": 0,
+        "pending": 0,
+        "failed": 0,
+        "errors": 0,
+    }
+    if not stats["configured"]:
+        return stats
+
+    now = now or dt.datetime.now()
+    rows = db.execute(
+        "SELECT * FROM tbank_payout_registries "
+        "WHERE status = 'created' AND payment_registry_id IS NOT NULL "
+        "AND TRIM(payment_registry_id) != '' "
+        "ORDER BY COALESCE(status_checked_at, created_at), id"
+    ).fetchall()
+    due = [
+        row for row in rows if _tbank_payout_auto_check_due(row, now)
+    ][:limit or TBANK_PAYOUT_AUTO_CHECK_LIMIT]
+    for index, payout in enumerate(due):
+        if index:
+            sleep_func(1)
+        result = _tbank_update_payout_status(db, payout, now=now)
+        db.commit()
+        stats["checked"] += 1
+        if result["error"]:
+            stats["errors"] += 1
+        elif result["paid"]:
+            stats["executed"] += 1
+        elif result["bank_status"] in TBANK_PAYOUT_FAILED_STATUSES:
+            stats["failed"] += 1
+        else:
+            stats["pending"] += 1
+    return stats
+
+
 # ---------------------------------------------------------------------
 # Зарплаты — выплата самозанятому через Т-Банк ("Отправить в Т-Банк" на
 # карточке сотрудника). ВАЖНО: подпись платёжного реестра
@@ -12076,18 +12144,37 @@ def fuel_sync_now():
 
 @app.route("/internal/cron/sync-fuel")
 def cron_sync_fuel():
-    """Hourly Beget cron target for trips, income, fuel and task reminders."""
+    """Hourly Beget cron target for trips, fuel, reminders and payouts."""
     if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
         return "forbidden", 403
     db = get_db()
     reminder_stats = send_due_task_reminders(
         db, send_telegram_notification_to_employee
     )
+    try:
+        payout_stats = _sync_tbank_payout_statuses(db)
+    except Exception as error:
+        # An unexpected local/database problem in the bank observer must not
+        # stop the long-running YCLIENTS and fuel synchronization.
+        print(f"T-Bank payout status sync failed: {error}", file=sys.stderr, flush=True)
+        payout_stats = {"configured": True, "checked": 0, "error": str(error)}
+    payout_summary = (
+        "not configured"
+        if not payout_stats.get("configured")
+        else "error"
+        if payout_stats.get("error")
+        else (
+            f"{payout_stats['checked']} checked, "
+            f"{payout_stats['executed']} paid, "
+            f"{payout_stats['errors']} API errors"
+        )
+    )
     if not yclients_configured():
         return (
             "yclients not configured; "
             f"task reminders: {reminder_stats['sent_3h']} after 3h, "
-            f"{reminder_stats['sent_6h']} after 6h",
+            f"{reminder_stats['sent_6h']} after 6h; "
+            f"tbank payouts: {payout_summary}",
             503,
         )
     try:
@@ -12114,7 +12201,24 @@ def cron_sync_fuel():
         f"{fuel_stats.get('cancelled', 0)} cancelled removed, "
         f"{fuel_stats['pending']} pending, {fuel_stats['skipped']} skipped; "
         f"task reminders: {reminder_stats['sent_3h']} after 3h, "
-        f"{reminder_stats['sent_6h']} after 6h",
+        f"{reminder_stats['sent_6h']} after 6h; "
+        f"tbank payouts: {payout_summary}",
+        200,
+    )
+
+
+@app.route("/internal/cron/check-tbank-payouts")
+def cron_check_tbank_payouts():
+    """Standalone ten-minute status observer for T-Bank payout registries."""
+    if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
+        return "forbidden", 403
+    stats = _sync_tbank_payout_statuses(get_db())
+    if not stats["configured"]:
+        return "tbank payouts not configured", 503
+    return (
+        f"ok: {stats['checked']} checked, {stats['executed']} paid, "
+        f"{stats['pending']} pending, {stats['failed']} failed, "
+        f"{stats['errors']} API errors",
         200,
     )
 
