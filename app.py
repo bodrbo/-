@@ -565,6 +565,25 @@ TBANK_API_TOKEN = os.environ.get("TBANK_API_TOKEN")
 TBANK_API_TOKEN_PAYMENT = os.environ.get("TBANK_API_TOKEN_PAYMENT")
 TBANK_ACCOUNT_NUMBER = os.environ.get("TBANK_ACCOUNT_NUMBER")
 TBANK_API_BASE = "https://business.tbank.ru/openapi/api"
+TBANK_PAYOUT_STATUS_CHECK_INTERVAL_MINUTES = 10
+TBANK_PAYOUT_STATUS_LABELS = {
+    "DRAFT": "Черновик",
+    "ERROR": "Ошибка",
+    "UNSIGNED": "Не подписан",
+    "SIGNED": "Подписан",
+    "MATCHED": "Сопоставлен",
+    "SUBMITTED": "Отправлен",
+    "PROCESSING": "Исполняется",
+    "ACCEPTED": "Принят к исполнению",
+    "EXECUTED": "Оплачен",
+    "PART_EXEC": "Оплачен частично",
+    "REJECTED": "Отклонён",
+    "CANCELLED": "Отменён",
+    "DELETED": "Удалён",
+}
+TBANK_PAYOUT_FAILED_STATUSES = {
+    "ERROR", "PART_EXEC", "REJECTED", "CANCELLED", "DELETED",
+}
 
 # ---------------------------------------------------------------------
 # Секрет для эндпоинта, который раз в день дёргает cron на хостинге, чтобы
@@ -829,6 +848,36 @@ def tbank_statement_configured():
 
 def tbank_payment_configured():
     return bool(TBANK_API_TOKEN_PAYMENT and TBANK_ACCOUNT_NUMBER)
+
+
+def _tbank_payout_next_check_at(checked_at):
+    if not checked_at:
+        return None
+    try:
+        checked = dt.datetime.fromisoformat(checked_at)
+    except (TypeError, ValueError):
+        return None
+    return checked + dt.timedelta(minutes=TBANK_PAYOUT_STATUS_CHECK_INTERVAL_MINUTES)
+
+
+def _decorate_tbank_payout(payout, now=None):
+    """Add presentation-only status and API cooldown fields."""
+    payout = dict(payout)
+    bank_status = (payout.get("bank_status") or "").upper()
+    payout["bank_status_label"] = TBANK_PAYOUT_STATUS_LABELS.get(
+        bank_status, bank_status
+    )
+    payout["bank_status_kind"] = (
+        "ok" if bank_status == "EXECUTED"
+        else "error" if bank_status in TBANK_PAYOUT_FAILED_STATUSES
+        else "pending"
+    )
+    next_check_at = _tbank_payout_next_check_at(payout.get("status_checked_at"))
+    payout["next_check_at"] = next_check_at
+    payout["can_check_status"] = (
+        next_check_at is None or (now or dt.datetime.now()) >= next_check_at
+    )
+    return payout
 
 
 # Красная "запись-блокер": менеджер ставит её сотруднику вместо реального
@@ -1993,10 +2042,26 @@ def init_db():
             payment_registry_id TEXT,
             status TEXT NOT NULL,
             error_message TEXT,
+            bank_status TEXT,
+            status_checked_at TEXT,
+            status_error TEXT,
             created_at TEXT NOT NULL
         )
         """
     )
+    tbank_payout_cols = {
+        row[1] for row in conn.execute(
+            "PRAGMA table_info(tbank_payout_registries)"
+        ).fetchall()
+    }
+    if "bank_status" not in tbank_payout_cols:
+        conn.execute("ALTER TABLE tbank_payout_registries ADD COLUMN bank_status TEXT")
+    if "status_checked_at" not in tbank_payout_cols:
+        conn.execute(
+            "ALTER TABLE tbank_payout_registries ADD COLUMN status_checked_at TEXT"
+        )
+    if "status_error" not in tbank_payout_cols:
+        conn.execute("ALTER TABLE tbank_payout_registries ADD COLUMN status_error TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS supply_warehouses (
@@ -2685,7 +2750,9 @@ def _payroll_context(db, selected_week, selected_employee):
             "SELECT * FROM tbank_payout_registries WHERE period_key = ? ORDER BY id DESC",
             (selected_week,),
         ).fetchall():
-            tbank_payouts.setdefault(row["employee"], dict(row))
+            tbank_payouts.setdefault(
+                row["employee"], _decorate_tbank_payout(row)
+            )
 
     # Keep active employees first, then append historical names from old
     # payroll rows so deleting access never hides previously earned amounts.
@@ -3081,6 +3148,59 @@ def tbank_create_payout():
         if amount:
             _tbank_send_payout(db, employee, period_key, amount)
     return redirect(url_for("index", week=period_key, employee=employee_filter))
+
+
+@app.route("/pay/tbank/<int:payout_id>/status", methods=["POST"])
+@admin_login_required
+def tbank_check_payout_status(payout_id):
+    employee_filter = request.form.get("employee_filter", "all")
+    db = get_db()
+    payout = db.execute(
+        "SELECT * FROM tbank_payout_registries WHERE id = ?", (payout_id,)
+    ).fetchone()
+    if payout is None:
+        return redirect(url_for("index", employee=employee_filter))
+
+    redirect_args = {
+        "week": payout["period_key"],
+        "employee": employee_filter,
+    }
+    if not tbank_payment_configured() or not payout["payment_registry_id"]:
+        return redirect(url_for("index", **redirect_args))
+
+    now_dt = dt.datetime.now()
+    next_check_at = _tbank_payout_next_check_at(payout["status_checked_at"])
+    if next_check_at is not None and now_dt < next_check_at:
+        return redirect(url_for("index", **redirect_args))
+
+    checked_at = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        bank_status = _tbank_fetch_payout_registry_status(
+            payout["payment_registry_id"]
+        )
+    except Exception as error:
+        db.execute(
+            "UPDATE tbank_payout_registries SET status_checked_at = ?, "
+            "status_error = ? WHERE id = ?",
+            (checked_at, str(error)[:1000], payout_id),
+        )
+    else:
+        db.execute(
+            "UPDATE tbank_payout_registries SET bank_status = ?, "
+            "status_checked_at = ?, status_error = NULL WHERE id = ?",
+            (bank_status, checked_at, payout_id),
+        )
+        if bank_status == "EXECUTED":
+            # This is deliberately the same record used by a manual click on
+            # the payroll card. The unique employee+period key makes repeated
+            # bank checks idempotent.
+            db.execute(
+                "INSERT OR IGNORE INTO payments "
+                "(employee, period_key, paid_at) VALUES (?, ?, ?)",
+                (payout["employee"], payout["period_key"], checked_at),
+            )
+    db.commit()
+    return redirect(url_for("index", **redirect_args))
 
 
 @app.route("/add", methods=["POST"])
@@ -10225,15 +10345,54 @@ def _tbank_request_post(path, payload, token=None):
     return resp.json()
 
 
+def _tbank_fetch_payout_registry_status(payment_registry_id):
+    """Return the authoritative status of one self-employed payout registry."""
+    try:
+        registry_id = int(payment_registry_id)
+    except (TypeError, ValueError):
+        raise RuntimeError("Т-Банк вернул некорректный номер платёжного реестра.")
+    if registry_id <= 0:
+        raise RuntimeError("Т-Банк вернул некорректный номер платёжного реестра.")
+
+    data = _tbank_request(
+        f"/v1/self-employed/payment-registry/{registry_id}",
+        {},
+        token=TBANK_API_TOKEN_PAYMENT,
+    )
+    containers = [data]
+    if isinstance(data, dict):
+        for key in ("paymentRegistry", "result", "data"):
+            value = data.get(key)
+            if isinstance(value, dict):
+                containers.append(value)
+    bank_status = ""
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        bank_status = str(
+            container.get("status")
+            or container.get("registryStatus")
+            or container.get("paymentRegistryStatus")
+            or ""
+        ).strip().upper()
+        if bank_status:
+            break
+    if not bank_status:
+        raise RuntimeError("Т-Банк не передал статус платёжного реестра.")
+    if len(bank_status) > 50:
+        raise RuntimeError("Т-Банк передал некорректный статус платёжного реестра.")
+    return bank_status
+
+
 # ---------------------------------------------------------------------
 # Зарплаты — выплата самозанятому через Т-Банк ("Отправить в Т-Банк" на
 # карточке сотрудника). ВАЖНО: подпись платёжного реестра
 # (/self-employed/payment-registry/submit) в API Т-Банка требует mTLS-
 # сертификата, которого у нас нет — есть только Bearer-токен. Поэтому этот
-# код доводит дело только до создания ЧЕРНОВИКА реестра; подписать и
-# оплатить его администратор должен сам в личном кабинете Т-Бизнес. Это
-# осознанное ограничение, а не недоделка — см. обсуждение с владельцем
-# бизнеса.
+# код создаёт ЧЕРНОВИК реестра; подписать и оплатить его администратор должен
+# сам в личном кабинете Т-Бизнес. Статус уже созданного реестра можно
+# безопасно проверить по Bearer-токену, и EXECUTED автоматически отмечается
+# в нашей таблице зарплат как оплаченный.
 # ---------------------------------------------------------------------
 def _tbank_recipient_full_name(r):
     """Т-Банк gives the self-employed recipient's name as three separate

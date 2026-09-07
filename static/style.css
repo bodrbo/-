@@ -6436,6 +6436,7 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   overflow-wrap: break-word;
 }
 .tbank-status-ok { color: var(--success); }
+.tbank-status-pending { color: var(--muted); }
 .tbank-status-error { color: var(--danger); }
 .btn-small {
   font-size: 12px;
