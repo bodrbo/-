@@ -170,6 +170,10 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertEqual(card_value("Сумма выполненных заказов"), "44 000,00 ₽")
         self.assertNotIn("Сумма по всем заказам", html)
         self.assertIn("Новая заявка · Предварительный расчёт · В работе", html)
+        self.assertLess(
+            html.index('class="totals-grid"'),
+            html.index('class="panel tuning-orders-filter"'),
+        )
 
     def test_orders_dashboard_filters_list_and_totals_by_business_date(self):
         with application_module.app.app_context():

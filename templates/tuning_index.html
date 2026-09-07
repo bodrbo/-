@@ -78,6 +78,23 @@
   </nav>
 
   {% if sub_page == 'orders' %}
+  <div class="totals-grid">
+    <div class="panel total-card total-card-grand">
+      <span class="k">{{ 'Заказов по фильтру' if filters_active else 'Заказов всего' }}</span>
+      <span class="v">{{ orders|length }}</span>
+    </div>
+    <div class="panel total-card total-card-grand">
+      <span class="k">Сумма активных заказов</span>
+      <span class="v">{{ active_orders_total|money }} ₽</span>
+      <span class="d">Новая заявка · Предварительный расчёт · В работе</span>
+    </div>
+    <div class="panel total-card total-card-grand">
+      <span class="k">Сумма выполненных заказов</span>
+      <span class="v">{{ completed_orders_total|money }} ₽</span>
+      <span class="d">Статус «Выполнен»</span>
+    </div>
+  </div>
+
   {% if date_filter_error %}
   <div class="alert tuning-orders-date-error">{{ date_filter_error }}</div>
   {% endif %}
@@ -128,22 +145,6 @@
       </div>
     </form>
   </details>
-  <div class="totals-grid">
-    <div class="panel total-card total-card-grand">
-      <span class="k">{{ 'Заказов по фильтру' if filters_active else 'Заказов всего' }}</span>
-      <span class="v">{{ orders|length }}</span>
-    </div>
-    <div class="panel total-card total-card-grand">
-      <span class="k">Сумма активных заказов</span>
-      <span class="v">{{ active_orders_total|money }} ₽</span>
-      <span class="d">Новая заявка · Предварительный расчёт · В работе</span>
-    </div>
-    <div class="panel total-card total-card-grand">
-      <span class="k">Сумма выполненных заказов</span>
-      <span class="v">{{ completed_orders_total|money }} ₽</span>
-      <span class="d">Статус «Выполнен»</span>
-    </div>
-  </div>
 
   <section class="panel">
     <h2>
