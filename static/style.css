@@ -5289,30 +5289,80 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 
 /* --- totals / dashboard cards --- */
 .tuning-orders-date-error { margin-bottom: 14px; }
-.tuning-orders-date-filter {
+.tuning-orders-filter {
+  padding: 0;
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+.tuning-orders-filter > summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 54px;
+  padding: 10px 16px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.tuning-orders-filter > summary::-webkit-details-marker { display: none; }
+.tuning-orders-filter > summary:hover { background: var(--paper-alt); }
+.tuning-orders-filter-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 8px;
+  background: rgba(52, 152, 219, .1);
+  color: var(--brass-strong);
+}
+.tuning-orders-filter-icon svg { width: 17px; height: 17px; }
+.tuning-orders-filter-title { font-size: 14px; font-weight: 700; }
+.tuning-orders-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--brass);
+  color: var(--on-accent);
+  font-size: 10px;
+  font-weight: 800;
+}
+.tuning-orders-filter-state {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tuning-orders-filter-chevron {
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  flex: none;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(45deg) translate(-2px, 2px);
+  transition: transform .15s ease;
+}
+.tuning-orders-filter[open] .tuning-orders-filter-chevron {
+  transform: rotate(225deg) translate(-2px, 2px);
+}
+.tuning-orders-filter-form {
   display: grid;
-  grid-template-columns: minmax(210px, 1fr) 170px 170px auto;
+  grid-template-columns: minmax(230px, 1.6fr) minmax(170px, 1fr) 155px 155px auto;
   align-items: end;
   gap: 12px;
-  padding: 14px 18px;
-  margin-bottom: 14px;
+  padding: 14px 16px 16px;
+  border-top: 1px solid var(--hairline-soft);
+  background: var(--paper-alt);
 }
-.tuning-orders-date-filter-copy {
-  align-self: center;
-  min-width: 0;
-}
-.tuning-orders-date-filter-copy strong,
-.tuning-orders-date-filter-copy span,
-.tuning-orders-date-filter label > span {
+.tuning-orders-filter-form label > span {
   display: block;
-}
-.tuning-orders-date-filter-copy strong { font-size: 14px; }
-.tuning-orders-date-filter-copy span {
-  margin-top: 3px;
-  color: var(--muted);
-  font-size: 10.5px;
-}
-.tuning-orders-date-filter label > span {
   margin-bottom: 5px;
   color: var(--muted);
   font-size: 10px;
@@ -5320,14 +5370,15 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   text-transform: uppercase;
   letter-spacing: .05em;
 }
-.tuning-orders-date-filter input { width: 100%; min-height: 40px; }
-.tuning-orders-date-filter-actions {
+.tuning-orders-filter-form input,
+.tuning-orders-filter-form select { width: 100%; min-height: 40px; }
+.tuning-orders-filter-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.tuning-orders-date-filter-actions .btn-primary,
-.tuning-orders-date-filter-actions .btn-secondary {
+.tuning-orders-filter-actions .btn-primary,
+.tuning-orders-filter-actions .btn-secondary {
   min-height: 40px;
   margin: 0;
 }
@@ -5373,18 +5424,24 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 .total-card-grand .v { color: #eaf4fc; }
 .total-card-grand .d { color: rgba(234, 244, 252, .68); }
 
-@media (max-width: 850px) {
-  .tuning-orders-date-filter {
-    grid-template-columns: minmax(190px, 1fr) 150px 150px;
+@media (max-width: 1000px) {
+  .tuning-orders-filter-form {
+    grid-template-columns: minmax(210px, 1.4fr) minmax(170px, 1fr) 150px 150px;
   }
-  .tuning-orders-date-filter-actions { grid-column: 1 / -1; }
+  .tuning-orders-filter-actions { grid-column: 1 / -1; }
 }
 
-@media (max-width: 560px) {
-  .tuning-orders-date-filter { grid-template-columns: 1fr 1fr; }
-  .tuning-orders-date-filter-copy,
-  .tuning-orders-date-filter-actions { grid-column: 1 / -1; }
-  .tuning-orders-date-filter-actions > * { flex: 1; text-align: center; }
+@media (max-width: 680px) {
+  .tuning-orders-filter-form { grid-template-columns: 1fr 1fr; }
+  .tuning-orders-filter-search,
+  .tuning-orders-filter-form label:nth-child(2),
+  .tuning-orders-filter-actions { grid-column: 1 / -1; }
+  .tuning-orders-filter-actions > * { flex: 1; text-align: center; }
+}
+
+@media (max-width: 420px) {
+  .tuning-orders-filter-state { font-size: 10px; }
+  .tuning-orders-filter-form { gap: 10px; padding: 12px; }
 }
 
 .checklist-buttons {

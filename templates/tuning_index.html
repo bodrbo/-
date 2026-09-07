@@ -81,29 +81,56 @@
   {% if date_filter_error %}
   <div class="alert tuning-orders-date-error">{{ date_filter_error }}</div>
   {% endif %}
-  <form method="get" action="{{ url_for('tuning_index') }}" class="panel tuning-orders-date-filter">
-    <div class="tuning-orders-date-filter-copy">
-      <strong>Период заказов</strong>
-      <span>Фильтр по дате, указанной в карточке заказа</span>
-    </div>
-    <label for="tuning-orders-date-from">
-      <span>С даты</span>
-      <input type="date" id="tuning-orders-date-from" name="date_from" value="{{ date_from }}">
-    </label>
-    <label for="tuning-orders-date-to">
-      <span>По дату</span>
-      <input type="date" id="tuning-orders-date-to" name="date_to" value="{{ date_to }}">
-    </label>
-    <div class="tuning-orders-date-filter-actions">
-      <button type="submit" class="btn-primary">Показать</button>
-      {% if date_filter_active %}
-      <a href="{{ url_for('tuning_index') }}" class="btn-secondary">Сбросить</a>
+  <details class="panel tuning-orders-filter"{% if date_filter_error %} open{% endif %}>
+    <summary>
+      <span class="tuning-orders-filter-icon" aria-hidden="true">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+          <path d="M3 5h14M5.5 10h9M8 15h4"/>
+        </svg>
+      </span>
+      <span class="tuning-orders-filter-title">Фильтры</span>
+      {% if filters_active %}
+      <span class="tuning-orders-filter-count">{{ active_filter_count }}</span>
+      <span class="tuning-orders-filter-state">Применены</span>
+      {% else %}
+      <span class="tuning-orders-filter-state">Поиск, статус и период</span>
       {% endif %}
-    </div>
-  </form>
+      <span class="tuning-orders-filter-chevron" aria-hidden="true"></span>
+    </summary>
+    <form method="get" action="{{ url_for('tuning_index') }}" class="tuning-orders-filter-form">
+      <label class="tuning-orders-filter-search" for="tuning-orders-search">
+        <span>Общий поиск</span>
+        <input type="search" id="tuning-orders-search" name="q" value="{{ search_query }}"
+               maxlength="120" placeholder="Клиент, техника, телефон или № заказа…">
+      </label>
+      <label for="tuning-orders-status">
+        <span>Статус</span>
+        <select id="tuning-orders-status" name="status">
+          <option value="">Все статусы</option>
+          {% for s in order_statuses %}
+          <option value="{{ s.value }}"{% if selected_status == s.value %} selected{% endif %}>{{ s.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label for="tuning-orders-date-from">
+        <span>С даты</span>
+        <input type="date" id="tuning-orders-date-from" name="date_from" value="{{ date_from }}">
+      </label>
+      <label for="tuning-orders-date-to">
+        <span>По дату</span>
+        <input type="date" id="tuning-orders-date-to" name="date_to" value="{{ date_to }}">
+      </label>
+      <div class="tuning-orders-filter-actions">
+        <button type="submit" class="btn-primary">Применить</button>
+        {% if filters_active %}
+        <a href="{{ url_for('tuning_index') }}" class="btn-secondary">Сбросить</a>
+        {% endif %}
+      </div>
+    </form>
+  </details>
   <div class="totals-grid">
     <div class="panel total-card total-card-grand">
-      <span class="k">{{ 'Заказов за период' if date_filter_active else 'Заказов всего' }}</span>
+      <span class="k">{{ 'Заказов по фильтру' if filters_active else 'Заказов всего' }}</span>
       <span class="v">{{ orders|length }}</span>
     </div>
     <div class="panel total-card total-card-grand">
@@ -124,16 +151,6 @@
       <a href="{{ url_for('add_tuning_order') }}" class="btn-add" style="float:right; margin-top:-2px;">Добавить заказ</a>
     </h2>
     {% if orders %}
-    <div class="table-search" style="display:flex; gap:10px; flex-wrap:wrap;">
-      <input type="search" placeholder="Поиск по клиенту, лодке или номеру…"
-             data-filter-table="#orders-table" aria-label="Поиск по заказам" style="flex:1 1 260px; max-width:360px;">
-      <select data-filter-status="#orders-table" aria-label="Фильтр по статусу" style="flex:none;">
-        <option value="">Все статусы</option>
-        {% for s in order_statuses %}
-        <option value="{{ s.value }}">{{ s.label }}</option>
-        {% endfor %}
-      </select>
-    </div>
     <div class="table-scroll">
       <table class="records" id="orders-table">
         <thead>
@@ -209,12 +226,12 @@
         </tbody>
       </table>
     </div>
-    <p id="orders-table-no-results" class="hint hidden">Ничего не найдено.</p>
     {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">Заказов пока нет</div>
-      <div class="s">Добавьте первый заказ кнопкой выше.</div>
+      <div class="t">{{ 'Заказы не найдены' if filters_active else 'Заказов пока нет' }}</div>
+      <div class="s">{{ 'Измените условия или сбросьте фильтры.' if filters_active else 'Добавьте первый заказ кнопкой выше.' }}</div>
+      {% if filters_active %}<a href="{{ url_for('tuning_index') }}" class="btn-secondary">Сбросить фильтры</a>{% endif %}
     </div>
     {% endif %}
   </section>

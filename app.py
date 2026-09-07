@@ -4948,6 +4948,11 @@ def tuning_index():
     db = get_db()
     _sync_tuning_boat_profiles(db)
     db.commit()
+    search_query = request.args.get("q", "").strip()[:120]
+    selected_status = request.args.get("status", "").strip()
+    allowed_statuses = {item["value"] for item in ORDER_STATUSES}
+    if selected_status not in allowed_statuses:
+        selected_status = ""
     date_from = request.args.get("date_from", "").strip()
     date_to = request.args.get("date_to", "").strip()
     date_filter_error = None
@@ -4975,6 +4980,9 @@ def tuning_index():
     if date_to:
         conditions.append("order_date <= ?")
         params.append(date_to)
+    if selected_status:
+        conditions.append("status = ?")
+        params.append(selected_status)
     where = " WHERE " + " AND ".join(conditions) if conditions else ""
     order_rows = db.execute(
         "SELECT * FROM tuning_orders" + where + " ORDER BY order_date DESC, id DESC",
@@ -4987,8 +4995,24 @@ def tuning_index():
         ).fetchall()
     }
     orders = []
+    search_words = search_query.casefold().split()
     for row in order_rows:
         order = dict(row)
+        if search_words:
+            searchable_text = " ".join(
+                str(order.get(field) or "")
+                for field in (
+                    "id",
+                    "client_name",
+                    "phone",
+                    "boat_model",
+                    "motor_model",
+                    "boat_registration_number",
+                    "motor_serial_number",
+                )
+            ).casefold()
+            if not all(word in searchable_text for word in search_words):
+                continue
         equipment_type = (
             "motor" if order["equipment_type"] == "motor" else "boat"
         )
@@ -5011,14 +5035,25 @@ def tuning_index():
     completed_orders_total = sum(
         order["total"] for order in orders if order["status"] == "done"
     )
+    filters_active = bool(
+        search_query or selected_status or date_from or date_to
+    )
+    active_filter_count = sum((
+        bool(search_query),
+        bool(selected_status),
+        bool(date_from or date_to),
+    ))
     return render_template(
         "tuning_index.html",
         orders=orders,
         active_orders_total=active_orders_total,
         completed_orders_total=completed_orders_total,
+        search_query=search_query,
+        selected_status=selected_status,
         date_from=date_from,
         date_to=date_to,
-        date_filter_active=bool(date_from or date_to),
+        filters_active=filters_active,
+        active_filter_count=active_filter_count,
         date_filter_error=date_filter_error,
         order_statuses=ORDER_STATUSES,
         active_page="tuning", sub_page="orders",

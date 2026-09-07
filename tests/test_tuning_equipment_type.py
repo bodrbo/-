@@ -212,7 +212,7 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertIn('name="date_to" value="2026-06-30"', html)
         self.assertRegex(
             html,
-            r'<span class="k">Заказов за период</span>\s*'
+            r'<span class="k">Заказов по фильтру</span>\s*'
             r'<span class="v">2</span>',
         )
         self.assertRegex(
@@ -226,6 +226,54 @@ class TuningEquipmentTypeTests(unittest.TestCase):
             r'<span class="v">20 000,00 ₽</span>',
         )
         self.assertIn('href="/tuning" class="btn-secondary">Сбросить</a>', html)
+
+    def test_orders_dashboard_combines_search_status_and_date_filters(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            for client_name, boat_model, order_date, status, total in (
+                ("Анна Морская", "Салют 585", "2026-06-12", "done", 15000),
+                ("Анна Морская", "Салют 585", "2026-07-12", "done", 25000),
+                ("Анна Морская", "Салют 585", "2026-06-14", "in_progress", 35000),
+                ("Другой клиент", "Салют 585", "2026-06-16", "done", 45000),
+            ):
+                db.execute(
+                    "INSERT INTO tuning_orders "
+                    "(client_name, boat_model, sale_channel, phone, subtotal, total, "
+                    "status, order_date, created_at, updated_at) "
+                    "VALUES (?, ?, 'direct', '', ?, ?, ?, ?, "
+                    "'2026-09-07 10:00', '2026-09-07 10:00')",
+                    (client_name, boat_model, total, total, status, order_date),
+                )
+            db.commit()
+
+        self.login()
+        response = self.client.get(
+            "/tuning",
+            query_string={
+                "q": "АННА морская",
+                "status": "done",
+                "date_from": "2026-06-01",
+                "date_to": "2026-06-30",
+            },
+        )
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(html.count("Анна Морская"), 1)
+        self.assertNotIn("Другой клиент", html)
+        self.assertIn('name="q" value="АННА морская"', html)
+        self.assertIn('value="done" selected', html)
+        self.assertIn('<span class="tuning-orders-filter-count">3</span>', html)
+        self.assertRegex(
+            html,
+            r'<span class="k">Заказов по фильтру</span>\s*'
+            r'<span class="v">1</span>',
+        )
+        self.assertRegex(
+            html,
+            r'<span class="k">Сумма выполненных заказов</span>\s*'
+            r'<span class="v">15 000,00 ₽</span>',
+        )
 
     def test_orders_dashboard_rejects_reversed_date_period(self):
         with application_module.app.app_context():
