@@ -81,6 +81,39 @@ class AIAssistantTests(unittest.TestCase):
             ).fetchall()
         ]
         for order_id in tuning_order_ids:
+            item_ids = [
+                row["id"] for row in db.execute(
+                    "SELECT id FROM tuning_order_items WHERE order_id = ?", (order_id,)
+                ).fetchall()
+            ]
+            for item_id in item_ids:
+                db.execute("DELETE FROM tuning_item_assignments WHERE item_id = ?", (item_id,))
+                db.execute("DELETE FROM work_item_photos WHERE item_id = ?", (item_id,))
+            sheet_ids = [
+                row["id"] for row in db.execute(
+                    "SELECT id FROM hull_diagnostic_sheets WHERE tuning_order_id = ?",
+                    (order_id,),
+                ).fetchall()
+            ]
+            for sheet_id in sheet_ids:
+                db.execute(
+                    "DELETE FROM hull_diagnostic_defects WHERE sheet_id = ?", (sheet_id,)
+                )
+            note_ids = [
+                row["id"] for row in db.execute(
+                    "SELECT id FROM tuning_order_notes WHERE order_id = ?", (order_id,)
+                ).fetchall()
+            ]
+            for note_id in note_ids:
+                db.execute(
+                    "DELETE FROM tuning_order_note_reminders WHERE note_id = ?", (note_id,)
+                )
+            db.execute("DELETE FROM tuning_order_items WHERE order_id = ?", (order_id,))
+            db.execute("DELETE FROM tuning_order_products WHERE order_id = ?", (order_id,))
+            db.execute("DELETE FROM tuning_order_notes WHERE order_id = ?", (order_id,))
+            db.execute("DELETE FROM tuning_yookassa_payments WHERE order_id = ?", (order_id,))
+            db.execute("DELETE FROM hull_diagnostic_sheets WHERE tuning_order_id = ?", (order_id,))
+            db.execute("DELETE FROM projects WHERE tuning_order_id = ?", (order_id,))
             db.execute("DELETE FROM tuning_payments WHERE order_id = ?", (order_id,))
             db.execute("DELETE FROM tuning_orders WHERE id = ?", (order_id,))
         owners = db.execute(
@@ -181,6 +214,8 @@ class AIAssistantTests(unittest.TestCase):
         self.assertEqual(result["payments_received_in_period"], 3)
         self.assertEqual(result["payments_received_in_period_rub"], 110000)
         self.assertEqual(result["by_status"], {"in_progress": 1, "done": 1})
+        self.assertEqual(result["order_ids"], [june_first, june_second])
+        self.assertFalse(result["order_ids_truncated"])
         channels = {
             row["sale_channel"]: row for row in result["sale_channel_breakdown"]
         }
@@ -231,6 +266,156 @@ class AIAssistantTests(unittest.TestCase):
         self.assertEqual(chart["labels"], ["июн 2026", "июл 2026"])
         self.assertEqual(chart["datasets"][0]["data"], [150000, 70000])
         self.assertIn("01.06.2026", chart["subtitle"])
+
+    def test_tuning_chart_filters_completed_orders(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            for suffix, total, status in (
+                ("done", 50000, "done"),
+                ("estimate", 200000, "estimate"),
+                ("progress", 100000, "in_progress"),
+            ):
+                db.execute(
+                    "INSERT INTO tuning_orders "
+                    "(client_name, boat_model, sale_channel, phone, subtotal, total, "
+                    "status, order_date, source_ref, created_at, updated_at) "
+                    "VALUES ('AI Filter Client', 'AI Filter Boat', 'direct', '', ?, ?, "
+                    "?, '2026-06-15', ?, '2026-09-05 12:00', '2026-09-05 12:00')",
+                    (total, total, status, "ai-summary-test:filter-" + suffix),
+                )
+            db.commit()
+            result = execute_tool(
+                db,
+                {
+                    "owner_type": "admin",
+                    "owner_id": self.admin_id,
+                    "name": "AI Администратор",
+                    "positions": [],
+                },
+                application_module.BOATS,
+                "get_bar_chart",
+                {
+                    "subject": "tuning",
+                    "metric": "amount_rub",
+                    "group_by": "month",
+                    "status": "done",
+                    "date_from": "2026-06-01",
+                    "date_to": "2026-06-30",
+                },
+            )
+
+        chart = result["visualization"]
+        self.assertEqual(chart["datasets"][0]["data"], [50000])
+        self.assertIn("Статус: Выполнен", chart["subtitle"])
+
+    def test_tuning_order_tools_return_full_details_without_phone_numbers(self):
+        sensitive_phone = "+7 (999) 123-45-67"
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            order_id = db.execute(
+                "INSERT INTO tuning_orders "
+                "(client_name, equipment_type, boat_model, boat_registration_number, "
+                "motor_model, motor_serial_number, sale_channel, phone, discount_pct, "
+                "discount_type, discount_value, subtotal, total, status, order_date, "
+                "source, source_ref, created_at, updated_at) VALUES "
+                "(?, 'boat', 'Тестовая лодка', 'Р 1234', 'Тестовый мотор', 'SERIAL-1', "
+                "'direct', ?, 10, 'percent', 10, 100000, 90000, 'done', "
+                "'2026-06-18', 'manual', 'ai-summary-test:details', "
+                "'2026-06-18 10:00', '2026-06-19 10:00')",
+                ("Иван " + sensitive_phone, sensitive_phone),
+            ).lastrowid
+            item_id = db.execute(
+                "INSERT INTO tuning_order_items "
+                "(order_id, work_name, cost_price, multiplier, price, status, photo_comment) "
+                "VALUES (?, 'Монтаж эхолота', 20000, 2, 40000, 'done', ?)",
+                (order_id, "Позвонить " + sensitive_phone),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO tuning_item_assignments "
+                "(item_id, employee_name, rate, norm_hours, comment, assignment_status, assigned_at) "
+                "VALUES (?, 'AI Мастер', 1500, 3, ?, 'accepted', '2026-06-18 11:00')",
+                (item_id, "Контакт " + sensitive_phone),
+            )
+            db.execute(
+                "INSERT INTO work_item_photos (item_id, filename, comment, created_at) "
+                "VALUES (?, 'work-photo.jpg', 'После монтажа', '2026-06-18 18:00')",
+                (item_id,),
+            )
+            db.execute(
+                "INSERT INTO tuning_order_products "
+                "(order_id, product_id, product_name, quantity, unit_price, cost_price, unit, created_at) "
+                "VALUES (?, 1, 'Эхолот', 1, 50000, 30000, 'шт', '2026-06-18 12:00')",
+                (order_id,),
+            )
+            payment_id = db.execute(
+                "INSERT INTO tuning_payments "
+                "(order_id, amount, paid_at, created_at, payment_type) "
+                "VALUES (?, 30000, '2026-06-18 12:00', '2026-06-18 12:00', 'CARD')",
+                (order_id,),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO tuning_yookassa_payments "
+                "(order_id, yookassa_payment_id, amount, status, confirmation_url, "
+                "tuning_payment_id, created_at, updated_at) "
+                "VALUES (?, 'provider-id-1', 30000, 'succeeded', "
+                "'https://secret-payment-link.example', ?, "
+                "'2026-06-18 12:00', '2026-06-18 12:05')",
+                (order_id, payment_id),
+            )
+            db.execute(
+                "INSERT INTO tuning_order_notes (order_id, author_admin_id, text, created_at) "
+                "VALUES (?, ?, ?, '2026-06-18 13:00')",
+                (order_id, self.admin_id, "Комментарий, телефон " + sensitive_phone),
+            )
+            db.execute(
+                "INSERT INTO projects (name, tuning_order_id, created_at) "
+                "VALUES (?, ?, '2026-06-18 10:00')",
+                ("Заказ №" + str(order_id), order_id),
+            )
+            sheet_id = db.execute(
+                "INSERT INTO hull_diagnostic_sheets (boat_name, created_at, tuning_order_id) "
+                "VALUES ('Тестовая лодка', '2026-06-18 14:00', ?)",
+                (order_id,),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO hull_diagnostic_defects "
+                "(sheet_id, view, x_pct, y_pct, defect_type, defect_size, created_at) "
+                "VALUES (?, 'port', 25, 50, 'Скол', '10 мм', '2026-06-18 14:10')",
+                (sheet_id,),
+            )
+            db.commit()
+            admin = {
+                "owner_type": "admin",
+                "owner_id": self.admin_id,
+                "name": "AI Администратор",
+                "positions": [],
+            }
+            listing = execute_tool(
+                db, admin, application_module.BOATS, "get_tuning_orders",
+                {
+                    "date_from": "2026-06-01", "date_to": "2026-06-30",
+                    "status": "done",
+                },
+            )
+            details = execute_tool(
+                db, admin, application_module.BOATS, "get_tuning_order_details",
+                {"order_id": order_id},
+            )
+
+        listed = next(row for row in listing["orders"] if row["order_id"] == order_id)
+        self.assertEqual(listed["total_rub"], 90000)
+        self.assertEqual(listed["paid_rub"], 30000)
+        self.assertEqual(details["order"]["order_id"], order_id)
+        self.assertEqual(details["work_items"][0]["work_name"], "Монтаж эхолота")
+        self.assertEqual(details["products"][0]["product_name"], "Эхолот")
+        self.assertEqual(details["payments"][0]["amount_rub"], 30000)
+        self.assertEqual(details["hull_diagnostics"][0]["defects"][0]["defect_type"], "Скол")
+        serialized = json.dumps({"listing": listing, "details": details}, ensure_ascii=False)
+        self.assertNotIn(sensitive_phone, serialized)
+        self.assertNotIn("79991234567", serialized.replace(" ", ""))
+        self.assertNotIn("secret-payment-link", serialized)
+        self.assertNotIn("confirmation_url", serialized)
+        self.assertIn("[номер телефона скрыт]", serialized)
 
     def test_payroll_chart_filters_all_employees_by_position(self):
         with application_module.app.app_context():
@@ -440,6 +625,8 @@ class AIAssistantTests(unittest.TestCase):
         self.assertIn("get_data_catalog", tool_names)
         self.assertIn("get_business_overview", tool_names)
         self.assertIn("get_tuning_summary", tool_names)
+        self.assertIn("get_tuning_orders", tool_names)
+        self.assertIn("get_tuning_order_details", tool_names)
         self.assertIn("get_employees_directory", tool_names)
         admin_chart_tool = next(
             tool for tool in payloads[0]["tools"] if tool["name"] == "get_bar_chart"
@@ -610,6 +797,8 @@ class AIAssistantTests(unittest.TestCase):
         self.assertIn("get_clients_summary", names)
         self.assertIn("get_payroll_summary", names)
         self.assertNotIn("get_tuning_summary", names)
+        self.assertNotIn("get_tuning_orders", names)
+        self.assertNotIn("get_tuning_order_details", names)
         self.assertNotIn("get_business_overview", names)
         self.assertNotIn("get_employees_directory", names)
         catalog_tool = next(

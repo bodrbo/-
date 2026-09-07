@@ -36,6 +36,15 @@ class AIDataCatalogTests(unittest.TestCase):
             self.user(owner_type="admin"), "employees"
         )["datasets"][0]
         self.assertEqual(employees["personal_data"], "employee_names_admin_only")
+        tuning = catalog_for_user(
+            self.user(owner_type="admin"), "tuning_orders"
+        )["datasets"][0]
+        self.assertEqual(
+            tuning["personal_data"],
+            "client_names_admin_only_phone_numbers_excluded",
+        )
+        self.assertIn("get_tuning_orders", tuning["available_tools"])
+        self.assertIn("get_tuning_order_details", tuning["available_tools"])
 
     def test_catalog_is_filtered_and_scoped_by_role(self):
         employee = self.user()

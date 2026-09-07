@@ -6,7 +6,7 @@ become discoverable through this interface.
 """
 
 
-CATALOG_VERSION = 2
+CATALOG_VERSION = 3
 
 
 DATASETS = (
@@ -39,7 +39,10 @@ DATASETS = (
     {
         "id": "tuning_orders",
         "name": "Тюнинг-заказы",
-        "description": "Заказы, оплаты и задолженность тюнинг-центра.",
+        "description": (
+            "Заказы, работы, товары, оплаты, задачи, заметки и задолженность "
+            "тюнинг-центра. Доступны номера и карточки заказов; телефоны исключены."
+        ),
         "roles": ("admin",),
         "scope": "all",
         "date_basis": {
@@ -60,7 +63,13 @@ DATASETS = (
             ("equipment_type", "Тип техники"),
         ),
         "filters": ("date_from", "date_to", "status"),
-        "tools": ("get_tuning_summary", "get_bar_chart"),
+        "tools": (
+            "get_tuning_summary",
+            "get_tuning_orders",
+            "get_tuning_order_details",
+            "get_bar_chart",
+        ),
+        "personal_data": "client_names_admin_only_phone_numbers_excluded",
     },
     {
         "id": "excursion_clients",

@@ -1,6 +1,7 @@
 """Role-aware, read-only tools available to the language model."""
 
 import datetime as dt
+import re
 
 from .constants import GUIDE_TOPICS
 from .data_catalog import (
@@ -40,6 +41,12 @@ MONTH_NAMES_SHORT = (
     "янв", "фев", "мар", "апр", "май", "июн",
     "июл", "авг", "сен", "окт", "ноя", "дек",
 )
+PHONE_IN_TEXT_PATTERN = re.compile(
+    r"(?<!\d)(?:(?:(?:\+?7|8)[\s().-]*)?\d{3}[\s().-]*)?"
+    r"\d{3}[\s.-]*\d{2}[\s.-]*\d{2}(?!\d)"
+)
+TUNING_ORDER_LIST_DEFAULT_LIMIT = 20
+TUNING_ORDER_LIST_MAX_LIMIT = 50
 
 
 class ToolAccessError(ValueError):
@@ -86,6 +93,24 @@ def _rows_to_counts(rows, key="label"):
 
 def _money(value):
     return round(float(value or 0), 2)
+
+
+def _redact_phone_numbers(value):
+    """Remove phone-shaped values from every free-text field sent to AI."""
+    if value is None:
+        return None
+    return PHONE_IN_TEXT_PATTERN.sub("[номер телефона скрыт]", str(value))
+
+
+def _safe_text(value):
+    return _redact_phone_numbers(value or "")
+
+
+def _tuning_status(arguments):
+    status = str(arguments.get("status") or "").strip()
+    if status and status not in TUNING_STATUS_LABELS:
+        raise ValueError("Неизвестный статус тюнинг-заказа.")
+    return status
 
 
 def _casefold_match(values, requested):
@@ -235,7 +260,7 @@ def _fleet_status(db, arguments, boats):
 
 def _tuning_summary(db, arguments):
     date_from, date_to = _date_period(arguments, default_days=30)
-    status = str(arguments.get("status") or "").strip()
+    status = _tuning_status(arguments)
     params = [date_from.isoformat(), date_to.isoformat()]
     where = "o.order_date >= ? AND o.order_date <= ?"
     if status:
@@ -281,11 +306,18 @@ def _tuning_summary(db, arguments):
         f"WHERE {payment_where}",
         payment_params,
     ).fetchone()
+    order_id_rows = db.execute(
+        "SELECT o.id FROM tuning_orders o "
+        f"WHERE {where} ORDER BY o.order_date, o.id LIMIT 201",
+        params,
+    ).fetchall()
     return {
         "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
         "date_basis": "order_date",
         "date_basis_note": "Заказы отобраны по дате заказа из интерфейса, а не по технической дате добавления в базу.",
         "status_filter": status or None,
+        "order_ids": [int(row["id"]) for row in order_id_rows[:200]],
+        "order_ids_truncated": len(order_id_rows) > 200,
         "orders": int(totals["orders_count"] or 0),
         "orders_total_rub": _money(totals["total"]),
         "payments_for_selected_orders_rub": _money(totals["paid_total"]),
@@ -318,6 +350,317 @@ def _tuning_summary(db, arguments):
             for row in channels
         ],
         "by_equipment_type": _rows_to_counts(equipment),
+    }
+
+
+def _tuning_orders(db, arguments, user):
+    if not _is_admin(user):
+        raise ToolAccessError("Карточки тюнинг-заказов доступны только администратору.")
+    date_from, date_to = _date_period(arguments, default_days=30, maximum_days=3650)
+    status = _tuning_status(arguments)
+    limit = arguments.get("limit", TUNING_ORDER_LIST_DEFAULT_LIMIT)
+    offset = arguments.get("offset", 0)
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= TUNING_ORDER_LIST_MAX_LIMIT:
+        raise ValueError("limit должен быть целым числом от 1 до 50.")
+    if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= 10000:
+        raise ValueError("offset должен быть целым числом от 0 до 10000.")
+
+    params = [date_from.isoformat(), date_to.isoformat()]
+    where = "o.order_date >= ? AND o.order_date <= ?"
+    if status:
+        where += " AND o.status = ?"
+        params.append(status)
+    total_count = db.execute(
+        f"SELECT COUNT(*) AS total FROM tuning_orders o WHERE {where}", params
+    ).fetchone()["total"]
+    rows = db.execute(
+        "SELECT o.id, o.client_id, o.client_name, o.equipment_type, "
+        "o.boat_model, o.boat_registration_number, o.motor_model, "
+        "o.motor_serial_number, o.sale_channel, o.discount_pct, "
+        "o.discount_type, o.discount_value, o.subtotal, o.total, o.status, "
+        "o.order_date, o.source, o.source_ref, o.created_at, o.updated_at, "
+        "COALESCE(p.paid_total, 0) AS paid_total, "
+        "MAX(o.total - COALESCE(p.paid_total, 0), 0) AS outstanding_total, "
+        "(SELECT COUNT(*) FROM tuning_order_items i WHERE i.order_id = o.id) AS work_items_count, "
+        "(SELECT COUNT(*) FROM tuning_order_products g WHERE g.order_id = o.id) AS products_count, "
+        "(SELECT COUNT(*) FROM tuning_order_notes n WHERE n.order_id = o.id) AS notes_count "
+        "FROM tuning_orders o LEFT JOIN ("
+        " SELECT order_id, SUM(amount) AS paid_total FROM tuning_payments GROUP BY order_id"
+        f") p ON p.order_id = o.id WHERE {where} "
+        "ORDER BY o.order_date DESC, o.id DESC LIMIT ? OFFSET ?",
+        params + [limit, offset],
+    ).fetchall()
+    orders = []
+    for row in rows:
+        orders.append({
+            "order_id": int(row["id"]),
+            "client_id": row["client_id"],
+            "client_name": _safe_text(row["client_name"]),
+            "equipment_type": row["equipment_type"],
+            "equipment_type_label": EQUIPMENT_TYPE_LABELS.get(
+                row["equipment_type"], row["equipment_type"]
+            ),
+            "boat_model": _safe_text(row["boat_model"]),
+            "boat_registration_number": _safe_text(row["boat_registration_number"]),
+            "motor_model": _safe_text(row["motor_model"]),
+            "motor_serial_number": _safe_text(row["motor_serial_number"]),
+            "sale_channel": row["sale_channel"],
+            "sale_channel_label": TUNING_SALE_CHANNEL_LABELS.get(
+                row["sale_channel"], row["sale_channel"]
+            ),
+            "discount_pct": _money(row["discount_pct"]),
+            "discount_type": row["discount_type"],
+            "discount_value": _money(row["discount_value"]),
+            "subtotal_rub": _money(row["subtotal"]),
+            "total_rub": _money(row["total"]),
+            "paid_rub": _money(row["paid_total"]),
+            "outstanding_rub": _money(row["outstanding_total"]),
+            "status": row["status"],
+            "status_label": TUNING_STATUS_LABELS.get(row["status"], row["status"]),
+            "order_date": row["order_date"],
+            "source": _safe_text(row["source"]),
+            "source_ref": _safe_text(row["source_ref"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "work_items_count": int(row["work_items_count"] or 0),
+            "products_count": int(row["products_count"] or 0),
+            "notes_count": int(row["notes_count"] or 0),
+        })
+    return {
+        "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
+        "date_basis": "order_date",
+        "status_filter": status or None,
+        "total_matching_orders": int(total_count or 0),
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + len(orders) < int(total_count or 0),
+        "orders": orders,
+        "privacy_note": (
+            "Телефоны исключены SQL-запросом; похожие на телефон значения "
+            "в свободном тексте дополнительно скрыты."
+        ),
+    }
+
+
+def _tuning_order_details(db, arguments, user):
+    if not _is_admin(user):
+        raise ToolAccessError("Карточки тюнинг-заказов доступны только администратору.")
+    order_id = arguments.get("order_id")
+    if isinstance(order_id, bool) or not isinstance(order_id, int) or order_id <= 0:
+        raise ValueError("order_id должен быть положительным целым числом.")
+
+    row = db.execute(
+        "SELECT o.id, o.client_id, o.client_name, o.equipment_type, "
+        "o.boat_model, o.boat_registration_number, o.motor_model, "
+        "o.motor_serial_number, o.sale_channel, o.discount_pct, "
+        "o.discount_type, o.discount_value, o.subtotal, o.total, o.status, "
+        "o.order_date, o.source, o.source_ref, o.created_at, o.updated_at, "
+        "COALESCE(p.paid_total, 0) AS paid_total, "
+        "MAX(o.total - COALESCE(p.paid_total, 0), 0) AS outstanding_total "
+        "FROM tuning_orders o LEFT JOIN ("
+        " SELECT order_id, SUM(amount) AS paid_total FROM tuning_payments GROUP BY order_id"
+        ") p ON p.order_id = o.id WHERE o.id = ?",
+        (order_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError("Тюнинг-заказ не найден.")
+
+    item_rows = db.execute(
+        "SELECT id, work_name, cost_price, multiplier, price, status, photo_comment "
+        "FROM tuning_order_items WHERE order_id = ? ORDER BY id",
+        (order_id,),
+    ).fetchall()
+    items = []
+    for item in item_rows:
+        assignment_rows = db.execute(
+            "SELECT id, employee_name, rate, norm_hours, comment, assignment_status, "
+            "assigned_at, responded_at, entry_id FROM tuning_item_assignments "
+            "WHERE item_id = ? ORDER BY id",
+            (item["id"],),
+        ).fetchall()
+        photo_rows = db.execute(
+            "SELECT id, filename, comment, created_at FROM work_item_photos "
+            "WHERE item_id = ? ORDER BY id",
+            (item["id"],),
+        ).fetchall()
+        items.append({
+            "item_id": int(item["id"]),
+            "work_name": _safe_text(item["work_name"]),
+            "cost_price_rub": _money(item["cost_price"]),
+            "multiplier": _money(item["multiplier"]),
+            "price_rub": _money(item["price"]),
+            "status": item["status"],
+            "photo_comment": _safe_text(item["photo_comment"]),
+            "assignments": [{
+                "assignment_id": int(assignment["id"]),
+                "employee_name": _safe_text(assignment["employee_name"]),
+                "rate_rub": _money(assignment["rate"]),
+                "norm_hours": _money(assignment["norm_hours"]),
+                "comment": _safe_text(assignment["comment"]),
+                "assignment_status": assignment["assignment_status"],
+                "assigned_at": assignment["assigned_at"],
+                "responded_at": assignment["responded_at"],
+                "payroll_entry_id": assignment["entry_id"],
+            } for assignment in assignment_rows],
+            "photos": [{
+                "photo_id": int(photo["id"]),
+                "filename": _safe_text(photo["filename"]),
+                "comment": _safe_text(photo["comment"]),
+                "created_at": photo["created_at"],
+            } for photo in photo_rows],
+        })
+
+    product_rows = db.execute(
+        "SELECT id, product_id, product_name, quantity, unit_price, cost_price, unit, created_at "
+        "FROM tuning_order_products WHERE order_id = ? ORDER BY id",
+        (order_id,),
+    ).fetchall()
+    payment_rows = db.execute(
+        "SELECT id, amount, payment_type, paid_at, created_at, project_id "
+        "FROM tuning_payments WHERE order_id = ? ORDER BY paid_at, id",
+        (order_id,),
+    ).fetchall()
+    online_payment_rows = db.execute(
+        "SELECT id, yookassa_payment_id, amount, status, tuning_payment_id, "
+        "created_at, updated_at FROM tuning_yookassa_payments "
+        "WHERE order_id = ? ORDER BY id",
+        (order_id,),
+    ).fetchall()
+    note_rows = db.execute(
+        "SELECT n.id, n.text, n.created_at, n.author_admin_id, a.admin_name AS author_name "
+        "FROM tuning_order_notes n LEFT JOIN admin_accounts a ON a.id = n.author_admin_id "
+        "WHERE n.order_id = ? ORDER BY n.created_at, n.id",
+        (order_id,),
+    ).fetchall()
+    notes = []
+    for note in note_rows:
+        reminder_rows = db.execute(
+            "SELECT r.id, r.remind_at, r.sent_at, r.created_at, "
+            "COALESCE(e.name, a.admin_name) AS recipient_name "
+            "FROM tuning_order_note_reminders r "
+            "LEFT JOIN employees e ON e.id = r.remind_employee_id "
+            "LEFT JOIN admin_accounts a ON a.id = r.remind_admin_id "
+            "WHERE r.note_id = ? ORDER BY r.remind_at, r.id",
+            (note["id"],),
+        ).fetchall()
+        notes.append({
+            "note_id": int(note["id"]),
+            "text": _safe_text(note["text"]),
+            "author_admin_id": note["author_admin_id"],
+            "author_name": _safe_text(note["author_name"]),
+            "created_at": note["created_at"],
+            "reminders": [{
+                "reminder_id": int(reminder["id"]),
+                "recipient_name": _safe_text(reminder["recipient_name"]),
+                "remind_at": reminder["remind_at"],
+                "sent_at": reminder["sent_at"],
+                "created_at": reminder["created_at"],
+            } for reminder in reminder_rows],
+        })
+
+    project = db.execute(
+        "SELECT id, name, created_at FROM projects WHERE tuning_order_id = ? ORDER BY id LIMIT 1",
+        (order_id,),
+    ).fetchone()
+    sheet_rows = db.execute(
+        "SELECT id, boat_name, created_at FROM hull_diagnostic_sheets "
+        "WHERE tuning_order_id = ? ORDER BY id",
+        (order_id,),
+    ).fetchall()
+    diagnostics = []
+    for sheet in sheet_rows:
+        defects = db.execute(
+            "SELECT id, view, x_pct, y_pct, defect_type, defect_size, created_at "
+            "FROM hull_diagnostic_defects WHERE sheet_id = ? ORDER BY id",
+            (sheet["id"],),
+        ).fetchall()
+        diagnostics.append({
+            "sheet_id": int(sheet["id"]),
+            "boat_name": _safe_text(sheet["boat_name"]),
+            "created_at": sheet["created_at"],
+            "defects": [{
+                "defect_id": int(defect["id"]),
+                "view": _safe_text(defect["view"]),
+                "x_pct": _money(defect["x_pct"]),
+                "y_pct": _money(defect["y_pct"]),
+                "defect_type": _safe_text(defect["defect_type"]),
+                "defect_size": _safe_text(defect["defect_size"]),
+                "created_at": defect["created_at"],
+            } for defect in defects],
+        })
+
+    order = {
+        "order_id": int(row["id"]),
+        "client_id": row["client_id"],
+        "client_name": _safe_text(row["client_name"]),
+        "equipment_type": row["equipment_type"],
+        "equipment_type_label": EQUIPMENT_TYPE_LABELS.get(
+            row["equipment_type"], row["equipment_type"]
+        ),
+        "boat_model": _safe_text(row["boat_model"]),
+        "boat_registration_number": _safe_text(row["boat_registration_number"]),
+        "motor_model": _safe_text(row["motor_model"]),
+        "motor_serial_number": _safe_text(row["motor_serial_number"]),
+        "sale_channel": row["sale_channel"],
+        "sale_channel_label": TUNING_SALE_CHANNEL_LABELS.get(
+            row["sale_channel"], row["sale_channel"]
+        ),
+        "discount_pct": _money(row["discount_pct"]),
+        "discount_type": row["discount_type"],
+        "discount_value": _money(row["discount_value"]),
+        "subtotal_rub": _money(row["subtotal"]),
+        "total_rub": _money(row["total"]),
+        "paid_rub": _money(row["paid_total"]),
+        "outstanding_rub": _money(row["outstanding_total"]),
+        "status": row["status"],
+        "status_label": TUNING_STATUS_LABELS.get(row["status"], row["status"]),
+        "order_date": row["order_date"],
+        "source": _safe_text(row["source"]),
+        "source_ref": _safe_text(row["source_ref"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+    return {
+        "order": order,
+        "work_items": items,
+        "products": [{
+            "order_product_id": int(product["id"]),
+            "catalog_product_id": product["product_id"],
+            "product_name": _safe_text(product["product_name"]),
+            "quantity": _money(product["quantity"]),
+            "unit_price_rub": _money(product["unit_price"]),
+            "cost_price_rub": _money(product["cost_price"]),
+            "unit": _safe_text(product["unit"]),
+            "created_at": product["created_at"],
+        } for product in product_rows],
+        "payments": [{
+            "payment_id": int(payment["id"]),
+            "amount_rub": _money(payment["amount"]),
+            "payment_type": payment["payment_type"],
+            "paid_at": payment["paid_at"],
+            "created_at": payment["created_at"],
+            "project_id": payment["project_id"],
+        } for payment in payment_rows],
+        "online_payments": [{
+            "payment_record_id": int(payment["id"]),
+            "provider_payment_id": _safe_text(payment["yookassa_payment_id"]),
+            "amount_rub": _money(payment["amount"]),
+            "status": payment["status"],
+            "recorded_payment_id": payment["tuning_payment_id"],
+            "created_at": payment["created_at"],
+            "updated_at": payment["updated_at"],
+        } for payment in online_payment_rows],
+        "notes": notes,
+        "financial_project": ({
+            "project_id": int(project["id"]),
+            "name": _safe_text(project["name"]),
+            "created_at": project["created_at"],
+        } if project else None),
+        "hull_diagnostics": diagnostics,
+        "privacy_note": (
+            "Телефон клиента и платёжные ссылки не выбираются из базы. "
+            "Телефоноподобные значения в текстах скрыты."
+        ),
     }
 
 
@@ -597,6 +940,7 @@ def _grouped_chart_query(db, table, date_column, date_from, date_to, group_expre
 
 def _tuning_bar_chart(db, arguments):
     date_from, date_to = _date_period(arguments, default_days=30)
+    status = _tuning_status(arguments)
     group_by = str(arguments.get("group_by") or "month")
     metric = str(arguments.get("metric") or "amount_rub")
     if group_by == "day" and (date_to - date_from).days >= 60:
@@ -619,13 +963,18 @@ def _tuning_bar_chart(db, arguments):
     rows = _grouped_chart_query(
         db, "tuning_orders o", "o.order_date", date_from, date_to,
         group_expression, value_expression, group_by in ("day", "month"),
+        "o.status = ?" if status else "",
+        [status] if status else [],
     )
     title = "Тюнинг-заказы по " + {
         "day": "дням", "month": "месяцам", "status": "статусам",
         "sale_channel": "каналам продаж", "equipment_type": "типам техники",
     }[group_by]
+    subtitle = _chart_period_label(date_from, date_to)
+    if status:
+        subtitle += " · Статус: " + TUNING_STATUS_LABELS[status]
     return _bar_visualization(
-        title, _chart_period_label(date_from, date_to), dataset_label, value_format,
+        title, subtitle, dataset_label, value_format,
         rows, group_by, labels,
     )
 
@@ -858,15 +1207,54 @@ TOOL_SCHEMAS = {
     "get_tuning_summary": {
         "description": (
             "Получить агрегированную сводку тюнинг-заказов по бизнес-дате из интерфейса: "
-            "количество и стоимость заказов, оплаты, текущую задолженность, статусы и каналы продаж."
+            "количество и стоимость заказов, их номера, оплаты, текущую задолженность, "
+            "статусы и каналы продаж. Для выполненных заказов передай status=done."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "date_from": {"type": "string", "description": "YYYY-MM-DD"},
                 "date_to": {"type": "string", "description": "YYYY-MM-DD"},
-                "status": {"type": "string"},
+                "status": {"type": "string", "enum": list(TUNING_STATUS_LABELS)},
             },
+            "additionalProperties": False,
+        },
+    },
+    "get_tuning_orders": {
+        "description": (
+            "Получить проверяемый постраничный список тюнинг-заказов с номерами, "
+            "датами, клиентами, техникой, статусами, суммами, оплатами и количеством "
+            "связанных работ, товаров и заметок. Телефоны исключены. Используй для "
+            "проверки состава аналитики; для выполненных заказов передай status=done."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "date_from": {"type": "string", "description": "YYYY-MM-DD"},
+                "date_to": {"type": "string", "description": "YYYY-MM-DD"},
+                "status": {"type": "string", "enum": list(TUNING_STATUS_LABELS)},
+                "limit": {
+                    "type": "integer", "minimum": 1,
+                    "maximum": TUNING_ORDER_LIST_MAX_LIMIT,
+                },
+                "offset": {"type": "integer", "minimum": 0, "maximum": 10000},
+            },
+            "additionalProperties": False,
+        },
+    },
+    "get_tuning_order_details": {
+        "description": (
+            "Получить подробную карточку одного тюнинг-заказа по его номеру: "
+            "параметры заказа, работы и назначения, фотографии, товары, оплаты, "
+            "заметки с напоминаниями, финансовый проект и диагностику корпуса. "
+            "Телефон клиента и платёжные ссылки исключены."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "order_id": {"type": "integer", "minimum": 1},
+            },
+            "required": ["order_id"],
             "additionalProperties": False,
         },
     },
@@ -1001,6 +1389,13 @@ TOOL_SCHEMAS = {
                     "description": "Фильтр начислений по точной должности, например Капитан.",
                 },
                 "segment": {"type": "string", "enum": ["excursion", "tuning"]},
+                "status": {
+                    "type": "string",
+                    "enum": list(TUNING_STATUS_LABELS),
+                    "description": (
+                        "Фильтр тюнинг-заказов; для выполненных используйте done."
+                    ),
+                },
             },
             "required": ["subject", "metric"],
             "additionalProperties": False,
@@ -1019,6 +1414,8 @@ def allowed_tool_names(user):
             "get_schedule_summary",
             "get_fleet_status",
             "get_tuning_summary",
+            "get_tuning_orders",
+            "get_tuning_order_details",
             "get_clients_summary",
             "get_employees_directory",
             "get_business_overview",
@@ -1091,6 +1488,10 @@ def execute_tool(db, user, boats, name, arguments):
         return _fleet_status(db, arguments, boats)
     if name == "get_tuning_summary":
         return _tuning_summary(db, arguments)
+    if name == "get_tuning_orders":
+        return _tuning_orders(db, arguments, user)
+    if name == "get_tuning_order_details":
+        return _tuning_order_details(db, arguments, user)
     if name == "get_clients_summary":
         return _clients_summary(db, arguments, user)
     if name == "get_payroll_summary":
