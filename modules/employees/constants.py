@@ -46,6 +46,7 @@ GENERATED_PASSWORD_LENGTH = 14
 # positions must always remain available when an administrator creates a new
 # employee — even if nobody currently holds one of them.
 KNOWN_POSITIONS = (
+    "Администратор",
     "Капитан",
     "Гид",
     "Гид-капитан",
@@ -53,4 +54,5 @@ KNOWN_POSITIONS = (
     "Менеджер по работе с клиентами",
 )
 
+ADMIN_POSITION = "Администратор"
 CUSTOMER_MANAGER_POSITION = "Менеджер по работе с клиентами"

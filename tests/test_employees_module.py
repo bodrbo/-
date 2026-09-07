@@ -112,6 +112,96 @@ class EmployeesModuleIntegrationTests(unittest.TestCase):
         self.assertEqual(login.status_code, 302)
         self.assertTrue(login.headers["Location"].endswith("/team/"))
 
+    def test_employee_with_admin_position_can_use_both_login_forms(self):
+        employee, credentials = self.create_employee(
+            "Алина Административная", positions=["администратор"]
+        )
+
+        admin_login_client = application_module.app.test_client()
+        response = admin_login_client.post(
+            "/admin/login",
+            data={
+                "username": credentials["username"],
+                "password": credentials["password"],
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/admin"))
+        self.assertEqual(admin_login_client.get("/employees").status_code, 200)
+        with admin_login_client.session_transaction() as session:
+            self.assertEqual(session["admin_name"], employee["name"])
+            self.assertEqual(session["admin_employee_id"], employee["id"])
+            self.assertNotIn("team_id", session)
+
+        with application_module.app.app_context():
+            linked = application_module.get_db().execute(
+                "SELECT employee_id FROM admin_accounts WHERE employee_id = ?",
+                (employee["id"],),
+            ).fetchone()
+            self.assertIsNotNone(linked)
+
+        team_login_client = application_module.app.test_client()
+        response = team_login_client.post(
+            "/team/login",
+            data={
+                "username": credentials["username"],
+                "password": credentials["password"],
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/admin"))
+        self.assertEqual(team_login_client.get("/employees").status_code, 200)
+        with team_login_client.session_transaction() as session:
+            self.assertEqual(session["admin_employee_id"], employee["id"])
+            self.assertNotIn("team_id", session)
+
+    def test_removing_admin_position_revokes_an_existing_admin_session(self):
+        employee, credentials = self.create_employee(
+            "Роман Временный", positions=["Администратор"]
+        )
+        promoted_client = application_module.app.test_client()
+        promoted_client.post(
+            "/team/login",
+            data={
+                "username": credentials["username"],
+                "password": credentials["password"],
+            },
+        )
+        with application_module.app.app_context():
+            position_id = application_module.get_db().execute(
+                "SELECT id FROM employee_positions "
+                "WHERE employee_id = ? AND position = 'Администратор'",
+                (employee["id"],),
+            ).fetchone()["id"]
+
+        response = promoted_client.post(
+            f"/employees/{employee['id']}/positions/{position_id}/delete"
+        )
+        self.assertEqual(response.status_code, 302)
+        revoked = promoted_client.get("/admin")
+        self.assertEqual(revoked.status_code, 302)
+        self.assertTrue(revoked.headers["Location"].endswith("/admin/login"))
+
+        employee_login = application_module.app.test_client().post(
+            "/team/login",
+            data={
+                "username": credentials["username"],
+                "password": credentials["password"],
+            },
+        )
+        self.assertTrue(employee_login.headers["Location"].endswith("/team/"))
+
+    def test_non_admin_employee_cannot_use_admin_login_form(self):
+        _, credentials = self.create_employee("Никита Неадминистратор", ["Гид"])
+        response = application_module.app.test_client().post(
+            "/admin/login",
+            data={
+                "username": credentials["username"],
+                "password": credentials["password"],
+            },
+        )
+        self.assertEqual(response.status_code, 401)
+
     def test_admin_can_reset_generated_employee_password(self):
         employee, original = self.create_employee("Мария Пароль", ["Гид"])
 

@@ -63,6 +63,7 @@ from integrations.telegram import fetch_recent_contacts as fetch_recent_telegram
 from integrations.tripster import fetch_orders as fetch_tripster_orders
 from modules.employees import create_employees_blueprint
 from modules.employees.constants import (
+    ADMIN_POSITION,
     CUSTOMER_MANAGER_POSITION,
     EMPLOYEES,
     INITIAL_EMPLOYEE_POSITIONS,
@@ -738,14 +739,18 @@ def send_telegram_notification_to_admin(db, admin_id, text):
     """Same fire-and-forget contract as send_telegram_notification_to_employee,
     routed to one admin's personal chat via admin_accounts.telegram_chat_id."""
     row = db.execute(
-        "SELECT telegram_chat_id FROM admin_accounts WHERE id = ? AND telegram_chat_id IS NOT NULL",
+        "SELECT a.telegram_chat_id, a.employee_id, e.name AS employee_name "
+        "FROM admin_accounts a LEFT JOIN employees e ON e.id = a.employee_id "
+        "WHERE a.id = ?",
         (admin_id,),
     ).fetchone()
-    if row is None:
-        status = f"skipped: no telegram_chat_id linked for admin_id={admin_id!r}"
-        _log_telegram(f"Telegram notification {status}")
-        return status
-    return send_telegram_notification(text, chat_id=row["telegram_chat_id"])
+    if row is not None and row["telegram_chat_id"]:
+        return send_telegram_notification(text, chat_id=row["telegram_chat_id"])
+    if row is not None and row["employee_id"] is not None and row["employee_name"]:
+        return send_telegram_notification_to_employee(db, row["employee_name"], text)
+    status = f"skipped: no telegram_chat_id linked for admin_id={admin_id!r}"
+    _log_telegram(f"Telegram notification {status}")
+    return status
 
 
 def send_push_notification(title, body, role="admin", url="/"):
@@ -2297,7 +2302,8 @@ def init_db():
             admin_name TEXT NOT NULL,
             username TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            employee_id INTEGER
         )
         """
     )
@@ -2308,6 +2314,12 @@ def init_db():
     admin_account_cols = [row[1] for row in conn.execute("PRAGMA table_info(admin_accounts)").fetchall()]
     if "telegram_chat_id" not in admin_account_cols:
         conn.execute("ALTER TABLE admin_accounts ADD COLUMN telegram_chat_id TEXT")
+    if "employee_id" not in admin_account_cols:
+        conn.execute("ALTER TABLE admin_accounts ADD COLUMN employee_id INTEGER")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_accounts_employee_id "
+        "ON admin_accounts (employee_id)"
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS investors (
@@ -2701,10 +2713,95 @@ def service_worker():
     return send_from_directory(app.static_folder, "sw.js", mimetype="application/javascript")
 
 
+def _employee_has_admin_position(db, employee_id):
+    positions = db.execute(
+        "SELECT position FROM employee_positions WHERE employee_id = ?",
+        (employee_id,),
+    ).fetchall()
+    return any(
+        str(row["position"] or "").casefold() == ADMIN_POSITION.casefold()
+        for row in positions
+    )
+
+
+def _active_admin_account(db=None):
+    """Return a still-authorized administrator account for this session.
+
+    Legacy administrator accounts have no employee_id and remain valid. Accounts
+    bridged from the employee directory are checked against the live position on
+    every request, so removing the position revokes existing sessions too.
+    """
+    admin_id = session.get("admin_id")
+    if not admin_id:
+        return None
+    db = db or get_db()
+    account = db.execute(
+        "SELECT id, admin_name, employee_id FROM admin_accounts WHERE id = ?",
+        (admin_id,),
+    ).fetchone()
+    if account is None:
+        return None
+    employee_id = account["employee_id"]
+    if employee_id is None:
+        return account
+    employee = db.execute(
+        "SELECT id FROM employees WHERE id = ? AND deleted_at IS NULL",
+        (employee_id,),
+    ).fetchone()
+    if employee is None or not _employee_has_admin_position(db, employee_id):
+        return None
+    return account
+
+
+def _ensure_employee_admin_account(db, team_account):
+    """Create the audit identity used by existing administrator-only features."""
+    employee_id = int(team_account["employee_id"])
+    employee_name = str(team_account["employee_name"])
+    existing = db.execute(
+        "SELECT id FROM admin_accounts WHERE employee_id = ?", (employee_id,)
+    ).fetchone()
+    if existing is None:
+        cursor = db.execute(
+            "INSERT INTO admin_accounts "
+            "(admin_name, username, password_hash, employee_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                employee_name,
+                f"__employee_admin_{employee_id}_{team_account['id']}",
+                team_account["password_hash"],
+                employee_id,
+                dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            ),
+        )
+        admin_id = cursor.lastrowid
+    else:
+        admin_id = existing["id"]
+        db.execute(
+            "UPDATE admin_accounts SET admin_name = ?, password_hash = ? WHERE id = ?",
+            (employee_name, team_account["password_hash"], admin_id),
+        )
+    db.commit()
+    return db.execute(
+        "SELECT id, admin_name, employee_id FROM admin_accounts WHERE id = ?",
+        (admin_id,),
+    ).fetchone()
+
+
+def _start_admin_session(account):
+    session.clear()
+    session["admin_id"] = account["id"]
+    session["admin_name"] = account["admin_name"]
+    if account["employee_id"] is not None:
+        session["admin_employee_id"] = account["employee_id"]
+
+
 def admin_login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if not session.get("admin_id"):
+        if _active_admin_account() is None:
+            session.pop("admin_id", None)
+            session.pop("admin_name", None)
+            session.pop("admin_employee_id", None)
             return redirect(url_for("admin_login"))
         return view(*args, **kwargs)
     return wrapped
@@ -2724,7 +2821,7 @@ def _active_team_account(db):
 
 
 def _is_customer_manager(db=None):
-    if session.get("admin_id") or not session.get("team_id"):
+    if _active_admin_account(db) is not None or not session.get("team_id"):
         return False
     db = db or get_db()
     account = _active_team_account(db)
@@ -2740,20 +2837,15 @@ def _is_customer_manager(db=None):
 def _current_ai_user():
     """Resolve the signed-in staff member and their data-access scope."""
     db = get_db()
-    admin_id = session.get("admin_id")
-    if admin_id:
-        row = db.execute(
-            "SELECT id, admin_name FROM admin_accounts WHERE id = ?",
-            (admin_id,),
-        ).fetchone()
-        if row is not None:
-            return {
-                "owner_type": "admin",
-                "owner_id": row["id"],
-                "name": row["admin_name"],
-                "positions": ["Администратор"],
-                "manager_view": False,
-            }
+    row = _active_admin_account(db)
+    if row is not None:
+        return {
+            "owner_type": "admin",
+            "owner_id": row["id"],
+            "name": row["admin_name"],
+            "positions": [ADMIN_POSITION],
+            "manager_view": False,
+        }
 
     account = _active_team_account(db)
     if account is None:
@@ -2779,7 +2871,7 @@ def excursion_manager_or_admin_required(view):
     """Allow administrators and customer managers into excursion tools."""
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if session.get("admin_id"):
+        if _active_admin_account() is not None:
             return view(*args, **kwargs)
         if _is_customer_manager():
             return view(*args, **kwargs)
@@ -2795,7 +2887,7 @@ def excursion_manager_or_admin_required(view):
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     if request.method == "GET":
-        if session.get("admin_id"):
+        if _active_admin_account() is not None:
             return redirect(url_for("index"))
         return render_template("admin_login.html", error=None)
 
@@ -2803,17 +2895,31 @@ def admin_login():
     password = request.form.get("password", "")
     db = get_db()
     row = db.execute(
-        "SELECT * FROM admin_accounts WHERE username = ?", (username,)
+        "SELECT * FROM admin_accounts WHERE username = ? AND employee_id IS NULL",
+        (username,),
     ).fetchone()
-    if row is None or not check_password_hash(row["password_hash"], password):
-        return render_template(
-            "admin_login.html", error="Неверный логин или пароль.",
-        ), 401
+    if row is not None and check_password_hash(row["password_hash"], password):
+        _start_admin_session(row)
+        return redirect(url_for("index"))
 
-    session.clear()
-    session["admin_id"] = row["id"]
-    session["admin_name"] = row["admin_name"]
-    return redirect(url_for("index"))
+    team_account = db.execute(
+        "SELECT ta.*, e.name AS employee_name FROM team_accounts ta "
+        "JOIN employees e ON e.id = ta.employee_id "
+        "WHERE ta.username = ? AND e.deleted_at IS NULL",
+        (username,),
+    ).fetchone()
+    if (
+        team_account is not None
+        and check_password_hash(team_account["password_hash"], password)
+        and _employee_has_admin_position(db, team_account["employee_id"])
+    ):
+        account = _ensure_employee_admin_account(db, team_account)
+        _start_admin_session(account)
+        return redirect(url_for("index"))
+
+    return render_template(
+        "admin_login.html", error="Неверный логин или пароль.",
+    ), 401
 
 
 @app.route("/admin/logout", methods=["POST"])
@@ -3781,6 +3887,7 @@ app.register_blueprint(
         get_db=get_db,
         admin_login_required=admin_login_required,
         active_team_account=_active_team_account,
+        active_admin_account=_active_admin_account,
     )
 )
 
@@ -4199,9 +4306,11 @@ def _note_reminder_recipients(db):
         })
     # Keep administrator accounts in the same picker so the former
     # self-reminder workflow and existing Telegram links remain available.
+    # Employee-backed administrators are already present in the employee
+    # part of this picker, where their current Telegram link is managed.
     for row in db.execute(
         "SELECT id, admin_name, telegram_chat_id FROM admin_accounts "
-        "ORDER BY admin_name COLLATE NOCASE"
+        "WHERE employee_id IS NULL ORDER BY admin_name COLLATE NOCASE"
     ).fetchall():
         recipients.append({
             "value": f"admin:{row['id']}",
@@ -9074,6 +9183,11 @@ def team_login():
         return render_template(
             "team_login.html", error="Неверный логин или пароль.",
         ), 401
+
+    if _employee_has_admin_position(db, row["employee_id"]):
+        account = _ensure_employee_admin_account(db, row)
+        _start_admin_session(account)
+        return redirect(url_for("index"))
 
     session.clear()
     session["team_id"] = row["id"]

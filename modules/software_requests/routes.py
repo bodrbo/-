@@ -8,24 +8,21 @@ from . import repository
 from .constants import DESCRIPTION_MAX_LENGTH, PAGE_PATH_MAX_LENGTH, REQUEST_STATUSES
 
 
-def create_blueprint(get_db, admin_login_required, active_team_account):
+def create_blueprint(
+    get_db, admin_login_required, active_team_account, active_admin_account
+):
     blueprint = Blueprint("software_requests", __name__)
 
     def current_staff():
         db = get_db()
-        admin_id = session.get("admin_id")
-        if admin_id:
-            row = db.execute(
-                "SELECT id, admin_name FROM admin_accounts WHERE id = ?",
-                (admin_id,),
-            ).fetchone()
-            if row is not None:
-                return {
-                    "author_type": "admin",
-                    "author_admin_id": row["id"],
-                    "author_employee_id": None,
-                    "author_name": row["admin_name"],
-                }
+        row = active_admin_account(db)
+        if row is not None:
+            return {
+                "author_type": "admin",
+                "author_admin_id": row["id"],
+                "author_employee_id": row["employee_id"],
+                "author_name": row["admin_name"],
+            }
 
         if session.get("team_id"):
             row = active_team_account(db)
