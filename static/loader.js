@@ -424,6 +424,39 @@ initTableFilters();
   });
 })();
 
+// Wide-screen navigation rail. Its collapsed state is local to this browser;
+// the same markup remains the existing burger dropdown below the desktop
+// breakpoint, so no separate mobile navigation can drift out of sync.
+(function () {
+  var toggle = document.getElementById("desktopSidebarToggle");
+  var sidebar = document.querySelector(".desktop-sidebar");
+  if (!toggle || !sidebar) return;
+
+  var storageKey = "bodrbo-admin-sidebar-collapsed";
+  var links = Array.prototype.slice.call(sidebar.querySelectorAll(".main-nav a"));
+
+  function applyState(collapsed, persist) {
+    document.body.classList.toggle("admin-sidebar-collapsed", collapsed);
+    toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    toggle.setAttribute("aria-label", collapsed ? "Развернуть боковое меню" : "Свернуть боковое меню");
+    toggle.setAttribute("title", collapsed ? "Развернуть меню" : "Свернуть меню");
+    links.forEach(function (link) {
+      var label = link.querySelector(".nav-label");
+      if (collapsed && label) link.setAttribute("title", label.textContent.trim());
+      else link.removeAttribute("title");
+    });
+    if (!persist) return;
+    try {
+      localStorage.setItem(storageKey, collapsed ? "1" : "0");
+    } catch (error) {}
+  }
+
+  applyState(document.body.classList.contains("admin-sidebar-collapsed"), false);
+  toggle.addEventListener("click", function () {
+    applyState(!document.body.classList.contains("admin-sidebar-collapsed"), true);
+  });
+})();
+
 // Mobile burger menu — independent of the loader above (some pages, like
 // the plain login screens, have the nav but not the page-loader overlay).
 (function () {

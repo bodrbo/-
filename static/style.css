@@ -2063,6 +2063,9 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
 .push-toggle:not(.subscribed) .push-toggle-on { display: none; }
 .push-toggle.subscribed .push-toggle-off { display: none; }
 
+.desktop-sidebar { display: contents; }
+.desktop-sidebar-header { display: none; }
+
 .main-nav {
   display: flex;
   align-items: stretch;
@@ -8480,4 +8483,203 @@ button.captain-command-alert:hover {
   .tuning-clients-page-links { width: 100%; justify-content: space-between; }
   .tuning-clients-page-links a,
   .tuning-clients-page-links span { min-width: 34px; height: 40px; }
+}
+
+/* ------------------------------------------------------------------
+   Desktop navigation rail
+
+   Compact screens keep the existing header dropdown. The persistent
+   rail only appears once the full desktop workspace is available.
+   ------------------------------------------------------------------ */
+@media (min-width: 1101px) {
+  body.has-admin-sidebar {
+    --admin-sidebar-width: 224px;
+    padding-left: var(--admin-sidebar-width);
+    transition: padding-left .2s ease;
+  }
+  body.has-admin-sidebar.admin-sidebar-collapsed { --admin-sidebar-width: 68px; }
+
+  body.has-admin-sidebar .desktop-sidebar {
+    position: fixed;
+    z-index: 1200;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    display: flex;
+    width: var(--admin-sidebar-width);
+    flex-direction: column;
+    color: #dbe8ef;
+    background:
+      linear-gradient(180deg, rgba(52, 152, 219, .11), transparent 150px),
+      #0f2a35;
+    border-right: 1px solid rgba(255, 255, 255, .09);
+    box-shadow: 10px 0 28px -24px rgba(4, 23, 33, .9);
+    transition: width .2s ease;
+  }
+  body.has-admin-sidebar .desktop-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 76px;
+    padding: 16px 12px 14px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, .1);
+  }
+  body.has-admin-sidebar .desktop-sidebar-heading {
+    overflow: hidden;
+    color: #9db2bd;
+    font-family: 'PT Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    transition: width .16s ease, opacity .12s ease;
+  }
+  body.has-admin-sidebar .desktop-sidebar-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    flex: none;
+    padding: 0;
+    color: #b9cad3;
+    background: rgba(255, 255, 255, .06);
+    border: 1px solid rgba(255, 255, 255, .13);
+    border-radius: 9px;
+    cursor: pointer;
+    transition: color .15s ease, background-color .15s ease, transform .2s ease;
+  }
+  body.has-admin-sidebar .desktop-sidebar-toggle:hover {
+    color: #fff;
+    background: rgba(52, 152, 219, .2);
+  }
+  body.has-admin-sidebar .desktop-sidebar-toggle:focus-visible {
+    outline: 2px solid #62b5e8;
+    outline-offset: 2px;
+  }
+  body.has-admin-sidebar .desktop-sidebar-toggle svg { width: 18px; height: 18px; }
+
+  body.has-admin-sidebar .desktop-sidebar .main-nav {
+    display: flex;
+    width: 100%;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 3px;
+    padding: 12px 9px 18px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, .2) transparent;
+  }
+  body.has-admin-sidebar .desktop-sidebar .main-nav a {
+    position: relative;
+    display: flex;
+    min-height: 43px;
+    width: 100%;
+    flex: none;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 9px 11px;
+    margin: 0;
+    color: #b9cad3;
+    background: transparent;
+    border: 0;
+    border-radius: 9px;
+    font-size: 12px;
+    text-align: left;
+    transition: color .15s ease, background-color .15s ease;
+  }
+  body.has-admin-sidebar .desktop-sidebar .main-nav a::before {
+    position: absolute;
+    top: 9px;
+    bottom: 9px;
+    left: -9px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: transparent;
+    content: '';
+  }
+  body.has-admin-sidebar .desktop-sidebar .main-nav a .nav-icon {
+    width: 19px;
+    height: 19px;
+    flex: none;
+    transition: none;
+  }
+  body.has-admin-sidebar .desktop-sidebar .main-nav a .nav-label {
+    overflow: hidden;
+    max-width: 170px;
+    opacity: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: max-width .16s ease, opacity .12s ease;
+  }
+  body.has-admin-sidebar .desktop-sidebar .main-nav a:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, .07);
+  }
+  body.has-admin-sidebar .desktop-sidebar .main-nav a:hover .nav-icon { transform: none; }
+  body.has-admin-sidebar .desktop-sidebar .main-nav a.active {
+    color: #fff;
+    background: rgba(52, 152, 219, .18);
+  }
+  body.has-admin-sidebar .desktop-sidebar .main-nav a.active::before { background: #62b5e8; }
+
+  body.has-admin-sidebar .topbar:not(.schedule-topbar) { padding: 14px 20px; }
+  body.has-admin-sidebar .topbar-inner {
+    align-items: center;
+    flex-wrap: nowrap;
+  }
+  body.has-admin-sidebar .topbar-top-row { flex: none; }
+  body.has-admin-sidebar .brand-logo { height: 44px; }
+  body.has-admin-sidebar .title-block {
+    min-width: 0;
+    flex: 1;
+    text-align: left;
+  }
+  body.has-admin-sidebar .title-block h1 {
+    overflow: hidden;
+    margin-top: 2px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  body.has-admin-sidebar .topbar-actions { flex: none; margin-left: auto; }
+
+  body.has-admin-sidebar.admin-sidebar-collapsed .desktop-sidebar-header {
+    justify-content: center;
+    padding-right: 0;
+    padding-left: 0;
+  }
+  body.has-admin-sidebar.admin-sidebar-collapsed .desktop-sidebar-heading {
+    width: 0;
+    opacity: 0;
+  }
+  body.has-admin-sidebar.admin-sidebar-collapsed .desktop-sidebar-toggle { transform: rotate(180deg); }
+  body.has-admin-sidebar.admin-sidebar-collapsed .desktop-sidebar .main-nav { padding-right: 8px; padding-left: 8px; }
+  body.has-admin-sidebar.admin-sidebar-collapsed .desktop-sidebar .main-nav a {
+    justify-content: center;
+    gap: 0;
+    padding-right: 0;
+    padding-left: 0;
+  }
+  body.has-admin-sidebar.admin-sidebar-collapsed .desktop-sidebar .main-nav a::before { left: -8px; }
+  body.has-admin-sidebar.admin-sidebar-collapsed .desktop-sidebar .main-nav a .nav-label {
+    max-width: 0;
+    opacity: 0;
+  }
+}
+
+@media (min-width: 1101px) and (prefers-reduced-motion: reduce) {
+  body.has-admin-sidebar,
+  body.has-admin-sidebar .desktop-sidebar,
+  body.has-admin-sidebar .desktop-sidebar * { transition: none !important; }
+}
+
+@media (min-width: 1101px) and (max-width: 1500px) {
+  body.has-admin-sidebar:not(.admin-sidebar-collapsed) .schedule-day-total { display: none; }
 }

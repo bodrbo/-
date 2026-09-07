@@ -148,6 +148,9 @@ class CustomerManagerAccessTests(unittest.TestCase):
             html = response.get_data(as_text=True)
             self.assertEqual(response.status_code, 200)
             self.assertIn("Менеджер по работе с клиентами", html)
+            self.assertIn('<aside class="desktop-sidebar"', html)
+            self.assertIn('id="desktopSidebarToggle"', html)
+            self.assertEqual(html.count('id="mainNav"'), 1)
             for label in ("Расписание", "Клиенты", "Услуги"):
                 self.assertIn(f'<span class="nav-label">{label}</span>', html)
             self.assertIn(

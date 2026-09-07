@@ -1,4 +1,22 @@
-<nav class="main-nav{{ ' manager-main-nav' if manager_view }}" id="mainNav" aria-label="Главное меню">
+<script>
+  document.body.classList.add('has-admin-sidebar');
+  try {
+    if (localStorage.getItem('bodrbo-admin-sidebar-collapsed') === '1') {
+      document.body.classList.add('admin-sidebar-collapsed');
+    }
+  } catch (error) {}
+</script>
+<aside class="desktop-sidebar" aria-label="Разделы системы">
+  <div class="desktop-sidebar-header">
+    <span class="desktop-sidebar-heading">Разделы</span>
+    <button type="button" class="desktop-sidebar-toggle" id="desktopSidebarToggle"
+            aria-label="Свернуть боковое меню" aria-expanded="true" title="Свернуть меню">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12.5 5L7.5 10l5 5"/>
+      </svg>
+    </button>
+  </div>
+  <nav class="main-nav{{ ' manager-main-nav' if manager_view }}" id="mainNav" aria-label="Главное меню">
   {% if manager_view %}
   <a href="{{ url_for('schedule.index') }}" class="{{ 'active' if active_page == 'schedule' }}">
     <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
@@ -105,4 +123,5 @@
     <span class="nav-label">Настройки</span>
   </a>
   {% endif %}
-</nav>
+  </nav>
+</aside>
