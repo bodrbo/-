@@ -1,4 +1,5 @@
 import os
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -125,6 +126,50 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertIsNotNone(client)
         self.assertEqual(client["phone"], "")
         self.assertEqual(order["order_date"], "2026-06-15")
+
+    def test_orders_dashboard_separates_active_and_completed_totals(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            for index, (status, total) in enumerate((
+                ("new_request", 11000),
+                ("estimate", 22000),
+                ("in_progress", 33000),
+                ("done", 44000),
+                ("qc", 55000),
+                ("cancelled", 66000),
+            ), start=1):
+                db.execute(
+                    "INSERT INTO tuning_orders "
+                    "(client_name, boat_model, sale_channel, phone, subtotal, total, "
+                    "status, order_date, created_at, updated_at) "
+                    "VALUES (?, ?, 'direct', '', ?, ?, ?, '2026-09-07', "
+                    "'2026-09-07 10:00', '2026-09-07 10:00')",
+                    (
+                        f"Клиент итогов {index}",
+                        f"Лодка итогов {index}",
+                        total,
+                        total,
+                        status,
+                    ),
+                )
+            db.commit()
+
+        self.login()
+        html = self.client.get("/tuning").get_data(as_text=True)
+
+        def card_value(label):
+            match = re.search(
+                rf'<span class="k">{re.escape(label)}</span>\s*'
+                r'<span class="v">([^<]+)</span>',
+                html,
+            )
+            self.assertIsNotNone(match)
+            return match.group(1)
+
+        self.assertEqual(card_value("Сумма активных заказов"), "66 000,00 ₽")
+        self.assertEqual(card_value("Сумма выполненных заказов"), "44 000,00 ₽")
+        self.assertNotIn("Сумма по всем заказам", html)
+        self.assertIn("Новая заявка · Предварительный расчёт · В работе", html)
 
     def test_creation_form_searches_catalog_and_creates_new_boat_profile(self):
         self.login()

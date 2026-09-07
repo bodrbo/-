@@ -84,8 +84,14 @@
       <span class="v">{{ orders|length }}</span>
     </div>
     <div class="panel total-card total-card-grand">
-      <span class="k">Сумма по всем заказам</span>
-      <span class="v">{{ grand_total|money }} ₽</span>
+      <span class="k">Сумма активных заказов</span>
+      <span class="v">{{ active_orders_total|money }} ₽</span>
+      <span class="d">Новая заявка · Предварительный расчёт · В работе</span>
+    </div>
+    <div class="panel total-card total-card-grand">
+      <span class="k">Сумма выполненных заказов</span>
+      <span class="v">{{ completed_orders_total|money }} ₽</span>
+      <span class="d">Статус «Выполнен»</span>
     </div>
   </div>
 

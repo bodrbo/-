@@ -943,6 +943,11 @@ ORDER_STATUSES = [
     {"value": "done", "label": "Выполнен"},
     {"value": "cancelled", "label": "Отменён"},
 ]
+TUNING_ACTIVE_TOTAL_STATUSES = frozenset((
+    "new_request",
+    "estimate",
+    "in_progress",
+))
 DEFAULT_ORDER_STATUS = "estimate"
 
 CLIENT_STATUSES = [
@@ -4969,9 +4974,19 @@ def tuning_index():
         order["boat_profile_id"] = profile_id if equipment_type == "boat" else None
         order["motor_profile_id"] = profile_id if equipment_type == "motor" else None
         orders.append(order)
-    grand_total = sum(o["total"] for o in orders)
+    active_orders_total = sum(
+        order["total"]
+        for order in orders
+        if order["status"] in TUNING_ACTIVE_TOTAL_STATUSES
+    )
+    completed_orders_total = sum(
+        order["total"] for order in orders if order["status"] == "done"
+    )
     return render_template(
-        "tuning_index.html", orders=orders, grand_total=grand_total,
+        "tuning_index.html",
+        orders=orders,
+        active_orders_total=active_orders_total,
+        completed_orders_total=completed_orders_total,
         order_statuses=ORDER_STATUSES,
         active_page="tuning", sub_page="orders",
     )

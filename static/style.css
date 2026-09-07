@@ -5317,12 +5317,18 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
+.total-card .d {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
 .total-card-grand {
   background: var(--ink);
   border-color: var(--ink);
 }
 .total-card-grand .k { color: var(--brass-strong); }
 .total-card-grand .v { color: #eaf4fc; }
+.total-card-grand .d { color: rgba(234, 244, 252, .68); }
 
 .checklist-buttons {
   display: grid;
