@@ -116,10 +116,16 @@
           {% for row in item_profitability %}
           <tr>
             <td>{{ row.item.work_name }}{% if row.item.status == 'removed' %} <span class="hint">(задача снята)</span>{% endif %}</td>
-            <td class="amount">{{ row.price|money }}</td>
+            <td class="amount{{ ' work-price-pending' if row.price_pending }}">
+              {{ (row.price|money ~ ' ₽') if not row.price_pending else 'Ждёт расчёта' }}
+            </td>
             <td class="amount">{{ row.materials_expense|money }}</td>
             <td class="amount">{{ row.tx_expense|money }}</td>
+            {% if row.price_pending %}
+            <td class="amount work-price-pending">Ждёт расчёта</td>
+            {% else %}
             <td class="amount" style="{{ 'color:var(--danger);' if row.profit < 0 else 'color:var(--success);' }}">{{ row.profit|money }}</td>
+            {% endif %}
           </tr>
           {% endfor %}
         </tbody>

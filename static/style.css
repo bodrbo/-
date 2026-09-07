@@ -3981,6 +3981,12 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
   text-align: right;
   color: var(--ink);
 }
+.work-price-pending {
+  color: var(--muted) !important;
+  font-weight: 600 !important;
+  font-style: italic;
+  white-space: nowrap;
+}
 
 .supply-request-row {
   display: flex;

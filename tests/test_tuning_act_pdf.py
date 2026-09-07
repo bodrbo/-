@@ -33,6 +33,26 @@ class TuningActPdfTests(unittest.TestCase):
         self.assertTrue(pdf.startswith(b"%PDF-"))
         self.assertGreater(len(pdf), 1000)
 
+    def test_handover_act_builds_with_work_awaiting_price(self):
+        order = {
+            "id": 43,
+            "created_at": "2026-08-28 12:00:00",
+            "client_name": "Тестовый заказчик",
+            "boat_model": "Тестовая лодка",
+            "discount_type": "percent",
+            "discount_value": 0,
+        }
+        items = [{
+            "work_name": "Работа после дефектовки",
+            "price": 0.0,
+            "price_pending": 1,
+        }]
+
+        pdf = application_module._build_handover_act_pdf(order, items)
+
+        self.assertTrue(pdf.startswith(b"%PDF-"))
+        self.assertGreater(len(pdf), 1000)
+
 
 if __name__ == "__main__":
     unittest.main()

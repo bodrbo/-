@@ -1663,6 +1663,7 @@ def init_db():
             cost_price REAL NOT NULL,
             multiplier REAL NOT NULL,
             price REAL NOT NULL,
+            price_pending INTEGER NOT NULL DEFAULT 0,
             status TEXT NOT NULL DEFAULT 'pending'
         )
         """
@@ -2269,6 +2270,10 @@ def init_db():
         )
     if "photo_comment" not in item_cols:
         conn.execute("ALTER TABLE tuning_order_items ADD COLUMN photo_comment TEXT")
+    if "price_pending" not in item_cols:
+        conn.execute(
+            "ALTER TABLE tuning_order_items ADD COLUMN price_pending INTEGER NOT NULL DEFAULT 0"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS work_item_photos (
@@ -4028,26 +4033,40 @@ def _process_tuning_form(form, default_order_date=None):
         if not name:
             errors.append(f"Работа №{row_num}: не указано название.")
 
+        price_pending = not cost_raw and not mult_raw
+        has_partial_price = bool(cost_raw) != bool(mult_raw)
+        if has_partial_price:
+            errors.append(
+                f"Работа №{row_num}: укажите себестоимость и коэффициент вместе "
+                "либо оставьте оба поля пустыми."
+            )
+
         cost = mult = None
-        try:
-            cost = float(cost_raw)
-            if cost < 0:
-                errors.append(f"Работа №{row_num}: себестоимость не может быть отрицательной.")
-        except ValueError:
-            errors.append(f"Работа №{row_num}: себестоимость должна быть числом.")
-        try:
-            mult = float(mult_raw)
-            if mult < 0:
-                errors.append(f"Работа №{row_num}: коэффициент не может быть отрицательным.")
-        except ValueError:
-            errors.append(f"Работа №{row_num}: коэффициент должен быть числом.")
+        if price_pending:
+            # Старые версии схемы требуют числовые значения. Отдельный флаг
+            # отличает ещё не рассчитанную работу от действительно бесплатной.
+            cost = mult = 0.0
+        elif not has_partial_price:
+            try:
+                cost = float(cost_raw)
+                if cost < 0:
+                    errors.append(f"Работа №{row_num}: себестоимость не может быть отрицательной.")
+            except ValueError:
+                errors.append(f"Работа №{row_num}: себестоимость должна быть числом.")
+            try:
+                mult = float(mult_raw)
+                if mult < 0:
+                    errors.append(f"Работа №{row_num}: коэффициент не может быть отрицательным.")
+            except ValueError:
+                errors.append(f"Работа №{row_num}: коэффициент должен быть числом.")
 
         if name and cost is not None and mult is not None:
-            price = cost * mult
+            price = 0.0 if price_pending else cost * mult
             item_id_raw = _get(item_ids, i).strip()
             items.append({
                 "item_id": int(item_id_raw) if item_id_raw.isdigit() else None,
                 "work_name": name, "cost_price": cost, "multiplier": mult, "price": price,
+                "price_pending": price_pending,
             })
             subtotal += price
 
@@ -4350,7 +4369,8 @@ def _recompute_order_totals(db, order_id):
     # A "Задача снята" work item stays in the table (for the record) but no
     # longer counts toward what the client owes.
     work_subtotal = db.execute(
-        "SELECT COALESCE(SUM(price), 0) AS s FROM tuning_order_items WHERE order_id = ? AND status != 'removed'",
+        "SELECT COALESCE(SUM(price), 0) AS s FROM tuning_order_items "
+        "WHERE order_id = ? AND status != 'removed' AND COALESCE(price_pending, 0) = 0",
         (order_id,),
     ).fetchone()["s"]
     goods_subtotal = db.execute(
@@ -4555,12 +4575,14 @@ def _build_act_pdf(order, items, goods=()):
         flow.append(Paragraph("Работы", style_section))
     table_data = [["№", "Наименование работы", "Цена", "Кол-во", "Ед. изм.", "Сумма"]]
     for i, item in enumerate(items, start=1):
-        price_str = f"{item['price']:.2f}".replace(".", ",")
+        price_pending = "price_pending" in item.keys() and bool(item["price_pending"])
+        price_str = "Ждёт расчёта" if price_pending else f"{item['price']:.2f}".replace(".", ",")
         table_data.append([
             str(i), Paragraph(item["work_name"], style_cell),
             price_str, "1", "шт", price_str,
         ])
-        total_sum += item["price"]
+        if not price_pending:
+            total_sum += item["price"]
     table_data.append([
         "", "", "", f"{len(items):.2f}".replace(".", ","), "Итого:",
         f"{total_sum:.2f}".replace(".", ","),
@@ -4752,12 +4774,14 @@ def _build_handover_act_pdf(order, items, goods=()):
         flow.append(Paragraph("Работы", style_section))
     table_data = [["№", "Наименование работы", "Цена", "Кол-во", "Ед. изм.", "Сумма"]]
     for i, item in enumerate(items, start=1):
-        price_str = f"{item['price']:.2f}".replace(".", ",")
+        price_pending = "price_pending" in item.keys() and bool(item["price_pending"])
+        price_str = "Ждёт расчёта" if price_pending else f"{item['price']:.2f}".replace(".", ",")
         table_data.append([
             str(i), Paragraph(item["work_name"], style_cell),
             price_str, "1", "шт", price_str,
         ])
-        total_sum += item["price"]
+        if not price_pending:
+            total_sum += item["price"]
     table_data.append([
         "", "", "", f"{len(items):.2f}".replace(".", ","), "Итого:",
         f"{total_sum:.2f}".replace(".", ","),
@@ -5938,10 +5962,11 @@ def add_tuning_order():
     order_id = cur.lastrowid
     for item in data["items"]:
         db.execute(
-            "INSERT INTO tuning_order_items (order_id, work_name, cost_price, multiplier, price, status) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO tuning_order_items "
+            "(order_id, work_name, cost_price, multiplier, price, price_pending, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (order_id, item["work_name"], item["cost_price"], item["multiplier"], item["price"],
-             DEFAULT_WORK_STATUS),
+             int(item["price_pending"]), DEFAULT_WORK_STATUS),
         )
     db.execute(
         "INSERT INTO projects (name, tuning_order_id, created_at) VALUES (?, ?, ?)",
@@ -6398,15 +6423,18 @@ def edit_tuning_order(order_id):
     for item in data["items"]:
         if item["item_id"] in existing_ids:
             db.execute(
-                "UPDATE tuning_order_items SET work_name=?, cost_price=?, multiplier=?, price=? WHERE id=?",
-                (item["work_name"], item["cost_price"], item["multiplier"], item["price"], item["item_id"]),
+                "UPDATE tuning_order_items SET work_name=?, cost_price=?, multiplier=?, price=?, "
+                "price_pending=? WHERE id=?",
+                (item["work_name"], item["cost_price"], item["multiplier"], item["price"],
+                 int(item["price_pending"]), item["item_id"]),
             )
         else:
             db.execute(
-                "INSERT INTO tuning_order_items (order_id, work_name, cost_price, multiplier, price, status) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO tuning_order_items "
+                "(order_id, work_name, cost_price, multiplier, price, price_pending, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (order_id, item["work_name"], item["cost_price"], item["multiplier"], item["price"],
-                 DEFAULT_WORK_STATUS),
+                 int(item["price_pending"]), DEFAULT_WORK_STATUS),
             )
     _sync_tuning_boat_profiles(db)
     db.commit()
@@ -6877,7 +6905,7 @@ def _render_client_dashboard(db, client, viewer_role, client_section=TUNING_SEGM
             payments = []
             paid_amount = payment_total["total"]
             remaining = max(0.0, o["total"] - paid_amount)
-        item_columns = "id, work_name, price, status"
+        item_columns = "id, work_name, price, price_pending, status"
         if is_admin_view:
             item_columns += ", cost_price, multiplier"
         items = db.execute(
@@ -10694,11 +10722,12 @@ def _item_profitability(db, order_id):
             (item["id"],),
         ).fetchone()["expense"]
         tx_expense = tx_expense_direct + tx_expense_split
-        price = item["price"] if item["status"] != "removed" else 0.0
+        price_pending = bool(item["price_pending"])
+        price = item["price"] if item["status"] != "removed" and not price_pending else 0.0
         profit = price - materials_expense - tx_expense
         result.append({
             "item": item, "price": price, "materials_expense": materials_expense,
-            "tx_expense": tx_expense, "profit": profit,
+            "tx_expense": tx_expense, "profit": profit, "price_pending": price_pending,
         })
     return result
 

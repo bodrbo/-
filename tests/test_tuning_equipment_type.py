@@ -100,6 +100,60 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertEqual(motor["motor_model"], "Suzuki DF200")
         self.assertEqual(motor["motor_serial_number"], "SN-200-77")
 
+    def test_work_can_be_saved_without_price_and_calculated_later(self):
+        self.login()
+        pending_form = self.valid_form()
+        pending_form.setlist("work_name[]", ["Ремонт после диагностики"])
+        pending_form.setlist("cost_price[]", [""])
+        pending_form.setlist("multiplier[]", [""])
+
+        response = self.client.post("/tuning/add", data=pending_form)
+
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            order = db.execute("SELECT * FROM tuning_orders").fetchone()
+            item = db.execute(
+                "SELECT * FROM tuning_order_items WHERE order_id = ?", (order["id"],)
+            ).fetchone()
+            self.assertEqual(item["price_pending"], 1)
+            self.assertEqual(item["price"], 0)
+            self.assertEqual(order["subtotal"], 0)
+            self.assertEqual(order["total"], 0)
+
+        edit_page = self.client.get(f"/tuning/edit/{order['id']}")
+        self.assertIn("Ждёт расчёта", edit_page.get_data(as_text=True))
+
+        calculated_form = self.valid_form()
+        calculated_form.setlist("work_name[]", ["Ремонт после диагностики"])
+        calculated_form.setlist("cost_price[]", ["1500"])
+        calculated_form.setlist("multiplier[]", ["2"])
+        calculated_form.setlist("item_id[]", [str(item["id"])])
+        response = self.client.post(f"/tuning/edit/{order['id']}", data=calculated_form)
+
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            updated_order = db.execute(
+                "SELECT subtotal, total FROM tuning_orders WHERE id = ?", (order["id"],)
+            ).fetchone()
+            updated_item = db.execute(
+                "SELECT price, price_pending FROM tuning_order_items WHERE id = ?", (item["id"],)
+            ).fetchone()
+            self.assertEqual(updated_item["price_pending"], 0)
+            self.assertEqual(updated_item["price"], 3000)
+            self.assertEqual(updated_order["subtotal"], 3000)
+            self.assertEqual(updated_order["total"], 3000)
+
+    def test_work_price_requires_both_cost_and_multiplier_or_neither(self):
+        form = self.valid_form()
+        form.setlist("multiplier[]", [""])
+
+        errors, data = application_module._process_tuning_form(form)
+
+        self.assertIsNone(data)
+        self.assertTrue(any("вместе" in error for error in errors))
+
     def test_conditional_model_validation(self):
         boat_errors, _ = application_module._process_tuning_form(
             self.valid_form("boat", boat_model="", motor_model="Yamaha F150")
@@ -714,6 +768,12 @@ class TuningEquipmentTypeTests(unittest.TestCase):
             "(model_key, model_name, created_at, updated_at) "
             "VALUES ('legacy boat', 'Legacy Boat', '2026-01-01', '2026-01-01')"
         )
+        connection.execute(
+            "CREATE TABLE tuning_order_items ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, "
+            "work_name TEXT NOT NULL, cost_price REAL NOT NULL, multiplier REAL NOT NULL, "
+            "price REAL NOT NULL, status TEXT NOT NULL DEFAULT 'pending')"
+        )
         connection.commit()
         connection.close()
 
@@ -728,10 +788,16 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         profile = migrated.execute(
             "SELECT model_name, equipment_type FROM tuning_boat_profiles"
         ).fetchone()
+        item_columns = {
+            column[1]: column for column in migrated.execute(
+                "PRAGMA table_info(tuning_order_items)"
+            ).fetchall()
+        }
         migrated.close()
 
         self.assertEqual(row, ("boat", "Legacy Boat", "", "", "", "2026-01-01"))
         self.assertEqual(profile, ("Legacy Boat", "boat"))
+        self.assertIn("price_pending", item_columns)
 
 
 if __name__ == "__main__":

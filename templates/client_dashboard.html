@@ -192,10 +192,12 @@
                 <tr class="{{ 'row-pending' if item.status == 'pending' else 'row-removed' if item.status == 'removed' }}">
                   <td>{{ item.work_name }}</td>
                   {% if is_admin_view %}
-                  <td class="amount client-admin-cost">{{ item.cost_price|money }}</td>
-                  <td class="client-admin-multiplier">× {{ item.multiplier|float|round(2) }}</td>
+                  <td class="amount client-admin-cost">{{ item.cost_price|money if not item.price_pending else '—' }}</td>
+                  <td class="client-admin-multiplier">{{ ('× ' ~ (item.multiplier|float|round(2))) if not item.price_pending else '—' }}</td>
                   {% endif %}
-                  <td class="amount">{{ item.price|money }}</td>
+                  <td class="amount{{ ' work-price-pending' if item.price_pending }}">
+                    {{ (item.price|money ~ ' ₽') if not item.price_pending else 'Ждёт расчёта' }}
+                  </td>
                   <td><span class="status-badge status-{{ item.status }}">{{ item.status|work_status_label }}</span></td>
                   <td class="row-actions">
                     {% set photos = work_photos_by_item.get(item.id, []) %}
