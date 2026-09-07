@@ -202,7 +202,7 @@
           // reflect — refetch the table fragment so it's not left stale.
           if (form.hasAttribute("data-ajax-refresh")) {
             if (!r.ok) throw new Error();
-            loadTransactions(paramsFromInputs(), false);
+            loadTransactions(paramsFromInputs(currentPage()), false);
           }
         }).catch(function () {
           alert("Не удалось выполнить действие. Попробуйте ещё раз.");
@@ -211,11 +211,18 @@
     });
   }
 
-  function paramsFromInputs() {
+  function paramsFromInputs(page) {
     var parts = [];
     if (startInput.value) parts.push("start=" + encodeURIComponent(startInput.value));
     if (endInput.value) parts.push("end=" + encodeURIComponent(endInput.value));
+    if (page && page > 1) parts.push("page=" + encodeURIComponent(page));
     return parts.join("&");
+  }
+
+  function currentPage() {
+    var raw = new URLSearchParams(location.search).get("page") || "1";
+    var page = parseInt(raw, 10);
+    return page > 0 ? page : 1;
   }
 
   function loadTransactions(params, push) {
@@ -231,7 +238,7 @@
         container.innerHTML = html;
         if (window.initTableFilters) window.initTableFilters(container);
         wireAjaxForms(container);
-        if (resetLink) resetLink.classList.toggle("hidden", !params);
+        if (resetLink) resetLink.classList.toggle("hidden", !startInput.value && !endInput.value);
         if (push) history.pushState({params: params}, "", "/analytics" + query);
       })
       .catch(function () {
@@ -254,6 +261,14 @@
       loadTransactions("", true);
     }, true);
   }
+
+  container.addEventListener("click", function (e) {
+    var link = e.target.closest("a[data-transactions-page]");
+    if (!link) return;
+    e.preventDefault();
+    var target = new URL(link.href, location.origin);
+    loadTransactions(target.search.replace(/^\?/, ""), true);
+  }, true);
 
   window.addEventListener("popstate", function () {
     var params = new URLSearchParams(location.search);

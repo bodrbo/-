@@ -958,6 +958,7 @@ CLIENT_STATUSES = [
 ]
 DEFAULT_CLIENT_STATUS = "neutral"
 CLIENT_DIRECTORY_PAGE_SIZE = 20
+ANALYTICS_TRANSACTION_PAGE_SIZE = 20
 
 WORK_STATUSES = [
     {"value": "pending", "label": "На согласовании"},
@@ -1956,6 +1957,10 @@ def init_db():
         # bank data (should stay in sync with the statement, not be
         # hand-edited or deleted here).
         conn.execute("ALTER TABLE bank_transactions ADD COLUMN source TEXT NOT NULL DEFAULT 'tbank'")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_bank_transactions_date_id "
+        "ON bank_transactions (operation_date DESC, id DESC)"
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tbank_payout_registries (
@@ -10416,54 +10421,74 @@ def _parse_date_filter():
     return filter_start, filter_end
 
 
-def _fetch_filtered_transactions(db, filter_start, filter_end):
-    if filter_start or filter_end:
-        # An explicit date range means the admin is deliberately looking
-        # for something specific (possibly months back) rather than just
-        # the recent activity the default view covers — a much higher cap
-        # than the default 200, just as a sanity limit against an
-        # accidentally huge range, not a real-world ceiling.
-        # operation_date isn't stored in one consistent shape (plain
-        # "YYYY-MM-DD" from manual entry vs "YYYY-MM-DDTHH:MM:SSZ" from the
-        # Т-Банк import) — comparing only the first 10 characters sidesteps
-        # that entirely instead of guessing a time suffix to compare
-        # against (e.g. a literal "T" sorts after a space, which would
-        # wrongly exclude same-day ISO-with-time rows from the end bound).
-        conditions = []
-        params = []
-        if filter_start:
-            conditions.append("substr(operation_date, 1, 10) >= ?")
-            params.append(filter_start)
-        if filter_end:
-            conditions.append("substr(operation_date, 1, 10) <= ?")
-            params.append(filter_end)
-        transactions = db.execute(
-            f"SELECT * FROM bank_transactions WHERE {' AND '.join(conditions)} "
-            "ORDER BY operation_date DESC, id DESC LIMIT 1000",
-            params,
+def _fetch_filtered_transactions(db, filter_start, filter_end, requested_page):
+    # operation_date can be a plain date or an ISO timestamp. An exclusive
+    # next-day upper boundary includes both forms from the selected final
+    # day while keeping the comparison usable by the date index.
+    conditions = []
+    params = []
+    if filter_start:
+        conditions.append("operation_date >= ?")
+        params.append(filter_start)
+    if filter_end:
+        end_exclusive = (
+            dt.date.fromisoformat(filter_end) + dt.timedelta(days=1)
+        ).isoformat()
+        conditions.append("operation_date < ?")
+        params.append(end_exclusive)
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+
+    total_count = db.execute(
+        "SELECT COUNT(*) AS count FROM bank_transactions" + where,
+        params,
+    ).fetchone()["count"]
+    total_pages = max(
+        1,
+        (total_count + ANALYTICS_TRANSACTION_PAGE_SIZE - 1)
+        // ANALYTICS_TRANSACTION_PAGE_SIZE,
+    )
+    page = min(max(1, requested_page), total_pages)
+    offset = (page - 1) * ANALYTICS_TRANSACTION_PAGE_SIZE
+    transactions = db.execute(
+        "SELECT * FROM bank_transactions" + where
+        + " ORDER BY operation_date DESC, id DESC LIMIT ? OFFSET ?",
+        [*params, ANALYTICS_TRANSACTION_PAGE_SIZE, offset],
+    ).fetchall()
+
+    transaction_ids = [row["id"] for row in transactions]
+    if transaction_ids:
+        placeholders = ",".join("?" for _ in transaction_ids)
+        split_rows = db.execute(
+            "SELECT ts.transaction_id, ts.amount, projects.name AS project_name, "
+            "tuning_order_items.work_name AS item_name "
+            "FROM transaction_splits ts JOIN projects ON projects.id = ts.project_id "
+            "LEFT JOIN tuning_order_items ON tuning_order_items.id = ts.item_id "
+            f"WHERE ts.transaction_id IN ({placeholders}) ORDER BY ts.id",
+            transaction_ids,
         ).fetchall()
     else:
-        transactions = db.execute(
-            "SELECT * FROM bank_transactions ORDER BY operation_date DESC, id DESC LIMIT 200"
-        ).fetchall()
-    split_rows = db.execute(
-        "SELECT ts.transaction_id, ts.amount, projects.name AS project_name, "
-        "tuning_order_items.work_name AS item_name "
-        "FROM transaction_splits ts JOIN projects ON projects.id = ts.project_id "
-        "LEFT JOIN tuning_order_items ON tuning_order_items.id = ts.item_id "
-        "ORDER BY ts.id"
-    ).fetchall()
+        split_rows = []
     splits_by_transaction = {}
     for s in split_rows:
         splits_by_transaction.setdefault(s["transaction_id"], []).append(
             {"project_name": s["project_name"], "amount": s["amount"], "item_name": s["item_name"]}
         )
-    return transactions, splits_by_transaction
+    return transactions, splits_by_transaction, total_count, page, total_pages
 
 
 def _transactions_table_context(db):
     filter_start, filter_end = _parse_date_filter()
-    transactions, splits_by_transaction = _fetch_filtered_transactions(db, filter_start, filter_end)
+    raw_page = request.args.get("page", "1").strip()
+    requested_page = int(raw_page) if raw_page.isdigit() else 1
+    (
+        transactions,
+        splits_by_transaction,
+        total_count,
+        page,
+        total_pages,
+    ) = _fetch_filtered_transactions(
+        db, filter_start, filter_end, requested_page
+    )
     projects = db.execute(
         "SELECT projects.*, tuning_orders.client_name AS client_name, "
         "tuning_orders.boat_model AS boat_model, "
@@ -10475,18 +10500,26 @@ def _transactions_table_context(db):
         "ORDER BY projects.created_at DESC, projects.id DESC"
     ).fetchall()
     # Actions on a row (assign project, save purpose, split) redirect back
-    # here afterwards — carry the active date filter along in that "next"
-    # URL, or it silently resets to the unfiltered view on every single
-    # action, forcing the admin to re-apply it each time.
+    # here afterwards — carry the active date filter and page in that
+    # "next" URL so an edit does not return the admin to the beginning.
     current_url = url_for(
         "analytics_index",
         start=filter_start or None, end=filter_end or None,
+        page=page if page > 1 else None,
     )
+    page_first = (page - 1) * ANALYTICS_TRANSACTION_PAGE_SIZE + 1 if total_count else 0
+    page_last = min(page * ANALYTICS_TRANSACTION_PAGE_SIZE, total_count)
     return {
         "transactions": transactions, "projects": projects,
         "splits_by_transaction": splits_by_transaction, "current_url": current_url,
         "filter_start": filter_start, "filter_end": filter_end,
         "items_by_project": _items_by_project(db),
+        "transaction_count": total_count,
+        "transaction_page": page,
+        "transaction_total_pages": total_pages,
+        "transaction_page_first": page_first,
+        "transaction_page_last": page_last,
+        "transaction_pagination_items": _client_pagination_items(page, total_pages),
     }
 
 

@@ -1,9 +1,6 @@
-{% if filter_start or filter_end %}
-<p class="hint">Показаны транзакции за выбранный период (до 1000). Без фильтра по датам показываются последние 200.</p>
-{% endif %}
 {% if transactions %}
 <div class="table-search">
-  <input type="search" placeholder="Поиск по контрагенту или назначению платежа…"
+  <input type="search" placeholder="Поиск среди транзакций на этой странице…"
          data-filter-table="#transactions-table" aria-label="Поиск по транзакциям">
 </div>
 <div class="table-scroll">
@@ -89,12 +86,46 @@
   </table>
 </div>
 <p id="transactions-table-no-results" class="hint hidden">Ничего не найдено.</p>
+<nav class="transactions-pagination" aria-label="Страницы транзакций">
+  <span class="transactions-page-summary">
+    {{ transaction_page_first }}–{{ transaction_page_last }} из {{ transaction_count }}
+    {% if filter_start or filter_end %}<small>за выбранный период</small>{% endif %}
+  </span>
+  {% if transaction_total_pages > 1 %}
+  <div class="transactions-page-links">
+    {% if transaction_page > 1 %}
+    <a href="{{ url_for('analytics_index', start=filter_start or none, end=filter_end or none, page=transaction_page - 1) }}"
+       data-transactions-page aria-label="Предыдущая страница">←</a>
+    {% else %}
+    <span class="disabled" aria-hidden="true">←</span>
+    {% endif %}
+    {% for page_number in transaction_pagination_items %}
+      {% if page_number is none %}
+      <span class="ellipsis" aria-hidden="true">…</span>
+      {% elif page_number == transaction_page %}
+      <span class="current" aria-current="page">{{ page_number }}</span>
+      {% else %}
+      <a href="{{ url_for('analytics_index', start=filter_start or none, end=filter_end or none, page=page_number) }}"
+         data-transactions-page aria-label="Страница {{ page_number }}">{{ page_number }}</a>
+      {% endif %}
+    {% endfor %}
+    {% if transaction_page < transaction_total_pages %}
+    <a href="{{ url_for('analytics_index', start=filter_start or none, end=filter_end or none, page=transaction_page + 1) }}"
+       data-transactions-page aria-label="Следующая страница">→</a>
+    {% else %}
+    <span class="disabled" aria-hidden="true">→</span>
+    {% endif %}
+  </div>
+  {% endif %}
+</nav>
 {% else %}
 <div class="empty-state">
   <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-  <div class="t">Транзакций пока нет</div>
+  <div class="t">{{ 'Транзакции не найдены' if filter_start or filter_end else 'Транзакций пока нет' }}</div>
   <div class="s">
-    {% if tbank_configured %}
+    {% if filter_start or filter_end %}
+    Измените период или сбросьте фильтр.
+    {% elif tbank_configured %}
     Здесь появится выписка по счёту, как только заработает выгрузка из Т-Банка.
     {% else %}
     Подключите Т-Банк (см. подсказку выше), чтобы начать загружать выписку.
