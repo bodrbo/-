@@ -171,6 +171,87 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertNotIn("Сумма по всем заказам", html)
         self.assertIn("Новая заявка · Предварительный расчёт · В работе", html)
 
+    def test_orders_dashboard_filters_list_and_totals_by_business_date(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            for client_name, order_date, status, total in (
+                ("Клиент до периода", "2026-05-31", "done", 9000),
+                ("Клиент начало периода", "2026-06-01", "new_request", 10000),
+                ("Клиент конец периода", "2026-06-30", "done", 20000),
+                ("Клиент после периода", "2026-07-01", "in_progress", 30000),
+            ):
+                db.execute(
+                    "INSERT INTO tuning_orders "
+                    "(client_name, boat_model, sale_channel, phone, subtotal, total, "
+                    "status, order_date, created_at, updated_at) "
+                    "VALUES (?, ?, 'direct', '', ?, ?, ?, ?, "
+                    "'2026-09-07 10:00', '2026-09-07 10:00')",
+                    (
+                        client_name,
+                        "Лодка фильтра " + order_date,
+                        total,
+                        total,
+                        status,
+                        order_date,
+                    ),
+                )
+            db.commit()
+
+        self.login()
+        response = self.client.get(
+            "/tuning?date_from=2026-06-01&date_to=2026-06-30"
+        )
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Клиент до периода", html)
+        self.assertIn("Клиент начало периода", html)
+        self.assertIn("Клиент конец периода", html)
+        self.assertNotIn("Клиент после периода", html)
+        self.assertIn('name="date_from" value="2026-06-01"', html)
+        self.assertIn('name="date_to" value="2026-06-30"', html)
+        self.assertRegex(
+            html,
+            r'<span class="k">Заказов за период</span>\s*'
+            r'<span class="v">2</span>',
+        )
+        self.assertRegex(
+            html,
+            r'<span class="k">Сумма активных заказов</span>\s*'
+            r'<span class="v">10 000,00 ₽</span>',
+        )
+        self.assertRegex(
+            html,
+            r'<span class="k">Сумма выполненных заказов</span>\s*'
+            r'<span class="v">20 000,00 ₽</span>',
+        )
+        self.assertIn('href="/tuning" class="btn-secondary">Сбросить</a>', html)
+
+    def test_orders_dashboard_rejects_reversed_date_period(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO tuning_orders "
+                "(client_name, boat_model, sale_channel, phone, subtotal, total, "
+                "status, order_date, created_at, updated_at) "
+                "VALUES ('Клиент проверки периода', 'Лодка проверки', 'direct', '', "
+                "1000, 1000, 'done', '2026-06-15', "
+                "'2026-09-07 10:00', '2026-09-07 10:00')"
+            )
+            db.commit()
+
+        self.login()
+        html = self.client.get(
+            "/tuning?date_from=2026-07-01&date_to=2026-06-01"
+        ).get_data(as_text=True)
+
+        self.assertIn(
+            "Дата начала периода не может быть позже даты окончания.", html
+        )
+        self.assertIn("Клиент проверки периода", html)
+        self.assertIn('name="date_from" value=""', html)
+        self.assertIn('name="date_to" value=""', html)
+
     def test_creation_form_searches_catalog_and_creates_new_boat_profile(self):
         self.login()
         existing = self.client.post(

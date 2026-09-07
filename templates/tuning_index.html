@@ -78,9 +78,32 @@
   </nav>
 
   {% if sub_page == 'orders' %}
+  {% if date_filter_error %}
+  <div class="alert tuning-orders-date-error">{{ date_filter_error }}</div>
+  {% endif %}
+  <form method="get" action="{{ url_for('tuning_index') }}" class="panel tuning-orders-date-filter">
+    <div class="tuning-orders-date-filter-copy">
+      <strong>Период заказов</strong>
+      <span>Фильтр по дате, указанной в карточке заказа</span>
+    </div>
+    <label for="tuning-orders-date-from">
+      <span>С даты</span>
+      <input type="date" id="tuning-orders-date-from" name="date_from" value="{{ date_from }}">
+    </label>
+    <label for="tuning-orders-date-to">
+      <span>По дату</span>
+      <input type="date" id="tuning-orders-date-to" name="date_to" value="{{ date_to }}">
+    </label>
+    <div class="tuning-orders-date-filter-actions">
+      <button type="submit" class="btn-primary">Показать</button>
+      {% if date_filter_active %}
+      <a href="{{ url_for('tuning_index') }}" class="btn-secondary">Сбросить</a>
+      {% endif %}
+    </div>
+  </form>
   <div class="totals-grid">
     <div class="panel total-card total-card-grand">
-      <span class="k">Заказов всего</span>
+      <span class="k">{{ 'Заказов за период' if date_filter_active else 'Заказов всего' }}</span>
       <span class="v">{{ orders|length }}</span>
     </div>
     <div class="panel total-card total-card-grand">

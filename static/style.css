@@ -5288,6 +5288,49 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 .btn-pay:hover { background: var(--brass-strong); }
 
 /* --- totals / dashboard cards --- */
+.tuning-orders-date-error { margin-bottom: 14px; }
+.tuning-orders-date-filter {
+  display: grid;
+  grid-template-columns: minmax(210px, 1fr) 170px 170px auto;
+  align-items: end;
+  gap: 12px;
+  padding: 14px 18px;
+  margin-bottom: 14px;
+}
+.tuning-orders-date-filter-copy {
+  align-self: center;
+  min-width: 0;
+}
+.tuning-orders-date-filter-copy strong,
+.tuning-orders-date-filter-copy span,
+.tuning-orders-date-filter label > span {
+  display: block;
+}
+.tuning-orders-date-filter-copy strong { font-size: 14px; }
+.tuning-orders-date-filter-copy span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+.tuning-orders-date-filter label > span {
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.tuning-orders-date-filter input { width: 100%; min-height: 40px; }
+.tuning-orders-date-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tuning-orders-date-filter-actions .btn-primary,
+.tuning-orders-date-filter-actions .btn-secondary {
+  min-height: 40px;
+  margin: 0;
+}
 .totals-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
@@ -5329,6 +5372,20 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 .total-card-grand .k { color: var(--brass-strong); }
 .total-card-grand .v { color: #eaf4fc; }
 .total-card-grand .d { color: rgba(234, 244, 252, .68); }
+
+@media (max-width: 850px) {
+  .tuning-orders-date-filter {
+    grid-template-columns: minmax(190px, 1fr) 150px 150px;
+  }
+  .tuning-orders-date-filter-actions { grid-column: 1 / -1; }
+}
+
+@media (max-width: 560px) {
+  .tuning-orders-date-filter { grid-template-columns: 1fr 1fr; }
+  .tuning-orders-date-filter-copy,
+  .tuning-orders-date-filter-actions { grid-column: 1 / -1; }
+  .tuning-orders-date-filter-actions > * { flex: 1; text-align: center; }
+}
 
 .checklist-buttons {
   display: grid;

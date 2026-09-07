@@ -4948,8 +4948,37 @@ def tuning_index():
     db = get_db()
     _sync_tuning_boat_profiles(db)
     db.commit()
+    date_from = request.args.get("date_from", "").strip()
+    date_to = request.args.get("date_to", "").strip()
+    date_filter_error = None
+    for value, label in ((date_from, "начала"), (date_to, "окончания")):
+        if not value:
+            continue
+        try:
+            dt.date.fromisoformat(value)
+        except ValueError:
+            date_filter_error = f"Некорректная дата {label} периода."
+            if label == "начала":
+                date_from = ""
+            else:
+                date_to = ""
+    if date_from and date_to and date_from > date_to:
+        date_filter_error = "Дата начала периода не может быть позже даты окончания."
+        date_from = ""
+        date_to = ""
+
+    conditions = []
+    params = []
+    if date_from:
+        conditions.append("order_date >= ?")
+        params.append(date_from)
+    if date_to:
+        conditions.append("order_date <= ?")
+        params.append(date_to)
+    where = " WHERE " + " AND ".join(conditions) if conditions else ""
     order_rows = db.execute(
-        "SELECT * FROM tuning_orders ORDER BY order_date DESC, id DESC"
+        "SELECT * FROM tuning_orders" + where + " ORDER BY order_date DESC, id DESC",
+        params,
     ).fetchall()
     profile_ids_by_model = {
         row["model_key"]: row["id"]
@@ -4987,6 +5016,10 @@ def tuning_index():
         orders=orders,
         active_orders_total=active_orders_total,
         completed_orders_total=completed_orders_total,
+        date_from=date_from,
+        date_to=date_to,
+        date_filter_active=bool(date_from or date_to),
+        date_filter_error=date_filter_error,
         order_statuses=ORDER_STATUSES,
         active_page="tuning", sub_page="orders",
     )
