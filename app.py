@@ -260,32 +260,38 @@ def _tuning_equipment_profile_key(equipment_type, model_name):
 
 
 def _sync_tuning_boat_profiles(db):
-    """Ensure every non-empty boat or motor model has a catalog profile.
+    """Ensure every non-empty boat and motor model has a catalog profile.
 
     Newest spelling wins when a model does not have a profile yet; once a
     profile exists its display name and manually entered data stay stable.
+    A boat order can contribute two independent profiles: its boat model and
+    the installed motor entered in the separate field.
     """
     seen_keys = set()
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     for row in db.execute(
         "SELECT equipment_type, boat_model, motor_model FROM tuning_orders "
         "WHERE (equipment_type = 'boat' AND TRIM(boat_model) != '') "
-        "OR (equipment_type = 'motor' AND TRIM(motor_model) != '') "
+        "OR TRIM(motor_model) != '' "
         "ORDER BY id DESC"
     ).fetchall():
-        equipment_type = "motor" if row[0] == "motor" else "boat"
-        raw_model = row[2] if equipment_type == "motor" else row[1]
-        model_name = " ".join(raw_model.split())
-        model_key = _tuning_equipment_profile_key(equipment_type, model_name)
-        if not model_key or model_key in seen_keys:
-            continue
-        seen_keys.add(model_key)
-        db.execute(
-            "INSERT OR IGNORE INTO tuning_boat_profiles "
-            "(model_key, model_name, equipment_type, specifications, "
-            "created_at, updated_at) VALUES (?, ?, ?, '', ?, ?)",
-            (model_key, model_name, equipment_type, now, now),
-        )
+        candidates = []
+        if row[0] == "boat" and (row[1] or "").strip():
+            candidates.append(("boat", row[1]))
+        if (row[2] or "").strip():
+            candidates.append(("motor", row[2]))
+        for equipment_type, raw_model in candidates:
+            model_name = " ".join(raw_model.split())
+            model_key = _tuning_equipment_profile_key(equipment_type, model_name)
+            if not model_key or model_key in seen_keys:
+                continue
+            seen_keys.add(model_key)
+            db.execute(
+                "INSERT OR IGNORE INTO tuning_boat_profiles "
+                "(model_key, model_name, equipment_type, specifications, "
+                "created_at, updated_at) VALUES (?, ?, ?, '', ?, ?)",
+                (model_key, model_name, equipment_type, now, now),
+            )
     _seed_tuning_boat_profile_specifications(db)
 
 
@@ -368,12 +374,21 @@ def _tuning_boat_profile_id(db, model_name):
 
 def _tuning_boat_model_choices(db):
     """Canonical display names available to the order-form combobox."""
+    return _tuning_equipment_model_choices(db, "boat")
+
+
+def _tuning_motor_model_choices(db):
+    """Canonical motor names available to boat and motor-only orders."""
+    return _tuning_equipment_model_choices(db, "motor")
+
+
+def _tuning_equipment_model_choices(db, equipment_type):
     return [
         row[0]
         for row in db.execute(
             "SELECT model_name FROM tuning_boat_profiles "
-            "WHERE equipment_type = 'boat' "
-            "ORDER BY model_name COLLATE NOCASE"
+            "WHERE equipment_type = ? ORDER BY model_name COLLATE NOCASE",
+            (equipment_type,),
         ).fetchall()
     ]
 
@@ -386,10 +401,14 @@ def _rename_tuning_boat_profile(db, profile, model_name, updated_at):
     model_column = "motor_model" if equipment_type == "motor" else "boat_model"
 
     order_ids = []
+    where_clause = (
+        "TRIM(motor_model) != ''"
+        if equipment_type == "motor"
+        else "equipment_type = 'boat' AND TRIM(boat_model) != ''"
+    )
     for row in db.execute(
         f"SELECT id, {model_column} AS model_name FROM tuning_orders "
-        "WHERE equipment_type = ?",
-        (equipment_type,),
+        f"WHERE {where_clause}"
     ).fetchall():
         if _tuning_equipment_profile_key(
             equipment_type, row["model_name"]
@@ -3973,9 +3992,8 @@ def _process_tuning_form(form, default_order_date=None):
         boat_model = ""
         boat_registration_number = ""
     else:
-        # A serial number belongs to a motor-only order. A boat order may
-        # still name its installed motor, but that does not make the motor
-        # a separate catalog entity or carry over a stale serial number.
+        # A serial number belongs to a motor-only order. A boat order still
+        # contributes its installed motor model to the shared motor catalog.
         motor_serial_number = ""
     phone = form.get("phone", "").strip()
     raw_client_id = form.get("client_id", "").strip()
@@ -5042,19 +5060,18 @@ def tuning_index():
             ).casefold()
             if not all(word in searchable_text for word in search_words):
                 continue
-        equipment_type = (
-            "motor" if order["equipment_type"] == "motor" else "boat"
-        )
-        model_name = (
-            order["motor_model"] if equipment_type == "motor"
-            else order["boat_model"]
-        )
-        profile_id = profile_ids_by_model.get(
-            _tuning_equipment_profile_key(equipment_type, model_name)
-        )
-        order["equipment_profile_id"] = profile_id
-        order["boat_profile_id"] = profile_id if equipment_type == "boat" else None
-        order["motor_profile_id"] = profile_id if equipment_type == "motor" else None
+        boat_profile_id = None
+        if order["equipment_type"] == "boat" and order["boat_model"]:
+            boat_profile_id = profile_ids_by_model.get(
+                _tuning_equipment_profile_key("boat", order["boat_model"])
+            )
+        motor_profile_id = None
+        if order["motor_model"]:
+            motor_profile_id = profile_ids_by_model.get(
+                _tuning_equipment_profile_key("motor", order["motor_model"])
+            )
+        order["boat_profile_id"] = boat_profile_id
+        order["motor_profile_id"] = motor_profile_id
         orders.append(order)
     active_orders_total = sum(
         order["total"]
@@ -5399,14 +5416,17 @@ def _render_tuning_equipment_catalog(equipment_type):
     db.commit()
     model_column = "motor_model" if equipment_type == "motor" else "boat_model"
 
+    order_scope = (
+        "TRIM(o.motor_model) != ''"
+        if equipment_type == "motor"
+        else "o.equipment_type = 'boat' AND TRIM(o.boat_model) != ''"
+    )
     order_rows = db.execute(
         "SELECT o.*, "
         "(SELECT GROUP_CONCAT(i.work_name, ' · ') FROM tuning_order_items i "
         " WHERE i.order_id = o.id AND i.status != 'removed') AS work_names "
-        f"FROM tuning_orders o WHERE o.equipment_type = ? "
-        f"AND TRIM(o.{model_column}) != '' "
-        "ORDER BY o.order_date DESC, o.id DESC",
-        (equipment_type,),
+        f"FROM tuning_orders o WHERE {order_scope} "
+        "ORDER BY o.order_date DESC, o.id DESC"
     ).fetchall()
     orders_by_model = {}
     for row in order_rows:
@@ -5474,14 +5494,17 @@ def _render_tuning_equipment_profile(profile_id, expected_type):
     )
     model_column = "motor_model" if expected_type == "motor" else "boat_model"
     orders = []
+    order_scope = (
+        "TRIM(o.motor_model) != ''"
+        if expected_type == "motor"
+        else "o.equipment_type = 'boat' AND TRIM(o.boat_model) != ''"
+    )
     for row in db.execute(
         "SELECT o.*, "
         "(SELECT GROUP_CONCAT(i.work_name, ' · ') FROM tuning_order_items i "
         " WHERE i.order_id = o.id AND i.status != 'removed') AS work_names "
-        "FROM tuning_orders o WHERE o.equipment_type = ? "
-        f"AND TRIM(o.{model_column}) != '' "
-        "ORDER BY o.order_date DESC, o.id DESC",
-        (expected_type,),
+        f"FROM tuning_orders o WHERE {order_scope} "
+        "ORDER BY o.order_date DESC, o.id DESC"
     ).fetchall():
         if _tuning_equipment_profile_key(
             expected_type, row[model_column]
@@ -5928,6 +5951,7 @@ def add_tuning_order():
             items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
             today=dt.date.today().isoformat(),
             boat_model_choices=_tuning_boat_model_choices(db),
+            motor_model_choices=_tuning_motor_model_choices(db),
             tuning_client_choices=_tuning_client_choices(db),
         )
 
@@ -5939,6 +5963,7 @@ def add_tuning_order():
             items_prefill=None, sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
             today=dt.date.today().isoformat(),
             boat_model_choices=_tuning_boat_model_choices(db),
+            motor_model_choices=_tuning_motor_model_choices(db),
             tuning_client_choices=_tuning_client_choices(db),
         ), 400
 
@@ -6265,18 +6290,14 @@ def edit_tuning_order(order_id):
         return redirect(url_for("tuning_index"))
     _sync_tuning_boat_profiles(db)
     db.commit()
-    equipment_profile_id = _tuning_equipment_profile_id(
-        db,
-        order["equipment_type"],
-        order["motor_model"]
-        if order["equipment_type"] == "motor"
-        else order["boat_model"],
-    )
     boat_profile_id = (
-        equipment_profile_id if order["equipment_type"] == "boat" else None
+        _tuning_equipment_profile_id(db, "boat", order["boat_model"])
+        if order["equipment_type"] == "boat" and order["boat_model"]
+        else None
     )
     motor_profile_id = (
-        equipment_profile_id if order["equipment_type"] == "motor" else None
+        _tuning_equipment_profile_id(db, "motor", order["motor_model"])
+        if order["motor_model"] else None
     )
 
     if request.method == "GET":
@@ -6350,6 +6371,7 @@ def edit_tuning_order(order_id):
             boat_profile_id=boat_profile_id,
             motor_profile_id=motor_profile_id,
             boat_model_choices=_tuning_boat_model_choices(db),
+            motor_model_choices=_tuning_motor_model_choices(db),
             tuning_client_choices=_tuning_client_choices(db),
             modulkassa_configured=_modulkassa_configured(),
         )
@@ -6380,6 +6402,7 @@ def edit_tuning_order(order_id):
             boat_profile_id=boat_profile_id,
             motor_profile_id=motor_profile_id,
             boat_model_choices=_tuning_boat_model_choices(db),
+            motor_model_choices=_tuning_motor_model_choices(db),
             tuning_client_choices=_tuning_client_choices(db),
             modulkassa_configured=_modulkassa_configured(),
         ), 400

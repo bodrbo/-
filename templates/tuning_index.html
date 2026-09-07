@@ -194,7 +194,14 @@
               <span class="equipment-model">{{ o.boat_model }}</span>
               {% endif %}
               {% if o.equipment_type == 'boat' and o.motor_model %}
-              <span class="equipment-motor">Мотор: {{ o.motor_model }}</span>
+              <span class="equipment-motor">Мотор:
+                {% if o.motor_profile_id %}
+                <a href="{{ url_for('tuning_motor_profile', profile_id=o.motor_profile_id) }}"
+                   class="tuning-boat-profile-link">{{ o.motor_model }}</a>
+                {% else %}
+                {{ o.motor_model }}
+                {% endif %}
+              </span>
               {% endif %}
               {% if o.equipment_type == 'boat' and o.boat_registration_number %}
               <span class="equipment-number">Бортовой №: {{ o.boat_registration_number }}</span>

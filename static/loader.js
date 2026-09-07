@@ -366,7 +366,7 @@ initTableFilters();
       form.addEventListener("submit", function (e) {
         if (input.disabled) return;
         if (allowCustom) hidden.value = input.value.trim();
-        if (!hidden.value) {
+        if (!hidden.value && (!wrap.hasAttribute("data-combo-optional") || input.required)) {
           e.preventDefault();
           input.classList.add("combo-input-error");
           input.focus();

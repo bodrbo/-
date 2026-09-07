@@ -677,17 +677,32 @@
         </div>
         <div class="field" id="motorModelField">
           <div class="field-label-with-link">
-            <label for="motor_model" id="motorModelLabel">{{ 'Модель мотора' if selected_equipment_type == 'motor' else 'Мотор' }}</label>
-            {% if motor_profile_id and selected_equipment_type == 'motor' %}
+            <label for="motor_model_search" id="motorModelLabel">{{ 'Модель мотора' if selected_equipment_type == 'motor' else 'Мотор' }}</label>
+            {% if motor_profile_id %}
             <a href="{{ url_for('tuning_motor_profile', profile_id=motor_profile_id) }}"
                class="tuning-boat-profile-link">Открыть профиль ↗</a>
             {% endif %}
           </div>
-          <input type="text" id="motor_model" name="motor_model"
-                 value="{{ form_values.motor_model if form_values else '' }}"
-                 placeholder="Например: Yamaha F150"
-                 {{ 'required' if selected_equipment_type == 'motor' }}>
-          <span class="field-context" id="motorModelContext">{{ '' if selected_equipment_type == 'motor' else 'Необязательно' }}</span>
+          {% set current_motor_model = form_values.motor_model if form_values else '' %}
+          <div class="combo-field" data-combo data-combo-allow-custom data-combo-optional>
+            <input type="text" id="motor_model_search" class="combo-input" data-combo-input
+                   value="{{ current_motor_model }}" data-selected-label="{{ current_motor_model }}"
+                   placeholder="Начните вводить модель мотора…" autocomplete="off"
+                   role="combobox" aria-autocomplete="list"
+                   {{ 'required' if selected_equipment_type == 'motor' }}>
+            <input type="hidden" id="motor_model" name="motor_model" data-combo-value
+                   value="{{ current_motor_model }}">
+            <div class="combo-dropdown hidden" data-combo-dropdown>
+              <p class="combo-empty hidden" data-combo-empty>Создать новую модель: введённое название будет добавлено в каталог моторов.</p>
+              {% for model in motor_model_choices|default([]) %}
+              <div class="combo-option" data-value="{{ model }}" data-label="{{ model }}"
+                   data-search="{{ model|lower }}">
+                <span class="combo-option-name">{{ model }}</span>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          <span class="field-context" id="motorModelContext">{{ 'Выберите мотор из каталога или введите новую модель.' if selected_equipment_type == 'motor' else 'Необязательно — можно выбрать из каталога или ввести новую модель.' }}</span>
         </div>
         <div class="field" id="motorSerialNumberField" {{ 'hidden' if selected_equipment_type != 'motor' }}>
           <label for="motor_serial_number">Серийный номер</label>
@@ -1012,10 +1027,11 @@ function updateEquipmentFields() {
   var boatInput = document.getElementById('boat_model');
   var boatSearchInput = document.getElementById('boat_model_search');
   var motorInput = document.getElementById('motor_model');
+  var motorSearchInput = document.getElementById('motor_model_search');
   var motorSerialField = document.getElementById('motorSerialNumberField');
   var motorLabel = document.getElementById('motorModelLabel');
   var motorContext = document.getElementById('motorModelContext');
-  if (!boatField || !boatNumberField || !boatInput || !boatSearchInput || !motorInput || !motorSerialField) return;
+  if (!boatField || !boatNumberField || !boatInput || !boatSearchInput || !motorInput || !motorSearchInput || !motorSerialField) return;
 
   boatField.hidden = motorOnly;
   boatNumberField.hidden = motorOnly;
@@ -1023,9 +1039,11 @@ function updateEquipmentFields() {
   boatInput.disabled = motorOnly;
   boatSearchInput.disabled = motorOnly;
   boatSearchInput.required = !motorOnly;
-  motorInput.required = motorOnly;
+  motorSearchInput.required = motorOnly;
   motorLabel.textContent = motorOnly ? 'Модель мотора' : 'Мотор';
-  motorContext.textContent = motorOnly ? '' : 'Необязательно';
+  motorContext.textContent = motorOnly
+    ? 'Выберите мотор из каталога или введите новую модель.'
+    : 'Необязательно — можно выбрать из каталога или ввести новую модель.';
 }
 
 document.addEventListener('DOMContentLoaded', updateOrderTotal);

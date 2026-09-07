@@ -670,7 +670,7 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertTrue(all(row["boat_model"] == "" for row in orders))
         self.assertTrue(all(row["motor_model"] == "Mercury 15" for row in orders))
 
-    def test_boat_profile_keeps_motor_on_order_not_on_model_identity(self):
+    def test_boat_order_creates_independent_boat_and_motor_profiles(self):
         self.login()
         response = self.client.post(
             "/tuning/add",
@@ -685,23 +685,61 @@ class TuningEquipmentTypeTests(unittest.TestCase):
 
         catalog = self.client.get("/tuning/boats")
         catalog_html = catalog.get_data(as_text=True)
+        motor_catalog = self.client.get("/tuning/motors")
+        motor_catalog_html = motor_catalog.get_data(as_text=True)
         with application_module.app.app_context():
             db = application_module.get_db()
-            profiles = db.execute("SELECT * FROM tuning_boat_profiles").fetchall()
+            profiles = {
+                row["equipment_type"]: row
+                for row in db.execute("SELECT * FROM tuning_boat_profiles").fetchall()
+            }
             order = db.execute("SELECT * FROM tuning_orders").fetchone()
 
-        self.assertEqual(len(profiles), 1)
-        self.assertEqual(profiles[0]["model_name"], "Salute 585 HT")
+        self.assertEqual(len(profiles), 2)
+        self.assertEqual(profiles["boat"]["model_name"], "Salute 585 HT")
+        self.assertEqual(profiles["motor"]["model_name"], "Yamaha F150")
+        self.assertEqual(profiles["motor"]["model_key"], "motor:yamaha f150")
         self.assertEqual(order["motor_model"], "Yamaha F150")
         self.assertEqual(order["boat_registration_number"], "Р 55-85 ЛО")
         self.assertIn("Salute 585 HT", catalog_html)
         self.assertNotIn("Yamaha F150", catalog_html)
+        self.assertIn("Yamaha F150", motor_catalog_html)
+        self.assertIn("1 заказов", motor_catalog_html)
 
-        profile = self.client.get(f"/tuning/boats/{profiles[0]['id']}")
+        profile = self.client.get(f"/tuning/boats/{profiles['boat']['id']}")
         profile_html = profile.get_data(as_text=True)
         self.assertIn("Salute 585 HT", profile_html)
         self.assertIn("Yamaha F150", profile_html)
         self.assertIn("Р 55-85 ЛО", profile_html)
+
+        motor_profile_href = f'/tuning/motors/{profiles["motor"]["id"]}'
+        motor_profile = self.client.get(motor_profile_href)
+        self.assertEqual(motor_profile.status_code, 200)
+        self.assertIn(f"№{order['id']}", motor_profile.get_data(as_text=True))
+
+        edit_html = self.client.get(f"/tuning/edit/{order['id']}").get_data(as_text=True)
+        self.assertIn('id="motor_model_search"', edit_html)
+        self.assertIn('data-value="Yamaha F150"', edit_html)
+        self.assertIn(f'href="{motor_profile_href}"', edit_html)
+
+        create_html = self.client.get("/tuning/add").get_data(as_text=True)
+        self.assertIn('data-combo-optional', create_html)
+        self.assertIn('data-value="Yamaha F150"', create_html)
+
+        renamed = self.client.post(
+            f"/tuning/equipment/{profiles['motor']['id']}/edit",
+            data={"model_name": "Yamaha F150 BETX"},
+        )
+        self.assertEqual(renamed.status_code, 302)
+        with application_module.app.app_context():
+            renamed_order = application_module.get_db().execute(
+                "SELECT equipment_type, boat_model, motor_model FROM tuning_orders "
+                "WHERE id = ?",
+                (order["id"],),
+            ).fetchone()
+        self.assertEqual(renamed_order["equipment_type"], "boat")
+        self.assertEqual(renamed_order["boat_model"], "Salute 585 HT")
+        self.assertEqual(renamed_order["motor_model"], "Yamaha F150 BETX")
 
     def test_edit_switches_identifier_fields_with_equipment_type(self):
         self.login()
