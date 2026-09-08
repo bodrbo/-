@@ -3370,6 +3370,111 @@ body.modal-open { overflow: hidden; }
 .modal-box h3 { margin: 0 0 16px 0; font-size: 16px; color: var(--ink); }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
 
+/* Trip editing stays over the filtered analytics list, so a batch of
+   corrections does not bounce the administrator between separate pages. */
+.trip-edit-modal[hidden] { display: none; }
+.trip-edit-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 3200;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.trip-edit-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border: 0;
+  background: rgba(9, 30, 40, .58);
+  backdrop-filter: blur(5px);
+  cursor: default;
+}
+.trip-edit-modal-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  width: min(900px, 100%);
+  max-height: calc(100vh - 40px);
+  border: 1px solid rgba(255, 255, 255, .45);
+  border-radius: 18px;
+  background: var(--paper);
+  box-shadow: 0 28px 80px -24px rgba(4, 23, 33, .72);
+}
+.trip-edit-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px 24px 17px;
+  border-bottom: 1px solid var(--hairline);
+  background: linear-gradient(135deg, #102f3d, #174b61);
+  color: #fff;
+}
+.trip-edit-modal-header span {
+  color: #8ec8e5;
+  font-family: 'PT Mono', monospace;
+  font-size: 9px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.trip-edit-modal-header h2 { margin: 4px 0 0; color: #fff; font-size: 21px; }
+.trip-edit-modal-close {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin: -6px -6px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #fff;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: .82;
+}
+.trip-edit-modal-close:hover,
+.trip-edit-modal-close:focus-visible { background: rgba(255,255,255,.12); opacity: 1; }
+.trip-edit-modal-form {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 22px 24px 24px;
+  overscroll-behavior: contain;
+}
+.trip-edit-modal-form > .alert { flex: 1 1 100%; }
+.trip-edit-modal-form > .form-group { flex-basis: 100%; }
+.trip-edit-expenses { margin-top: 14px; }
+.trip-edit-modal-actions {
+  position: sticky;
+  bottom: -24px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  width: calc(100% + 48px);
+  margin: 4px -24px -24px;
+  padding: 14px 24px 18px;
+  border-top: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, .96);
+  backdrop-filter: blur(8px);
+}
+.trip-edit-modal-actions .btn-secondary { margin: 0; }
+
+@media (max-width: 700px) {
+  .trip-edit-modal { align-items: end; padding: 0; }
+  .trip-edit-modal-card { width: 100%; max-height: 94vh; border-radius: 18px 18px 0 0; }
+  .trip-edit-modal-header { padding: 16px 18px; }
+  .trip-edit-modal-form { padding: 18px; }
+  .trip-edit-modal-actions {
+    bottom: -18px;
+    width: calc(100% + 36px);
+    margin: 4px -18px -18px;
+    padding: 12px 18px 16px;
+  }
+  .trip-edit-modal-actions > * { flex: 1; text-align: center; }
+}
+
 .doc-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
 .doc-item {
   display: flex;

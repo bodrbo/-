@@ -3838,6 +3838,16 @@ def edit_trip(trip_id):
             "fuel_cost": trip["fuel_cost"],
             "mooring_cost": trip["mooring_cost"],
         }
+        if request.args.get("modal") == "1":
+            return jsonify(
+                ok=True,
+                trip=form_values,
+                labor_items=labor_prefill,
+                expenses=[
+                    {"description": expense["description"], "amount": expense["amount"]}
+                    for expense in exps
+                ],
+            )
         ctx = _trips_list_context(db)
         return render_template(
             "trips.html", **ctx, **_trips_common_kwargs(db),
@@ -3848,6 +3858,8 @@ def edit_trip(trip_id):
 
     errors, data = _process_trip_form(db, request.form, exclude_trip_id=trip_id)
     if errors:
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify(ok=False, errors=errors), 400
         ctx = _trips_list_context(db)
         return render_template(
             "trips.html", **ctx, **_trips_common_kwargs(db),
@@ -3897,7 +3909,12 @@ def edit_trip(trip_id):
             (trip_id, desc, amt),
         )
     db.commit()
-    return redirect(url_for("trips_index"))
+    return_url = request.form.get("return_url", "").strip()
+    if return_url != "/trips" and not return_url.startswith("/trips?"):
+        return_url = url_for("trips_index")
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return jsonify(ok=True, redirect_url=return_url)
+    return redirect(return_url)
 
 
 def _delete_trip_data(db, trip_id, *, release_yclients_refs=False):

@@ -35,7 +35,7 @@
   </div>
 </div>
 
-{% macro labor_row(item=None) %}
+{% macro labor_row(item=None, remove_handler='removeLaborRow') %}
 <div class="labor-row">
   <select name="employee[]" class="labor-employee" onchange="handleEmployeeChange(this)" required>
     <option value="" disabled {{ 'selected' if not item or not item.employee }}>Сотрудник</option>
@@ -64,7 +64,7 @@
          value="{{ item.quantity if item else '' }}" required>
   <input type="text" inputmode="decimal" name="rate[]" class="labor-rate" placeholder="Ставка, ₽"
          value="{{ item.rate if item else '' }}" required>
-  <button type="button" class="btn-delete" onclick="removeLaborRow(this)" title="Убрать сотрудника">✕</button>
+  <button type="button" class="btn-delete" onclick="{{ remove_handler }}(this)" title="Убрать сотрудника">✕</button>
 </div>
 {% endmacro %}
 
@@ -622,11 +622,13 @@
                 <td class="amount">{{ t.my_share|money }}</td>
                 <td class="row-actions">
                   {% if not t.is_expense %}
-                  <a href="{{ url_for('edit_trip', trip_id=t.id) }}" class="icon-btn" title="Редактировать">
+                  <button type="button" class="icon-btn" title="Редактировать"
+                          aria-label="Редактировать рейс"
+                          onclick="openTripEditModal({{ t.id }})">
                     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                       <path d="M13.5 3.5l3 3L6 17H3v-3L13.5 3.5z"/>
                     </svg>
-                  </a>
+                  </button>
                   {% endif %}
                   <form action="{{ url_for('delete_trip', trip_id=t.id) }}" method="post"
                         onsubmit="return confirm('{{ 'Удалить этот расход?' if t.is_expense else 'Удалить этот рейс? Связанная запись в зарплатах тоже удалится.' }}');">
@@ -654,6 +656,98 @@
   </details>
 
 </main>
+
+<div class="trip-edit-modal" id="tripEditModal" hidden>
+  <button type="button" class="trip-edit-modal-backdrop" onclick="closeTripEditModal()" aria-label="Закрыть окно редактирования"></button>
+  <section class="trip-edit-modal-card" role="dialog" aria-modal="true" aria-labelledby="tripEditModalTitle">
+    <header class="trip-edit-modal-header">
+      <div>
+        <span>Рейс</span>
+        <h2 id="tripEditModalTitle">Редактировать рейс</h2>
+      </div>
+      <button type="button" class="trip-edit-modal-close" onclick="closeTripEditModal()" aria-label="Закрыть">×</button>
+    </header>
+    <form method="post" class="entry-form trip-edit-modal-form" id="tripEditForm">
+      <input type="hidden" name="return_url"
+             value="{{ url_for('trips_index', month=selected_month, boat=selected_boat) }}">
+      <div class="alert hidden" id="tripEditErrors" role="alert"></div>
+
+      <div class="form-group">
+        <div class="form-group-label"><span class="n">1</span>Рейс</div>
+        <div class="field-row-inner">
+          <div class="field">
+            <label for="edit_boat">Катер</label>
+            <select id="edit_boat" name="boat" required onchange="applyEditBoat(this)">
+              {% for b in boats %}
+              <option value="{{ b.name }}"
+                      data-fuel="{{ b.fuel }}" data-mooring="{{ b.mooring }}"
+                      data-comm-direct="{{ b.commission_direct }}" data-comm-agg="{{ b.commission_aggregator }}">
+                {{ b.name }} ({{ b.investor }})
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field field-narrow">
+            <label for="edit_trip_date">Дата рейса</label>
+            <input type="date" id="edit_trip_date" name="trip_date" required>
+          </div>
+          <div class="field field-narrow">
+            <label for="edit_trip_time">Время старта</label>
+            <input type="time" id="edit_trip_time" name="trip_time" required>
+          </div>
+          <div class="field">
+            <label for="edit_sale_channel">Канал продажи</label>
+            <select id="edit_sale_channel" name="sale_channel" onchange="applyEditChannelDefault()">
+              {% for c in sale_channels %}<option value="{{ c.value }}">{{ c.label }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="field field-narrow">
+            <label for="edit_commission_pct">Комиссия, %</label>
+            <input type="text" inputmode="decimal" id="edit_commission_pct" name="commission_pct" required>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <div class="form-group-label"><span class="n">2</span>Экипаж на рейсе</div>
+        <div class="field-wide">
+          <label>Капитан, гид — можно добавить несколько</label>
+          <div id="edit-labor-container"></div>
+          <button type="button" class="btn-add" onclick="addEditLaborRow()">Добавить сотрудника</button>
+        </div>
+        <template id="edit-labor-row-template">{{ labor_row(None, 'removeEditLaborRow') }}</template>
+      </div>
+
+      <div class="form-group">
+        <div class="form-group-label"><span class="n">3</span>Финансы рейса</div>
+        <div class="field-row-inner">
+          <div class="field field-narrow">
+            <label for="edit_revenue">Доход рейса, ₽</label>
+            <input type="text" inputmode="decimal" id="edit_revenue" name="revenue" required>
+          </div>
+          <div class="field field-narrow">
+            <label for="edit_fuel_cost">Топливо, ₽</label>
+            <input type="text" inputmode="decimal" id="edit_fuel_cost" name="fuel_cost" required>
+          </div>
+          <div class="field field-narrow">
+            <label for="edit_mooring_cost">Стоянка, ₽</label>
+            <input type="text" inputmode="decimal" id="edit_mooring_cost" name="mooring_cost" required>
+          </div>
+        </div>
+        <div class="field-wide trip-edit-expenses">
+          <label>Дополнительные разовые расходы</label>
+          <div id="edit-expenses-container"></div>
+          <button type="button" class="btn-add" onclick="addEditExpenseRow()">Добавить расход</button>
+        </div>
+      </div>
+
+      <div class="trip-edit-modal-actions">
+        <button type="button" class="btn-secondary" onclick="closeTripEditModal()">Отмена</button>
+        <button type="submit" id="tripEditSubmit">Сохранить изменения</button>
+      </div>
+    </form>
+  </section>
+</div>
 
 <script>
 function toggleCustom(fieldPrefix) {
@@ -741,6 +835,187 @@ function addExpenseRow() {
   container.appendChild(div);
 }
 
+var tripEditLastTrigger = null;
+var tripEditLoadSequence = 0;
+
+function setTripEditErrors(errors) {
+  var box = document.getElementById('tripEditErrors');
+  if (!box) return;
+  if (!errors || !errors.length) {
+    box.classList.add('hidden');
+    box.textContent = '';
+    return;
+  }
+  box.textContent = '';
+  var strong = document.createElement('strong');
+  strong.textContent = 'Не удалось сохранить рейс:';
+  var list = document.createElement('ul');
+  errors.forEach(function (error) {
+    var item = document.createElement('li');
+    item.textContent = error;
+    list.appendChild(item);
+  });
+  box.appendChild(strong);
+  box.appendChild(list);
+  box.classList.remove('hidden');
+}
+
+function setEditSelectWithCustom(row, selectSelector, customSelector, value) {
+  var select = row.querySelector(selectSelector);
+  var custom = row.querySelector(customSelector);
+  if (!select || !custom) return;
+  var hasOption = Array.prototype.some.call(select.options, function (option) {
+    return option.value === value && option.value !== '{{ custom_value }}';
+  });
+  if (hasOption) {
+    select.value = value;
+    custom.value = '';
+  } else {
+    select.value = '{{ custom_value }}';
+    custom.value = value || '';
+  }
+}
+
+function addEditLaborRow(item) {
+  var container = document.getElementById('edit-labor-container');
+  var template = document.getElementById('edit-labor-row-template');
+  if (!container || !template) return;
+  var fragment = template.content.cloneNode(true);
+  var row = fragment.querySelector('.labor-row');
+  if (item && row) {
+    setEditSelectWithCustom(row, '.labor-employee', '.labor-employee-custom', item.employee || '');
+    setEditSelectWithCustom(row, '.labor-worktype', '.labor-worktype-custom', item.work_type || '');
+    row.querySelector('.labor-quantity').value = item.quantity;
+    row.querySelector('.labor-rate').value = item.rate;
+    handleEmployeeChange(row.querySelector('.labor-employee'));
+    handleWorkTypeChangeWithoutDefaults(row.querySelector('.labor-worktype'));
+  }
+  container.appendChild(fragment);
+}
+
+function handleWorkTypeChangeWithoutDefaults(select) {
+  var row = select.closest('.labor-row');
+  var custom = row.querySelector('.labor-worktype-custom');
+  var customSelected = select.value === '{{ custom_value }}';
+  custom.classList.toggle('hidden', !customSelected);
+  custom.required = customSelected;
+}
+
+function removeEditLaborRow(btn) {
+  var rows = document.querySelectorAll('#edit-labor-container .labor-row');
+  if (rows.length <= 1) return;
+  btn.closest('.labor-row').remove();
+}
+
+function addEditExpenseRow(item) {
+  var container = document.getElementById('edit-expenses-container');
+  if (!container) return;
+  var row = document.createElement('div');
+  row.className = 'expense-row';
+  var description = document.createElement('input');
+  description.type = 'text';
+  description.name = 'expense_desc[]';
+  description.placeholder = 'Например, ремонт';
+  description.value = item && item.description != null ? item.description : '';
+  var amount = document.createElement('input');
+  amount.type = 'text';
+  amount.inputMode = 'decimal';
+  amount.name = 'expense_amount[]';
+  amount.placeholder = 'Сумма';
+  amount.value = item && item.amount != null ? item.amount : '';
+  var remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'btn-delete';
+  remove.title = 'Убрать расход';
+  remove.textContent = '✕';
+  remove.addEventListener('click', function () { row.remove(); });
+  row.appendChild(description);
+  row.appendChild(amount);
+  row.appendChild(remove);
+  container.appendChild(row);
+}
+
+function applyEditChannelDefault() {
+  var boatSelect = document.getElementById('edit_boat');
+  var channelSelect = document.getElementById('edit_sale_channel');
+  if (!boatSelect || !channelSelect || boatSelect.selectedIndex < 0) return;
+  var boatOption = boatSelect.options[boatSelect.selectedIndex];
+  var attribute = channelSelect.value === 'aggregator' ? 'data-comm-agg' : 'data-comm-direct';
+  var percent = boatOption.getAttribute(attribute);
+  if (percent) document.getElementById('edit_commission_pct').value = percent;
+}
+
+function applyEditBoat(select) {
+  var option = select.options[select.selectedIndex];
+  var fuel = option && option.getAttribute('data-fuel');
+  var mooring = option && option.getAttribute('data-mooring');
+  if (fuel) document.getElementById('edit_fuel_cost').value = fuel;
+  if (mooring) document.getElementById('edit_mooring_cost').value = mooring;
+  applyEditChannelDefault();
+}
+
+function fillTripEditForm(data) {
+  var trip = data.trip || {};
+  document.getElementById('edit_boat').value = trip.boat || '';
+  document.getElementById('edit_trip_date').value = trip.trip_date || '';
+  document.getElementById('edit_trip_time').value = trip.trip_time || '00:00';
+  document.getElementById('edit_sale_channel').value = trip.sale_channel || 'direct';
+  document.getElementById('edit_commission_pct').value = trip.commission_pct;
+  document.getElementById('edit_revenue').value = trip.revenue;
+  document.getElementById('edit_fuel_cost').value = trip.fuel_cost;
+  document.getElementById('edit_mooring_cost').value = trip.mooring_cost;
+
+  var laborContainer = document.getElementById('edit-labor-container');
+  laborContainer.textContent = '';
+  (data.labor_items && data.labor_items.length ? data.labor_items : [{}]).forEach(addEditLaborRow);
+  var expensesContainer = document.getElementById('edit-expenses-container');
+  expensesContainer.textContent = '';
+  (data.expenses || []).forEach(addEditExpenseRow);
+}
+
+function openTripEditModal(tripId) {
+  var modal = document.getElementById('tripEditModal');
+  var form = document.getElementById('tripEditForm');
+  var title = document.getElementById('tripEditModalTitle');
+  var submit = document.getElementById('tripEditSubmit');
+  if (!modal || !form) return;
+  tripEditLastTrigger = document.activeElement;
+  tripEditLoadSequence += 1;
+  var sequence = tripEditLoadSequence;
+  form.action = '/trips/edit/' + tripId;
+  title.textContent = 'Загрузка рейса…';
+  submit.disabled = true;
+  setTripEditErrors([]);
+  modal.hidden = false;
+  document.body.classList.add('modal-open');
+
+  fetch('/trips/edit/' + tripId + '?modal=1', {
+    headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}
+  }).then(function (response) {
+    if (!response.ok) throw new Error('Не удалось загрузить данные рейса.');
+    return response.json();
+  }).then(function (data) {
+    if (sequence !== tripEditLoadSequence || modal.hidden) return;
+    fillTripEditForm(data);
+    title.textContent = 'Редактировать рейс';
+    submit.disabled = false;
+    document.getElementById('edit_boat').focus();
+  }).catch(function (error) {
+    if (sequence !== tripEditLoadSequence || modal.hidden) return;
+    title.textContent = 'Редактировать рейс';
+    setTripEditErrors([error.message]);
+  });
+}
+
+function closeTripEditModal() {
+  var modal = document.getElementById('tripEditModal');
+  if (!modal || modal.hidden) return;
+  tripEditLoadSequence += 1;
+  modal.hidden = true;
+  document.body.classList.remove('modal-open');
+  if (tripEditLastTrigger && tripEditLastTrigger.focus) tripEditLastTrigger.focus();
+}
+
 document.addEventListener('DOMContentLoaded', function () {
   document.querySelectorAll('#labor-container .labor-employee').forEach(handleEmployeeChange);
   document.querySelectorAll('#labor-container .labor-worktype').forEach(function (sel) {
@@ -751,6 +1026,41 @@ document.addEventListener('DOMContentLoaded', function () {
       custom.required = true;
     }
   });
+
+  var editForm = document.getElementById('tripEditForm');
+  if (editForm) {
+    editForm.addEventListener('submit', function (event) {
+      event.preventDefault();
+      var submit = document.getElementById('tripEditSubmit');
+      submit.disabled = true;
+      submit.textContent = 'Сохраняем…';
+      setTripEditErrors([]);
+      fetch(editForm.action, {
+        method: 'POST',
+        body: new FormData(editForm),
+        headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}
+      }).then(function (response) {
+        return response.json().then(function (payload) {
+          return {response: response, payload: payload};
+        });
+      }).then(function (result) {
+        if (!result.response.ok || !result.payload.ok) {
+          setTripEditErrors(result.payload.errors || ['Не удалось сохранить рейс.']);
+          return;
+        }
+        window.location.assign(result.payload.redirect_url || window.location.href);
+      }).catch(function () {
+        setTripEditErrors(['Сервер не ответил. Проверьте соединение и попробуйте ещё раз.']);
+      }).finally(function () {
+        submit.disabled = false;
+        submit.textContent = 'Сохранить изменения';
+      });
+    });
+  }
+});
+
+document.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape') closeTripEditModal();
 });
 </script>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
