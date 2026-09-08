@@ -9276,40 +9276,74 @@ button.captain-command-alert:hover {
 .partner-orders-heading h2 { margin: 0; }
 .partner-orders-heading .btn-secondary { margin: 0; }
 .partner-totals-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
-.partner-open-price-cell { min-width: 205px; }
-.partner-open-price-form { position: relative; margin: 0; }
+.partner-open-price-cell { min-width: 190px; }
+.partner-open-price-form { position: relative; width: 190px; margin: 0; }
 .partner-open-price-control {
   display: grid;
-  grid-template-columns: minmax(105px, 1fr) auto 34px;
+  grid-template-columns: minmax(80px, 1fr) 20px 35px 36px;
   align-items: center;
   overflow: hidden;
   border: 1px solid var(--hairline);
-  border-radius: 8px;
-  background: var(--paper-alt);
+  border-radius: 9px;
+  background: var(--paper);
+  box-shadow: 0 1px 2px rgba(15, 42, 53, .035);
+  transition: border-color .16s ease, box-shadow .16s ease;
 }
 .partner-open-price-control:focus-within {
   border-color: var(--brass);
-  outline: 2px solid rgba(52, 152, 219, .18);
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, .14);
 }
 .partner-open-price-control input[type="text"] {
   width: 100%;
   min-width: 0;
-  height: 38px;
-  padding: 8px 5px 8px 10px;
+  height: 40px;
+  padding: 8px 3px 8px 10px;
   border: 0;
   border-radius: 0;
   outline: 0;
   background: transparent;
+  color: var(--ink);
   font-family: 'PT Mono', monospace;
-  font-size: 12px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-align: right;
+}
+.partner-open-price-control input[type="text"]::placeholder { color: #9cabb6; font-weight: 400; }
+.partner-open-price-currency {
+  color: var(--muted);
+  font-family: 'PT Mono', monospace;
+  font-size: 10px;
+  text-align: center;
+}
+.partner-price-presets-toggle {
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 27px;
+  margin: 0 3px;
+  padding: 0;
+  border: 1px solid rgba(52, 152, 219, .3);
+  border-radius: 6px;
+  background: #edf6fc;
+  color: var(--brass-strong);
+  cursor: pointer;
+  font-family: 'PT Mono', monospace;
+  font-size: 9px;
   font-weight: 700;
 }
-.partner-open-price-control > span { color: var(--muted); font-size: 11px; }
+.partner-price-presets-toggle:hover,
+.partner-price-presets-toggle:focus-visible,
+.partner-price-presets-toggle[aria-expanded="true"] {
+  outline: none;
+  border-color: var(--brass);
+  background: var(--brass);
+  color: var(--on-accent);
+}
 .partner-open-price-save {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 38px;
+  width: 36px;
+  height: 40px;
   padding: 0;
   border: 0;
   border-left: 1px solid var(--hairline);
@@ -9320,31 +9354,39 @@ button.captain-command-alert:hover {
 }
 .partner-open-price-save:hover,
 .partner-open-price-save:focus-visible { background: var(--brass-strong); }
-.partner-open-price-save svg { width: 16px; height: 16px; }
+.partner-open-price-save:focus-visible { outline: 2px solid rgba(255, 255, 255, .85); outline-offset: -4px; }
+.partner-open-price-save svg { width: 15px; height: 15px; }
 .partner-price-presets {
   display: none;
   align-items: center;
   flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 6px;
-  padding: 7px;
+  width: 190px;
+  margin: 0;
+  padding: 8px;
+  gap: 6px;
   border: 1px solid rgba(52, 152, 219, .22);
-  border-radius: 8px;
-  background: #edf6fc;
-  box-shadow: 0 8px 18px -15px rgba(15, 42, 53, .55);
+  border-radius: 9px;
+  background: var(--paper);
+  box-shadow: 0 12px 30px rgba(15, 42, 53, .18);
+  z-index: 80;
+  position: fixed;
+  inset: auto;
 }
-.partner-open-price-form:focus-within .partner-price-presets,
-.partner-open-price-form:hover .partner-price-presets { display: flex; }
+.partner-price-presets:popover-open,
+.partner-price-presets.is-fallback-open { display: flex; }
 .partner-price-presets > span {
   width: 100%;
+  padding: 0 2px 2px;
   color: var(--muted);
-  font-size: 9px;
+  font-family: 'PT Mono', monospace;
+  font-size: 8.5px;
   font-weight: 700;
 }
 .partner-price-presets button {
+  flex: 1;
   min-height: 28px;
   margin: 0;
-  padding: 4px 8px;
+  padding: 4px 6px;
   border: 1px solid rgba(52, 152, 219, .38);
   border-radius: 6px;
   background: #fff;

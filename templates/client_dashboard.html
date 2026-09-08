@@ -265,15 +265,21 @@
                           action="{{ url_for('update_partner_open_price', token=client.token, order_id=o.id, item_id=item.id) }}">
                       <div class="partner-open-price-control">
                         <input type="text" inputmode="decimal" name="open_price"
-                               value="{{ item.partner_price if item.partner_price is not none else '' }}"
-                               aria-label="Открытая цена: {{ item.work_name }}" placeholder="Введите цену">
-                        <span>₽</span>
+                               value="{{ item.partner_price|money if item.partner_price is not none else '' }}"
+                               aria-label="Открытая цена: {{ item.work_name }}" placeholder="0,00">
+                        <span class="partner-open-price-currency" aria-hidden="true">₽</span>
+                        <button type="button" class="partner-price-presets-toggle"
+                                popovertarget="partner-price-presets-{{ item.id }}"
+                                data-price-popover-trigger="partner-price-presets-{{ item.id }}"
+                                aria-expanded="false"
+                                aria-label="Выбрать наценку к закрытой цене"
+                                title="Быстрая наценка">+%</button>
                         <button type="submit" class="partner-open-price-save" aria-label="Сохранить открытую цену" title="Сохранить цену">
                           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.5l4 4 8-9"/></svg>
                         </button>
                       </div>
-                      <div class="partner-price-presets" aria-label="Быстрые наценки">
-                        <span>Наценка к закрытой цене</span>
+                      <div class="partner-price-presets" id="partner-price-presets-{{ item.id }}" popover aria-label="Быстрые наценки">
+                        <span>Наценка к {{ item.price|money }} ₽</span>
                         {% for markup in (10, 15, 20) %}
                         <button type="submit" name="markup" value="{{ markup }}" {{ 'disabled' if item.price_pending }} title="Закрытая цена + {{ markup }}%">+{{ markup }}%</button>
                         {% endfor %}
@@ -538,6 +544,72 @@ document.addEventListener('keydown', function (e) {
   if (modalOpen && e.key === 'ArrowRight') showNextPhoto();
   if (e.key === 'Escape') closePhotoModal();
 });
+
+(function setupPartnerPricePopovers() {
+  var triggers = Array.prototype.slice.call(
+    document.querySelectorAll('[data-price-popover-trigger]')
+  );
+  if (!triggers.length) return;
+  var supportsPopover = typeof HTMLElement !== 'undefined' &&
+    typeof HTMLElement.prototype.showPopover === 'function';
+
+  function placePopover(trigger, popover) {
+    window.requestAnimationFrame(function () {
+      var triggerRect = trigger.getBoundingClientRect();
+      var width = popover.offsetWidth || 190;
+      var height = popover.offsetHeight || 64;
+      var edge = 8;
+      var left = Math.min(
+        Math.max(edge, triggerRect.right - width),
+        window.innerWidth - width - edge
+      );
+      var top = triggerRect.bottom + 8;
+      if (top + height > window.innerHeight - edge) {
+        top = Math.max(edge, triggerRect.top - height - 8);
+      }
+      popover.style.left = left + 'px';
+      popover.style.top = top + 'px';
+    });
+  }
+
+  triggers.forEach(function (trigger) {
+    var popover = document.getElementById(trigger.dataset.pricePopoverTrigger);
+    if (!popover) return;
+
+    if (supportsPopover) {
+      popover.addEventListener('toggle', function (event) {
+        var isOpen = event.newState === 'open';
+        trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        if (isOpen) placePopover(trigger, popover);
+      });
+    } else {
+      trigger.removeAttribute('popovertarget');
+      trigger.addEventListener('click', function (event) {
+        event.preventDefault();
+        var willOpen = !popover.classList.contains('is-fallback-open');
+        document.querySelectorAll('.partner-price-presets.is-fallback-open').forEach(function (openPopover) {
+          openPopover.classList.remove('is-fallback-open');
+        });
+        triggers.forEach(function (item) { item.setAttribute('aria-expanded', 'false'); });
+        if (willOpen) {
+          popover.classList.add('is-fallback-open');
+          trigger.setAttribute('aria-expanded', 'true');
+          placePopover(trigger, popover);
+        }
+      });
+    }
+  });
+
+  if (!supportsPopover) {
+    document.addEventListener('click', function (event) {
+      if (event.target.closest('.partner-price-presets, [data-price-popover-trigger]')) return;
+      document.querySelectorAll('.partner-price-presets.is-fallback-open').forEach(function (popover) {
+        popover.classList.remove('is-fallback-open');
+      });
+      triggers.forEach(function (trigger) { trigger.setAttribute('aria-expanded', 'false'); });
+    });
+  }
+}());
 </script>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 
