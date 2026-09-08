@@ -8634,8 +8634,6 @@ def partner_order_estimate_pdf(token, order_id):
             items=items,
             goods=goods,
             partner_name=order["client_name"],
-            partner_title=(partner_profile or {}).get("partner_title")
-            or DEFAULT_TUNING_PARTNER_TITLE,
             equipment_label=tuning_equipment_label(order),
             logo_path=logo_path,
             unit_labels={item["value"]: item["label"] for item in SUPPLY_COST_UNITS},

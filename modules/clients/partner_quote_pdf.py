@@ -47,7 +47,6 @@ def build_partner_quote_pdf(
     items,
     goods,
     partner_name,
-    partner_title,
     equipment_label,
     logo_path=None,
     unit_labels=None,
@@ -80,10 +79,6 @@ def build_partner_quote_pdf(
         "brand": ParagraphStyle(
             "partner-quote-brand", fontName="OpenSans-Bold", fontSize=18,
             leading=22, textColor=ink,
-        ),
-        "brand_subtitle": ParagraphStyle(
-            "partner-quote-brand-subtitle", fontName="OpenSans", fontSize=9.5,
-            leading=13, textColor=ink_soft,
         ),
         "logo_letter": ParagraphStyle(
             "partner-quote-logo-letter", fontName="OpenSans-Bold", fontSize=23,
@@ -169,10 +164,7 @@ def build_partner_quote_pdf(
     brand = Table(
         [[
             logo,
-            [
-                Paragraph(_safe(partner_name), styles["brand"]),
-                Paragraph(_safe(partner_title), styles["brand_subtitle"]),
-            ],
+            Paragraph(_safe(partner_name), styles["brand"]),
         ]],
         colWidths=[42 * mm, 130 * mm],
     )
