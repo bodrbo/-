@@ -9280,7 +9280,7 @@ button.captain-command-alert:hover {
 .partner-open-price-form { position: relative; width: 190px; margin: 0; }
 .partner-open-price-control {
   display: grid;
-  grid-template-columns: minmax(80px, 1fr) 20px 35px 36px;
+  grid-template-columns: minmax(100px, 1fr) 20px 36px;
   align-items: center;
   overflow: hidden;
   border: 1px solid var(--hairline);
@@ -9315,35 +9315,17 @@ button.captain-command-alert:hover {
   font-size: 10px;
   text-align: center;
 }
-.partner-price-presets-toggle {
-  display: grid;
-  place-items: center;
-  width: 29px;
-  height: 27px;
-  margin: 0 3px;
-  padding: 0;
-  border: 1px solid rgba(52, 152, 219, .3);
-  border-radius: 6px;
-  background: #edf6fc;
-  color: var(--brass-strong);
-  cursor: pointer;
-  font-family: 'PT Mono', monospace;
-  font-size: 9px;
-  font-weight: 700;
-}
-.partner-price-presets-toggle:hover,
-.partner-price-presets-toggle:focus-visible,
-.partner-price-presets-toggle[aria-expanded="true"] {
-  outline: none;
-  border-color: var(--brass);
-  background: var(--brass);
-  color: var(--on-accent);
-}
-.partner-open-price-save {
-  display: grid;
-  place-items: center;
+button.partner-open-price-save {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
   width: 36px;
+  min-width: 36px;
+  max-width: 36px;
   height: 40px;
+  min-height: 40px;
+  margin: 0;
   padding: 0;
   border: 0;
   border-left: 1px solid var(--hairline);
@@ -9351,11 +9333,20 @@ button.captain-command-alert:hover {
   background: var(--brass);
   color: var(--on-accent);
   cursor: pointer;
+  font-size: 0;
+  line-height: 0;
 }
-.partner-open-price-save:hover,
-.partner-open-price-save:focus-visible { background: var(--brass-strong); }
-.partner-open-price-save:focus-visible { outline: 2px solid rgba(255, 255, 255, .85); outline-offset: -4px; }
-.partner-open-price-save svg { width: 15px; height: 15px; }
+button.partner-open-price-save:hover,
+button.partner-open-price-save:focus-visible { background: var(--brass-strong); }
+button.partner-open-price-save:focus-visible { outline: 2px solid rgba(255, 255, 255, .85); outline-offset: -4px; }
+button.partner-open-price-save svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin: 0;
+  transform: none;
+}
 .partner-price-presets {
   display: none;
   align-items: center;

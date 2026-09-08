@@ -266,19 +266,16 @@
                       <div class="partner-open-price-control">
                         <input type="text" inputmode="decimal" name="open_price"
                                value="{{ item.partner_price|money if item.partner_price is not none else '' }}"
-                               aria-label="Открытая цена: {{ item.work_name }}" placeholder="0,00">
+                               aria-label="Открытая цена: {{ item.work_name }}" placeholder="0,00"
+                               aria-haspopup="true" aria-expanded="false"
+                               aria-controls="partner-price-presets-{{ item.id }}"
+                               data-price-hints="partner-price-presets-{{ item.id }}">
                         <span class="partner-open-price-currency" aria-hidden="true">₽</span>
-                        <button type="button" class="partner-price-presets-toggle"
-                                popovertarget="partner-price-presets-{{ item.id }}"
-                                data-price-popover-trigger="partner-price-presets-{{ item.id }}"
-                                aria-expanded="false"
-                                aria-label="Выбрать наценку к закрытой цене"
-                                title="Быстрая наценка">+%</button>
                         <button type="submit" class="partner-open-price-save" aria-label="Сохранить открытую цену" title="Сохранить цену">
                           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.5l4 4 8-9"/></svg>
                         </button>
                       </div>
-                      <div class="partner-price-presets" id="partner-price-presets-{{ item.id }}" popover aria-label="Быстрые наценки">
+                      <div class="partner-price-presets" id="partner-price-presets-{{ item.id }}" popover="auto" aria-label="Подсказки наценки">
                         <span>Наценка к {{ item.price|money }} ₽</span>
                         {% for markup in (10, 15, 20) %}
                         <button type="submit" name="markup" value="{{ markup }}" {{ 'disabled' if item.price_pending }} title="Закрытая цена + {{ markup }}%">+{{ markup }}%</button>
@@ -545,17 +542,18 @@ document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') closePhotoModal();
 });
 
-(function setupPartnerPricePopovers() {
-  var triggers = Array.prototype.slice.call(
-    document.querySelectorAll('[data-price-popover-trigger]')
+(function setupPartnerPriceHints() {
+  var priceInputs = Array.prototype.slice.call(
+    document.querySelectorAll('[data-price-hints]')
   );
-  if (!triggers.length) return;
+  if (!priceInputs.length) return;
   var supportsPopover = typeof HTMLElement !== 'undefined' &&
     typeof HTMLElement.prototype.showPopover === 'function';
 
-  function placePopover(trigger, popover) {
+  function placePopover(input, popover) {
     window.requestAnimationFrame(function () {
-      var triggerRect = trigger.getBoundingClientRect();
+      var control = input.closest('.partner-open-price-control') || input;
+      var triggerRect = control.getBoundingClientRect();
       var width = popover.offsetWidth || 190;
       var height = popover.offsetHeight || 64;
       var edge = 8;
@@ -572,41 +570,54 @@ document.addEventListener('keydown', function (e) {
     });
   }
 
-  triggers.forEach(function (trigger) {
-    var popover = document.getElementById(trigger.dataset.pricePopoverTrigger);
+  function closeFallbackHints(exceptPopover) {
+    document.querySelectorAll('.partner-price-presets.is-fallback-open').forEach(function (popover) {
+      if (popover !== exceptPopover) popover.classList.remove('is-fallback-open');
+    });
+    priceInputs.forEach(function (input) {
+      if (!exceptPopover || input.dataset.priceHints !== exceptPopover.id) {
+        input.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+
+  priceInputs.forEach(function (input) {
+    var popover = document.getElementById(input.dataset.priceHints);
     if (!popover) return;
 
     if (supportsPopover) {
       popover.addEventListener('toggle', function (event) {
         var isOpen = event.newState === 'open';
-        trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-        if (isOpen) placePopover(trigger, popover);
-      });
-    } else {
-      trigger.removeAttribute('popovertarget');
-      trigger.addEventListener('click', function (event) {
-        event.preventDefault();
-        var willOpen = !popover.classList.contains('is-fallback-open');
-        document.querySelectorAll('.partner-price-presets.is-fallback-open').forEach(function (openPopover) {
-          openPopover.classList.remove('is-fallback-open');
-        });
-        triggers.forEach(function (item) { item.setAttribute('aria-expanded', 'false'); });
-        if (willOpen) {
-          popover.classList.add('is-fallback-open');
-          trigger.setAttribute('aria-expanded', 'true');
-          placePopover(trigger, popover);
-        }
+        input.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        if (isOpen) placePopover(input, popover);
       });
     }
+
+    function showHints() {
+      if (supportsPopover) {
+        try {
+          if (!popover.matches(':popover-open')) popover.showPopover();
+        } catch (error) {
+          return;
+        }
+      } else {
+        closeFallbackHints(popover);
+        if (!popover.classList.contains('is-fallback-open')) {
+          popover.classList.add('is-fallback-open');
+        }
+        input.setAttribute('aria-expanded', 'true');
+        placePopover(input, popover);
+      }
+    }
+
+    input.addEventListener('focus', showHints);
+    input.addEventListener('input', showHints);
   });
 
   if (!supportsPopover) {
     document.addEventListener('click', function (event) {
-      if (event.target.closest('.partner-price-presets, [data-price-popover-trigger]')) return;
-      document.querySelectorAll('.partner-price-presets.is-fallback-open').forEach(function (popover) {
-        popover.classList.remove('is-fallback-open');
-      });
-      triggers.forEach(function (trigger) { trigger.setAttribute('aria-expanded', 'false'); });
+      if (event.target.closest('.partner-price-presets, [data-price-hints]')) return;
+      closeFallbackHints();
     });
   }
 }());
