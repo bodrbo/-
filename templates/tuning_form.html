@@ -131,6 +131,10 @@
     <a href="{{ url_for('tuning_motor_catalog') }}" class="{{ 'active' if sub_page == 'motor_catalog' }}">Каталог моторов</a>
   </nav>
 
+  {% if tuning_copy_notice %}
+  <div class="alert tuning-copy-notice" role="status">{{ tuning_copy_notice }}</div>
+  {% endif %}
+
   {% if errors %}
     <div class="alert">
       <strong>Не удалось сохранить заказ:</strong>
@@ -144,8 +148,19 @@
   <div class="panel" style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
     <h2 style="margin:0;">Статус заказа</h2>
     <span class="status-badge status-{{ edit_order.status }}">{{ edit_order.status|order_status_label }}</span>
+    <form action="{{ url_for('copy_tuning_order', order_id=edit_order.id) }}" method="post"
+          class="tuning-copy-order-form"
+          onsubmit="return confirm('Создать копию заказа №{{ edit_order.id }}?');">
+      <button type="submit" class="btn-secondary tuning-copy-order-button">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="6" y="6" width="10" height="10" rx="1.5"/>
+          <path d="M4 13H3.5A1.5 1.5 0 012 11.5v-8A1.5 1.5 0 013.5 2h8A1.5 1.5 0 0113 3.5V4"/>
+        </svg>
+        Копировать заказ
+      </button>
+    </form>
     <form action="{{ url_for('set_tuning_order_status', order_id=edit_order.id) }}" method="post"
-          class="status-select-form" style="margin-left:auto;">
+          class="status-select-form tuning-order-status-select">
       <select name="status" onchange="this.form.submit()">
         {% for s in order_statuses %}
         <option value="{{ s.value }}" {{ 'selected' if edit_order.status == s.value }}>{{ s.label }}</option>

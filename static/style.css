@@ -7087,6 +7087,19 @@ table.records tr.row-expense td.amount { color: var(--danger); }
   font-size: 14px;
 }
 .alert ul { margin: 6px 0 0 0; padding-left: 20px; }
+.alert.tuning-copy-notice {
+  border-color: rgba(47, 107, 79, .3);
+  background: rgba(47, 107, 79, .09);
+  color: var(--success);
+}
+.tuning-copy-order-form { margin-left: auto; }
+.tuning-copy-order-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.tuning-copy-order-button svg { width: 15px; height: 15px; }
+.tuning-order-status-select { margin-left: 0; }
 
 .table-scroll { overflow-x: auto; }
 

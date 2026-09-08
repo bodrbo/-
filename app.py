@@ -6856,6 +6856,90 @@ def add_tuning_order():
     return redirect(url_for("tuning_index"))
 
 
+@app.route("/tuning/<int:order_id>/copy", methods=["POST"])
+@admin_login_required
+def copy_tuning_order(order_id):
+    """Copy the commercial draft without carrying operational history over."""
+    db = get_db()
+    source_order = db.execute(
+        "SELECT * FROM tuning_orders WHERE id = ?", (order_id,)
+    ).fetchone()
+    if source_order is None:
+        return redirect(url_for("tuning_index"))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    order_date = dt.date.today().isoformat()
+    cursor = db.execute(
+        "INSERT INTO tuning_orders "
+        "(client_id, client_name, equipment_type, boat_model, "
+        "boat_registration_number, motor_model, motor_serial_number, "
+        "sale_channel, phone, discount_pct, discount_type, discount_value, "
+        "subtotal, total, status, order_date, created_at, updated_at, "
+        "source, source_ref) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            source_order["client_id"],
+            source_order["client_name"],
+            source_order["equipment_type"],
+            source_order["boat_model"],
+            source_order["boat_registration_number"],
+            source_order["motor_model"],
+            source_order["motor_serial_number"],
+            source_order["sale_channel"],
+            source_order["phone"],
+            source_order["discount_pct"],
+            source_order["discount_type"],
+            source_order["discount_value"],
+            source_order["subtotal"],
+            source_order["total"],
+            DEFAULT_ORDER_STATUS,
+            order_date,
+            now,
+            now,
+            "manual",
+            None,
+        ),
+    )
+    copied_order_id = cursor.lastrowid
+    db.execute(
+        "INSERT INTO tuning_order_motors "
+        "(order_id, motor_model, motor_serial_number, position, created_at) "
+        "SELECT ?, motor_model, motor_serial_number, position, ? "
+        "FROM tuning_order_motors WHERE order_id = ? ORDER BY position, id",
+        (copied_order_id, now, order_id),
+    )
+    db.execute(
+        "INSERT INTO tuning_order_items "
+        "(order_id, work_name, cost_price, multiplier, price, price_pending, status) "
+        "SELECT ?, work_name, cost_price, multiplier, price, price_pending, ? "
+        "FROM tuning_order_items WHERE order_id = ? AND status != 'removed' "
+        "ORDER BY id",
+        (copied_order_id, DEFAULT_WORK_STATUS, order_id),
+    )
+    db.execute(
+        "INSERT INTO tuning_order_products "
+        "(order_id, product_id, product_name, quantity, unit_price, "
+        "cost_price, unit, created_at) "
+        "SELECT ?, product_id, product_name, quantity, unit_price, "
+        "cost_price, unit, ? FROM tuning_order_products "
+        "WHERE order_id = ? ORDER BY id",
+        (copied_order_id, now, order_id),
+    )
+    db.execute(
+        "INSERT INTO projects (name, tuning_order_id, created_at) VALUES (?, ?, ?)",
+        (f"Заказ №{copied_order_id}", copied_order_id, now),
+    )
+    _sync_tuning_boat_profiles(db)
+    # Recalculate from the copied active work and goods rows instead of
+    # trusting a possibly stale total cached on the source order.
+    _recompute_order_totals(db, copied_order_id)
+    session["tuning_copy_notice"] = (
+        f"Создана копия заказа №{order_id}. Новый заказ №{copied_order_id} "
+        "сохранён как предварительный расчёт."
+    )
+    return redirect(url_for("edit_tuning_order", order_id=copied_order_id))
+
+
 # Fixed JSON contract for the standalone tuning.bodrbo.ru site. Keeping
 # these limits here makes the public boundary explicit and prevents an
 # accidental multi-megabyte lead from being copied into orders/notes.
@@ -7230,6 +7314,7 @@ def edit_tuning_order(order_id):
             motor_model_choices=_tuning_motor_model_choices(db),
             tuning_client_choices=_tuning_client_choices(db),
             modulkassa_configured=_modulkassa_configured(),
+            tuning_copy_notice=session.pop("tuning_copy_notice", None),
         )
 
     errors, data = _process_tuning_form(
