@@ -11076,7 +11076,9 @@ def _parse_date_filter():
     return filter_start, filter_end
 
 
-def _fetch_filtered_transactions(db, filter_start, filter_end, requested_page):
+def _fetch_filtered_transactions(
+    db, filter_start, filter_end, requested_page, search_query=""
+):
     # operation_date can be a plain date or an ISO timestamp. An exclusive
     # next-day upper boundary includes both forms from the selected final
     # day while keeping the comparison usable by the date index.
@@ -11091,6 +11093,22 @@ def _fetch_filtered_transactions(db, filter_start, filter_end, requested_page):
         ).isoformat()
         conditions.append("operation_date < ?")
         params.append(end_exclusive)
+    # Search on the server rather than filtering the 20 rendered rows in the
+    # browser. Apart from covering every page, this is important for purpose:
+    # it is rendered inside an editable <input>, whose value is not part of a
+    # table row's textContent and was therefore invisible to the old search.
+    searchable_columns = (
+        "COALESCE(operation_id, '') || ' ' || "
+        "COALESCE(counterparty_name, '') || ' ' || "
+        "COALESCE(counterparty_inn, '') || ' ' || "
+        "COALESCE(purpose, '') || ' ' || "
+        "COALESCE(category, '') || ' ' || "
+        "COALESCE(status, '') || ' ' || "
+        "COALESCE(CAST(amount AS TEXT), '')"
+    )
+    for word in search_query.casefold().split():
+        conditions.append(f"INSTR(CASEFOLD({searchable_columns}), ?) > 0")
+        params.append(word)
     where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
 
     total_count = db.execute(
@@ -11133,6 +11151,7 @@ def _fetch_filtered_transactions(db, filter_start, filter_end, requested_page):
 
 def _transactions_table_context(db):
     filter_start, filter_end = _parse_date_filter()
+    search_query = " ".join(request.args.get("q", "").split())[:120]
     raw_page = request.args.get("page", "1").strip()
     requested_page = int(raw_page) if raw_page.isdigit() else 1
     (
@@ -11142,7 +11161,7 @@ def _transactions_table_context(db):
         page,
         total_pages,
     ) = _fetch_filtered_transactions(
-        db, filter_start, filter_end, requested_page
+        db, filter_start, filter_end, requested_page, search_query
     )
     projects = db.execute(
         "SELECT projects.*, tuning_orders.client_name AS client_name, "
@@ -11160,6 +11179,7 @@ def _transactions_table_context(db):
     current_url = url_for(
         "analytics_index",
         start=filter_start or None, end=filter_end or None,
+        q=search_query or None,
         page=page if page > 1 else None,
     )
     page_first = (page - 1) * ANALYTICS_TRANSACTION_PAGE_SIZE + 1 if total_count else 0
@@ -11168,6 +11188,7 @@ def _transactions_table_context(db):
         "transactions": transactions, "projects": projects,
         "splits_by_transaction": splits_by_transaction, "current_url": current_url,
         "filter_start": filter_start, "filter_end": filter_end,
+        "search_query": search_query,
         "items_by_project": _items_by_project(db),
         "transaction_count": total_count,
         "transaction_page": page,

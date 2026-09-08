@@ -146,6 +146,11 @@
   <section class="panel">
     <h2>Транзакции по счёту</h2>
     <form id="transactions-filter-form" action="{{ url_for('analytics_index') }}" method="get" class="entry-form" style="margin-bottom:14px;">
+      <div class="field">
+        <label for="filter_query">Поиск</label>
+        <input type="search" id="filter_query" name="q" value="{{ search_query }}"
+               maxlength="120" placeholder="Назначение, контрагент, категория…">
+      </div>
       <div class="field field-narrow">
         <label for="filter_start">С даты</label>
         <input type="date" id="filter_start" name="start" value="{{ filter_start }}">
@@ -157,7 +162,7 @@
       <div class="field field-submit">
         <button type="submit" class="btn-secondary">Применить</button>
         <a href="{{ url_for('analytics_index') }}" id="transactions-filter-reset"
-           class="term {{ 'hidden' if not (filter_start or filter_end) }}" style="margin-left:10px;">Сбросить</a>
+           class="term {{ 'hidden' if not (search_query or filter_start or filter_end) }}" style="margin-left:10px;">Сбросить</a>
       </div>
     </form>
     <div id="transactions-container">
@@ -183,6 +188,7 @@
   var resetLink = document.getElementById("transactions-filter-reset");
   var startInput = document.getElementById("filter_start");
   var endInput = document.getElementById("filter_end");
+  var queryInput = document.getElementById("filter_query");
   var addForm = document.getElementById("transactions-add-form");
   if (!container || !filterForm) return;
 
@@ -213,6 +219,7 @@
 
   function paramsFromInputs(page) {
     var parts = [];
+    if (queryInput.value.trim()) parts.push("q=" + encodeURIComponent(queryInput.value.trim()));
     if (startInput.value) parts.push("start=" + encodeURIComponent(startInput.value));
     if (endInput.value) parts.push("end=" + encodeURIComponent(endInput.value));
     if (page && page > 1) parts.push("page=" + encodeURIComponent(page));
@@ -236,9 +243,10 @@
       })
       .then(function (html) {
         container.innerHTML = html;
-        if (window.initTableFilters) window.initTableFilters(container);
         wireAjaxForms(container);
-        if (resetLink) resetLink.classList.toggle("hidden", !startInput.value && !endInput.value);
+        if (resetLink) resetLink.classList.toggle(
+          "hidden", !queryInput.value.trim() && !startInput.value && !endInput.value
+        );
         if (push) history.pushState({params: params}, "", "/analytics" + query);
       })
       .catch(function () {
@@ -256,6 +264,7 @@
   if (resetLink) {
     resetLink.addEventListener("click", function (e) {
       e.preventDefault();
+      queryInput.value = "";
       startInput.value = "";
       endInput.value = "";
       loadTransactions("", true);
@@ -272,6 +281,7 @@
 
   window.addEventListener("popstate", function () {
     var params = new URLSearchParams(location.search);
+    queryInput.value = params.get("q") || "";
     startInput.value = params.get("start") || "";
     endInput.value = params.get("end") || "";
     loadTransactions(location.search.replace(/^\?/, ""), false);

@@ -116,6 +116,27 @@ class AnalyticsTransactionPaginationTests(unittest.TestCase):
         self.assertIn("41–45 из 45", html)
         self.assertIn('aria-current="page">3</span>', html)
 
+    def test_search_finds_purpose_across_pages_case_insensitively(self):
+        response = self.client.get(
+            "/analytics", query_string={"q": "нАзНаЧеНиЕ ТеСтА 03"}
+        )
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.transaction_rows(html), 1)
+        self.assertIn('value="Назначение теста 03"', html)
+        self.assertNotIn('value="Назначение теста 45"', html)
+        self.assertIn("1–1 из 1", html)
+        self.assertIn('value="нАзНаЧеНиЕ ТеСтА 03"', html)
+
+    def test_search_is_preserved_across_pages_and_row_actions(self):
+        query = {"q": "назначение теста", "page": 2}
+        html = self.client.get("/analytics", query_string=query).get_data(as_text=True)
+
+        self.assertEqual(self.transaction_rows(html), 20)
+        self.assertIn('q=%D0%BD%D0%B0%D0%B7%D0%BD%D0%B0%D1%87%D0%B5%D0%BD%D0%B8%D0%B5+', html)
+        self.assertIn("page=2", html)
+
 
 if __name__ == "__main__":
     unittest.main()

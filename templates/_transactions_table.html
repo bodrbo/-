@@ -1,8 +1,4 @@
 {% if transactions %}
-<div class="table-search">
-  <input type="search" placeholder="Поиск среди транзакций на этой странице…"
-         data-filter-table="#transactions-table" aria-label="Поиск по транзакциям">
-</div>
 <div class="table-scroll">
   <table class="records" id="transactions-table">
     <thead>
@@ -89,12 +85,13 @@
 <nav class="transactions-pagination" aria-label="Страницы транзакций">
   <span class="transactions-page-summary">
     {{ transaction_page_first }}–{{ transaction_page_last }} из {{ transaction_count }}
-    {% if filter_start or filter_end %}<small>за выбранный период</small>{% endif %}
+    {% if search_query %}<small>с учётом фильтров</small>
+    {% elif filter_start or filter_end %}<small>за выбранный период</small>{% endif %}
   </span>
   {% if transaction_total_pages > 1 %}
   <div class="transactions-page-links">
     {% if transaction_page > 1 %}
-    <a href="{{ url_for('analytics_index', start=filter_start or none, end=filter_end or none, page=transaction_page - 1) }}"
+    <a href="{{ url_for('analytics_index', q=search_query or none, start=filter_start or none, end=filter_end or none, page=transaction_page - 1) }}"
        data-transactions-page aria-label="Предыдущая страница">←</a>
     {% else %}
     <span class="disabled" aria-hidden="true">←</span>
@@ -105,12 +102,12 @@
       {% elif page_number == transaction_page %}
       <span class="current" aria-current="page">{{ page_number }}</span>
       {% else %}
-      <a href="{{ url_for('analytics_index', start=filter_start or none, end=filter_end or none, page=page_number) }}"
+      <a href="{{ url_for('analytics_index', q=search_query or none, start=filter_start or none, end=filter_end or none, page=page_number) }}"
          data-transactions-page aria-label="Страница {{ page_number }}">{{ page_number }}</a>
       {% endif %}
     {% endfor %}
     {% if transaction_page < transaction_total_pages %}
-    <a href="{{ url_for('analytics_index', start=filter_start or none, end=filter_end or none, page=transaction_page + 1) }}"
+    <a href="{{ url_for('analytics_index', q=search_query or none, start=filter_start or none, end=filter_end or none, page=transaction_page + 1) }}"
        data-transactions-page aria-label="Следующая страница">→</a>
     {% else %}
     <span class="disabled" aria-hidden="true">→</span>
@@ -121,10 +118,10 @@
 {% else %}
 <div class="empty-state">
   <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-  <div class="t">{{ 'Транзакции не найдены' if filter_start or filter_end else 'Транзакций пока нет' }}</div>
+  <div class="t">{{ 'Транзакции не найдены' if search_query or filter_start or filter_end else 'Транзакций пока нет' }}</div>
   <div class="s">
-    {% if filter_start or filter_end %}
-    Измените период или сбросьте фильтр.
+    {% if search_query or filter_start or filter_end %}
+    Измените параметры поиска или сбросьте фильтр.
     {% elif tbank_configured %}
     Здесь появится выписка по счёту, как только заработает выгрузка из Т-Банка.
     {% else %}
