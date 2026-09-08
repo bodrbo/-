@@ -6,7 +6,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{ 'ЛК клиента — режим администратора' if is_admin_view else 'Карточка экскурсионного клиента' if is_manager_view else 'Личный кабинет клиента' }}</title>
+<title>{{ 'ЛК партнёра — режим администратора' if is_admin_view and is_tuning_partner else 'ЛК клиента — режим администратора' if is_admin_view else 'Карточка экскурсионного клиента' if is_manager_view else 'Личный кабинет партнёра' if is_tuning_partner else 'Личный кабинет клиента' }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260901-client-admin-theme">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
@@ -17,7 +17,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Боцман">
 </head>
-<body class="client-dashboard-body{{ ' client-dashboard-admin' if is_staff_view }}">
+<body class="client-dashboard-body{{ ' client-dashboard-admin' if is_staff_view }}{{ ' client-dashboard-partner' if is_tuning_partner }}">
 
 <div class="page-loader" id="pageLoader" aria-hidden="true">
   <div class="loader-body">
@@ -44,7 +44,7 @@
       <a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo brand-logo-large"></a>
     </div>
     <div class="title-block">
-      <h1>{{ 'ЛК клиента · администратор' if is_admin_view else 'Экскурсионный клиент' if is_manager_view else 'Личный кабинет клиента' }}</h1>
+      <h1>{{ 'ЛК партнёра · администратор' if is_admin_view and is_tuning_partner else 'ЛК клиента · администратор' if is_admin_view else 'Экскурсионный клиент' if is_manager_view else 'Личный кабинет партнёра' if is_tuning_partner else 'Личный кабинет клиента' }}</h1>
     </div>
   </div>
 </header>
@@ -56,12 +56,12 @@
     <div>
       <span class="client-admin-eyebrow">{{ 'Рабочий режим' if is_manager_view else 'Служебный режим' }}</span>
       <div class="client-admin-mode-heading">
-        <h2 id="client-admin-mode-title">{{ 'Карточка экскурсионного клиента' if is_manager_view else 'Вы смотрите кабинет как администратор' }}</h2>
+        <h2 id="client-admin-mode-title">{{ 'Карточка экскурсионного клиента' if is_manager_view else 'Вы смотрите кабинет партнёра как администратор' if is_tuning_partner else 'Вы смотрите кабинет как администратор' }}</h2>
         <span class="status-badge status-client-{{ client.status }}">
           {{ {'satisfied': 'Довольный', 'neutral': 'Нейтральный', 'dissatisfied': 'Недовольный', 'blacklisted': 'Чёрный список'}.get(client.status, 'Нейтральный') }}
         </span>
       </div>
-      <p>{% if is_manager_view %}Здесь доступны контактные данные клиента и история его экскурсионных рейсов.{% else %}Клиент не видит эту панель, внутреннюю экономику, заметки и служебные данные заказов.{% endif %}</p>
+      <p>{% if is_manager_view %}Здесь доступны контактные данные клиента и история его экскурсионных рейсов.{% elif is_tuning_partner %}Партнёр видит свой профиль, заявки и клиентскую часть заказов, но не внутреннюю экономику и служебные данные.{% else %}Клиент не видит эту панель, внутреннюю экономику, заметки и служебные данные заказов.{% endif %}</p>
     </div>
     <div class="client-admin-toolbar-actions">
       <a href="{{ url_for('tuning_clients') if client_section == 'tuning' and client_relationship == 'client' else url_for('tuning_clients', section=client_section, relationship=client_relationship) }}" class="client-admin-link">← К клиентам и партнерам</a>
@@ -100,9 +100,56 @@
   </section>
   {% endif %}
 
-  <div class="investor-bar">
-    <span class="investor-name">{{ client.client_name }}</span>
-  </div>
+  {% if partner_profile_error %}<div class="alert" role="alert">{{ partner_profile_error }}</div>{% endif %}
+  {% if partner_profile_notice %}<div class="alert success" role="status">{{ partner_profile_notice }}</div>{% endif %}
+  {% if partner_request_notice %}<div class="alert success" role="status">{{ partner_request_notice }}</div>{% endif %}
+
+  {% if is_tuning_partner %}
+  <section class="partner-identity-card" aria-labelledby="partner-profile-name">
+    <div class="partner-logo-frame">
+      {% if partner_profile.logo_url %}
+      <img src="{{ partner_profile.logo_url }}" alt="Логотип {{ client.client_name }}">
+      {% else %}
+      <span aria-hidden="true">{{ client.client_name[:1]|upper }}</span>
+      {% endif %}
+    </div>
+    <div class="partner-identity-copy">
+      <span class="partner-identity-eyebrow">Партнёр Бодрого тюнинг-центра</span>
+      <h2 id="partner-profile-name">{{ client.client_name }}</h2>
+      <p class="partner-title">{{ partner_profile.display_title }}</p>
+    </div>
+    {% if not is_admin_view %}
+    <a href="{{ url_for('partner_estimate_request', token=client.token) }}" class="partner-request-cta">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M10 3v14M3 10h14"/>
+      </svg>
+      Заявка на расчёт
+    </a>
+    {% endif %}
+  </section>
+  {% if is_admin_view %}
+  <details class="panel partner-profile-editor">
+    <summary>Оформление кабинета партнёра</summary>
+    <form method="post" enctype="multipart/form-data" action="{{ url_for('update_tuning_partner_profile', client_id=client.id) }}">
+      <div class="field partner-title-field">
+        <label for="partner_title">Статус под названием</label>
+        <input id="partner_title" name="partner_title" type="text" maxlength="120"
+               value="{{ partner_profile.partner_title }}" placeholder="Например: Партнёрский тюнинг-центр">
+      </div>
+      <div class="field partner-logo-field">
+        <label for="partner_logo">Логотип</label>
+        <input id="partner_logo" name="partner_logo" type="file" accept="image/jpeg,image/png,image/webp">
+      </div>
+      {% if partner_profile.logo_url %}
+      <label class="partner-remove-logo"><input type="checkbox" name="remove_logo" value="1"> Удалить текущий логотип</label>
+      {% endif %}
+      <button type="submit">Сохранить оформление</button>
+    </form>
+  </details>
+  {% endif %}
+  {% else %}
+  <div class="investor-bar"><span class="investor-name">{{ client.client_name }}</span></div>
+  {% endif %}
 
   {% if is_staff_view and client_section == 'excursion' %}
   <div class="totals-grid">
@@ -162,8 +209,13 @@
     </div>
   </div>
 
-  <section class="panel">
-    <h2>Ваши заказы</h2>
+  <section class="panel" id="orders">
+    <div class="partner-orders-heading">
+      <h2>{{ 'Заявки и заказы' if is_tuning_partner else 'Ваши заказы' }}</h2>
+      {% if is_tuning_partner and not is_admin_view %}
+      <a href="{{ url_for('partner_estimate_request', token=client.token) }}" class="btn-secondary">Создать заявку</a>
+      {% endif %}
+    </div>
     {% if orders %}
     <div class="order-card-list">
       {% for o in orders %}
@@ -210,7 +262,7 @@
                       </svg>
                     </button>
                     {% endif %}
-                    {% if item.status == 'pending' and not is_admin_view %}
+                    {% if item.status == 'pending' and not item.price_pending and not is_admin_view %}
                     <form action="{{ url_for('client_approve_item', token=client.token, item_id=item.id) }}" method="post">
                       <button type="submit" class="icon-btn approve" title="Согласовать работу">
                         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -287,7 +339,7 @@
               <a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="client-admin-edit-link">Редактировать заказ</a>
             </div>
             <dl class="client-admin-order-facts">
-              <div><dt>Источник</dt><dd>{{ {'manual': 'Создан вручную', 'tilda': 'Заявка Tilda', 'tuning_site': 'Сайт тюнинга'}.get(o.source, o.source or '—') }}</dd></div>
+              <div><dt>Источник</dt><dd>{{ {'manual': 'Создан вручную', 'tilda': 'Заявка Tilda', 'tuning_site': 'Сайт тюнинга', 'partner_request': 'Заявка партнёра'}.get(o.source, o.source or '—') }}</dd></div>
               <div><dt>Канал продажи</dt><dd>{{ 'Напрямую' if o.sale_channel == 'direct' else ('Агрегатор' if o.sale_channel == 'aggregator' else 'Смешанный') }}</dd></div>
               <div><dt>Внутренняя себестоимость</dt><dd>{{ o.internal_cost|money }} ₽</dd></div>
               <div><dt>Расчётная маржа</dt><dd class="{{ 'is-negative' if o.gross_margin < 0 else 'is-positive' }}">{{ o.gross_margin|money }} ₽</dd></div>
@@ -340,7 +392,7 @@
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
       <div class="t">Заказов пока нет</div>
-      <div class="s">Здесь появятся ваши заказы из тюнинг-центра.</div>
+      <div class="s">{{ 'Создайте заявку на расчёт — после ответа она останется здесь как заказ.' if is_tuning_partner else 'Здесь появятся ваши заказы из тюнинг-центра.' }}</div>
     </div>
     {% endif %}
   </section>

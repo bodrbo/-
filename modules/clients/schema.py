@@ -146,6 +146,8 @@ def init_schema(conn):
             segment TEXT NOT NULL,
             created_at TEXT NOT NULL,
             relationship_type TEXT NOT NULL DEFAULT 'client',
+            partner_title TEXT NOT NULL DEFAULT '',
+            partner_logo_filename TEXT,
             PRIMARY KEY (client_id, segment)
         )
         """
@@ -157,6 +159,15 @@ def init_schema(conn):
         conn.execute(
             "ALTER TABLE client_segments ADD COLUMN relationship_type "
             "TEXT NOT NULL DEFAULT 'client'"
+        )
+    if "partner_title" not in segment_columns:
+        conn.execute(
+            "ALTER TABLE client_segments ADD COLUMN partner_title "
+            "TEXT NOT NULL DEFAULT ''"
+        )
+    if "partner_logo_filename" not in segment_columns:
+        conn.execute(
+            "ALTER TABLE client_segments ADD COLUMN partner_logo_filename TEXT"
         )
     conn.execute(
         "UPDATE client_segments SET relationship_type = 'client' "

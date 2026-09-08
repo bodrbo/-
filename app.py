@@ -244,6 +244,13 @@ def find_diploma_url(username):
 
 WORK_PHOTO_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 TUNING_BOAT_PHOTO_EXTENSIONS = WORK_PHOTO_EXTENSIONS
+PARTNER_LOGO_EXTENSIONS = WORK_PHOTO_EXTENSIONS
+PARTNER_TITLE_LIMIT = 120
+PARTNER_REQUEST_WORK_LIMIT = 30
+PARTNER_REQUEST_MOTOR_LIMIT = 10
+PARTNER_REQUEST_WORK_NAME_LIMIT = 500
+PARTNER_REQUEST_SERIAL_LIMIT = 160
+DEFAULT_TUNING_PARTNER_TITLE = "Партнёрский тюнинг-центр"
 TUNING_BOAT_MODEL_NAME_LIMIT = 200
 TUNING_BOAT_SPECIFICATIONS_LIMIT = 8000
 TUNING_BOAT_SOURCE_NAME_LIMIT = 250
@@ -4435,6 +4442,104 @@ def _process_tuning_form(form, default_order_date=None):
     return errors, data
 
 
+def _process_partner_estimate_request(form, client):
+    """Build the regular order payload from partner-editable fields only.
+
+    A separate allow-list is intentional: forged client, status, product and
+    price inputs never reach the ordinary tuning form parser.
+    """
+    errors = []
+    safe_form = MultiDict()
+    safe_form.add("client_name", client["client_name"])
+    safe_form.add("client_id", str(client["id"]))
+    safe_form.add("phone", client["phone"] or "")
+    equipment_type = form.get("equipment_type", "boat")
+    if equipment_type not in ("boat", "motor"):
+        equipment_type = "boat"
+    safe_form.add("equipment_type", equipment_type)
+    safe_form.add(
+        "boat_model", form.get("boat_model", "") if equipment_type == "boat" else ""
+    )
+    safe_form.add(
+        "boat_registration_number",
+        form.get("boat_registration_number", "") if equipment_type == "boat" else "",
+    )
+    safe_form.add(
+        "motor_model", form.get("motor_model", "") if equipment_type == "motor" else ""
+    )
+    safe_form.add(
+        "motor_serial_number",
+        form.get("motor_serial_number", "") if equipment_type == "motor" else "",
+    )
+    safe_form.add("sale_channel", "direct")
+    safe_form.add("discount_type", "percent")
+    safe_form.add("discount_value", "0")
+
+    submitted_motor_models = (
+        form.getlist("boat_motor_model[]") if equipment_type == "boat" else []
+    )
+    if len(submitted_motor_models) > PARTNER_REQUEST_MOTOR_LIMIT:
+        errors.append(
+            f"В одной заявке можно указать не больше "
+            f"{PARTNER_REQUEST_MOTOR_LIMIT} моторов."
+        )
+    motor_models = submitted_motor_models[:PARTNER_REQUEST_MOTOR_LIMIT]
+    motor_serials = (
+        form.getlist("boat_motor_serial_number[]")[:PARTNER_REQUEST_MOTOR_LIMIT]
+        if equipment_type == "boat" else []
+    )
+    for index, model in enumerate(motor_models):
+        safe_form.add("boat_motor_model[]", model)
+        safe_form.add(
+            "boat_motor_serial_number[]",
+            motor_serials[index] if index < len(motor_serials) else "",
+        )
+
+    raw_work_names = form.getlist("work_name[]")
+    if len(raw_work_names) > PARTNER_REQUEST_WORK_LIMIT:
+        errors.append(
+            f"В одной заявке можно указать не больше {PARTNER_REQUEST_WORK_LIMIT} работ."
+        )
+    for work_name in raw_work_names[:PARTNER_REQUEST_WORK_LIMIT]:
+        safe_form.add("work_name[]", work_name)
+        # Empty pairs are interpreted by the existing order parser as an
+        # explicitly unpriced line and persisted with price_pending=1.
+        safe_form.add("cost_price[]", "")
+        safe_form.add("multiplier[]", "")
+
+    for field_name, label, limit in (
+        ("boat_model", "Модель лодки", TUNING_BOAT_MODEL_NAME_LIMIT),
+        ("motor_model", "Модель мотора", TUNING_BOAT_MODEL_NAME_LIMIT),
+        ("boat_registration_number", "Бортовой номер", PARTNER_REQUEST_SERIAL_LIMIT),
+        ("motor_serial_number", "Серийный номер", PARTNER_REQUEST_SERIAL_LIMIT),
+    ):
+        if len(safe_form.get(field_name, "").strip()) > limit:
+            errors.append(f"{label}: не больше {limit} символов.")
+    for index, model in enumerate(motor_models, 1):
+        if len(model.strip()) > TUNING_BOAT_MODEL_NAME_LIMIT:
+            errors.append(
+                f"Мотор №{index}: модель не больше {TUNING_BOAT_MODEL_NAME_LIMIT} символов."
+            )
+    for index, serial in enumerate(motor_serials, 1):
+        if len(serial.strip()) > PARTNER_REQUEST_SERIAL_LIMIT:
+            errors.append(
+                f"Мотор №{index}: серийный номер не больше "
+                f"{PARTNER_REQUEST_SERIAL_LIMIT} символов."
+            )
+    for index, work_name in enumerate(raw_work_names[:PARTNER_REQUEST_WORK_LIMIT], 1):
+        if len(work_name.strip()) > PARTNER_REQUEST_WORK_NAME_LIMIT:
+            errors.append(
+                f"Работа №{index}: описание не больше "
+                f"{PARTNER_REQUEST_WORK_NAME_LIMIT} символов."
+            )
+
+    parser_errors, data = _process_tuning_form(
+        safe_form, default_order_date=dt.date.today().isoformat()
+    )
+    errors.extend(parser_errors)
+    return errors, None if errors else data
+
+
 def _boat_motor_form_values(form):
     """Rebuild repeatable motor rows after a validation error."""
     models = form.getlist("boat_motor_model[]")
@@ -7866,6 +7971,22 @@ def remove_tuning_order_product(order_id, row_id):
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
+def _client_segment_profile(db, client_id, segment):
+    row = db.execute(
+        "SELECT relationship_type, partner_title, partner_logo_filename "
+        "FROM client_segments WHERE client_id = ? AND segment = ?",
+        (client_id, segment),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def _partner_logo_url(partner_profile):
+    filename = (partner_profile or {}).get("partner_logo_filename")
+    if not filename:
+        return None
+    return url_for("static", filename=f"partner_logos/{filename}")
+
+
 def _render_client_dashboard(
     db,
     client,
@@ -7883,6 +8004,19 @@ def _render_client_dashboard(
     is_admin_view = viewer_role == "admin"
     is_manager_view = viewer_role == "manager"
     is_staff_view = is_admin_view or is_manager_view
+    is_tuning_partner = (
+        client_section == TUNING_SEGMENT
+        and client_relationship == CLIENT_RELATIONSHIP_PARTNER
+    )
+    partner_profile = (
+        _client_segment_profile(db, client["id"], TUNING_SEGMENT)
+        if is_tuning_partner else None
+    )
+    if partner_profile is not None:
+        partner_profile["display_title"] = (
+            partner_profile["partner_title"] or DEFAULT_TUNING_PARTNER_TITLE
+        )
+        partner_profile["logo_url"] = _partner_logo_url(partner_profile)
     excursion_trips = []
     if is_staff_view and client_section == EXCURSION_SEGMENT:
         excursion_trips = [
@@ -7897,7 +8031,8 @@ def _render_client_dashboard(
         ]
     order_columns = (
         "id, equipment_type, boat_model, boat_registration_number, motor_model, "
-        "motor_serial_number, discount_type, discount_value, total, status, created_at"
+        "motor_serial_number, discount_type, discount_value, total, status, "
+        "order_date, created_at"
     )
     if is_admin_view:
         order_columns += ", sale_channel, updated_at, source, source_ref"
@@ -8000,6 +8135,11 @@ def _render_client_dashboard(
         viewer_role=viewer_role,
         client_section=client_section,
         client_relationship=client_relationship,
+        is_tuning_partner=is_tuning_partner,
+        partner_profile=partner_profile,
+        partner_profile_notice=session.pop("partner_profile_notice", None),
+        partner_profile_error=session.pop("partner_profile_error", None),
+        partner_request_notice=session.pop("partner_request_notice", None),
         excursion_trips=excursion_trips,
         admin_name=(
             session.get("admin_name")
@@ -8013,12 +8153,19 @@ def _render_client_dashboard(
 def client_dashboard(token):
     db = get_db()
     client = db.execute(
-        "SELECT id, client_name, boat_model, token FROM clients WHERE token = ?",
+        "SELECT id, client_name, boat_model, phone, token FROM clients WHERE token = ?",
         (token,),
     ).fetchone()
     if client is None:
         return redirect(url_for("home"))
-    return _render_client_dashboard(db, client, "client")
+    membership = _client_segment_profile(db, client["id"], TUNING_SEGMENT)
+    relationship = (
+        membership["relationship_type"]
+        if membership is not None else CLIENT_RELATIONSHIP_CLIENT
+    )
+    return _render_client_dashboard(
+        db, client, "client", TUNING_SEGMENT, relationship
+    )
 
 
 @app.route("/admin/clients/<int:client_id>/cabinet")
@@ -8063,6 +8210,167 @@ def admin_client_dashboard(client_id):
     )
 
 
+@app.route("/admin/clients/<int:client_id>/partner-profile", methods=["POST"])
+@admin_login_required
+def update_tuning_partner_profile(client_id):
+    db = get_db()
+    membership = _client_segment_profile(db, client_id, TUNING_SEGMENT)
+    if (
+        membership is None
+        or membership["relationship_type"] != CLIENT_RELATIONSHIP_PARTNER
+    ):
+        return redirect(url_for("tuning_clients"))
+
+    partner_title = " ".join(request.form.get("partner_title", "").split())
+    if len(partner_title) > PARTNER_TITLE_LIMIT:
+        session["partner_profile_error"] = (
+            f"Статус партнёра не должен превышать {PARTNER_TITLE_LIMIT} символов."
+        )
+        return redirect(url_for(
+            "admin_client_dashboard", client_id=client_id, section=TUNING_SEGMENT
+        ))
+
+    logo_filename = membership["partner_logo_filename"]
+    if request.form.get("remove_logo") == "1":
+        logo_filename = None
+    logo = request.files.get("partner_logo")
+    if logo and logo.filename:
+        extension = os.path.splitext(logo.filename)[1].lower()
+        if (
+            extension not in PARTNER_LOGO_EXTENSIONS
+            or not (logo.mimetype or "").lower().startswith("image/")
+        ):
+            session["partner_profile_error"] = (
+                "Логотип должен быть изображением JPG, PNG или WebP."
+            )
+            return redirect(url_for(
+                "admin_client_dashboard", client_id=client_id,
+                section=TUNING_SEGMENT,
+            ))
+        logos_dir = os.path.join(app.static_folder, "partner_logos")
+        os.makedirs(logos_dir, exist_ok=True)
+        logo_filename = f"{client_id}-{secrets.token_hex(8)}{extension}"
+        logo.save(os.path.join(logos_dir, logo_filename))
+
+    db.execute(
+        "UPDATE client_segments SET partner_title = ?, partner_logo_filename = ? "
+        "WHERE client_id = ? AND segment = ? AND relationship_type = ?",
+        (
+            partner_title,
+            logo_filename,
+            client_id,
+            TUNING_SEGMENT,
+            CLIENT_RELATIONSHIP_PARTNER,
+        ),
+    )
+    db.commit()
+    session["partner_profile_notice"] = "Профиль партнёра обновлён."
+    return redirect(url_for(
+        "admin_client_dashboard", client_id=client_id, section=TUNING_SEGMENT
+    ))
+
+
+def _render_partner_estimate_request(client, errors=None, form_values=None):
+    db = get_db()
+    _sync_tuning_boat_profiles(db)
+    db.commit()
+    profile = _client_segment_profile(db, client["id"], TUNING_SEGMENT)
+    if profile is not None:
+        profile["display_title"] = (
+            profile["partner_title"] or DEFAULT_TUNING_PARTNER_TITLE
+        )
+        profile["logo_url"] = _partner_logo_url(profile)
+    return render_template(
+        "partner_estimate_request.html",
+        client=client,
+        partner_profile=profile,
+        errors=errors,
+        form_values=form_values,
+        work_names_prefill=(
+            form_values.getlist("work_name[]") if form_values is not None else [""]
+        ),
+        boat_motors_prefill=(
+            _boat_motor_form_values(form_values) if form_values is not None else []
+        ),
+        boat_model_choices=_tuning_boat_model_choices(db),
+        motor_model_choices=_tuning_motor_model_choices(db),
+    )
+
+
+@app.route("/client/<token>/estimate-request", methods=["GET", "POST"])
+def partner_estimate_request(token):
+    db = get_db()
+    client = db.execute(
+        "SELECT id, client_name, boat_model, phone, token "
+        "FROM clients WHERE token = ?",
+        (token,),
+    ).fetchone()
+    if client is None:
+        return redirect(url_for("home"))
+    membership = _client_segment_profile(db, client["id"], TUNING_SEGMENT)
+    if (
+        membership is None
+        or membership["relationship_type"] != CLIENT_RELATIONSHIP_PARTNER
+    ):
+        return redirect(url_for("client_dashboard", token=token))
+    if request.method == "GET":
+        return _render_partner_estimate_request(client)
+
+    errors, data = _process_partner_estimate_request(request.form, client)
+    if errors:
+        return _render_partner_estimate_request(
+            client, errors=errors, form_values=request.form
+        ), 400
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    cursor = db.execute(
+        "INSERT INTO tuning_orders "
+        "(client_id, client_name, equipment_type, boat_model, "
+        "boat_registration_number, motor_model, motor_serial_number, "
+        "sale_channel, phone, discount_pct, discount_type, discount_value, "
+        "subtotal, total, status, order_date, created_at, updated_at, "
+        "source, source_ref) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 'direct', ?, 0, 'percent', 0, "
+        "0, 0, ?, ?, ?, ?, 'partner_request', ?)",
+        (
+            client["id"],
+            client["client_name"],
+            data["equipment_type"],
+            data["boat_model"],
+            data["boat_registration_number"],
+            data["motor_model"],
+            data["motor_serial_number"],
+            client["phone"] or "",
+            DEFAULT_ORDER_STATUS,
+            data["order_date"],
+            now,
+            now,
+            f"partner:{client['id']}:{uuid.uuid4().hex}",
+        ),
+    )
+    order_id = cursor.lastrowid
+    _replace_tuning_order_motors(
+        db, order_id, data["equipment_type"], data["boat_motors"], now
+    )
+    for item in data["items"]:
+        db.execute(
+            "INSERT INTO tuning_order_items "
+            "(order_id, work_name, cost_price, multiplier, price, "
+            "price_pending, status) VALUES (?, ?, 0, 0, 0, 1, ?)",
+            (order_id, item["work_name"], DEFAULT_WORK_STATUS),
+        )
+    db.execute(
+        "INSERT INTO projects (name, tuning_order_id, created_at) VALUES (?, ?, ?)",
+        (f"Заказ №{order_id}", order_id, now),
+    )
+    _sync_tuning_boat_profiles(db)
+    db.commit()
+    session["partner_request_notice"] = (
+        f"Заявка №{order_id} отправлена. Мы добавим расчёт в этот кабинет."
+    )
+    return redirect(url_for("client_dashboard", token=token) + "#orders")
+
+
 @app.route(
     "/admin/clients/<int:client_id>/acquisition-channel", methods=["POST"]
 )
@@ -8096,7 +8404,7 @@ def client_approve_item(token, item_id):
     if client is None:
         return redirect(url_for("home"))
     item = db.execute(
-        "SELECT toi.id, toi.status, toi.work_name, o.client_name, "
+        "SELECT toi.id, toi.status, toi.price_pending, toi.work_name, o.client_name, "
         "o.equipment_type, o.boat_model, o.boat_registration_number, "
         "o.motor_model, o.motor_serial_number "
         "FROM tuning_order_items toi "
@@ -8104,7 +8412,11 @@ def client_approve_item(token, item_id):
         "WHERE toi.id = ? AND o.client_id = ?",
         (item_id, client["id"]),
     ).fetchone()
-    if item is not None and item["status"] == "pending":
+    if (
+        item is not None
+        and item["status"] == "pending"
+        and not item["price_pending"]
+    ):
         db.execute("UPDATE tuning_order_items SET status = 'approved' WHERE id = ?", (item_id,))
         db.commit()
         equipment_label = tuning_equipment_label(item)

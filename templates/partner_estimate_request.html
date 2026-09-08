@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Новая заявка на расчёт</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<meta name="theme-color" content="#123848">
+</head>
+<body class="client-dashboard-body client-dashboard-partner partner-request-page">
+
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100">
+      <g fill="var(--brass)">
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/>
+      </g>
+      <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
+    </svg>
+    <span class="loader-label">Отправляем заявку…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <a href="{{ url_for('client_dashboard', token=client.token) }}">
+        <img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo brand-logo-large">
+      </a>
+    </div>
+    <div class="title-block"><h1>Заявка на расчёт</h1></div>
+  </div>
+</header>
+
+<main class="wrap partner-request-wrap">
+  <a class="partner-request-back" href="{{ url_for('client_dashboard', token=client.token) }}">← Вернуться в кабинет</a>
+
+  <section class="partner-request-intro">
+    <div class="partner-logo-frame partner-logo-frame-small">
+      {% if partner_profile.logo_url %}
+      <img src="{{ partner_profile.logo_url }}" alt="Логотип {{ client.client_name }}">
+      {% else %}
+      <span aria-hidden="true">{{ client.client_name[:1]|upper }}</span>
+      {% endif %}
+    </div>
+    <div>
+      <span class="partner-identity-eyebrow">Заявитель</span>
+      <h2>{{ client.client_name }}</h2>
+      <p>{{ partner_profile.display_title }}</p>
+    </div>
+  </section>
+
+  {% if errors %}
+  <div class="alert" role="alert">
+    <strong>Проверьте заявку:</strong>
+    <ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <form method="post" class="partner-request-form" id="partnerRequestForm">
+    <section class="panel partner-request-section">
+      <div class="partner-request-section-heading">
+        <span>01</span>
+        <div><h2>Техника</h2><p>Выберите тип и укажите модель, которую нужно рассчитать.</p></div>
+      </div>
+
+      {% set equipment_type = form_values.get('equipment_type', 'boat') if form_values else 'boat' %}
+      <fieldset class="partner-equipment-switch">
+        <legend>Тип техники</legend>
+        <label><input type="radio" name="equipment_type" value="boat" {{ 'checked' if equipment_type != 'motor' }}><span>Лодка</span></label>
+        <label><input type="radio" name="equipment_type" value="motor" {{ 'checked' if equipment_type == 'motor' }}><span>Мотор</span></label>
+      </fieldset>
+
+      <div id="partnerBoatFields" class="partner-request-fields">
+        <div class="field">
+          <label for="partner_boat_model">Модель лодки</label>
+          <input id="partner_boat_model" name="boat_model" type="text" list="partnerBoatModels"
+                 maxlength="200" autocomplete="off"
+                 value="{{ form_values.get('boat_model', '') if form_values else '' }}"
+                 placeholder="Выберите из каталога или введите новую">
+          <datalist id="partnerBoatModels">{% for model in boat_model_choices %}<option value="{{ model }}">{% endfor %}</datalist>
+          <small>Новая модель автоматически появится в каталоге лодок.</small>
+        </div>
+        <div class="field">
+          <label for="partner_boat_number">Бортовой номер</label>
+          <input id="partner_boat_number" name="boat_registration_number" type="text" maxlength="160"
+                 value="{{ form_values.get('boat_registration_number', '') if form_values else '' }}" placeholder="Необязательно">
+        </div>
+
+        <div class="partner-motors-block">
+          <div class="partner-repeatable-heading"><h3>Моторы на лодке</h3><button type="button" class="btn-secondary" id="addPartnerMotor">+ Добавить мотор</button></div>
+          <div id="partnerMotorRows">
+            {% for motor in boat_motors_prefill %}
+            <div class="partner-repeatable-row partner-motor-row">
+              <div class="field"><label>Модель мотора</label><input name="boat_motor_model[]" type="text" list="partnerMotorModels" maxlength="200" value="{{ motor.motor_model }}" placeholder="Модель"></div>
+              <div class="field"><label>Серийный номер</label><input name="boat_motor_serial_number[]" type="text" maxlength="160" value="{{ motor.motor_serial_number }}" placeholder="Необязательно"></div>
+              <button type="button" class="icon-btn danger partner-remove-row" aria-label="Убрать мотор" title="Убрать мотор">×</button>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <div id="partnerMotorFields" class="partner-request-fields">
+        <div class="field">
+          <label for="partner_motor_model">Модель мотора</label>
+          <input id="partner_motor_model" name="motor_model" type="text" list="partnerMotorModels" maxlength="200" autocomplete="off"
+                 value="{{ form_values.get('motor_model', '') if form_values else '' }}" placeholder="Выберите из каталога или введите новую">
+          <small>Новая модель автоматически появится в каталоге моторов.</small>
+        </div>
+        <div class="field">
+          <label for="partner_motor_serial">Серийный номер</label>
+          <input id="partner_motor_serial" name="motor_serial_number" type="text" maxlength="160"
+                 value="{{ form_values.get('motor_serial_number', '') if form_values else '' }}" placeholder="Необязательно">
+        </div>
+      </div>
+      <datalist id="partnerMotorModels">{% for model in motor_model_choices %}<option value="{{ model }}">{% endfor %}</datalist>
+    </section>
+
+    <section class="panel partner-request-section">
+      <div class="partner-request-section-heading">
+        <span>02</span>
+        <div><h2>Работы для расчёта</h2><p>Опишите каждую работу отдельной строкой. Стоимость назначит администратор.</p></div>
+      </div>
+      <div class="partner-price-lock" role="note">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4" y="8" width="12" height="9" rx="2"/><path d="M7 8V6a3 3 0 016 0v2"/></svg>
+        Цены и статусы защищены — все позиции будут созданы с отметкой «Ждёт расчёта».
+      </div>
+      <div id="partnerWorkRows">
+        {% for work_name in work_names_prefill %}
+        <div class="partner-repeatable-row partner-work-row">
+          <div class="field"><label>Работа {{ loop.index }}</label><textarea name="work_name[]" maxlength="500" rows="2" placeholder="Например: установка эхолота">{{ work_name }}</textarea></div>
+          <button type="button" class="icon-btn danger partner-remove-row" aria-label="Убрать работу" title="Убрать работу">×</button>
+        </div>
+        {% endfor %}
+      </div>
+      <button type="button" class="btn-secondary partner-add-work" id="addPartnerWork">+ Добавить работу</button>
+    </section>
+
+    <div class="partner-request-submitbar">
+      <p><strong>Клиент:</strong> {{ client.client_name }}<br><span>После отправки заявку можно будет открыть в кабинете.</span></p>
+      <button type="submit">Отправить на расчёт</button>
+    </div>
+  </form>
+</main>
+
+<template id="partnerMotorRowTemplate">
+  <div class="partner-repeatable-row partner-motor-row">
+    <div class="field"><label>Модель мотора</label><input name="boat_motor_model[]" type="text" list="partnerMotorModels" maxlength="200" placeholder="Модель"></div>
+    <div class="field"><label>Серийный номер</label><input name="boat_motor_serial_number[]" type="text" maxlength="160" placeholder="Необязательно"></div>
+    <button type="button" class="icon-btn danger partner-remove-row" aria-label="Убрать мотор" title="Убрать мотор">×</button>
+  </div>
+</template>
+<template id="partnerWorkRowTemplate">
+  <div class="partner-repeatable-row partner-work-row">
+    <div class="field"><label>Работа</label><textarea name="work_name[]" maxlength="500" rows="2" placeholder="Опишите работу"></textarea></div>
+    <button type="button" class="icon-btn danger partner-remove-row" aria-label="Убрать работу" title="Убрать работу">×</button>
+  </div>
+</template>
+
+<script>
+(function () {
+  var boatFields = document.getElementById('partnerBoatFields');
+  var motorFields = document.getElementById('partnerMotorFields');
+  var boatModel = document.getElementById('partner_boat_model');
+  var motorModel = document.getElementById('partner_motor_model');
+  function syncEquipment() {
+    var isMotor = document.querySelector('input[name="equipment_type"]:checked').value === 'motor';
+    boatFields.hidden = isMotor;
+    motorFields.hidden = !isMotor;
+    boatModel.required = !isMotor;
+    motorModel.required = isMotor;
+  }
+  document.querySelectorAll('input[name="equipment_type"]').forEach(function (input) { input.addEventListener('change', syncEquipment); });
+  syncEquipment();
+
+  function appendTemplate(templateId, targetId, limit) {
+    var target = document.getElementById(targetId);
+    if (target.children.length >= limit) return;
+    target.appendChild(document.getElementById(templateId).content.cloneNode(true));
+    renumberWorks();
+  }
+  function renumberWorks() {
+    document.querySelectorAll('#partnerWorkRows .partner-work-row').forEach(function (row, index) {
+      row.querySelector('label').textContent = 'Работа ' + (index + 1);
+    });
+  }
+  document.getElementById('addPartnerMotor').addEventListener('click', function () { appendTemplate('partnerMotorRowTemplate', 'partnerMotorRows', 10); });
+  document.getElementById('addPartnerWork').addEventListener('click', function () { appendTemplate('partnerWorkRowTemplate', 'partnerWorkRows', 30); });
+  document.addEventListener('click', function (event) {
+    var button = event.target.closest('.partner-remove-row');
+    if (!button) return;
+    var row = button.closest('.partner-repeatable-row');
+    if (row.classList.contains('partner-work-row') && document.querySelectorAll('#partnerWorkRows .partner-work-row').length === 1) {
+      row.querySelector('textarea').value = '';
+      return;
+    }
+    row.remove();
+    renumberWorks();
+  });
+})();
+</script>
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+</body>
+</html>
