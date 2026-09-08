@@ -186,11 +186,13 @@
     {% endif %}
   </section>
   {% else %}
-  <div class="totals-grid">
+  <div class="totals-grid{{ ' partner-totals-grid' if is_tuning_partner }}">
+    {% if not is_tuning_partner %}
     <div class="panel total-card">
       <span class="k">Техника</span>
       <span class="v" style="font-size:20px;">{{ primary_equipment }}</span>
     </div>
+    {% endif %}
     <div class="panel total-card">
       <span class="k">Заказов</span>
       <span class="v">{{ orders|length }}</span>

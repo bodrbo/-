@@ -9079,6 +9079,7 @@ button.captain-command-alert:hover {
 .partner-orders-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
 .partner-orders-heading h2 { margin: 0; }
 .partner-orders-heading .btn-secondary { margin: 0; }
+.partner-totals-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .client-dashboard-partner .alert.success { border-color: rgba(47, 107, 79, .3); background: #eef8f2; color: #245c43; }
 
 .partner-request-wrap { max-width: 920px; }

@@ -117,10 +117,12 @@ class TuningPartnerDashboardTests(unittest.TestCase):
         self.assertIn("Личный кабинет партнёра", partner_html)
         self.assertIn("Партнёрский тюнинг-центр", partner_html)
         self.assertIn("Заявка на расчёт", partner_html)
+        self.assertNotIn('<span class="k">Техника</span>', partner_html)
         self.assertIn(
             f'/client/{self.PARTNER_TOKEN}/estimate-request', partner_html
         )
         self.assertNotIn("Заявка на расчёт", regular_html)
+        self.assertIn('<span class="k">Техника</span>', regular_html)
 
     def test_admin_can_edit_title_and_upload_logo(self):
         self._login_admin()
