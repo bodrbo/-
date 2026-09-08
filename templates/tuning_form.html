@@ -52,6 +52,43 @@
 </div>
 {% endmacro %}
 
+{% macro boat_motor_row(motor=None) %}
+<div class="boat-motor-row">
+  <div class="field boat-motor-model-field">
+    <label>Модель мотора</label>
+    {% set current_model = motor.motor_model if motor else '' %}
+    <div class="combo-field" data-combo data-combo-allow-custom data-combo-optional>
+      <input type="text" class="combo-input" data-combo-input
+             value="{{ current_model }}" data-selected-label="{{ current_model }}"
+             placeholder="Выберите из каталога или введите новую модель…"
+             autocomplete="off" role="combobox" aria-autocomplete="list"
+             aria-label="Модель мотора лодки">
+      <input type="hidden" name="boat_motor_model[]" data-combo-value value="{{ current_model }}">
+      <div class="combo-dropdown hidden" data-combo-dropdown>
+        <p class="combo-empty hidden" data-combo-empty>Новая модель будет добавлена в каталог моторов.</p>
+        {% for model in motor_model_choices|default([]) %}
+        <div class="combo-option" data-value="{{ model }}" data-label="{{ model }}" data-search="{{ model|lower }}">
+          <span class="combo-option-name">{{ model }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="field boat-motor-serial-field">
+    <label>Серийный номер</label>
+    <input type="text" name="boat_motor_serial_number[]"
+           value="{{ motor.motor_serial_number if motor else '' }}"
+           placeholder="Необязательно" aria-label="Серийный номер мотора лодки">
+  </div>
+  <button type="button" class="icon-btn danger boat-motor-remove"
+          onclick="removeBoatMotorRow(this)" title="Убрать мотор" aria-label="Убрать мотор">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 6h12M8 6V4h4v2M6 6l1 11h6l1-11M9 9v5M11 9v5"/>
+    </svg>
+  </button>
+</div>
+{% endmacro %}
+
 <header class="topbar">
   <div class="topbar-inner">
     <div class="topbar-top-row">
@@ -679,9 +716,26 @@
                  placeholder="Например: Р 12-34 ЛО">
           <span class="field-context">Необязательно</span>
         </div>
-        <div class="field" id="motorModelField">
+        <div class="field-wide boat-motors-field" id="boatMotorsField" {{ 'hidden' if selected_equipment_type == 'motor' }}>
+          <div class="boat-motors-heading">
+            <div>
+              <span class="field-static-label">Моторы</span>
+              <span class="field-context">Необязательно. Можно указать несколько моторов и их серийные номера.</span>
+            </div>
+            <button type="button" class="btn-add" onclick="addBoatMotorRow()">Добавить мотор</button>
+          </div>
+          <div id="boat-motors-container">
+            {% if boat_motors_prefill %}
+              {% for motor in boat_motors_prefill %}{{ boat_motor_row(motor) }}{% endfor %}
+            {% else %}
+              {{ boat_motor_row() }}
+            {% endif %}
+          </div>
+          <template id="boat-motor-row-template">{{ boat_motor_row() }}</template>
+        </div>
+        <div class="field" id="motorModelField" {{ 'hidden' if selected_equipment_type != 'motor' }}>
           <div class="field-label-with-link">
-            <label for="motor_model_search" id="motorModelLabel">{{ 'Модель мотора' if selected_equipment_type == 'motor' else 'Мотор' }}</label>
+            <label for="motor_model_search">Модель мотора</label>
             {% if motor_profile_id %}
             <a href="{{ url_for('tuning_motor_profile', profile_id=motor_profile_id) }}"
                class="tuning-boat-profile-link">Открыть профиль ↗</a>
@@ -706,7 +760,7 @@
               {% endfor %}
             </div>
           </div>
-          <span class="field-context" id="motorModelContext">{{ 'Выберите мотор из каталога или введите новую модель.' if selected_equipment_type == 'motor' else 'Необязательно — можно выбрать из каталога или ввести новую модель.' }}</span>
+          <span class="field-context">Выберите мотор из каталога или введите новую модель.</span>
         </div>
         <div class="field" id="motorSerialNumberField" {{ 'hidden' if selected_equipment_type != 'motor' }}>
           <label for="motor_serial_number">Серийный номер</label>
@@ -1002,6 +1056,20 @@ function removeWorkRow(btn) {
   updateOrderTotal();
 }
 
+function addBoatMotorRow() {
+  var container = document.getElementById('boat-motors-container');
+  var template = document.getElementById('boat-motor-row-template');
+  if (!container || !template) return;
+  var fragment = template.content.cloneNode(true);
+  if (window.initSearchableComboboxes) window.initSearchableComboboxes(fragment);
+  container.appendChild(fragment);
+}
+
+function removeBoatMotorRow(btn) {
+  var row = btn.closest('.boat-motor-row');
+  if (row) row.remove();
+}
+
 function updateOrderTotal() {
   // Goods are saved immediately through their own "Товары" mini-form
   // (not part of this work-items submit), so their total is baked in here
@@ -1030,24 +1098,27 @@ function updateEquipmentFields() {
   var boatNumberField = document.getElementById('boatRegistrationNumberField');
   var boatInput = document.getElementById('boat_model');
   var boatSearchInput = document.getElementById('boat_model_search');
+  var boatMotorsField = document.getElementById('boatMotorsField');
+  var motorModelField = document.getElementById('motorModelField');
   var motorInput = document.getElementById('motor_model');
   var motorSearchInput = document.getElementById('motor_model_search');
   var motorSerialField = document.getElementById('motorSerialNumberField');
-  var motorLabel = document.getElementById('motorModelLabel');
-  var motorContext = document.getElementById('motorModelContext');
-  if (!boatField || !boatNumberField || !boatInput || !boatSearchInput || !motorInput || !motorSearchInput || !motorSerialField) return;
+  if (!boatField || !boatNumberField || !boatMotorsField || !motorModelField || !boatInput || !boatSearchInput || !motorInput || !motorSearchInput || !motorSerialField) return;
 
   boatField.hidden = motorOnly;
   boatNumberField.hidden = motorOnly;
+  boatMotorsField.hidden = motorOnly;
+  motorModelField.hidden = !motorOnly;
   motorSerialField.hidden = !motorOnly;
   boatInput.disabled = motorOnly;
   boatSearchInput.disabled = motorOnly;
+  boatMotorsField.querySelectorAll('input').forEach(function (input) {
+    input.disabled = motorOnly;
+  });
+  motorInput.disabled = !motorOnly;
+  motorSearchInput.disabled = !motorOnly;
   boatSearchInput.required = !motorOnly;
   motorSearchInput.required = motorOnly;
-  motorLabel.textContent = motorOnly ? 'Модель мотора' : 'Мотор';
-  motorContext.textContent = motorOnly
-    ? 'Выберите мотор из каталога или введите новую модель.'
-    : 'Необязательно — можно выбрать из каталога или ввести новую модель.';
 }
 
 document.addEventListener('DOMContentLoaded', updateOrderTotal);

@@ -25,6 +25,7 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         )
         db.execute("DELETE FROM tuning_item_assignments")
         db.execute("DELETE FROM tuning_order_items")
+        db.execute("DELETE FROM tuning_order_motors")
         db.execute("DELETE FROM tuning_boat_profiles")
         db.execute("DELETE FROM projects WHERE tuning_order_id IS NOT NULL")
         db.execute("DELETE FROM client_segments")
@@ -740,6 +741,104 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertEqual(renamed_order["equipment_type"], "boat")
         self.assertEqual(renamed_order["boat_model"], "Salute 585 HT")
         self.assertEqual(renamed_order["motor_model"], "Yamaha F150 BETX")
+
+    def test_boat_order_saves_multiple_motors_and_shows_them_in_catalogs(self):
+        self.login()
+        form = self.valid_form("boat", boat_model="Катер с двумя моторами")
+        form.setlist("boat_motor_model[]", ["Yamaha F150", "Suzuki DF140"])
+        form.setlist("boat_motor_serial_number[]", ["Y-001", "S-002"])
+
+        response = self.client.post("/tuning/add", data=form)
+
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            order = db.execute("SELECT * FROM tuning_orders").fetchone()
+            motors = db.execute(
+                "SELECT motor_model, motor_serial_number, position "
+                "FROM tuning_order_motors WHERE order_id = ? ORDER BY position",
+                (order["id"],),
+            ).fetchall()
+            profiles = {
+                row["model_key"] for row in db.execute(
+                    "SELECT model_key FROM tuning_boat_profiles"
+                ).fetchall()
+            }
+
+        self.assertEqual(order["motor_model"], "Yamaha F150")
+        self.assertEqual(
+            [(row["motor_model"], row["motor_serial_number"], row["position"]) for row in motors],
+            [("Yamaha F150", "Y-001", 0), ("Suzuki DF140", "S-002", 1)],
+        )
+        self.assertIn("motor:yamaha f150", profiles)
+        self.assertIn("motor:suzuki df140", profiles)
+
+        order_html = self.client.get("/tuning").get_data(as_text=True)
+        edit_html = self.client.get(f"/tuning/edit/{order['id']}").get_data(as_text=True)
+        motor_catalog_html = self.client.get("/tuning/motors").get_data(as_text=True)
+        for value in ("Yamaha F150", "Suzuki DF140", "Y-001", "S-002"):
+            self.assertIn(value, order_html)
+            self.assertIn(value, edit_html)
+        self.assertIn("Yamaha F150", motor_catalog_html)
+        self.assertIn("Suzuki DF140", motor_catalog_html)
+
+    def test_edit_replaces_boat_motor_rows_and_clears_removed_motor(self):
+        self.login()
+        create_form = self.valid_form("boat", boat_model="Редактируемая лодка")
+        create_form.setlist("boat_motor_model[]", ["Motor One", "Motor Two"])
+        create_form.setlist("boat_motor_serial_number[]", ["ONE", "TWO"])
+        self.client.post("/tuning/add", data=create_form)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            order_id = db.execute("SELECT id FROM tuning_orders").fetchone()["id"]
+            item_id = db.execute(
+                "SELECT id FROM tuning_order_items WHERE order_id = ?", (order_id,)
+            ).fetchone()["id"]
+
+        edit_form = self.valid_form("boat", boat_model="Редактируемая лодка")
+        edit_form.setlist("item_id[]", [str(item_id)])
+        edit_form.setlist("boat_motor_model[]", ["Motor Two", "Motor Three"])
+        edit_form.setlist("boat_motor_serial_number[]", ["TWO-NEW", "THREE"])
+        response = self.client.post(f"/tuning/edit/{order_id}", data=edit_form)
+
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            order = db.execute(
+                "SELECT motor_model FROM tuning_orders WHERE id = ?", (order_id,)
+            ).fetchone()
+            motors = db.execute(
+                "SELECT motor_model, motor_serial_number FROM tuning_order_motors "
+                "WHERE order_id = ? ORDER BY position", (order_id,)
+            ).fetchall()
+        self.assertEqual(order["motor_model"], "Motor Two")
+        self.assertEqual(
+            [(row["motor_model"], row["motor_serial_number"]) for row in motors],
+            [("Motor Two", "TWO-NEW"), ("Motor Three", "THREE")],
+        )
+
+    def test_init_migrates_legacy_boat_motor_without_duplicates(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            cursor = db.execute(
+                "INSERT INTO tuning_orders "
+                "(client_name, equipment_type, boat_model, motor_model, sale_channel, "
+                "phone, subtotal, total, order_date, created_at, updated_at) "
+                "VALUES ('Старый клиент', 'boat', 'Legacy Twin', 'Legacy Motor', "
+                "'direct', '', 0, 0, '2026-01-01', '2026-01-01', '2026-01-01')"
+            )
+            order_id = cursor.lastrowid
+            db.commit()
+
+        application_module.init_db()
+        application_module.init_db()
+
+        with application_module.app.app_context():
+            rows = application_module.get_db().execute(
+                "SELECT motor_model FROM tuning_order_motors WHERE order_id = ?",
+                (order_id,),
+            ).fetchall()
+        self.assertEqual([row["motor_model"] for row in rows], ["Legacy Motor"])
 
     def test_edit_switches_identifier_fields_with_equipment_type(self):
         self.login()

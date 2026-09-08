@@ -193,14 +193,12 @@
               {% else %}
               <span class="equipment-model">{{ o.boat_model }}</span>
               {% endif %}
-              {% if o.equipment_type == 'boat' and o.motor_model %}
-              <span class="equipment-motor">Мотор:
-                {% if o.motor_profile_id %}
-                <a href="{{ url_for('tuning_motor_profile', profile_id=o.motor_profile_id) }}"
-                   class="tuning-boat-profile-link">{{ o.motor_model }}</a>
-                {% else %}
-                {{ o.motor_model }}
-                {% endif %}
+              {% if o.equipment_type == 'boat' and o.motors %}
+              <span class="equipment-motor">{{ 'Мотор' if o.motors|length == 1 else 'Моторы' }}:
+                {% for motor in o.motors %}
+                  {% if motor.profile_id %}<a href="{{ url_for('tuning_motor_profile', profile_id=motor.profile_id) }}"
+                    class="tuning-boat-profile-link">{{ motor.motor_model }}</a>{% else %}{{ motor.motor_model }}{% endif %}{% if motor.motor_serial_number %} <small>№ {{ motor.motor_serial_number }}</small>{% endif %}{{ ', ' if not loop.last }}
+                {% endfor %}
               </span>
               {% endif %}
               {% if o.equipment_type == 'boat' and o.boat_registration_number %}
@@ -475,8 +473,8 @@
               <td><a href="{{ url_for('edit_tuning_order', order_id=order.id) }}" class="term">№{{ order.id }}</a></td>
               <td class="muted">{{ order.order_date|ru_date }}</td>
               <td>{{ order.client_name }}</td>
-              <td>{{ (order.motor_serial_number if is_motor_catalog else order.boat_registration_number) or '—' }}</td>
-              {% if not is_motor_catalog %}<td>{{ order.motor_model or '—' }}</td>{% endif %}
+              <td>{{ (order.catalog_motor_serial_number if is_motor_catalog else order.boat_registration_number) or '—' }}</td>
+              {% if not is_motor_catalog %}<td>{% if order.motors %}{% for motor in order.motors %}{{ motor.motor_model }}{% if motor.motor_serial_number %} <span class="muted">№ {{ motor.motor_serial_number }}</span>{% endif %}{{ ', ' if not loop.last }}{% endfor %}{% else %}—{% endif %}</td>{% endif %}
               <td class="boat-order-works">{{ order.work_names or 'Работы пока не добавлены' }}</td>
               <td class="amount">{{ order.total|money }}</td>
               <td><span class="status-badge status-{{ order.status }}">{{ order.status|order_status_label }}</span></td>

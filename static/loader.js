@@ -269,13 +269,15 @@ initTableFilters();
 // holding .combo-option divs (each with data-value/data-label/data-search),
 // and optional [data-combo-empty]/[data-combo-more] status lines. A wrapper
 // with [data-combo-allow-custom] submits typed text when no option is picked.
-(function () {
-  var wrappers = document.querySelectorAll("[data-combo]");
+window.initSearchableComboboxes = function (root) {
+  var wrappers = (root || document).querySelectorAll("[data-combo]");
   if (!wrappers.length) return;
 
   var MAX_VISIBLE = 50;
 
   wrappers.forEach(function (wrap) {
+    if (wrap.hasAttribute("data-combo-initialized")) return;
+    wrap.setAttribute("data-combo-initialized", "");
     var input = wrap.querySelector("[data-combo-input]");
     var hidden = wrap.querySelector("[data-combo-value]");
     var dropdown = wrap.querySelector("[data-combo-dropdown]");
@@ -374,7 +376,8 @@ initTableFilters();
       });
     }
   });
-})();
+};
+window.initSearchableComboboxes(document);
 
 // Client picker used by field diagnostics. The visible combobox searches by
 // both name and phone, while the hidden client id and the phone field keep the

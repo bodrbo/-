@@ -5744,7 +5744,51 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 }
 #boatModelField[hidden],
 #boatRegistrationNumberField[hidden],
+#boatMotorsField[hidden],
+#motorModelField[hidden],
 #motorSerialNumberField[hidden] { display: none; }
+.boat-motors-field {
+  padding: 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--paper-alt);
+}
+.boat-motors-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+.field-static-label {
+  display: block;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+.boat-motors-heading .field-context { min-height: 0; }
+.boat-motors-heading .btn-add { flex: none; }
+.boat-motor-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) minmax(170px, 1fr) 38px;
+  gap: 10px;
+  align-items: end;
+}
+.boat-motor-row + .boat-motor-row {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--hairline);
+}
+.boat-motor-row .field { min-width: 0; }
+.boat-motor-remove { width: 38px; height: 42px; margin: 0; }
+.boat-motor-remove svg { width: 16px; height: 16px; }
+@media (max-width: 700px) {
+  .boat-motors-heading { align-items: flex-start; }
+  .boat-motor-row { grid-template-columns: minmax(0, 1fr) 38px; }
+  .boat-motor-model-field,
+  .boat-motor-serial-field { grid-column: 1; }
+  .boat-motor-remove { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+}
 .equipment-kind,
 .equipment-model,
 .equipment-motor,
