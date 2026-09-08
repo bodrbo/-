@@ -9080,6 +9080,146 @@ button.captain-command-alert:hover {
 .partner-orders-heading h2 { margin: 0; }
 .partner-orders-heading .btn-secondary { margin: 0; }
 .partner-totals-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.partner-open-price-cell { min-width: 205px; }
+.partner-open-price-form { position: relative; margin: 0; }
+.partner-open-price-control {
+  display: grid;
+  grid-template-columns: minmax(105px, 1fr) auto 34px;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--paper-alt);
+}
+.partner-open-price-control:focus-within {
+  border-color: var(--brass);
+  outline: 2px solid rgba(52, 152, 219, .18);
+}
+.partner-open-price-control input[type="text"] {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding: 8px 5px 8px 10px;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+  font-family: 'PT Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+.partner-open-price-control > span { color: var(--muted); font-size: 11px; }
+.partner-open-price-save {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--hairline);
+  border-radius: 0;
+  background: var(--brass);
+  color: var(--on-accent);
+  cursor: pointer;
+}
+.partner-open-price-save:hover,
+.partner-open-price-save:focus-visible { background: var(--brass-strong); }
+.partner-open-price-save svg { width: 16px; height: 16px; }
+.partner-price-presets {
+  display: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 7px;
+  border: 1px solid rgba(52, 152, 219, .22);
+  border-radius: 8px;
+  background: #edf6fc;
+  box-shadow: 0 8px 18px -15px rgba(15, 42, 53, .55);
+}
+.partner-open-price-form:focus-within .partner-price-presets,
+.partner-open-price-form:hover .partner-price-presets { display: flex; }
+.partner-price-presets > span {
+  width: 100%;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+.partner-price-presets button {
+  min-height: 28px;
+  margin: 0;
+  padding: 4px 8px;
+  border: 1px solid rgba(52, 152, 219, .38);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--brass-strong);
+  cursor: pointer;
+  font-family: 'PT Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+}
+.partner-price-presets button:hover,
+.partner-price-presets button:focus-visible { border-color: var(--brass); background: var(--brass); color: #fff; }
+.partner-price-presets button:disabled { border-color: var(--hairline); color: var(--muted); cursor: not-allowed; opacity: .55; }
+.partner-open-price-readonly { color: var(--ink-soft); font-family: 'PT Mono', monospace; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.partner-quote-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 230px;
+  align-items: stretch;
+  gap: 0;
+  overflow: hidden;
+  margin-top: 18px;
+  border: 1px solid rgba(52, 152, 219, .25);
+  border-radius: 10px;
+  background: #f6fafd;
+}
+.partner-quote-totals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.partner-quote-totals > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 12px;
+  padding: 11px 13px;
+  border-right: 1px solid var(--hairline-soft);
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.partner-quote-totals > div:nth-child(2n) { border-right: 0; }
+.partner-quote-totals > div:nth-last-child(-n+2) { border-bottom: 0; }
+.partner-quote-totals span { color: var(--muted); font-size: 9.5px; }
+.partner-quote-totals strong { color: var(--ink); font-family: 'PT Mono', monospace; font-size: 11px; white-space: nowrap; }
+.partner-quote-totals .partner-quote-grand { background: #edf6fc; }
+.partner-quote-totals .partner-quote-grand strong { color: var(--brass-strong); font-size: 13px; }
+.partner-quote-action {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border-left: 1px solid rgba(52, 152, 219, .2);
+  background: #fff;
+}
+.partner-quote-pdf {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  gap: 7px;
+  padding: 9px 11px;
+  border: 1px solid var(--brass);
+  border-radius: 8px;
+  background: var(--brass);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+}
+.partner-quote-pdf svg { width: 17px; height: 17px; flex: none; }
+.partner-quote-pdf:hover { border-color: var(--brass-strong); background: var(--brass-strong); }
+.partner-quote-pdf.is-disabled { border-color: var(--hairline); background: var(--paper-alt); color: var(--muted); }
+.partner-quote-action small { color: var(--muted); font-size: 9px; line-height: 1.35; text-align: center; }
 .client-dashboard-partner .alert.success { border-color: rgba(47, 107, 79, .3); background: #eef8f2; color: #245c43; }
 
 .partner-request-wrap { max-width: 920px; }
@@ -9218,6 +9358,8 @@ button.captain-command-alert:hover {
   .partner-logo-frame span { font-size: 35px; }
   .partner-profile-editor form { grid-template-columns: 1fr; }
   .partner-remove-logo { grid-column: auto; }
+  .partner-quote-panel { grid-template-columns: 1fr; }
+  .partner-quote-action { border-top: 1px solid rgba(52, 152, 219, .2); border-left: 0; }
 }
 
 @media (max-width: 560px) {
@@ -9231,6 +9373,11 @@ button.captain-command-alert:hover {
   .partner-title { font-size: 11px; }
   .partner-orders-heading { align-items: stretch; flex-direction: column; }
   .partner-orders-heading .btn-secondary { min-height: 42px; text-align: center; }
+  .partner-quote-totals { grid-template-columns: 1fr; }
+  .partner-quote-totals > div,
+  .partner-quote-totals > div:nth-child(2n),
+  .partner-quote-totals > div:nth-last-child(-n+2) { border-right: 0; border-bottom: 1px solid var(--hairline-soft); }
+  .partner-quote-totals > div:last-child { border-bottom: 0; }
   .partner-request-intro { padding: 14px; }
   .partner-logo-frame-small { width: 54px; height: 54px; }
   .partner-request-section-heading { padding: 16px; }

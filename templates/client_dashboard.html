@@ -103,6 +103,8 @@
   {% if partner_profile_error %}<div class="alert" role="alert">{{ partner_profile_error }}</div>{% endif %}
   {% if partner_profile_notice %}<div class="alert success" role="status">{{ partner_profile_notice }}</div>{% endif %}
   {% if partner_request_notice %}<div class="alert success" role="status">{{ partner_request_notice }}</div>{% endif %}
+  {% if partner_price_error %}<div class="alert" role="alert">{{ partner_price_error }}</div>{% endif %}
+  {% if partner_price_notice %}<div class="alert success" role="status">{{ partner_price_notice }}</div>{% endif %}
 
   {% if is_tuning_partner %}
   <section class="partner-identity-card" aria-labelledby="partner-profile-name">
@@ -221,7 +223,7 @@
     {% if orders %}
     <div class="order-card-list">
       {% for o in orders %}
-      <details class="panel order-card">
+      <details class="panel order-card" id="order-{{ o.id }}" {{ 'open' if open_order_id == o.id }}>
         <summary>
           <span class="oc-num">№{{ o.id }}</span>
           <span class="oc-date">{{ o.order_date|ru_date }}</span>
@@ -240,7 +242,7 @@
           {% if o.work_items %}
           <div class="table-scroll">
             <table class="records">
-              <thead><tr><th>Работа</th>{% if is_admin_view %}<th>Себестоимость, ₽</th><th>Коэффициент</th>{% endif %}<th>Цена, ₽</th><th>Статус</th><th></th></tr></thead>
+              <thead><tr><th>Работа</th>{% if is_admin_view %}<th>Себестоимость, ₽</th><th>Коэффициент</th>{% endif %}<th>{{ 'Закрытая цена, ₽' if is_tuning_partner else 'Цена, ₽' }}</th>{% if is_tuning_partner %}<th>Открытая цена, ₽</th>{% endif %}<th>Статус</th><th></th></tr></thead>
               <tbody>
                 {% for item in o.work_items %}
                 <tr class="{{ 'row-pending' if item.status == 'pending' else 'row-removed' if item.status == 'removed' }}">
@@ -252,6 +254,34 @@
                   <td class="amount{{ ' work-price-pending' if item.price_pending }}">
                     {{ (item.price|money ~ ' ₽') if not item.price_pending else 'Ждёт расчёта' }}
                   </td>
+                  {% if is_tuning_partner %}
+                  <td class="partner-open-price-cell">
+                    {% if is_admin_view %}
+                      <span class="partner-open-price-readonly">{{ (item.partner_price|money ~ ' ₽') if item.partner_price is not none else 'Не назначена' }}</span>
+                    {% elif item.status == 'removed' %}
+                      <span class="muted">Не участвует</span>
+                    {% else %}
+                    <form method="post" class="partner-open-price-form"
+                          action="{{ url_for('update_partner_open_price', token=client.token, order_id=o.id, item_id=item.id) }}">
+                      <div class="partner-open-price-control">
+                        <input type="text" inputmode="decimal" name="open_price"
+                               value="{{ item.partner_price if item.partner_price is not none else '' }}"
+                               aria-label="Открытая цена: {{ item.work_name }}" placeholder="Введите цену">
+                        <span>₽</span>
+                        <button type="submit" class="partner-open-price-save" aria-label="Сохранить открытую цену" title="Сохранить цену">
+                          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.5l4 4 8-9"/></svg>
+                        </button>
+                      </div>
+                      <div class="partner-price-presets" aria-label="Быстрые наценки">
+                        <span>Наценка к закрытой цене</span>
+                        {% for markup in (10, 15, 20) %}
+                        <button type="submit" name="markup" value="{{ markup }}" {{ 'disabled' if item.price_pending }} title="Закрытая цена + {{ markup }}%">+{{ markup }}%</button>
+                        {% endfor %}
+                      </div>
+                    </form>
+                    {% endif %}
+                  </td>
+                  {% endif %}
                   <td><span class="status-badge status-{{ item.status }}">{{ item.status|work_status_label }}</span></td>
                   <td class="row-actions">
                     {% set photos = work_photos_by_item.get(item.id, []) %}
@@ -301,6 +331,31 @@
               </tbody>
             </table>
           </div>
+          {% endif %}
+
+          {% if is_tuning_partner %}
+          <section class="partner-quote-panel" aria-label="Цены и PDF-расчёт заказа №{{ o.id }}">
+            <div class="partner-quote-totals">
+              <div><span>Закрытая стоимость</span><strong>{{ o.total|money }} ₽</strong></div>
+              <div><span>Работы по открытым ценам</span><strong>{{ o.partner_work_total|money }} ₽</strong></div>
+              <div><span>Товары</span><strong>{{ o.partner_goods_total|money }} ₽</strong></div>
+              <div class="partner-quote-grand"><span>Итого для клиента</span><strong>{{ o.partner_quote_total|money }} ₽</strong></div>
+            </div>
+            <div class="partner-quote-action">
+              {% if o.partner_quote_ready %}
+              <a href="{{ url_for('partner_order_estimate_pdf', token=client.token, order_id=o.id) }}" target="_blank" rel="noopener" class="partner-quote-pdf">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 2.5h6.5L15 6v11.5H5z"/><path d="M11.5 2.5V6H15M7.5 10.5h5M7.5 13h5"/></svg>
+                Сформировать PDF-расчёт
+              </a>
+              {% else %}
+              <span class="partner-quote-pdf is-disabled" aria-disabled="true">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M5 2.5h6.5L15 6v11.5H5z"/><path d="M11.5 2.5V6H15"/></svg>
+                PDF пока недоступен
+              </span>
+              <small>Назначьте открытые цены для всех работ.</small>
+              {% endif %}
+            </div>
+          </section>
           {% endif %}
 
           <p class="hint" style="margin-top:14px;">

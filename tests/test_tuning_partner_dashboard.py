@@ -106,6 +106,51 @@ class TuningPartnerDashboardTests(unittest.TestCase):
             ("work_name[]", "Смонтировать ходовые огни"),
         ])
 
+    def _create_priced_order(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            cursor = db.execute(
+                "INSERT INTO tuning_orders "
+                "(client_id, client_name, equipment_type, boat_model, "
+                "boat_registration_number, motor_model, motor_serial_number, "
+                "sale_channel, phone, discount_pct, discount_type, discount_value, "
+                "subtotal, total, status, order_date, created_at, updated_at, "
+                "source, source_ref) VALUES (?, 'Верфь Север', 'boat', ?, "
+                "'Р 90-08 ЛО', '', '', 'direct', '+79991112233', 0, 'percent', "
+                "0, 3000, 3500, 'estimate', '2026-09-08', '2026-09-08 12:00', "
+                "'2026-09-08 12:00', 'partner_request', 'partner:test:prices')",
+                (self.partner_id, self.BOAT_MODEL),
+            )
+            order_id = cursor.lastrowid
+            first = db.execute(
+                "INSERT INTO tuning_order_items "
+                "(order_id, work_name, cost_price, multiplier, price, "
+                "price_pending, status) VALUES (?, 'Монтаж картплоттера', 500, "
+                "2, 1000, 0, 'pending')",
+                (order_id,),
+            ).lastrowid
+            second = db.execute(
+                "INSERT INTO tuning_order_items "
+                "(order_id, work_name, cost_price, multiplier, price, "
+                "price_pending, status) VALUES (?, 'Настройка электрики', 1000, "
+                "2, 2000, 0, 'pending')",
+                (order_id,),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO tuning_order_products "
+                "(order_id, product_id, product_name, quantity, unit_price, "
+                "cost_price, unit, created_at) VALUES (?, 9008, 'Кабель морской', "
+                "2, 250, 120, 'piece', '2026-09-08 12:00')",
+                (order_id,),
+            )
+            db.execute(
+                "INSERT INTO projects (name, tuning_order_id, created_at) "
+                "VALUES (?, ?, '2026-09-08 12:00')",
+                (f"Заказ №{order_id}", order_id),
+            )
+            db.commit()
+        return order_id, first, second
+
     def test_partner_gets_branded_cabinet_and_regular_client_does_not(self):
         partner_html = self.http.get(
             f"/client/{self.PARTNER_TOKEN}"
@@ -270,6 +315,101 @@ class TuningPartnerDashboardTests(unittest.TestCase):
                 (self.partner_id,),
             ).fetchone()["count"]
         self.assertEqual(count, 0)
+
+    def test_partner_sets_manual_and_markup_open_prices(self):
+        order_id, first_item_id, second_item_id = self._create_priced_order()
+        html = self.http.get(f"/client/{self.PARTNER_TOKEN}").get_data(as_text=True)
+
+        self.assertIn("Закрытая цена, ₽", html)
+        self.assertIn("Открытая цена, ₽", html)
+        self.assertIn("+10%", html)
+        self.assertIn("+15%", html)
+        self.assertIn("+20%", html)
+        self.assertIn("PDF пока недоступен", html)
+
+        markup_response = self.http.post(
+            f"/client/{self.PARTNER_TOKEN}/orders/{order_id}/items/"
+            f"{first_item_id}/open-price",
+            data={"markup": "10", "open_price": "999999"},
+        )
+        manual_response = self.http.post(
+            f"/client/{self.PARTNER_TOKEN}/orders/{order_id}/items/"
+            f"{second_item_id}/open-price",
+            data={"open_price": "2 450,50"},
+        )
+
+        self.assertEqual(markup_response.status_code, 302)
+        self.assertEqual(manual_response.status_code, 302)
+        self.assertIn(f"open_order={order_id}", manual_response.headers["Location"])
+        with application_module.app.app_context():
+            rows = application_module.get_db().execute(
+                "SELECT id, price, partner_price FROM tuning_order_items "
+                "WHERE order_id = ? ORDER BY id",
+                (order_id,),
+            ).fetchall()
+        self.assertEqual(tuple(rows[0]), (first_item_id, 1000.0, 1100.0))
+        self.assertEqual(tuple(rows[1]), (second_item_id, 2000.0, 2450.5))
+
+        ready_html = self.http.get(
+            f"/client/{self.PARTNER_TOKEN}", query_string={"open_order": order_id}
+        ).get_data(as_text=True)
+        self.assertIn("Сформировать PDF-расчёт", ready_html)
+        self.assertIn("4 050,50 ₽", ready_html.replace("\u00a0", " "))
+
+    def test_open_price_endpoint_rejects_other_client_and_invalid_amount(self):
+        order_id, first_item_id, _ = self._create_priced_order()
+
+        other_response = self.http.post(
+            f"/client/{self.CLIENT_TOKEN}/orders/{order_id}/items/"
+            f"{first_item_id}/open-price",
+            data={"open_price": "9999"},
+        )
+        invalid_response = self.http.post(
+            f"/client/{self.PARTNER_TOKEN}/orders/{order_id}/items/"
+            f"{first_item_id}/open-price",
+            data={"open_price": "-1"},
+        )
+
+        self.assertEqual(other_response.status_code, 302)
+        self.assertTrue(other_response.headers["Location"].endswith("/"))
+        self.assertEqual(invalid_response.status_code, 302)
+        with application_module.app.app_context():
+            price = application_module.get_db().execute(
+                "SELECT partner_price FROM tuning_order_items WHERE id = ?",
+                (first_item_id,),
+            ).fetchone()["partner_price"]
+        self.assertIsNone(price)
+
+    def test_partner_estimate_pdf_requires_prices_and_uses_partner_brand(self):
+        order_id, first_item_id, second_item_id = self._create_priced_order()
+        unavailable = self.http.get(
+            f"/client/{self.PARTNER_TOKEN}/orders/{order_id}/estimate.pdf"
+        )
+        self.assertEqual(unavailable.status_code, 409)
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "UPDATE tuning_order_items SET partner_price = CASE id "
+                "WHEN ? THEN 1200 WHEN ? THEN 2400 END WHERE order_id = ?",
+                (first_item_id, second_item_id, order_id),
+            )
+            db.commit()
+
+        response = self.http.get(
+            f"/client/{self.PARTNER_TOKEN}/orders/{order_id}/estimate.pdf"
+        )
+        other_client_response = self.http.get(
+            f"/client/{self.CLIENT_TOKEN}/orders/{order_id}/estimate.pdf"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "application/pdf")
+        self.assertTrue(response.data.startswith(b"%PDF-"))
+        self.assertGreater(len(response.data), 5000)
+        self.assertIn("inline;", response.headers["Content-Disposition"])
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(other_client_response.status_code, 404)
 
 
 if __name__ == "__main__":

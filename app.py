@@ -119,6 +119,7 @@ from modules.clients import (
     init_schema as init_client_segments_schema,
     sync_clients as sync_yclients_clients,
 )
+from modules.clients.partner_quote_pdf import build_partner_quote_pdf
 from modules.clients.constants import (
     CLIENT_ACQUISITION_CHANNELS,
     CLIENT_RELATIONSHIP_CLIENT,
@@ -1882,11 +1883,20 @@ def init_db():
             cost_price REAL NOT NULL,
             multiplier REAL NOT NULL,
             price REAL NOT NULL,
+            partner_price REAL,
             price_pending INTEGER NOT NULL DEFAULT 0,
             status TEXT NOT NULL DEFAULT 'pending'
         )
         """
     )
+    tuning_item_cols = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(tuning_order_items)").fetchall()
+    }
+    if "partner_price" not in tuning_item_cols:
+        conn.execute(
+            "ALTER TABLE tuning_order_items ADD COLUMN partner_price REAL"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tuning_order_products (
@@ -7015,8 +7025,10 @@ def copy_tuning_order(order_id):
     )
     db.execute(
         "INSERT INTO tuning_order_items "
-        "(order_id, work_name, cost_price, multiplier, price, price_pending, status) "
-        "SELECT ?, work_name, cost_price, multiplier, price, price_pending, ? "
+        "(order_id, work_name, cost_price, multiplier, price, partner_price, "
+        "price_pending, status) "
+        "SELECT ?, work_name, cost_price, multiplier, price, partner_price, "
+        "price_pending, ? "
         "FROM tuning_order_items WHERE order_id = ? AND status != 'removed' "
         "ORDER BY id",
         (copied_order_id, DEFAULT_WORK_STATUS, order_id),
@@ -8062,6 +8074,8 @@ def _render_client_dashboard(
             paid_amount = payment_total["total"]
             remaining = max(0.0, o["total"] - paid_amount)
         item_columns = "id, work_name, price, price_pending, status"
+        if is_tuning_partner:
+            item_columns += ", partner_price"
         if is_admin_view:
             item_columns += ", cost_price, multiplier"
         items = db.execute(
@@ -8083,6 +8097,22 @@ def _render_client_dashboard(
         order["remaining"] = remaining
         order["work_items"] = items
         order["goods_items"] = goods_items
+        if is_tuning_partner:
+            active_partner_items = [
+                item for item in items if item["status"] != "removed"
+            ]
+            order["partner_work_total"] = sum(
+                item["partner_price"] or 0 for item in active_partner_items
+            )
+            order["partner_goods_total"] = sum(
+                item["quantity"] * item["unit_price"] for item in goods_items
+            )
+            order["partner_quote_total"] = (
+                order["partner_work_total"] + order["partner_goods_total"]
+            )
+            order["partner_quote_ready"] = bool(active_partner_items or goods_items) and all(
+                item["partner_price"] is not None for item in active_partner_items
+            )
         order["receipt_payments"] = _modulkassa_receipts_for_client_order(
             db, o["id"]
         )
@@ -8140,6 +8170,9 @@ def _render_client_dashboard(
         partner_profile_notice=session.pop("partner_profile_notice", None),
         partner_profile_error=session.pop("partner_profile_error", None),
         partner_request_notice=session.pop("partner_request_notice", None),
+        partner_price_notice=session.pop("partner_price_notice", None),
+        partner_price_error=session.pop("partner_price_error", None),
+        open_order_id=request.args.get("open_order", type=int),
         excursion_trips=excursion_trips,
         admin_name=(
             session.get("admin_name")
@@ -8369,6 +8402,148 @@ def partner_estimate_request(token):
         f"Заявка №{order_id} отправлена. Мы добавим расчёт в этот кабинет."
     )
     return redirect(url_for("client_dashboard", token=token) + "#orders")
+
+
+def _partner_order_for_token(db, token, order_id):
+    """Resolve an order only when the token belongs to a current partner."""
+    return db.execute(
+        "SELECT o.* FROM tuning_orders o "
+        "JOIN clients c ON c.id = o.client_id "
+        "JOIN client_segments cs ON cs.client_id = c.id "
+        "AND cs.segment = ? AND cs.relationship_type = ? "
+        "WHERE c.token = ? AND o.id = ?",
+        (TUNING_SEGMENT, CLIENT_RELATIONSHIP_PARTNER, token, order_id),
+    ).fetchone()
+
+
+def _partner_order_cabinet_url(token, order_id):
+    return url_for(
+        "client_dashboard", token=token, open_order=order_id
+    ) + f"#order-{order_id}"
+
+
+@app.route(
+    "/client/<token>/orders/<int:order_id>/items/<int:item_id>/open-price",
+    methods=["POST"],
+)
+def update_partner_open_price(token, order_id, item_id):
+    db = get_db()
+    order = _partner_order_for_token(db, token, order_id)
+    if order is None:
+        return redirect(url_for("home"))
+    item = db.execute(
+        "SELECT id, price, price_pending, status FROM tuning_order_items "
+        "WHERE id = ? AND order_id = ?",
+        (item_id, order_id),
+    ).fetchone()
+    if item is None or item["status"] == "removed":
+        session["partner_price_error"] = "Работа для изменения цены не найдена."
+        return redirect(_partner_order_cabinet_url(token, order_id))
+
+    markup_raw = request.form.get("markup", "").strip()
+    open_price = None
+    clearing_price = False
+    if markup_raw in {"10", "15", "20"}:
+        if item["price_pending"]:
+            session["partner_price_error"] = (
+                "Сначала дождитесь закрытой цены от тюнинг-центра."
+            )
+            return redirect(_partner_order_cabinet_url(token, order_id))
+        open_price = round(
+            float(item["price"]) * (1 + int(markup_raw) / 100), 2
+        )
+    else:
+        price_raw = (
+            request.form.get("open_price", "")
+            .strip()
+            .replace("\u00a0", "")
+            .replace(" ", "")
+            .replace(",", ".")
+        )
+        if not price_raw:
+            clearing_price = True
+        else:
+            try:
+                open_price = round(float(price_raw), 2)
+            except ValueError:
+                open_price = None
+            if open_price is None or open_price < 0 or open_price > 999999999.99:
+                session["partner_price_error"] = (
+                    "Укажите открытую цену от 0 до 999 999 999,99 ₽."
+                )
+                return redirect(_partner_order_cabinet_url(token, order_id))
+
+    db.execute(
+        "UPDATE tuning_order_items SET partner_price = ? "
+        "WHERE id = ? AND order_id = ?",
+        (None if clearing_price else open_price, item_id, order_id),
+    )
+    db.commit()
+    session["partner_price_notice"] = (
+        "Открытая цена очищена."
+        if clearing_price else "Открытая цена сохранена."
+    )
+    return redirect(_partner_order_cabinet_url(token, order_id))
+
+
+@app.route("/client/<token>/orders/<int:order_id>/estimate.pdf")
+def partner_order_estimate_pdf(token, order_id):
+    db = get_db()
+    order_row = _partner_order_for_token(db, token, order_id)
+    if order_row is None:
+        return "Расчёт не найден.", 404
+    partner_profile = _client_segment_profile(
+        db, order_row["client_id"], TUNING_SEGMENT
+    )
+    items = db.execute(
+        "SELECT id, work_name, partner_price FROM tuning_order_items "
+        "WHERE order_id = ? AND status != 'removed' ORDER BY id",
+        (order_id,),
+    ).fetchall()
+    goods = db.execute(
+        "SELECT product_name, quantity, unit_price, unit "
+        "FROM tuning_order_products WHERE order_id = ? ORDER BY id",
+        (order_id,),
+    ).fetchall()
+    if not items and not goods:
+        return "Добавьте в заказ работы или товары перед созданием PDF.", 409
+    if any(item["partner_price"] is None for item in items):
+        return "Укажите открытые цены для всех работ перед созданием PDF.", 409
+
+    order = dict(order_row)
+    order["motors"] = _tuning_order_motors(db, order_id)
+    logo_filename = (partner_profile or {}).get("partner_logo_filename") or ""
+    logo_path = None
+    if logo_filename and os.path.basename(logo_filename) == logo_filename:
+        logo_path = os.path.join(
+            app.static_folder, "partner_logos", logo_filename
+        )
+    try:
+        _register_act_fonts()
+        pdf_bytes = build_partner_quote_pdf(
+            order=order,
+            items=items,
+            goods=goods,
+            partner_name=order["client_name"],
+            partner_title=(partner_profile or {}).get("partner_title")
+            or DEFAULT_TUNING_PARTNER_TITLE,
+            equipment_label=tuning_equipment_label(order),
+            logo_path=logo_path,
+            unit_labels={item["value"]: item["label"] for item in SUPPLY_COST_UNITS},
+        )
+    except ImportError:
+        return (
+            "Формирование PDF временно недоступно: на сервере не установлена "
+            "библиотека reportlab.",
+            503,
+        )
+    response = app.response_class(pdf_bytes, mimetype="application/pdf")
+    response.headers["Content-Disposition"] = (
+        f'inline; filename="Estimate-{order_id}.pdf"'
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @app.route(
