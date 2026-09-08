@@ -141,6 +141,55 @@ class AnalyticsTransactionPaginationTests(unittest.TestCase):
         self.assertIn('q=%D0%BD%D0%B0%D0%B7%D0%BD%D0%B0%D1%87%D0%B5%D0%BD%D0%B8%D0%B5+', html)
         self.assertIn("page=2", html)
 
+    def test_transaction_totals_are_empty_without_filters(self):
+        html = self.client.get("/analytics").get_data(as_text=True)
+        income_card = re.search(
+            r'data-transaction-total="income">(.*?)</div>', html, re.DOTALL
+        ).group(1)
+        expense_card = re.search(
+            r'data-transaction-total="expense">(.*?)</div>', html, re.DOTALL
+        ).group(1)
+
+        self.assertNotIn('class="v"', income_card)
+        self.assertNotIn('class="v"', expense_card)
+        self.assertIn(
+            "Для подсчёта доходов и расходов выберите диапазон дат", html
+        )
+
+    def test_transaction_totals_use_all_filtered_rows_not_current_page(self):
+        html = self.client.get(
+            "/analytics",
+            query_string={"start": "2026-08-01", "end": "2026-08-31"},
+        ).get_data(as_text=True)
+
+        self.assertIn("82\xa0500,00 ₽", html)
+        self.assertIn("0,00 ₽", html)
+        self.assertNotIn("Для подсчёта доходов и расходов", html)
+
+    def test_transaction_totals_split_income_and_expense_for_search(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            for suffix, amount, direction in (
+                ("total-in", 1500, "in"),
+                ("total-out", 400, "out"),
+            ):
+                db.execute(
+                    "INSERT INTO bank_transactions "
+                    "(operation_id, account_number, operation_date, amount, direction, "
+                    "counterparty_name, purpose, created_at, source) "
+                    "VALUES (?, 'test-account', '2026-09-08', ?, ?, 'Итоги', "
+                    "'Уникальный фильтр итогов', '2026-09-08 12:00', 'tbank')",
+                    (f"{self.OPERATION_PREFIX}{suffix}", amount, direction),
+                )
+            db.commit()
+
+        html = self.client.get(
+            "/analytics", query_string={"q": "уникальный фильтр"}
+        ).get_data(as_text=True)
+
+        self.assertIn("1\xa0500,00 ₽", html)
+        self.assertIn("400,00 ₽", html)
+
 
 if __name__ == "__main__":
     unittest.main()

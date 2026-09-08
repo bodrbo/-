@@ -5433,6 +5433,9 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 .total-card-grand .v { color: #eaf4fc; }
 .total-card-grand .d { color: rgba(234, 244, 252, .68); }
 
+.transaction-filter-totals { margin-bottom: 12px; }
+.transaction-filter-totals-hint { margin: 0 0 16px; }
+
 @media (max-width: 1000px) {
   .tuning-orders-filter-form {
     grid-template-columns: minmax(210px, 1.4fr) minmax(170px, 1fr) 150px 150px;

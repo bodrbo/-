@@ -1,3 +1,23 @@
+<div class="totals-grid transaction-filter-totals">
+  <div class="panel total-card total-card-grand" data-transaction-total="income">
+    <span class="k">Доходы</span>
+    {% if transaction_totals_active %}
+    <span class="v">{{ transaction_income_total|money }} ₽</span>
+    {% endif %}
+  </div>
+  <div class="panel total-card total-card-grand" data-transaction-total="expense">
+    <span class="k">Расходы</span>
+    {% if transaction_totals_active %}
+    <span class="v">{{ transaction_expense_total|money }} ₽</span>
+    {% endif %}
+  </div>
+</div>
+{% if not transaction_totals_active %}
+<p class="hint transaction-filter-totals-hint">
+  Для подсчёта доходов и расходов выберите диапазон дат или укажите поисковый запрос.
+</p>
+{% endif %}
+
 {% if transactions %}
 <div class="table-scroll">
   <table class="records" id="transactions-table">

@@ -11148,9 +11148,7 @@ def _parse_date_filter():
     return filter_start, filter_end
 
 
-def _fetch_filtered_transactions(
-    db, filter_start, filter_end, requested_page, search_query=""
-):
+def _transaction_filter_clause(filter_start, filter_end, search_query=""):
     # operation_date can be a plain date or an ISO timestamp. An exclusive
     # next-day upper boundary includes both forms from the selected final
     # day while keeping the comparison usable by the date index.
@@ -11182,6 +11180,15 @@ def _fetch_filtered_transactions(
         conditions.append(f"INSTR(CASEFOLD({searchable_columns}), ?) > 0")
         params.append(word)
     where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    return where, params
+
+
+def _fetch_filtered_transactions(
+    db, filter_start, filter_end, requested_page, search_query=""
+):
+    where, params = _transaction_filter_clause(
+        filter_start, filter_end, search_query
+    )
 
     total_count = db.execute(
         "SELECT COUNT(*) AS count FROM bank_transactions" + where,
@@ -11235,6 +11242,25 @@ def _transactions_table_context(db):
     ) = _fetch_filtered_transactions(
         db, filter_start, filter_end, requested_page, search_query
     )
+    transaction_totals_active = bool(filter_start or filter_end or search_query)
+    if transaction_totals_active:
+        totals_where, totals_params = _transaction_filter_clause(
+            filter_start, filter_end, search_query
+        )
+        totals = db.execute(
+            "SELECT "
+            "COALESCE(SUM(CASE WHEN direction = 'in' THEN amount ELSE 0 END), 0) "
+            "AS income, "
+            "COALESCE(SUM(CASE WHEN direction = 'out' THEN amount ELSE 0 END), 0) "
+            "AS expense "
+            "FROM bank_transactions" + totals_where,
+            totals_params,
+        ).fetchone()
+        transaction_income_total = totals["income"]
+        transaction_expense_total = totals["expense"]
+    else:
+        transaction_income_total = None
+        transaction_expense_total = None
     projects = db.execute(
         "SELECT projects.*, tuning_orders.client_name AS client_name, "
         "tuning_orders.boat_model AS boat_model, "
@@ -11262,6 +11288,9 @@ def _transactions_table_context(db):
         "splits_by_transaction": splits_by_transaction, "current_url": current_url,
         "filter_start": filter_start, "filter_end": filter_end,
         "search_query": search_query,
+        "transaction_totals_active": transaction_totals_active,
+        "transaction_income_total": transaction_income_total,
+        "transaction_expense_total": transaction_expense_total,
         "transaction_category_rules": category_rules,
         "transaction_category_rules_by_id": {
             rule["id"]: rule for rule in category_rules
