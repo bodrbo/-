@@ -141,7 +141,7 @@ class CustomerManagerAccessTests(unittest.TestCase):
 
         for path, active_label in (
             ("/schedule?date=2026-09-05", "Расписание"),
-            ("/admin/clients?section=tuning", "Клиенты"),
+            ("/admin/clients?section=tuning", "Клиенты и партнеры"),
             ("/services", "Услуги"),
         ):
             response = self.client.get(path)
@@ -151,7 +151,7 @@ class CustomerManagerAccessTests(unittest.TestCase):
             self.assertIn('<aside class="desktop-sidebar"', html)
             self.assertIn('id="desktopSidebarToggle"', html)
             self.assertEqual(html.count('id="mainNav"'), 1)
-            for label in ("Расписание", "Клиенты", "Услуги"):
+            for label in ("Расписание", "Клиенты и партнеры", "Услуги"):
                 self.assertIn(f'<span class="nav-label">{label}</span>', html)
             self.assertIn(
                 f'<span class="nav-label">{active_label}</span>', html
@@ -223,6 +223,39 @@ class CustomerManagerAccessTests(unittest.TestCase):
             ).fetchone()["status"]
         self.assertEqual(tuning_status, "neutral")
         self.assertEqual(excursion_status, "satisfied")
+
+        self.client.post(
+            f"/admin/clients/{self.tuning_client_id}/relationship",
+            data={
+                "section": "tuning",
+                "current_relationship": "client",
+                "relationship_type": "partner",
+            },
+        )
+        self.client.post(
+            f"/admin/clients/{self.excursion_client_id}/relationship",
+            data={
+                "section": "tuning",
+                "current_relationship": "client",
+                "relationship_type": "partner",
+            },
+        )
+        with application_module.app.app_context():
+            relationships = {
+                row["client_id"]: row["relationship_type"]
+                for row in application_module.get_db().execute(
+                    "SELECT client_id, relationship_type FROM client_segments "
+                    "WHERE client_id IN (?, ?)",
+                    (self.tuning_client_id, self.excursion_client_id),
+                ).fetchall()
+            }
+        self.assertEqual(relationships[self.tuning_client_id], "client")
+        self.assertEqual(relationships[self.excursion_client_id], "partner")
+        partner_directory = self.client.get(
+            "/admin/clients?relationship=partner"
+        ).get_data(as_text=True)
+        self.assertIn("Экскурсионный Клиент", partner_directory)
+        self.assertNotIn("Тюнинговый Клиент", partner_directory)
 
     def test_manager_can_set_sales_channel_only_for_excursion_client(self):
         self.login_as_manager()

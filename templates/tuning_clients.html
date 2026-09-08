@@ -1,9 +1,12 @@
 <!DOCTYPE html>
 <html lang="ru">
+{% set is_partner_directory = client_relationship == 'partner' %}
+{% set contact_plural = 'Партнеры' if is_partner_directory else 'Клиенты' %}
+{% set directory_title = contact_plural ~ (' экскурсий' if client_section == 'excursion' else ' тюнинга') %}
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{ 'Клиенты экскурсий' if client_section == 'excursion' else 'Клиенты тюнинга' }}</title>
+<title>{{ directory_title }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260829-clients">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
@@ -43,8 +46,8 @@
     </div>
     {% include '_admin_main_nav.html' %}
     <div class="title-block">
-      <span class="kicker">{{ 'Менеджер по работе с клиентами' if manager_view else 'Клиентская база' }}</span>
-      <h1>{{ 'Клиенты экскурсий' if client_section == 'excursion' else 'Клиенты тюнинга' }}</h1>
+      <span class="kicker">{{ 'Менеджер по работе с клиентами' if manager_view else 'Клиенты и партнеры' }}</span>
+      <h1>{{ directory_title }}</h1>
     </div>
     <div class="topbar-actions">
       {% if not manager_view %}<button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
@@ -57,20 +60,28 @@
 </header>
 
 <main class="wrap tuning-clients-page">
-  {% if not manager_view %}<nav class="sub-tabs client-directory-tabs" aria-label="Разделы клиентской базы">
-    <a href="{{ url_for('tuning_clients', section='tuning') }}" class="{{ 'active' if client_section == 'tuning' }}">
+  <nav class="sub-tabs client-directory-tabs" aria-label="Разделы базы клиентов и партнеров">
+    {% if not manager_view %}
+    <a href="{{ url_for('tuning_clients', section='tuning') }}" class="{{ 'active' if client_section == 'tuning' and client_relationship == 'client' }}">
       Клиенты тюнинга <span>{{ tuning_clients_count }}</span>
     </a>
-    <a href="{{ url_for('tuning_clients', section='excursion') }}" class="{{ 'active' if client_section == 'excursion' }}">
+    <a href="{{ url_for('tuning_clients', section='tuning', relationship='partner') }}" class="{{ 'active' if client_section == 'tuning' and client_relationship == 'partner' }}">
+      Партнеры тюнинга <span>{{ tuning_partners_count }}</span>
+    </a>
+    {% endif %}
+    <a href="{{ url_for('tuning_clients', section='excursion') }}" class="{{ 'active' if client_section == 'excursion' and client_relationship == 'client' }}">
       Клиенты экскурсий <span>{{ excursion_clients_count }}</span>
     </a>
-  </nav>{% endif %}
+    <a href="{{ url_for('tuning_clients', section='excursion', relationship='partner') }}" class="{{ 'active' if client_section == 'excursion' and client_relationship == 'partner' }}">
+      Партнеры экскурсий <span>{{ excursion_partners_count }}</span>
+    </a>
+  </nav>
 
   <section class="tuning-clients-heading" aria-labelledby="tuning-clients-title">
     <div>
       <p class="tuning-clients-eyebrow">{{ 'Экскурсионные рейсы' if client_section == 'excursion' else 'Тюнинг-центр' }} · отдельная база</p>
-      <h2 id="tuning-clients-title">{{ 'Туристы и история рейсов' if client_section == 'excursion' else 'Клиенты и история заказов' }}</h2>
-      <p>{% if client_section == 'excursion' %}Сюда автоматически попадают клиенты, добавленные в рейсы. Эта база используется при создании новых записей на экскурсии.{% else %}Эта база используется в тюнинг-заказах и выездной диагностике. Туристы без тюнинг-заказов здесь не показываются.{% endif %}</p>
+      <h2 id="tuning-clients-title">{% if is_partner_directory %}Партнеры и история взаимодействия{% elif client_section == 'excursion' %}Туристы и история рейсов{% else %}Клиенты и история заказов{% endif %}</h2>
+      <p>{% if is_partner_directory %}Здесь отображаются контакты со статусом «Партнёр». Перенос сохраняет карточку, историю заказов, рейсов и платежей.{% elif client_section == 'excursion' %}Сюда автоматически попадают клиенты, добавленные в рейсы. Эта база используется при создании новых записей на экскурсии.{% else %}Эта база используется в тюнинг-заказах и выездной диагностике. Туристы без тюнинг-заказов здесь не показываются.{% endif %}</p>
     </div>
     {% if client_section == 'excursion' %}
     <form action="{{ url_for('import_yclients_client_directory') }}" method="post">
@@ -88,7 +99,7 @@
   {% endif %}
 
   <div class="totals-grid tuning-clients-totals">
-    <div class="panel total-card total-card-grand"><span class="k">Клиентов</span><span class="v">{{ clients_count }}</span></div>
+    <div class="panel total-card total-card-grand"><span class="k">{{ 'Партнеров' if is_partner_directory else 'Клиентов' }}</span><span class="v">{{ clients_count }}</span></div>
     {% if client_section == 'excursion' %}
     <div class="panel total-card"><span class="k">Посещений рейсов</span><span class="v">{{ trips_count }}</span></div>
     <div class="panel total-card"><span class="k">Будущих записей</span><span class="v">{{ upcoming_count }}</span></div>
@@ -102,19 +113,20 @@
   <section class="panel tuning-clients-directory">
     <div class="tuning-clients-directory-head">
       <div>
-        <h2>Все клиенты</h2>
-        <p>Поиск по имени и номеру телефона во всей клиентской базе.</p>
+        <h2>Все {{ 'партнеры' if is_partner_directory else 'клиенты' }}</h2>
+        <p>Поиск по имени и номеру телефона в текущем подразделе.</p>
       </div>
       {% if clients or search_query %}
       <form class="tuning-clients-search" method="get" action="{{ url_for('tuning_clients') }}" role="search">
         <input type="hidden" name="section" value="{{ client_section }}">
+        <input type="hidden" name="relationship" value="{{ client_relationship }}">
         <label class="tuning-clients-search-field">
           <span class="sr-only">Поиск по клиентам</span>
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M12.5 12.5L17 17"/></svg>
           <input type="search" name="q" value="{{ search_query }}" maxlength="120" placeholder="Имя или телефон" aria-label="Поиск по имени или телефону">
         </label>
         <button type="submit" class="tuning-clients-search-submit">Найти</button>
-        {% if search_query %}<a href="{{ url_for('tuning_clients', section=client_section) }}" class="tuning-clients-search-clear" aria-label="Сбросить поиск" title="Сбросить поиск">×</a>{% endif %}
+        {% if search_query %}<a href="{{ url_for('tuning_clients', section=client_section, relationship=client_relationship) }}" class="tuning-clients-search-clear" aria-label="Сбросить поиск" title="Сбросить поиск">×</a>{% endif %}
       </form>
       {% endif %}
     </div>
@@ -123,17 +135,33 @@
     <div class="table-scroll">
       <table class="records tuning-clients-table" id="tuning-clients-table">
         {% if client_section == 'excursion' %}
-        <thead><tr><th>Клиент</th><th>Статус</th><th>Телефон</th><th>Рейсов</th><th>Последний рейс</th><th>Ближайший рейс</th><th>Катера</th></tr></thead>
+        <thead><tr><th>Контакт</th><th>Тип контакта</th><th>Лояльность</th><th>Телефон</th><th>Рейсов</th><th>Последний рейс</th><th>Ближайший рейс</th><th>Катера</th></tr></thead>
         {% else %}
-        <thead><tr><th>Клиент</th><th>Статус</th><th>Телефон</th><th>Последняя техника</th><th>Заказов</th><th>Последний заказ</th><th>Сумма</th><th>Оплачено</th><th>К доплате</th></tr></thead>
+        <thead><tr><th>Контакт</th><th>Тип контакта</th><th>Лояльность</th><th>Телефон</th><th>Последняя техника</th><th>Заказов</th><th>Последний заказ</th><th>Сумма</th><th>Оплачено</th><th>К доплате</th></tr></thead>
         {% endif %}
         <tbody>
           {% for client in clients %}
           <tr>
-            <td><a href="{{ url_for('admin_client_dashboard', client_id=client.id, section=client_section) }}" class="tuning-client-name">{{ client.client_name }}</a><span class="tuning-client-id">ID {{ client.id }}</span></td>
+            <td><a href="{{ url_for('admin_client_dashboard', client_id=client.id, section=client_section, relationship=client_relationship) }}" class="tuning-client-name">{{ client.client_name }}</a><span class="tuning-client-id">ID {{ client.id }}</span></td>
+            <td>
+              <form action="{{ url_for('update_client_relationship', client_id=client.id) }}" method="post" class="status-badge status-contact-{{ client_relationship }} tuning-client-status-form">
+                <input type="hidden" name="section" value="{{ client_section }}">
+                <input type="hidden" name="current_relationship" value="{{ client_relationship }}">
+                <input type="hidden" name="q" value="{{ search_query }}">
+                <span class="tuning-client-status-label">{{ 'Партнёр' if is_partner_directory else 'Клиент' }}</span>
+                <svg class="tuning-client-status-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg>
+                <select name="relationship_type" class="tuning-client-status" aria-label="Тип контакта {{ client.client_name }}" onchange="this.form.submit()">
+                  {% for relationship in client_relationship_options %}
+                  <option value="{{ relationship.value }}" {{ 'selected' if client_relationship == relationship.value }}>{{ relationship.label }}</option>
+                  {% endfor %}
+                </select>
+                <button type="submit" class="sr-only">Сохранить тип контакта {{ client.client_name }}</button>
+              </form>
+            </td>
             <td>
               <form action="{{ url_for('update_tuning_client_status', client_id=client.id) }}" method="post" class="status-badge status-client-{{ client.status }} tuning-client-status-form">
                 <input type="hidden" name="section" value="{{ client_section }}">
+                <input type="hidden" name="relationship" value="{{ client_relationship }}">
                 <input type="hidden" name="page" value="{{ page }}">
                 <input type="hidden" name="q" value="{{ search_query }}">
                 <span class="tuning-client-status-label">{{ {'satisfied': 'Довольный', 'neutral': 'Нейтральный', 'dissatisfied': 'Недовольный', 'blacklisted': 'Чёрный список'}.get(client.status, 'Нейтральный') }}</span>
@@ -175,8 +203,8 @@
     {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">{{ 'Клиенты не найдены' if search_query else 'Клиентов пока нет' }}</div>
-      <div class="s">{% if search_query %}Измените имя или номер телефона и повторите поиск.{% elif client_section == 'excursion' %}Они появятся здесь после добавления первого клиента в рейс.{% else %}Они появятся здесь после создания первого тюнинг-заказа.{% endif %}</div>
+      <div class="t">{{ contact_plural ~ ' не найдены' if search_query else contact_plural ~ ' пока отсутствуют' }}</div>
+      <div class="s">{% if search_query %}Измените имя или номер телефона и повторите поиск.{% elif is_partner_directory %}Переведите нужный контакт в партнеры через поле «Тип контакта».{% elif client_section == 'excursion' %}Они появятся здесь после добавления первого клиента в рейс.{% else %}Они появятся здесь после создания первого тюнинг-заказа.{% endif %}</div>
     </div>
     {% endif %}
 
@@ -188,7 +216,7 @@
       </span>
       <div class="tuning-clients-page-links">
         {% if page > 1 %}
-        <a href="{{ url_for('tuning_clients', section=client_section, page=page - 1, q=search_query) }}" aria-label="Предыдущая страница">←</a>
+        <a href="{{ url_for('tuning_clients', section=client_section, relationship=client_relationship, page=page - 1, q=search_query) }}" aria-label="Предыдущая страница">←</a>
         {% else %}
         <span class="disabled" aria-hidden="true">←</span>
         {% endif %}
@@ -198,11 +226,11 @@
           {% elif page_number == page %}
           <span class="current" aria-current="page">{{ page_number }}</span>
           {% else %}
-          <a href="{{ url_for('tuning_clients', section=client_section, page=page_number, q=search_query) }}" aria-label="Страница {{ page_number }}">{{ page_number }}</a>
+          <a href="{{ url_for('tuning_clients', section=client_section, relationship=client_relationship, page=page_number, q=search_query) }}" aria-label="Страница {{ page_number }}">{{ page_number }}</a>
           {% endif %}
         {% endfor %}
         {% if page < total_pages %}
-        <a href="{{ url_for('tuning_clients', section=client_section, page=page + 1, q=search_query) }}" aria-label="Следующая страница">→</a>
+        <a href="{{ url_for('tuning_clients', section=client_section, relationship=client_relationship, page=page + 1, q=search_query) }}" aria-label="Следующая страница">→</a>
         {% else %}
         <span class="disabled" aria-hidden="true">→</span>
         {% endif %}

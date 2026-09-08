@@ -1,6 +1,9 @@
 """SQL access for the internal trip schedule."""
 
-from modules.clients.constants import EXCURSION_SEGMENT
+from modules.clients.constants import (
+    CLIENT_RELATIONSHIP_CLIENT,
+    EXCURSION_SEGMENT,
+)
 from modules.clients.services import ensure_segment
 
 
@@ -76,8 +79,9 @@ def search_clients(db, query, limit=20):
         "SELECT clients.id, clients.client_name, clients.phone, clients.status "
         "FROM clients JOIN client_segments "
         "ON client_segments.client_id = clients.id "
-        "AND client_segments.segment = ?",
-        (EXCURSION_SEGMENT,),
+        "AND client_segments.segment = ? "
+        "AND client_segments.relationship_type = ?",
+        (EXCURSION_SEGMENT, CLIENT_RELATIONSHIP_CLIENT),
     ).fetchall()
     ranked = []
     exact_query = " ".join(words)

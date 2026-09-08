@@ -145,13 +145,31 @@ def init_schema(conn):
             client_id INTEGER NOT NULL,
             segment TEXT NOT NULL,
             created_at TEXT NOT NULL,
+            relationship_type TEXT NOT NULL DEFAULT 'client',
             PRIMARY KEY (client_id, segment)
         )
         """
     )
+    segment_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(client_segments)").fetchall()
+    }
+    if "relationship_type" not in segment_columns:
+        conn.execute(
+            "ALTER TABLE client_segments ADD COLUMN relationship_type "
+            "TEXT NOT NULL DEFAULT 'client'"
+        )
+    conn.execute(
+        "UPDATE client_segments SET relationship_type = 'client' "
+        "WHERE relationship_type IS NULL "
+        "OR relationship_type NOT IN ('client', 'partner')"
+    )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_client_segments_segment "
         "ON client_segments(segment, client_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_client_segments_directory "
+        "ON client_segments(segment, relationship_type, client_id)"
     )
 
     _backfill_booking_participants(conn)

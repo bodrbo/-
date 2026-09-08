@@ -121,6 +121,10 @@ from modules.clients import (
 )
 from modules.clients.constants import (
     CLIENT_ACQUISITION_CHANNELS,
+    CLIENT_RELATIONSHIP_CLIENT,
+    CLIENT_RELATIONSHIP_OPTIONS,
+    CLIENT_RELATIONSHIP_PARTNER,
+    CLIENT_RELATIONSHIP_TYPES,
     EXCURSION_SEGMENT,
     TUNING_SEGMENT,
 )
@@ -547,7 +551,8 @@ def _tuning_client_choices(db):
         "SELECT clients.id, clients.client_name, clients.phone FROM clients "
         "WHERE EXISTS (SELECT 1 FROM client_segments "
         " WHERE client_segments.client_id = clients.id "
-        " AND client_segments.segment = ?) "
+        " AND client_segments.segment = ? "
+        " AND client_segments.relationship_type = 'client') "
         "OR NOT EXISTS (SELECT 1 FROM client_segments "
         " WHERE client_segments.client_id = clients.id) "
         "ORDER BY clients.client_name COLLATE NOCASE, clients.phone, clients.id",
@@ -5810,6 +5815,11 @@ def tuning_clients():
         section = request.args.get("section", TUNING_SEGMENT).strip().lower()
         if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
             section = TUNING_SEGMENT
+    relationship_type = request.args.get(
+        "relationship", CLIENT_RELATIONSHIP_CLIENT
+    ).strip().lower()
+    if relationship_type not in CLIENT_RELATIONSHIP_TYPES:
+        relationship_type = CLIENT_RELATIONSHIP_CLIENT
 
     search_query = " ".join(request.args.get("q", "").split())[:120]
     search_pattern = f"%{search_query.casefold()}%"
@@ -5818,16 +5828,26 @@ def tuning_clients():
     except (TypeError, ValueError):
         requested_page = 1
 
-    segment_counts = {
-        row["segment"]: row["client_count"]
+    relationship_counts = {
+        (row["segment"], row["relationship_type"]): row["client_count"]
         for row in db.execute(
-            "SELECT client_segments.segment, "
+            "SELECT client_segments.segment, client_segments.relationship_type, "
             "COUNT(DISTINCT clients.id) AS client_count "
             "FROM client_segments JOIN clients "
             "ON clients.id = client_segments.client_id "
-            "GROUP BY client_segments.segment"
+            "GROUP BY client_segments.segment, client_segments.relationship_type"
         ).fetchall()
     }
+    legacy_tuning_count = db.execute(
+        "SELECT COUNT(*) AS client_count FROM clients c "
+        "WHERE NOT EXISTS (SELECT 1 FROM client_segments cs "
+        "WHERE cs.client_id = c.id)"
+    ).fetchone()["client_count"]
+    relationship_counts[(TUNING_SEGMENT, CLIENT_RELATIONSHIP_CLIENT)] = (
+        relationship_counts.get(
+            (TUNING_SEGMENT, CLIENT_RELATIONSHIP_CLIENT), 0
+        ) + legacy_tuning_count
+    )
 
     clients_count = 0
     orders_count = 0
@@ -5837,9 +5857,15 @@ def tuning_clients():
     upcoming_count = 0
     tuning_scope_sql = (
         "(EXISTS (SELECT 1 FROM client_segments scope_cs "
-        " WHERE scope_cs.client_id = c.id AND scope_cs.segment = ?) "
-        "OR NOT EXISTS (SELECT 1 FROM client_segments any_cs "
-        " WHERE any_cs.client_id = c.id))"
+        " WHERE scope_cs.client_id = c.id AND scope_cs.segment = ? "
+        " AND scope_cs.relationship_type = ?) "
+        "OR (? = 'client' AND NOT EXISTS (SELECT 1 FROM client_segments any_cs "
+        " WHERE any_cs.client_id = c.id)))"
+    )
+    tuning_scope_params = (
+        TUNING_SEGMENT,
+        relationship_type,
+        relationship_type,
     )
 
     if section == EXCURSION_SEGMENT:
@@ -5851,11 +5877,11 @@ def tuning_clients():
             "COUNT(DISTINCT CASE WHEN si.starts_at >= ? THEN "
             " CAST(c.id AS TEXT) || ':' || CAST(si.id AS TEXT) END) AS upcoming_count "
             "FROM clients c JOIN client_segments cs ON cs.client_id = c.id "
-            "AND cs.segment = ? "
+            "AND cs.segment = ? AND cs.relationship_type = ? "
             "LEFT JOIN schedule_participants sp ON sp.client_id = c.id "
             "LEFT JOIN schedule_items si ON si.id = sp.schedule_item_id "
             "AND si.deleted_at IS NULL",
-            (now, EXCURSION_SEGMENT),
+            (now, EXCURSION_SEGMENT, relationship_type),
         ).fetchone()
         clients_count = summary["clients_count"]
         trips_count = summary["trips_count"]
@@ -5863,9 +5889,9 @@ def tuning_clients():
         filtered_count = db.execute(
             "SELECT COUNT(DISTINCT c.id) AS client_count "
             "FROM clients c JOIN client_segments cs ON cs.client_id = c.id "
-            "AND cs.segment = ? "
+            "AND cs.segment = ? AND cs.relationship_type = ? "
             "WHERE CASEFOLD(c.client_name || ' ' || COALESCE(c.phone, '')) LIKE ?",
-            (EXCURSION_SEGMENT, search_pattern),
+            (EXCURSION_SEGMENT, relationship_type, search_pattern),
         ).fetchone()["client_count"]
     else:
         summary = db.execute(
@@ -5885,7 +5911,7 @@ def tuning_clients():
             " WHERE o.client_id IS NOT NULL GROUP BY o.client_id"
             ") ps ON ps.client_id = c.id "
             f"WHERE {tuning_scope_sql}",
-            (TUNING_SEGMENT,),
+            tuning_scope_params,
         ).fetchone()
         clients_count = summary["clients_count"]
         orders_count = summary["orders_count"]
@@ -5895,7 +5921,7 @@ def tuning_clients():
             "SELECT COUNT(*) AS client_count FROM clients c "
             f"WHERE {tuning_scope_sql} "
             "AND CASEFOLD(c.client_name || ' ' || COALESCE(c.phone, '')) LIKE ?",
-            (TUNING_SEGMENT, search_pattern),
+            (*tuning_scope_params, search_pattern),
         ).fetchone()["client_count"]
 
     total_pages = max(
@@ -5915,7 +5941,7 @@ def tuning_clients():
             "MIN(CASE WHEN si.starts_at >= ? THEN si.starts_at END) AS next_trip_at, "
             "GROUP_CONCAT(DISTINCT si.boat) AS boats "
             "FROM clients c JOIN client_segments cs ON cs.client_id = c.id "
-            "AND cs.segment = ? "
+            "AND cs.segment = ? AND cs.relationship_type = ? "
             "LEFT JOIN schedule_participants sp ON sp.client_id = c.id "
             "LEFT JOIN schedule_items si ON si.id = sp.schedule_item_id "
             "AND si.deleted_at IS NULL "
@@ -5928,6 +5954,7 @@ def tuning_clients():
                 now,
                 now,
                 EXCURSION_SEGMENT,
+                relationship_type,
                 search_pattern,
                 CLIENT_DIRECTORY_PAGE_SIZE,
                 offset,
@@ -5965,7 +5992,7 @@ def tuning_clients():
             "ORDER BY COALESCE(os.last_order_at, c.created_at) DESC, c.id DESC "
             "LIMIT ? OFFSET ?",
             (
-                TUNING_SEGMENT,
+                *tuning_scope_params,
                 search_pattern,
                 CLIENT_DIRECTORY_PAGE_SIZE,
                 offset,
@@ -5988,9 +6015,21 @@ def tuning_clients():
         outstanding_total=outstanding_total,
         trips_count=trips_count,
         upcoming_count=upcoming_count,
-        tuning_clients_count=segment_counts.get(TUNING_SEGMENT, 0),
-        excursion_clients_count=segment_counts.get(EXCURSION_SEGMENT, 0),
+        tuning_clients_count=relationship_counts.get(
+            (TUNING_SEGMENT, CLIENT_RELATIONSHIP_CLIENT), 0
+        ),
+        tuning_partners_count=relationship_counts.get(
+            (TUNING_SEGMENT, CLIENT_RELATIONSHIP_PARTNER), 0
+        ),
+        excursion_clients_count=relationship_counts.get(
+            (EXCURSION_SEGMENT, CLIENT_RELATIONSHIP_CLIENT), 0
+        ),
+        excursion_partners_count=relationship_counts.get(
+            (EXCURSION_SEGMENT, CLIENT_RELATIONSHIP_PARTNER), 0
+        ),
         client_section=section,
+        client_relationship=relationship_type,
+        client_relationship_options=CLIENT_RELATIONSHIP_OPTIONS,
         client_import_notice=session.pop("client_import_notice", None),
         yclients_import_configured=yclients_configured(),
         client_statuses=CLIENT_STATUSES,
@@ -6027,12 +6066,87 @@ def update_tuning_client_status(client_id):
     )
     if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
         section = TUNING_SEGMENT
+    relationship_type = request.form.get(
+        "relationship", CLIENT_RELATIONSHIP_CLIENT
+    )
+    if relationship_type not in CLIENT_RELATIONSHIP_TYPES:
+        relationship_type = CLIENT_RELATIONSHIP_CLIENT
     redirect_args = {}
     if section == EXCURSION_SEGMENT:
         redirect_args["section"] = section
     page_value = request.form.get("page", "1")
     if page_value != "1":
         redirect_args["page"] = page_value
+    search_query = " ".join(request.form.get("q", "").split())[:120]
+    if search_query:
+        redirect_args["q"] = search_query
+    if relationship_type == CLIENT_RELATIONSHIP_PARTNER:
+        redirect_args["relationship"] = relationship_type
+    return redirect(url_for("tuning_clients", **redirect_args))
+
+
+@app.route("/admin/clients/<int:client_id>/relationship", methods=["POST"])
+@excursion_manager_or_admin_required
+def update_client_relationship(client_id):
+    db = get_db()
+    manager_view = _is_customer_manager(db)
+    section = (
+        EXCURSION_SEGMENT
+        if manager_view
+        else request.form.get("section", TUNING_SEGMENT).strip().lower()
+    )
+    if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
+        section = TUNING_SEGMENT
+    current_relationship = request.form.get(
+        "current_relationship", CLIENT_RELATIONSHIP_CLIENT
+    ).strip().lower()
+    if current_relationship not in CLIENT_RELATIONSHIP_TYPES:
+        current_relationship = CLIENT_RELATIONSHIP_CLIENT
+    relationship_type = request.form.get(
+        "relationship_type", ""
+    ).strip().lower()
+
+    client_exists = db.execute(
+        "SELECT 1 FROM clients WHERE id = ?", (client_id,)
+    ).fetchone() is not None
+    membership_exists = db.execute(
+        "SELECT 1 FROM client_segments WHERE client_id = ? AND segment = ?",
+        (client_id, section),
+    ).fetchone() is not None
+    has_any_membership = db.execute(
+        "SELECT 1 FROM client_segments WHERE client_id = ? LIMIT 1",
+        (client_id,),
+    ).fetchone() is not None
+    may_update = (
+        client_exists
+        and relationship_type in CLIENT_RELATIONSHIP_TYPES
+        and (
+            membership_exists
+            or (
+                not manager_view
+                and section == TUNING_SEGMENT
+                and not has_any_membership
+            )
+        )
+    )
+    if may_update:
+        ensure_client_segment(
+            db,
+            client_id,
+            section,
+            dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        )
+        db.execute(
+            "UPDATE client_segments SET relationship_type = ? "
+            "WHERE client_id = ? AND segment = ?",
+            (relationship_type, client_id, section),
+        )
+        db.commit()
+        current_relationship = relationship_type
+
+    redirect_args = {"section": section}
+    if current_relationship == CLIENT_RELATIONSHIP_PARTNER:
+        redirect_args["relationship"] = current_relationship
     search_query = " ".join(request.form.get("q", "").split())[:120]
     if search_query:
         redirect_args["q"] = search_query
@@ -7667,7 +7781,13 @@ def remove_tuning_order_product(order_id, row_id):
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
-def _render_client_dashboard(db, client, viewer_role, client_section=TUNING_SEGMENT):
+def _render_client_dashboard(
+    db,
+    client,
+    viewer_role,
+    client_section=TUNING_SEGMENT,
+    client_relationship=CLIENT_RELATIONSHIP_CLIENT,
+):
     """Build the shared cabinet while keeping privileged data server-side.
 
     The public token route always calls this with ``client``.  Only the
@@ -7794,6 +7914,7 @@ def _render_client_dashboard(db, client, viewer_role, client_section=TUNING_SEGM
         client_acquisition_channels=CLIENT_ACQUISITION_CHANNELS,
         viewer_role=viewer_role,
         client_section=client_section,
+        client_relationship=client_relationship,
         excursion_trips=excursion_trips,
         admin_name=(
             session.get("admin_name")
@@ -7825,17 +7946,36 @@ def admin_client_dashboard(client_id):
             return redirect(url_for("tuning_clients", section=EXCURSION_SEGMENT))
         return redirect(url_for("tuning_index"))
     if _is_customer_manager(db):
-        is_excursion_client = db.execute(
-            "SELECT 1 FROM client_segments WHERE client_id = ? AND segment = ?",
+        excursion_membership = db.execute(
+            "SELECT relationship_type FROM client_segments "
+            "WHERE client_id = ? AND segment = ?",
             (client_id, EXCURSION_SEGMENT),
-        ).fetchone() is not None
-        if not is_excursion_client:
+        ).fetchone()
+        if excursion_membership is None:
             return redirect(url_for("tuning_clients", section=EXCURSION_SEGMENT))
-        return _render_client_dashboard(db, client, "manager", EXCURSION_SEGMENT)
+        return _render_client_dashboard(
+            db,
+            client,
+            "manager",
+            EXCURSION_SEGMENT,
+            excursion_membership["relationship_type"],
+        )
     client_section = request.args.get("section", TUNING_SEGMENT)
     if client_section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
         client_section = TUNING_SEGMENT
-    return _render_client_dashboard(db, client, "admin", client_section)
+    relationship_row = db.execute(
+        "SELECT relationship_type FROM client_segments "
+        "WHERE client_id = ? AND segment = ?",
+        (client_id, client_section),
+    ).fetchone()
+    client_relationship = (
+        relationship_row["relationship_type"]
+        if relationship_row is not None
+        else CLIENT_RELATIONSHIP_CLIENT
+    )
+    return _render_client_dashboard(
+        db, client, "admin", client_section, client_relationship
+    )
 
 
 @app.route(

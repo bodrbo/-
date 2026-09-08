@@ -43,7 +43,8 @@ def create_blueprint(
         return db.execute(
             "SELECT clients.id, clients.client_name, clients.phone FROM clients "
             "WHERE EXISTS (SELECT 1 FROM client_segments "
-            " WHERE client_segments.client_id = clients.id AND segment = 'tuning') "
+            " WHERE client_segments.client_id = clients.id AND segment = 'tuning' "
+            " AND relationship_type = 'client') "
             "OR NOT EXISTS (SELECT 1 FROM client_segments "
             " WHERE client_segments.client_id = clients.id) "
             "ORDER BY clients.client_name COLLATE NOCASE, clients.phone, clients.id"

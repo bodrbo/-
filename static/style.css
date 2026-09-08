@@ -3757,6 +3757,23 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .status-badge.status-client-blacklisted::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23ffffff' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='M4 12L12 4'/%3E%3C/svg%3E");
 }
+.status-badge.status-contact-client { background: rgba(46, 134, 193, .14); color: var(--brass-strong); }
+.status-badge.status-contact-client::before {
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  background: transparent;
+  box-sizing: border-box;
+}
+.status-badge.status-contact-partner { background: rgba(142, 68, 173, .14); color: #7d3c98; }
+.status-badge.status-contact-partner::before {
+  width: 9px;
+  height: 9px;
+  border: 2px solid currentColor;
+  border-radius: 2px;
+  background: transparent;
+  box-sizing: border-box;
+  transform: rotate(45deg);
+}
 /* Boat defect tracker (Флот → Неисправности) — deliberately distinct
    modifier names from status-in_progress/status-done above: those are
    already blue/green for unrelated things (order & work-item statuses),
@@ -8605,7 +8622,7 @@ button.captain-command-alert:hover {
 .tuning-clients-search-clear { width: 42px; background: var(--paper); color: var(--muted); font-size: 20px; }
 .tuning-clients-search-clear:hover { border-color: var(--danger); color: var(--danger); }
 .tuning-clients-directory .table-scroll { margin: 0; }
-.tuning-clients-table { min-width: 1080px; }
+.tuning-clients-table { min-width: 1190px; }
 .tuning-clients-table td { vertical-align: middle; }
 .tuning-client-name {
   display: block;

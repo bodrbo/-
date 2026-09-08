@@ -64,7 +64,7 @@
       <p>{% if is_manager_view %}Здесь доступны контактные данные клиента и история его экскурсионных рейсов.{% else %}Клиент не видит эту панель, внутреннюю экономику, заметки и служебные данные заказов.{% endif %}</p>
     </div>
     <div class="client-admin-toolbar-actions">
-      <a href="{{ url_for('tuning_clients', section=client_section) if client_section == 'excursion' else url_for('tuning_clients') }}" class="client-admin-link">← К клиентам</a>
+      <a href="{{ url_for('tuning_clients') if client_section == 'tuning' and client_relationship == 'client' else url_for('tuning_clients', section=client_section, relationship=client_relationship) }}" class="client-admin-link">← К клиентам и партнерам</a>
       {% if is_manager_view %}
       <a href="{{ url_for('schedule.index') }}" class="client-admin-preview-link">К расписанию</a>
       {% else %}
