@@ -178,6 +178,7 @@ class ClientDashboardRoleTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Личный кабинет клиента", html)
+        self.assertIn("data-hide-software-request-widget", html)
         self.assertIn("Установка эхолота", html)
         self.assertIn('class="row-pending"', html)
         self.assertIn(
@@ -220,6 +221,7 @@ class ClientDashboardRoleTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("ЛК клиента — режим администратора", html)
+        self.assertIn("data-hide-software-request-widget", html)
         self.assertIn("Вы смотрите кабинет как администратор", html)
         self.assertIn("Администратор теста", html)
         self.assertIn(self.CLIENT_PHONE, html)

@@ -554,6 +554,10 @@ if ("serviceWorker" in navigator) {
 // being copied into every standalone template; unauthenticated and client
 // pages receive 204 and never get an internal request control.
 (function () {
+  // Client-facing cabinets stay free of internal staff controls even when an
+  // administrator opens them while their staff session is still active.
+  if (document.body.hasAttribute("data-hide-software-request-widget")) return;
+
   fetch("/software-requests/widget", {
     credentials: "same-origin",
     headers: {"X-Requested-With": "XMLHttpRequest"},

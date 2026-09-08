@@ -160,6 +160,7 @@ class TuningPartnerDashboardTests(unittest.TestCase):
         ).get_data(as_text=True)
 
         self.assertIn("Личный кабинет партнёра", partner_html)
+        self.assertIn("data-hide-software-request-widget", partner_html)
         self.assertIn("Партнёрский тюнинг-центр", partner_html)
         self.assertIn("Заявка на расчёт", partner_html)
         self.assertNotIn('<span class="k">Техника</span>', partner_html)
@@ -167,6 +168,7 @@ class TuningPartnerDashboardTests(unittest.TestCase):
             f'/client/{self.PARTNER_TOKEN}/estimate-request', partner_html
         )
         self.assertNotIn("Заявка на расчёт", regular_html)
+        self.assertIn("data-hide-software-request-widget", regular_html)
         self.assertIn('<span class="k">Техника</span>', regular_html)
 
     def test_admin_can_edit_title_and_upload_logo(self):
@@ -300,6 +302,17 @@ class TuningPartnerDashboardTests(unittest.TestCase):
                 (self.regular_client_id,),
             ).fetchone()["count"]
         self.assertEqual(count, 0)
+
+    def test_partner_request_form_hides_internal_feedback_widget(self):
+        response = self.http.get(
+            f"/client/{self.PARTNER_TOKEN}/estimate-request"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "data-hide-software-request-widget",
+            response.get_data(as_text=True),
+        )
 
     def test_invalid_partner_request_creates_nothing(self):
         response = self.http.post(
