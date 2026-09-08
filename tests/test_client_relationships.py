@@ -55,11 +55,13 @@ class ClientRelationshipTests(unittest.TestCase):
     def _clear_test_data(cls, db):
         db.execute(
             "DELETE FROM client_segments WHERE client_id IN "
-            "(SELECT id FROM clients WHERE token IN (?, ?))",
+            "(SELECT id FROM clients WHERE token IN (?, ?) "
+            "OR client_name LIKE 'Ручной тест%')",
             (cls.TOKEN, cls.SECOND_TOKEN),
         )
         db.execute(
-            "DELETE FROM clients WHERE token IN (?, ?)",
+            "DELETE FROM clients WHERE token IN (?, ?) "
+            "OR client_name LIKE 'Ручной тест%'",
             (cls.TOKEN, cls.SECOND_TOKEN),
         )
         db.commit()
@@ -153,6 +155,178 @@ class ClientRelationshipTests(unittest.TestCase):
             ).fetchone()["relationship_type"]
 
         self.assertEqual(relationship_type, "client")
+
+    def test_admin_manually_creates_client_and_partner_in_selected_sections(self):
+        client_response = self.client.post(
+            "/admin/clients/create",
+            data={
+                "section": "excursion",
+                "relationship": "client",
+                "client_name": "Ручной тест Турист",
+                "phone": "",
+                "email": "tourist@example.ru",
+                "comment": "Позвонил сам",
+            },
+        )
+        partner_response = self.client.post(
+            "/admin/clients/create",
+            data={
+                "section": "tuning",
+                "relationship": "partner",
+                "client_name": "Ручной тест Верфь",
+                "phone": "+7 (999) 500-00-01",
+                "email": "partner@example.ru",
+            },
+        )
+
+        self.assertEqual(client_response.status_code, 302)
+        self.assertEqual(partner_response.status_code, 302)
+        partner_query = parse_qs(urlparse(partner_response.headers["Location"]).query)
+        self.assertEqual(partner_query["section"], ["tuning"])
+        self.assertEqual(partner_query["relationship"], ["partner"])
+        with application_module.app.app_context():
+            rows = application_module.get_db().execute(
+                "SELECT c.client_name, c.phone, c.email, c.comment, c.token, "
+                "cs.segment, cs.relationship_type FROM clients c "
+                "JOIN client_segments cs ON cs.client_id = c.id "
+                "WHERE c.client_name LIKE 'Ручной тест%' ORDER BY c.client_name"
+            ).fetchall()
+        by_name = {row["client_name"]: row for row in rows}
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(by_name["Ручной тест Турист"]["segment"], "excursion")
+        self.assertEqual(by_name["Ручной тест Турист"]["relationship_type"], "client")
+        self.assertEqual(by_name["Ручной тест Турист"]["comment"], "Позвонил сам")
+        self.assertEqual(by_name["Ручной тест Верфь"]["segment"], "tuning")
+        self.assertEqual(by_name["Ручной тест Верфь"]["relationship_type"], "partner")
+        self.assertTrue(all(row["token"] for row in rows))
+
+    def test_manual_creation_reuses_same_named_phone_across_segments(self):
+        first = self.client.post(
+            "/admin/clients/create",
+            data={
+                "section": "tuning",
+                "relationship": "client",
+                "client_name": "Ручной тест Общий",
+                "phone": "+7 999 700-10-20",
+            },
+        )
+        second = self.client.post(
+            "/admin/clients/create",
+            data={
+                "section": "excursion",
+                "relationship": "partner",
+                "client_name": "  Ручной   тест Общий  ",
+                "phone": "8 (999) 700-10-20",
+                "email": "shared@example.ru",
+            },
+        )
+
+        self.assertEqual(first.status_code, 302)
+        self.assertEqual(second.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            contacts = db.execute(
+                "SELECT id, email FROM clients WHERE client_name = ?",
+                ("Ручной тест Общий",),
+            ).fetchall()
+            memberships = db.execute(
+                "SELECT segment, relationship_type FROM client_segments "
+                "WHERE client_id = ? ORDER BY segment",
+                (contacts[0]["id"],),
+            ).fetchall()
+        self.assertEqual(len(contacts), 1)
+        self.assertEqual(contacts[0]["email"], "shared@example.ru")
+        self.assertEqual(
+            [(row["segment"], row["relationship_type"]) for row in memberships],
+            [("excursion", "partner"), ("tuning", "client")],
+        )
+
+    def test_manual_creation_rejects_conflicting_phone_and_keeps_form(self):
+        first = self.client.post(
+            "/admin/clients/create",
+            data={
+                "section": "tuning",
+                "relationship": "client",
+                "client_name": "Ручной тест Первый",
+                "phone": "+7 999 800-30-40",
+            },
+        )
+        conflict = self.client.post(
+            "/admin/clients/create",
+            data={
+                "section": "tuning",
+                "relationship": "partner",
+                "client_name": "Ручной тест Другой",
+                "phone": "8 999 800 30 40",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(first.status_code, 302)
+        self.assertEqual(conflict.status_code, 200)
+        html = conflict.get_data(as_text=True)
+        self.assertIn("Телефон уже принадлежит контакту", html)
+        self.assertIn('value="Ручной тест Другой"', html)
+        self.assertIn('data-auto-open="true"', html)
+        with application_module.app.app_context():
+            count = application_module.get_db().execute(
+                "SELECT COUNT(*) AS count FROM clients "
+                "WHERE client_name LIKE 'Ручной тест%'"
+            ).fetchone()["count"]
+        self.assertEqual(count, 1)
+
+    def test_manual_creation_validates_required_name_phone_and_email(self):
+        response = self.client.post(
+            "/admin/clients/create",
+            data={
+                "section": "excursion",
+                "relationship": "client",
+                "client_name": "",
+                "phone": "123",
+                "email": "wrong-address",
+            },
+            follow_redirects=True,
+        )
+
+        html = response.get_data(as_text=True)
+        self.assertIn("Укажите имя клиента или название партнёра", html)
+        self.assertIn("Проверьте номер телефона", html)
+        self.assertIn("Проверьте адрес электронной почты", html)
+
+    def test_customer_manager_can_only_create_excursion_contacts(self):
+        with application_module.app.app_context():
+            account = application_module.get_db().execute(
+                "SELECT ta.id, ta.employee_id FROM team_accounts ta "
+                "JOIN employees e ON e.id = ta.employee_id "
+                "JOIN employee_positions ep ON ep.employee_id = e.id "
+                "WHERE ep.position = ? AND e.deleted_at IS NULL LIMIT 1",
+                ("Менеджер по работе с клиентами",),
+            ).fetchone()
+        with self.client.session_transaction() as session:
+            session.clear()
+            session["team_id"] = account["id"]
+            session["team_employee_name"] = "Менеджер"
+            session["team_username"] = "manual-client-manager-test"
+
+        response = self.client.post(
+            "/admin/clients/create",
+            data={
+                "section": "tuning",
+                "relationship": "partner",
+                "client_name": "Ручной тест Менеджер",
+                "phone": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            membership = application_module.get_db().execute(
+                "SELECT cs.segment, cs.relationship_type FROM client_segments cs "
+                "JOIN clients c ON c.id = cs.client_id WHERE c.client_name = ?",
+                ("Ручной тест Менеджер",),
+            ).fetchone()
+        self.assertEqual(membership["segment"], "excursion")
+        self.assertEqual(membership["relationship_type"], "partner")
 
 
 if __name__ == "__main__":

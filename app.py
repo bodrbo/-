@@ -115,8 +115,10 @@ from modules.ai_assistant.constants import (
 )
 from modules.ai_assistant.openai_client import OpenAIResponsesClient
 from modules.clients import (
+    create_directory_contact,
     ensure_segment as ensure_client_segment,
     init_schema as init_client_segments_schema,
+    normalize_phone_identity as normalize_client_phone,
     sync_clients as sync_yclients_clients,
 )
 from modules.clients.partner_quote_pdf import build_partner_quote_pdf
@@ -1150,6 +1152,10 @@ CLIENT_STATUSES = [
 ]
 DEFAULT_CLIENT_STATUS = "neutral"
 CLIENT_DIRECTORY_PAGE_SIZE = 20
+CLIENT_DIRECTORY_NAME_LIMIT = 160
+CLIENT_DIRECTORY_PHONE_LIMIT = 50
+CLIENT_DIRECTORY_EMAIL_LIMIT = 254
+CLIENT_DIRECTORY_COMMENT_LIMIT = 1200
 ANALYTICS_TRANSACTION_PAGE_SIZE = 20
 
 WORK_STATUSES = [
@@ -6146,6 +6152,10 @@ def tuning_clients():
         client_relationship=relationship_type,
         client_relationship_options=CLIENT_RELATIONSHIP_OPTIONS,
         client_import_notice=session.pop("client_import_notice", None),
+        client_create_notice=session.pop("client_create_notice", None),
+        client_create_errors=session.pop("client_create_errors", []),
+        client_create_form=session.pop("client_create_form", {}),
+        open_create_dialog=request.args.get("new") == "1",
         yclients_import_configured=yclients_configured(),
         client_statuses=CLIENT_STATUSES,
         active_page="clients",
@@ -6158,6 +6168,105 @@ def tuning_clients():
         page_first=(offset + 1 if filtered_count else 0),
         page_last=min(offset + len(clients), filtered_count),
     )
+
+
+@app.route("/admin/clients/create", methods=["POST"])
+@excursion_manager_or_admin_required
+def create_client_directory_contact():
+    db = get_db()
+    manager_view = _is_customer_manager(db)
+    section = (
+        EXCURSION_SEGMENT
+        if manager_view
+        else request.form.get("section", TUNING_SEGMENT).strip().lower()
+    )
+    if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
+        section = TUNING_SEGMENT
+    relationship_type = request.form.get(
+        "relationship", CLIENT_RELATIONSHIP_CLIENT
+    ).strip().lower()
+    if relationship_type not in CLIENT_RELATIONSHIP_TYPES:
+        relationship_type = CLIENT_RELATIONSHIP_CLIENT
+
+    values = {
+        "client_name": " ".join(request.form.get("client_name", "").split()),
+        "phone": request.form.get("phone", "").strip(),
+        "email": request.form.get("email", "").strip(),
+        "comment": request.form.get("comment", "").strip(),
+    }
+    errors = []
+    if not values["client_name"]:
+        errors.append("Укажите имя клиента или название партнёра.")
+    elif len(values["client_name"]) > CLIENT_DIRECTORY_NAME_LIMIT:
+        errors.append(
+            f"Имя или название — не более {CLIENT_DIRECTORY_NAME_LIMIT} символов."
+        )
+    if len(values["phone"]) > CLIENT_DIRECTORY_PHONE_LIMIT:
+        errors.append(
+            f"Телефон — не более {CLIENT_DIRECTORY_PHONE_LIMIT} символов."
+        )
+    elif values["phone"] and len(normalize_client_phone(values["phone"])) < 7:
+        errors.append("Проверьте номер телефона или оставьте поле пустым.")
+    if len(values["email"]) > CLIENT_DIRECTORY_EMAIL_LIMIT:
+        errors.append(
+            f"Email — не более {CLIENT_DIRECTORY_EMAIL_LIMIT} символов."
+        )
+    elif values["email"]:
+        email_parts = values["email"].split("@")
+        if (
+            len(email_parts) != 2
+            or not email_parts[0]
+            or not email_parts[1]
+            or " " in values["email"]
+        ):
+            errors.append("Проверьте адрес электронной почты.")
+    if len(values["comment"]) > CLIENT_DIRECTORY_COMMENT_LIMIT:
+        errors.append(
+            f"Комментарий — не более {CLIENT_DIRECTORY_COMMENT_LIMIT} символов."
+        )
+
+    redirect_args = {"section": section, "relationship": relationship_type}
+    if errors:
+        session["client_create_errors"] = errors
+        session["client_create_form"] = values
+        redirect_args["new"] = "1"
+        return redirect(url_for("tuning_clients", **redirect_args))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    try:
+        creation = create_directory_contact(
+            db,
+            name=values["client_name"],
+            phone=values["phone"],
+            email=values["email"],
+            comment=values["comment"],
+            segment=section,
+            relationship_type=relationship_type,
+            created_at=now,
+            token=secrets.token_urlsafe(16),
+        )
+    except ValueError as exc:
+        db.rollback()
+        session["client_create_errors"] = [str(exc)]
+        session["client_create_form"] = values
+        redirect_args["new"] = "1"
+        return redirect(url_for("tuning_clients", **redirect_args))
+
+    db.commit()
+    contact_label = "Партнёр" if relationship_type == "partner" else "Клиент"
+    if creation["result"] == "created":
+        message = f"{contact_label} добавлен. Личный кабинет создан автоматически."
+    elif creation["result"] == "linked":
+        message = f"{contact_label} добавлен в выбранный раздел без дублирования карточки."
+    else:
+        message = f"{contact_label} уже есть в этом разделе."
+    session["client_create_notice"] = {
+        "type": "success",
+        "message": message,
+        "client_id": creation["client_id"],
+    }
+    redirect_args["q"] = values["client_name"]
+    return redirect(url_for("tuning_clients", **redirect_args))
 
 
 @app.route("/admin/clients/<int:client_id>/status", methods=["POST"])

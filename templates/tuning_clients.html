@@ -7,7 +7,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{ directory_title }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260829-clients">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260908-client-create">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
 <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
@@ -83,13 +83,19 @@
       <h2 id="tuning-clients-title">{% if is_partner_directory %}Партнеры и история взаимодействия{% elif client_section == 'excursion' %}Туристы и история рейсов{% else %}Клиенты и история заказов{% endif %}</h2>
       <p>{% if is_partner_directory %}Здесь отображаются контакты со статусом «Партнёр». Перенос сохраняет карточку, историю заказов, рейсов и платежей.{% elif client_section == 'excursion' %}Сюда автоматически попадают клиенты, добавленные в рейсы. Эта база используется при создании новых записей на экскурсии.{% else %}Эта база используется в тюнинг-заказах и выездной диагностике. Туристы без тюнинг-заказов здесь не показываются.{% endif %}</p>
     </div>
-    {% if client_section == 'excursion' %}
-    <form action="{{ url_for('import_yclients_client_directory') }}" method="post">
-      <button type="submit" class="btn-secondary" {{ 'disabled' if not yclients_import_configured }}>
-        Импортировать из YCLIENTS
+    <div class="tuning-clients-heading-actions">
+      {% if client_section == 'excursion' %}
+      <form action="{{ url_for('import_yclients_client_directory') }}" method="post">
+        <button type="submit" class="btn-secondary" {{ 'disabled' if not yclients_import_configured }}>
+          Импортировать из YCLIENTS
+        </button>
+      </form>
+      {% endif %}
+      <button type="button" class="client-create-button" data-client-create-open>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>
+        Добавить {{ 'партнёра' if is_partner_directory else 'клиента' }}
       </button>
-    </form>
-    {% endif %}
+    </div>
   </section>
 
   {% if client_import_notice %}
@@ -97,6 +103,61 @@
     {{ client_import_notice.message }}
   </div>
   {% endif %}
+
+  {% if client_create_notice %}
+  <div class="alert success client-create-notice" role="status">
+    <span>{{ client_create_notice.message }}</span>
+    <a href="{{ url_for('admin_client_dashboard', client_id=client_create_notice.client_id, section=client_section, relationship=client_relationship) }}">Открыть карточку</a>
+  </div>
+  {% endif %}
+
+  <dialog class="client-create-dialog" data-client-create-dialog data-auto-open="{{ 'true' if open_create_dialog or client_create_errors else 'false' }}" aria-labelledby="client-create-title">
+    <form method="post" action="{{ url_for('create_client_directory_contact') }}" class="client-create-form">
+      <input type="hidden" name="section" value="{{ client_section }}">
+      <input type="hidden" name="relationship" value="{{ client_relationship }}">
+      <header class="client-create-dialog-head">
+        <div>
+          <div class="client-create-context" aria-label="Раздел создания контакта">
+            <span>{{ 'Экскурсии' if client_section == 'excursion' else 'Тюнинг' }}</span>
+            <span>{{ 'Партнёр' if is_partner_directory else 'Клиент' }}</span>
+          </div>
+          <h2 id="client-create-title">Новый {{ 'партнёр' if is_partner_directory else 'клиент' }}</h2>
+          <p>Карточка и ссылка на личный кабинет появятся сразу после сохранения.</p>
+        </div>
+        <button type="button" class="client-create-close" data-client-create-close aria-label="Закрыть">×</button>
+      </header>
+
+      {% if client_create_errors %}
+      <div class="client-create-errors" role="alert">
+        {% for error in client_create_errors %}<p>{{ error }}</p>{% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="client-create-fields">
+        <label class="client-create-field client-create-field-wide">
+          <span>{{ 'Имя или название партнёра' if is_partner_directory else 'Имя клиента' }} <b>*</b></span>
+          <input type="text" name="client_name" value="{{ client_create_form.client_name or '' }}" maxlength="160" required autocomplete="name" placeholder="{{ 'Например, Северная верфь' if is_partner_directory else 'Имя и фамилия' }}">
+        </label>
+        <label class="client-create-field">
+          <span>Телефон <small>необязательно</small></span>
+          <input type="tel" name="phone" value="{{ client_create_form.phone or '' }}" maxlength="50" autocomplete="tel" placeholder="+7 999 000-00-00">
+        </label>
+        <label class="client-create-field">
+          <span>Email <small>необязательно</small></span>
+          <input type="email" name="email" value="{{ client_create_form.email or '' }}" maxlength="254" autocomplete="email" placeholder="name@example.ru">
+        </label>
+        <label class="client-create-field client-create-field-wide">
+          <span>Комментарий <small>виден сотрудникам</small></span>
+          <textarea name="comment" maxlength="1200" rows="4" placeholder="Контекст знакомства, пожелания или важные детали">{{ client_create_form.comment or '' }}</textarea>
+        </label>
+      </div>
+
+      <footer class="client-create-actions">
+        <button type="button" class="client-create-cancel" data-client-create-close>Отмена</button>
+        <button type="submit" class="client-create-submit">Добавить {{ 'партнёра' if is_partner_directory else 'клиента' }}</button>
+      </footer>
+    </form>
+  </dialog>
 
   <div class="totals-grid tuning-clients-totals">
     <div class="panel total-card total-card-grand"><span class="k">{{ 'Партнеров' if is_partner_directory else 'Клиентов' }}</span><span class="v">{{ clients_count }}</span></div>
@@ -241,5 +302,36 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+(function () {
+  const dialog = document.querySelector('[data-client-create-dialog]');
+  const openButton = document.querySelector('[data-client-create-open]');
+  if (!dialog || !openButton) return;
+
+  function openDialog() {
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', '');
+    const firstInput = dialog.querySelector('input[name="client_name"]');
+    if (firstInput) window.setTimeout(() => firstInput.focus(), 20);
+  }
+
+  function closeDialog() {
+    if (typeof dialog.close === 'function') dialog.close();
+    else dialog.removeAttribute('open');
+  }
+
+  openButton.addEventListener('click', openDialog);
+  dialog.querySelectorAll('[data-client-create-close]').forEach((button) => {
+    button.addEventListener('click', closeDialog);
+  });
+  dialog.addEventListener('click', (event) => {
+    if (event.target !== dialog) return;
+    const bounds = dialog.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right ||
+        event.clientY < bounds.top || event.clientY > bounds.bottom) closeDialog();
+  });
+  if (dialog.dataset.autoOpen === 'true') openDialog();
+}());
+</script>
 </body>
 </html>
