@@ -2042,6 +2042,27 @@ def init_db():
         # bank data (should stay in sync with the statement, not be
         # hand-edited or deleted here).
         conn.execute("ALTER TABLE bank_transactions ADD COLUMN source TEXT NOT NULL DEFAULT 'tbank'")
+    if "source_category" not in bank_tx_cols:
+        # Keep the category received from the bank separately. An automatic
+        # rule may temporarily override category; when that rule is removed
+        # we can then restore the provider's value instead of losing it.
+        conn.execute("ALTER TABLE bank_transactions ADD COLUMN source_category TEXT")
+        conn.execute(
+            "UPDATE bank_transactions SET source_category = category "
+            "WHERE source_category IS NULL"
+        )
+    if "category_rule_id" not in bank_tx_cols:
+        conn.execute("ALTER TABLE bank_transactions ADD COLUMN category_rule_id INTEGER")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS transaction_category_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            phrase TEXT NOT NULL,
+            category TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_bank_transactions_date_id "
         "ON bank_transactions (operation_date DESC, id DESC)"
@@ -11062,6 +11083,57 @@ def _tbank_normalize_operation(op):
     }
 
 
+def _transaction_category_rules(db):
+    """Return rules in deterministic priority order.
+
+    A longer phrase is more specific and wins when several phrases match the
+    same purpose. The id is a stable tie-breaker for phrases of equal length.
+    """
+    return db.execute(
+        "SELECT * FROM transaction_category_rules "
+        "ORDER BY LENGTH(phrase) DESC, id ASC"
+    ).fetchall()
+
+
+def _apply_transaction_category_rules(db, transaction_ids=None):
+    rules = _transaction_category_rules(db)
+    params = []
+    where = ""
+    if transaction_ids is not None:
+        transaction_ids = [int(value) for value in transaction_ids]
+        if not transaction_ids:
+            return 0
+        placeholders = ",".join("?" for _ in transaction_ids)
+        where = f" WHERE id IN ({placeholders})"
+        params.extend(transaction_ids)
+
+    rows = db.execute(
+        "SELECT id, purpose, category, source_category, category_rule_id "
+        "FROM bank_transactions" + where,
+        params,
+    ).fetchall()
+    changed = 0
+    for row in rows:
+        purpose = str(row["purpose"] or "").casefold()
+        matched_rule = next(
+            (rule for rule in rules if rule["phrase"].casefold() in purpose),
+            None,
+        )
+        category = (
+            matched_rule["category"] if matched_rule is not None
+            else row["source_category"]
+        )
+        rule_id = matched_rule["id"] if matched_rule is not None else None
+        if row["category"] != category or row["category_rule_id"] != rule_id:
+            db.execute(
+                "UPDATE bank_transactions SET category = ?, category_rule_id = ? "
+                "WHERE id = ?",
+                (category, rule_id, row["id"]),
+            )
+            changed += 1
+    return changed
+
+
 def _parse_date_filter():
     filter_start = request.args.get("start", "").strip()
     filter_end = request.args.get("end", "").strip()
@@ -11173,6 +11245,7 @@ def _transactions_table_context(db):
         "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
         "ORDER BY projects.created_at DESC, projects.id DESC"
     ).fetchall()
+    category_rules = _transaction_category_rules(db)
     # Actions on a row (assign project, save purpose, split) redirect back
     # here afterwards — carry the active date filter and page in that
     # "next" URL so an edit does not return the admin to the beginning.
@@ -11189,6 +11262,10 @@ def _transactions_table_context(db):
         "splits_by_transaction": splits_by_transaction, "current_url": current_url,
         "filter_start": filter_start, "filter_end": filter_end,
         "search_query": search_query,
+        "transaction_category_rules": category_rules,
+        "transaction_category_rules_by_id": {
+            rule["id"]: rule for rule in category_rules
+        },
         "items_by_project": _items_by_project(db),
         "transaction_count": total_count,
         "transaction_page": page,
@@ -11212,6 +11289,7 @@ def analytics_index():
         fetch_default_start=week_ago.isoformat(), fetch_default_end=today.isoformat(),
         fetch_error=session.pop("tbank_fetch_error", None),
         fetch_result=session.pop("tbank_fetch_result", None),
+        transaction_rule_notice=session.pop("transaction_rule_notice", None),
         **context,
     )
 
@@ -11258,13 +11336,14 @@ def analytics_fetch():
     added = 0
     updated = 0
     skipped_no_id = 0
+    touched_transaction_ids = []
     for op in raw_operations:
         data = _tbank_normalize_operation(op)
         if not data["operation_id"]:
             skipped_no_id += 1
             continue
         existing = db.execute(
-            "SELECT 1 FROM bank_transactions WHERE operation_id = ?", (data["operation_id"],)
+            "SELECT id FROM bank_transactions WHERE operation_id = ?", (data["operation_id"],)
         ).fetchone()
         if existing:
             # Re-parse from this fresh fetch even for rows we already have —
@@ -11273,25 +11352,30 @@ def analytics_fetch():
             # fetch instead of staying wrong until someone deletes them.
             db.execute(
                 "UPDATE bank_transactions SET operation_date=?, amount=?, direction=?, "
-                "counterparty_name=?, counterparty_inn=?, purpose=?, category=?, status=?, "
-                "raw_json=? WHERE operation_id=?",
+                "counterparty_name=?, counterparty_inn=?, purpose=?, category=?, "
+                "source_category=?, category_rule_id=NULL, status=?, raw_json=? "
+                "WHERE operation_id=?",
                 (data["operation_date"], data["amount"], data["direction"],
                  data["counterparty_name"], data["counterparty_inn"], data["purpose"],
-                 data["category"], data["status"], json.dumps(op, ensure_ascii=False),
+                 data["category"], data["category"], data["status"],
+                 json.dumps(op, ensure_ascii=False),
                  data["operation_id"]),
             )
+            touched_transaction_ids.append(existing["id"])
             updated += 1
             continue
-        db.execute(
+        cur = db.execute(
             "INSERT INTO bank_transactions (operation_id, account_number, operation_date, amount, "
-            "direction, counterparty_name, counterparty_inn, purpose, category, status, raw_json, "
-            "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "direction, counterparty_name, counterparty_inn, purpose, category, source_category, "
+            "status, raw_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (data["operation_id"], TBANK_ACCOUNT_NUMBER, data["operation_date"], data["amount"],
              data["direction"], data["counterparty_name"], data["counterparty_inn"],
-             data["purpose"], data["category"], data["status"],
+             data["purpose"], data["category"], data["category"], data["status"],
              json.dumps(op, ensure_ascii=False), now),
         )
+        touched_transaction_ids.append(cur.lastrowid)
         added += 1
+    _apply_transaction_category_rules(db, touched_transaction_ids)
     db.commit()
 
     session["tbank_fetch_result"] = (
@@ -11551,13 +11635,14 @@ def add_manual_transaction():
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     operation_id = f"manual-{secrets.token_hex(8)}"
-    db.execute(
+    cur = db.execute(
         "INSERT INTO bank_transactions (operation_id, account_number, operation_date, amount, "
         "direction, counterparty_name, purpose, source, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, 'manual', ?)",
         (operation_id, "Вручную", operation_date, amount, direction,
          counterparty_name or None, purpose or None, now),
     )
+    _apply_transaction_category_rules(db, [cur.lastrowid])
     db.commit()
     return _redirect_or_ajax_ok(next_url)
 
@@ -11611,9 +11696,79 @@ def set_transaction_purpose():
             "UPDATE bank_transactions SET purpose = ? WHERE id = ?",
             (purpose or None, int(transaction_id)),
         )
+        _apply_transaction_category_rules(db, [int(transaction_id)])
         db.commit()
     next_url = request.form.get("next") or url_for("analytics_index")
     return _redirect_or_ajax_ok(next_url)
+
+
+@app.route("/analytics/transaction-category-rules", methods=["POST"])
+@admin_login_required
+def add_transaction_category_rule():
+    db = get_db()
+    phrase = " ".join(request.form.get("phrase", "").split())
+    category = " ".join(request.form.get("category", "").split())
+    if not phrase or not category:
+        session["transaction_rule_notice"] = {
+            "type": "error",
+            "message": "Укажите и фразу из назначения, и категорию.",
+        }
+        return redirect(url_for("analytics_index") + "#transaction-category-rules")
+    if len(phrase) > 120 or len(category) > 80:
+        session["transaction_rule_notice"] = {
+            "type": "error",
+            "message": "Фраза должна быть не длиннее 120 символов, категория — 80.",
+        }
+        return redirect(url_for("analytics_index") + "#transaction-category-rules")
+
+    existing = db.execute(
+        "SELECT id FROM transaction_category_rules WHERE CASEFOLD(phrase) = ?",
+        (phrase.casefold(),),
+    ).fetchone()
+    if existing is None:
+        db.execute(
+            "INSERT INTO transaction_category_rules (phrase, category, created_at) "
+            "VALUES (?, ?, ?)",
+            (phrase, category, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+        )
+        action = "добавлено"
+    else:
+        db.execute(
+            "UPDATE transaction_category_rules SET phrase = ?, category = ? WHERE id = ?",
+            (phrase, category, existing["id"]),
+        )
+        action = "обновлено"
+    changed = _apply_transaction_category_rules(db)
+    db.commit()
+    session["transaction_rule_notice"] = {
+        "type": "success",
+        "message": (
+            f"Правило {action}. Категория пересчитана у транзакций: {changed}."
+        ),
+    }
+    return redirect(url_for("analytics_index") + "#transaction-category-rules")
+
+
+@app.route(
+    "/analytics/transaction-category-rules/<int:rule_id>/delete",
+    methods=["POST"],
+)
+@admin_login_required
+def delete_transaction_category_rule(rule_id):
+    db = get_db()
+    cur = db.execute(
+        "DELETE FROM transaction_category_rules WHERE id = ?", (rule_id,)
+    )
+    changed = _apply_transaction_category_rules(db)
+    db.commit()
+    session["transaction_rule_notice"] = {
+        "type": "success" if cur.rowcount else "error",
+        "message": (
+            f"Правило удалено. Категория пересчитана у транзакций: {changed}."
+            if cur.rowcount else "Правило уже удалено."
+        ),
+    }
+    return redirect(url_for("analytics_index") + "#transaction-category-rules")
 
 
 def _normalize_transaction_split(db, transaction_id):

@@ -143,6 +143,72 @@
     </form>
   </section>
 
+  <details class="panel collapsible-panel" id="transaction-category-rules"{% if transaction_rule_notice %} open{% endif %}>
+    <summary>
+      <span>Настройки зависимостей</span>
+      <span class="badge">{{ transaction_category_rules|length }}</span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
+      <p class="hint">
+        Если назначение платежа содержит заданную фразу, транзакции автоматически
+        присваивается выбранная категория. Регистр букв не учитывается.
+      </p>
+      {% if transaction_rule_notice %}
+        {% if transaction_rule_notice.type == 'error' %}
+        <div class="alert">{{ transaction_rule_notice.message }}</div>
+        {% else %}
+        <div class="import-note hint">{{ transaction_rule_notice.message }}</div>
+        {% endif %}
+      {% endif %}
+      <form action="{{ url_for('add_transaction_category_rule') }}" method="post" class="entry-form">
+        <div class="field">
+          <label for="transaction_rule_phrase">Фраза в назначении платежа</label>
+          <input type="text" id="transaction_rule_phrase" name="phrase" maxlength="120"
+                 placeholder="Например: оплата по договору" required>
+        </div>
+        <div class="field">
+          <label for="transaction_rule_category">Присвоить категорию</label>
+          <input type="text" id="transaction_rule_category" name="category" maxlength="80"
+                 placeholder="Например: Выручка" required>
+        </div>
+        <div class="field field-submit">
+          <button type="submit">Добавить правило</button>
+        </div>
+      </form>
+      {% if transaction_category_rules %}
+      <div class="table-scroll" style="margin-top:16px;">
+        <table class="records">
+          <thead>
+            <tr><th>Фраза</th><th>Категория</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for rule in transaction_category_rules %}
+            <tr>
+              <td>{{ rule.phrase }}</td>
+              <td>{{ rule.category }}</td>
+              <td class="row-actions">
+                <form action="{{ url_for('delete_transaction_category_rule', rule_id=rule.id) }}"
+                      method="post" onsubmit="return confirm('Удалить это правило? Категории транзакций будут пересчитаны.');">
+                  <button type="submit" class="icon-btn danger" title="Удалить правило" aria-label="Удалить правило {{ rule.phrase }}">
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M6 6v9M10 6v9M14 6v9M4 4h12M7 4l1-2h4l1 2M5 4l1 13h8l1-13"/>
+                    </svg>
+                  </button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">Если совпали несколько правил, применяется правило с самой длинной фразой.</p>
+      {% else %}
+      <p class="hint" style="margin-top:16px;">Правил пока нет.</p>
+      {% endif %}
+    </div>
+  </details>
+
   <section class="panel">
     <h2>Транзакции по счёту</h2>
     <form id="transactions-filter-form" action="{{ url_for('analytics_index') }}" method="get" class="entry-form" style="margin-bottom:14px;">

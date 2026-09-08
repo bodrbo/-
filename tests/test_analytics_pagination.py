@@ -59,7 +59,11 @@ class AnalyticsTransactionPaginationTests(unittest.TestCase):
             session["admin_name"] = "Администратор теста"
 
     def transaction_rows(self, html):
-        body = re.search(r"<tbody>(.*?)</tbody>", html, re.DOTALL)
+        body = re.search(
+            r'<table class="records" id="transactions-table">.*?<tbody>(.*?)</tbody>',
+            html,
+            re.DOTALL,
+        )
         self.assertIsNotNone(body)
         return body.group(1).count("<tr>")
 

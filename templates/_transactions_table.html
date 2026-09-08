@@ -30,7 +30,12 @@
             </button>
           </form>
         </td>
-        <td class="muted">{{ t.category or '—' }}</td>
+        <td class="muted">
+          {{ t.category or '—' }}
+          {% if t.category_rule_id and transaction_category_rules_by_id.get(t.category_rule_id) %}
+          <small class="hint" title="Правило: {{ transaction_category_rules_by_id[t.category_rule_id].phrase }}">авто</small>
+          {% endif %}
+        </td>
         <td>
           {% if t.id in splits_by_transaction %}
           <div class="hint" style="margin:0;">
