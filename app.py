@@ -120,6 +120,7 @@ from modules.clients import (
     init_schema as init_client_segments_schema,
     normalize_phone_identity as normalize_client_phone,
     sync_clients as sync_yclients_clients,
+    update_directory_contact,
 )
 from modules.clients.partner_quote_pdf import build_partner_quote_pdf
 from modules.clients.constants import (
@@ -8278,6 +8279,7 @@ def _render_client_dashboard(
         partner_profile=partner_profile,
         partner_profile_notice=session.pop("partner_profile_notice", None),
         partner_profile_error=session.pop("partner_profile_error", None),
+        partner_profile_form=session.pop("partner_profile_form", {}),
         partner_request_notice=session.pop("partner_request_notice", None),
         partner_price_notice=session.pop("partner_price_notice", None),
         partner_price_error=session.pop("partner_price_error", None),
@@ -8353,62 +8355,148 @@ def admin_client_dashboard(client_id):
 
 
 @app.route("/admin/clients/<int:client_id>/partner-profile", methods=["POST"])
-@admin_login_required
+@excursion_manager_or_admin_required
 def update_tuning_partner_profile(client_id):
     db = get_db()
-    membership = _client_segment_profile(db, client_id, TUNING_SEGMENT)
+    manager_view = _is_customer_manager(db)
+    section = (
+        EXCURSION_SEGMENT
+        if manager_view
+        else request.form.get("section", TUNING_SEGMENT).strip().lower()
+    )
+    if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
+        section = TUNING_SEGMENT
+
+    membership = _client_segment_profile(db, client_id, section)
+    client = db.execute(
+        "SELECT id, client_name, phone, email, comment FROM clients WHERE id = ?",
+        (client_id,),
+    ).fetchone()
     if (
-        membership is None
+        client is None
+        or membership is None
         or membership["relationship_type"] != CLIENT_RELATIONSHIP_PARTNER
     ):
-        return redirect(url_for("tuning_clients"))
+        redirect_args = {"section": section, "relationship": CLIENT_RELATIONSHIP_PARTNER}
+        return redirect(url_for("tuning_clients", **redirect_args))
 
-    partner_title = " ".join(request.form.get("partner_title", "").split())
-    if len(partner_title) > PARTNER_TITLE_LIMIT:
-        session["partner_profile_error"] = (
-            f"Статус партнёра не должен превышать {PARTNER_TITLE_LIMIT} символов."
+    values = {
+        "client_name": " ".join(
+            request.form.get("client_name", client["client_name"]).split()
+        ),
+        "phone": request.form.get("phone", client["phone"] or "").strip(),
+        "email": request.form.get("email", client["email"] or "").strip(),
+        "comment": request.form.get("comment", client["comment"] or "").strip(),
+    }
+    errors = []
+    if not values["client_name"]:
+        errors.append("Укажите название или имя партнёра.")
+    elif len(values["client_name"]) > CLIENT_DIRECTORY_NAME_LIMIT:
+        errors.append(
+            f"Название или имя — не более {CLIENT_DIRECTORY_NAME_LIMIT} символов."
         )
+    if len(values["phone"]) > CLIENT_DIRECTORY_PHONE_LIMIT:
+        errors.append(
+            f"Телефон — не более {CLIENT_DIRECTORY_PHONE_LIMIT} символов."
+        )
+    elif values["phone"] and len(normalize_client_phone(values["phone"])) < 7:
+        errors.append("Проверьте номер телефона или оставьте поле пустым.")
+    if len(values["email"]) > CLIENT_DIRECTORY_EMAIL_LIMIT:
+        errors.append(
+            f"Email — не более {CLIENT_DIRECTORY_EMAIL_LIMIT} символов."
+        )
+    elif values["email"]:
+        email_parts = values["email"].split("@")
+        if (
+            len(email_parts) != 2
+            or not email_parts[0]
+            or not email_parts[1]
+            or " " in values["email"]
+        ):
+            errors.append("Проверьте адрес электронной почты.")
+    if len(values["comment"]) > CLIENT_DIRECTORY_COMMENT_LIMIT:
+        errors.append(
+            f"Комментарий — не более {CLIENT_DIRECTORY_COMMENT_LIMIT} символов."
+        )
+
+    is_tuning_partner = section == TUNING_SEGMENT
+    partner_title = membership["partner_title"]
+    if is_tuning_partner:
+        partner_title = " ".join(
+            request.form.get("partner_title", partner_title or "").split()
+        )
+        values["partner_title"] = partner_title
+        if len(partner_title) > PARTNER_TITLE_LIMIT:
+            errors.append(
+                f"Статус партнёра не должен превышать {PARTNER_TITLE_LIMIT} символов."
+            )
+
+    if errors:
+        session["partner_profile_error"] = " ".join(errors)
+        session["partner_profile_form"] = values
         return redirect(url_for(
-            "admin_client_dashboard", client_id=client_id, section=TUNING_SEGMENT
+            "admin_client_dashboard", client_id=client_id, section=section
+        ))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    try:
+        update_directory_contact(
+            db,
+            client_id=client_id,
+            name=values["client_name"],
+            phone=values["phone"],
+            email=values["email"],
+            comment=values["comment"],
+            updated_at=now,
+        )
+    except ValueError as exc:
+        db.rollback()
+        session["partner_profile_error"] = str(exc)
+        session["partner_profile_form"] = values
+        return redirect(url_for(
+            "admin_client_dashboard", client_id=client_id, section=section
         ))
 
     logo_filename = membership["partner_logo_filename"]
-    if request.form.get("remove_logo") == "1":
+    if is_tuning_partner and request.form.get("remove_logo") == "1":
         logo_filename = None
-    logo = request.files.get("partner_logo")
+    logo = request.files.get("partner_logo") if is_tuning_partner else None
     if logo and logo.filename:
         extension = os.path.splitext(logo.filename)[1].lower()
         if (
             extension not in PARTNER_LOGO_EXTENSIONS
             or not (logo.mimetype or "").lower().startswith("image/")
         ):
+            db.rollback()
             session["partner_profile_error"] = (
                 "Логотип должен быть изображением JPG, PNG или WebP."
             )
+            session["partner_profile_form"] = values
             return redirect(url_for(
                 "admin_client_dashboard", client_id=client_id,
-                section=TUNING_SEGMENT,
+                section=section,
             ))
         logos_dir = os.path.join(app.static_folder, "partner_logos")
         os.makedirs(logos_dir, exist_ok=True)
         logo_filename = f"{client_id}-{secrets.token_hex(8)}{extension}"
         logo.save(os.path.join(logos_dir, logo_filename))
 
-    db.execute(
-        "UPDATE client_segments SET partner_title = ?, partner_logo_filename = ? "
-        "WHERE client_id = ? AND segment = ? AND relationship_type = ?",
-        (
-            partner_title,
-            logo_filename,
-            client_id,
-            TUNING_SEGMENT,
-            CLIENT_RELATIONSHIP_PARTNER,
-        ),
-    )
+    if is_tuning_partner:
+        db.execute(
+            "UPDATE client_segments SET partner_title = ?, partner_logo_filename = ? "
+            "WHERE client_id = ? AND segment = ? AND relationship_type = ?",
+            (
+                partner_title,
+                logo_filename,
+                client_id,
+                section,
+                CLIENT_RELATIONSHIP_PARTNER,
+            ),
+        )
     db.commit()
-    session["partner_profile_notice"] = "Профиль партнёра обновлён."
+    session["partner_profile_notice"] = "Данные партнёра обновлены."
     return redirect(url_for(
-        "admin_client_dashboard", client_id=client_id, section=TUNING_SEGMENT
+        "admin_client_dashboard", client_id=client_id, section=section
     ))
 
 

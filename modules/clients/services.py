@@ -120,3 +120,77 @@ def create_directory_contact(
         (cursor.lastrowid, segment, relationship_type, created_at),
     )
     return {"client_id": cursor.lastrowid, "result": "created"}
+
+
+def update_directory_contact(
+    db,
+    *,
+    client_id,
+    name,
+    phone,
+    email,
+    comment,
+    updated_at,
+):
+    """Update one shared contact and its denormalized operational copies.
+
+    Orders, schedule participants and diagnostic sheets keep a readable copy
+    of the customer's name and phone. Updating them together prevents the
+    partner directory and related documents from showing conflicting data.
+    """
+    current = db.execute(
+        "SELECT id, client_name, phone FROM clients WHERE id = ?", (client_id,)
+    ).fetchone()
+    if current is None:
+        raise ValueError("Партнёр не найден.")
+
+    current_phone_identity = normalize_phone_identity(current["phone"])
+    new_phone_identity = normalize_phone_identity(phone)
+    if new_phone_identity and new_phone_identity != current_phone_identity:
+        matches = [
+            row
+            for row in db.execute(
+                "SELECT id, client_name, phone FROM clients "
+                "WHERE id != ? AND TRIM(COALESCE(phone, '')) != '' ORDER BY id",
+                (client_id,),
+            ).fetchall()
+            if normalize_phone_identity(row["phone"]) == new_phone_identity
+        ]
+        if matches:
+            raise ValueError(
+                f"Телефон уже принадлежит контакту «{matches[0]['client_name']}». "
+                "Укажите другой номер или оставьте поле пустым."
+            )
+
+    identity_changed = (
+        name != current["client_name"] or phone != (current["phone"] or "")
+    )
+    db.execute(
+        "UPDATE clients SET client_name = ?, phone = ?, email = ?, comment = ? "
+        "WHERE id = ?",
+        (name, phone, email, comment, client_id),
+    )
+    if not identity_changed:
+        return
+
+    db.execute(
+        "UPDATE tuning_orders SET client_name = ?, phone = ?, updated_at = ? "
+        "WHERE client_id = ?",
+        (name, phone, updated_at, client_id),
+    )
+    db.execute(
+        "UPDATE schedule_items SET customer_name = ?, customer_phone = ?, "
+        "updated_at = ? WHERE kind = 'booking' AND id IN ("
+        "SELECT schedule_item_id FROM schedule_participants WHERE client_id = ?)",
+        (name, phone, updated_at, client_id),
+    )
+    db.execute(
+        "UPDATE schedule_participants SET client_name = ?, client_phone = ? "
+        "WHERE client_id = ?",
+        (name, phone, client_id),
+    )
+    db.execute(
+        "UPDATE field_diagnostic_sheets SET owner_name = ?, owner_phone = ? "
+        "WHERE owner_client_id = ?",
+        (name, phone, client_id),
+    )

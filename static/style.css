@@ -9254,12 +9254,60 @@ button.captain-command-alert:hover {
   list-style-position: inside;
 }
 .partner-profile-editor[open] > summary { border-bottom: 1px solid var(--hairline-soft); }
-.partner-profile-editor form {
+.partner-profile-editor form { padding: 18px; }
+.partner-profile-hint {
+  margin: 0 0 15px;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+.partner-profile-fields {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.partner-profile-field {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+.partner-profile-field-wide { grid-column: 1 / -1; }
+.partner-profile-field > span {
+  color: var(--ink-soft);
+  font-family: 'PT Mono', monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+.partner-profile-field input,
+.partner-profile-field textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  background: var(--paper-alt);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.partner-profile-field input { min-height: 44px; padding: 10px 12px; }
+.partner-profile-field textarea { min-height: 82px; padding: 11px 12px; line-height: 1.5; resize: vertical; }
+.partner-profile-field input:focus,
+.partner-profile-field textarea:focus {
+  outline: none;
+  border-color: var(--brass);
+  background: var(--paper);
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, .13);
+}
+.partner-profile-branding {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: end;
   gap: 14px;
-  padding: 18px;
+  margin-top: 2px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline-soft);
 }
 .partner-profile-editor input[type="file"] {
   width: 100%;
@@ -9270,7 +9318,8 @@ button.captain-command-alert:hover {
   background: var(--paper-alt);
   color: var(--ink-soft);
 }
-.partner-profile-editor button { min-height: 40px; }
+.partner-profile-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
+.partner-profile-editor button { min-height: 40px; margin: 0; }
 .partner-remove-logo { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 7px; }
 .partner-orders-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
 .partner-orders-heading h2 { margin: 0; }
@@ -9585,7 +9634,9 @@ button.partner-open-price-save svg {
   .partner-request-cta { grid-column: 1 / -1; width: 100%; }
   .partner-logo-frame { width: 82px; height: 82px; border-radius: 16px; }
   .partner-logo-frame span { font-size: 35px; }
-  .partner-profile-editor form { grid-template-columns: 1fr; }
+  .partner-profile-fields,
+  .partner-profile-branding { grid-template-columns: 1fr; }
+  .partner-profile-field-wide { grid-column: auto; }
   .partner-remove-logo { grid-column: auto; }
   .partner-quote-panel { grid-template-columns: 1fr; }
   .partner-quote-action { border-top: 1px solid rgba(52, 152, 219, .2); border-left: 0; }

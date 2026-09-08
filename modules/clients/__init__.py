@@ -1,7 +1,12 @@
 """Shared client identities split into business segments."""
 
 from .schema import init_schema
-from .services import create_directory_contact, ensure_segment, normalize_phone_identity
+from .services import (
+    create_directory_contact,
+    ensure_segment,
+    normalize_phone_identity,
+    update_directory_contact,
+)
 from .yclients import sync_clients
 
 __all__ = [
@@ -10,4 +15,5 @@ __all__ = [
     "init_schema",
     "normalize_phone_identity",
     "sync_clients",
+    "update_directory_contact",
 ]

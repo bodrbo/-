@@ -3,6 +3,7 @@
 {% set is_admin_view = viewer_role == 'admin' %}
 {% set is_manager_view = viewer_role == 'manager' %}
 {% set is_staff_view = is_admin_view or is_manager_view %}
+{% set is_partner_contact = client_relationship == 'partner' %}
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -129,28 +130,59 @@
     </a>
     {% endif %}
   </section>
-  {% if is_admin_view %}
-  <details class="panel partner-profile-editor">
-    <summary>Оформление кабинета партнёра</summary>
-    <form method="post" enctype="multipart/form-data" action="{{ url_for('update_tuning_partner_profile', client_id=client.id) }}">
-      <div class="field partner-title-field">
-        <label for="partner_title">Статус под названием</label>
-        <input id="partner_title" name="partner_title" type="text" maxlength="120"
-               value="{{ partner_profile.partner_title }}" placeholder="Например: Партнёрский тюнинг-центр">
-      </div>
-      <div class="field partner-logo-field">
-        <label for="partner_logo">Логотип</label>
-        <input id="partner_logo" name="partner_logo" type="file" accept="image/jpeg,image/png,image/webp">
-      </div>
-      {% if partner_profile.logo_url %}
-      <label class="partner-remove-logo"><input type="checkbox" name="remove_logo" value="1"> Удалить текущий логотип</label>
-      {% endif %}
-      <button type="submit">Сохранить оформление</button>
-    </form>
-  </details>
-  {% endif %}
   {% else %}
   <div class="investor-bar"><span class="investor-name">{{ client.client_name }}</span></div>
+  {% endif %}
+
+  {% if is_staff_view and is_partner_contact %}
+  {% set profile_values = partner_profile_form or {} %}
+  <details class="panel partner-profile-editor" {{ 'open' if partner_profile_error }}>
+    <summary>{{ 'Данные и оформление партнёра' if is_tuning_partner else 'Данные партнёра' }}</summary>
+    <form method="post" enctype="multipart/form-data" action="{{ url_for('update_tuning_partner_profile', client_id=client.id) }}">
+      <input type="hidden" name="section" value="{{ client_section }}">
+      <p class="partner-profile-hint">Изменения применятся к профилю и всем связанным заказам, рейсам и документам.</p>
+      <div class="partner-profile-fields">
+        <label class="partner-profile-field">
+          <span>Название или имя партнёра</span>
+          <input name="client_name" type="text" maxlength="160" required autocomplete="organization"
+                 value="{{ profile_values.get('client_name', client.client_name) }}">
+        </label>
+        <label class="partner-profile-field">
+          <span>Телефон</span>
+          <input name="phone" type="tel" maxlength="50" autocomplete="tel"
+                 value="{{ profile_values.get('phone', client.phone or '') }}" placeholder="+7 900 000-00-00">
+        </label>
+        <label class="partner-profile-field">
+          <span>Email</span>
+          <input name="email" type="email" maxlength="254" autocomplete="email"
+                 value="{{ profile_values.get('email', client.email or '') }}" placeholder="partner@example.ru">
+        </label>
+        <label class="partner-profile-field partner-profile-field-wide">
+          <span>Комментарий для команды</span>
+          <textarea name="comment" maxlength="1200" rows="3" placeholder="Контактное лицо, удобное время связи и другие детали">{{ profile_values.get('comment', client.comment or '') }}</textarea>
+        </label>
+        {% if is_tuning_partner and is_admin_view %}
+        <div class="partner-profile-branding">
+          <div class="field partner-title-field">
+            <label for="partner_title">Статус под названием</label>
+            <input id="partner_title" name="partner_title" type="text" maxlength="120"
+                   value="{{ profile_values.get('partner_title', partner_profile.partner_title) }}" placeholder="Например: Партнёрский тюнинг-центр">
+          </div>
+          <div class="field partner-logo-field">
+            <label for="partner_logo">Логотип</label>
+            <input id="partner_logo" name="partner_logo" type="file" accept="image/jpeg,image/png,image/webp">
+          </div>
+          {% if partner_profile.logo_url %}
+          <label class="partner-remove-logo"><input type="checkbox" name="remove_logo" value="1"> Удалить текущий логотип</label>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+      <div class="partner-profile-actions">
+        <button type="submit">Сохранить данные</button>
+      </div>
+    </form>
+  </details>
   {% endif %}
 
   {% if is_staff_view and client_section == 'excursion' %}
