@@ -292,7 +292,7 @@
           {% if o.work_items %}
           <div class="table-scroll">
             <table class="records">
-              <thead><tr><th>Работа</th>{% if is_admin_view %}<th>Себестоимость, ₽</th><th>Коэффициент</th>{% endif %}{% if not incoming_subcontract %}<th>{{ 'Закрытая цена, ₽' if is_tuning_partner else 'Цена, ₽' }}</th>{% endif %}{% if is_tuning_partner %}<th>{{ 'Расчёт партнёра, ₽' if incoming_subcontract else 'Открытая цена, ₽' }}</th>{% endif %}<th>Статус</th><th></th></tr></thead>
+              <thead><tr><th>Работа</th>{% if is_admin_view %}<th>Себестоимость, ₽</th><th>Коэффициент</th>{% endif %}{% if not incoming_subcontract %}<th>{{ 'Закрытая цена, ₽' if is_tuning_partner else 'Цена, ₽' }}</th>{% endif %}{% if is_tuning_partner %}<th>{{ 'Закрытая цена, ₽' if incoming_subcontract else 'Открытая цена, ₽' }}</th>{% endif %}<th>Статус</th><th></th></tr></thead>
               <tbody>
                 {% for item in o.work_items %}
                 <tr class="{{ 'row-pending' if item.status == 'pending' else 'row-removed' if item.status == 'removed' }}">
@@ -316,7 +316,7 @@
                       <div class="partner-open-price-control">
                         <input type="text" inputmode="decimal" name="open_price"
                                value="{{ item.partner_price|money if item.partner_price is not none else '' }}"
-                               aria-label="{{ 'Расчёт партнёра' if incoming_subcontract else 'Открытая цена' }}: {{ item.work_name }}" placeholder="0,00"
+                               aria-label="{{ 'Закрытая цена' if incoming_subcontract else 'Открытая цена' }}: {{ item.work_name }}" placeholder="0,00"
                                {% if not incoming_subcontract %}aria-haspopup="true" aria-expanded="false"
                                aria-controls="partner-price-presets-{{ item.id }}"
                                data-price-hints="partner-price-presets-{{ item.id }}"{% endif %}>
@@ -413,7 +413,7 @@
 
           {% if incoming_subcontract %}
           <p class="hint" style="margin-top:14px;">
-            {{ ('Расчёт партнёра: ' ~ (o.partner_work_total|money) ~ ' ₽') if o.partner_response_ready else 'Партнёр ещё не указал стоимость всех работ.' }}
+            {{ ('Закрытая стоимость: ' ~ (o.partner_work_total|money) ~ ' ₽') if o.partner_response_ready else 'Укажите закрытую цену для всех работ.' }}
           </p>
           {% else %}
           <p class="hint" style="margin-top:14px;">

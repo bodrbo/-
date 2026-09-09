@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{ 'Новый субподряд' if admin_subcontract else 'Новая заявка на расчёт' }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260909-subcontracts">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260909-subcontract-pricing">
 <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
 <meta name="theme-color" content="#123848">
 </head>
@@ -54,7 +54,7 @@
 </header>
 
 <main class="wrap partner-request-wrap">
-  <a class="partner-request-back" href="{{ url_for('tuning_index') if admin_subcontract else url_for('client_dashboard', token=client.token) }}">← {{ 'Вернуться к заказам' if admin_subcontract else 'Вернуться в кабинет' }}</a>
+  <a class="partner-request-back" href="{{ url_for('tuning_subcontracts') if admin_subcontract else url_for('client_dashboard', token=client.token) }}">← {{ 'Вернуться к субподрядам' if admin_subcontract else 'Вернуться в кабинет' }}</a>
 
   {% if not admin_subcontract %}
   <section class="partner-request-intro">
@@ -85,7 +85,7 @@
     <section class="panel partner-request-section partner-recipient-section">
       <div class="partner-request-section-heading">
         <span>01</span>
-        <div><h2>Партнёр-исполнитель</h2><p>Выберите тюнинг-центр, которому отправляем заявку на расчёт.</p></div>
+        <div><h2>Участники субподряда</h2><p>Выберите конечного клиента и партнёра, который рассчитает работы.</p></div>
       </div>
       <div class="partner-request-fields partner-recipient-fields">
         <div class="field">
@@ -99,6 +99,30 @@
             {% endfor %}
           </select>
           {% if not partner_choices %}<small>Сначала добавьте контакт в подраздел «Партнёры тюнинга».</small>{% endif %}
+        </div>
+        <div class="field" data-tuning-client-combo>
+          <label for="subcontract_client_search">Клиент</label>
+          <div class="combo-field" data-combo>
+            <input type="text" id="subcontract_client_search" class="combo-input" data-combo-input
+                   value="{{ selected_subcontract_client.client_name if selected_subcontract_client else '' }}"
+                   data-selected-label="{{ selected_subcontract_client.client_name if selected_subcontract_client else '' }}"
+                   placeholder="Начните вводить имя или телефон…" autocomplete="off"
+                   role="combobox" aria-autocomplete="list" required>
+            <input type="hidden" name="client_id" data-combo-value
+                   value="{{ selected_subcontract_client.id if selected_subcontract_client else '' }}">
+            <div class="combo-dropdown hidden" data-combo-dropdown>
+              <p class="combo-empty hidden" data-combo-empty>Клиент не найден в базе тюнинга.</p>
+              {% for tuning_client in tuning_client_choices %}
+              <div class="combo-option" data-value="{{ tuning_client.id }}"
+                   data-label="{{ tuning_client.client_name }}"
+                   data-search="{{ (tuning_client.client_name ~ ' ' ~ tuning_client.phone)|lower }}">
+                <span class="combo-option-name">{{ tuning_client.client_name }}</span>
+                {% if tuning_client.phone %}<span class="combo-option-sku">{{ tuning_client.phone }}</span>{% endif %}
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% if not tuning_client_choices %}<small>Сначала добавьте клиента тюнинга в клиентскую базу.</small>{% endif %}
         </div>
       </div>
     </section>
@@ -185,7 +209,7 @@
     <div class="partner-request-submitbar">
       {% if admin_subcontract %}
       <p><strong>Субподряд</strong><br><span>После создания он появится во входящих заявках выбранного партнёра.</span></p>
-      <button type="submit" {{ 'disabled' if not partner_choices }}>Отправить партнёру</button>
+      <button type="submit" {{ 'disabled' if not partner_choices or not tuning_client_choices }}>Отправить партнёру</button>
       {% else %}
       <p><strong>Клиент:</strong> {{ client.client_name }}<br><span>После отправки заявку можно будет открыть в кабинете.</span></p>
       <button type="submit">Отправить на расчёт</button>

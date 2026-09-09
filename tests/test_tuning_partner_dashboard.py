@@ -1,5 +1,6 @@
 import io
 import os
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -67,7 +68,9 @@ class TuningPartnerDashboardTests(unittest.TestCase):
         for client_id in client_ids:
             order_ids = [
                 row["id"] for row in db.execute(
-                    "SELECT id FROM tuning_orders WHERE client_id = ?", (client_id,)
+                    "SELECT id FROM tuning_orders "
+                    "WHERE client_id = ? OR partner_id = ?",
+                    (client_id, client_id),
                 ).fetchall()
             ]
             for order_id in order_ids:
@@ -436,22 +439,24 @@ class TuningPartnerDashboardTests(unittest.TestCase):
         self.assertEqual(form_response.status_code, 200)
         self.assertIn("Новый субподряд", form_html)
         self.assertIn('name="partner_id"', form_html)
+        self.assertIn('name="client_id"', form_html)
         self.assertIn("Верфь Север", form_html)
-        self.assertNotIn("Обычный клиент", form_html)
+        self.assertIn("Обычный клиент", form_html)
         self.assertNotIn("data-hide-software-request-widget", form_html)
 
         form = self._valid_request()
         form.add("partner_id", str(self.partner_id))
+        form.add("client_id", str(self.regular_client_id))
         response = self.http.post("/tuning/subcontract/add", data=form)
 
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(response.headers["Location"].endswith("/tuning"))
+        self.assertTrue(response.headers["Location"].endswith("/tuning/subcontracts"))
         with application_module.app.app_context():
             db = application_module.get_db()
             order = db.execute(
-                "SELECT * FROM tuning_orders WHERE client_id = ? "
-                "AND source = 'subcontract_request'",
-                (self.partner_id,),
+                "SELECT * FROM tuning_orders WHERE partner_id = ? "
+                "AND client_id = ? AND source = 'subcontract_request'",
+                (self.partner_id, self.regular_client_id),
             ).fetchone()
             items = db.execute(
                 "SELECT work_name, price_pending, price FROM tuning_order_items "
@@ -462,8 +467,9 @@ class TuningPartnerDashboardTests(unittest.TestCase):
                 "SELECT id FROM projects WHERE tuning_order_id = ?", (order["id"],)
             ).fetchone()
 
-        self.assertEqual(order["client_name"], "Верфь Север")
-        self.assertEqual(order["phone"], "+79991112233")
+        self.assertEqual(order["client_name"], "Обычный клиент")
+        self.assertEqual(order["phone"], "")
+        self.assertEqual(order["partner_id"], self.partner_id)
         self.assertEqual(order["status"], "estimate")
         self.assertTrue(order["source_ref"].startswith(
             f"subcontract:{self.partner_id}:"
@@ -477,10 +483,23 @@ class TuningPartnerDashboardTests(unittest.TestCase):
         )
         self.assertIsNotNone(project)
 
+        subcontract_html = self.http.get(
+            "/tuning/subcontracts"
+        ).get_data(as_text=True)
+        orders_html = self.http.get("/tuning").get_data(as_text=True)
+        self.assertIn("Субподряды", subcontract_html)
+        self.assertIn("Закрытая цена", subcontract_html)
+        self.assertIn("Открытая цена", subcontract_html)
+        self.assertIn("Верфь Север", subcontract_html)
+        self.assertIn("Обычный клиент", subcontract_html)
+        self.assertIn(self.BOAT_MODEL, subcontract_html)
+        self.assertNotIn(self.BOAT_MODEL, orders_html)
+
     def test_subcontracts_and_partner_requests_are_split_by_direction(self):
         self._login_admin()
         subcontract_form = self._valid_request()
         subcontract_form.add("partner_id", str(self.partner_id))
+        subcontract_form.add("client_id", str(self.regular_client_id))
         self.http.post("/tuning/subcontract/add", data=subcontract_form)
 
         with self.http.session_transaction() as session:
@@ -502,7 +521,7 @@ class TuningPartnerDashboardTests(unittest.TestCase):
         self.assertNotIn("Субподряд от нас", incoming_html)
         self.assertNotIn("Ожидаем партнёра", incoming_html)
         self.assertIn("Требуется расчёт", incoming_html)
-        self.assertIn("Расчёт партнёра, ₽", incoming_html)
+        self.assertIn("Закрытая цена, ₽", incoming_html)
         self.assertNotIn("Субподряд от нас", outgoing_html)
         self.assertIn("Открытая цена, ₽", outgoing_html)
 
@@ -510,11 +529,12 @@ class TuningPartnerDashboardTests(unittest.TestCase):
         self._login_admin()
         form = self._valid_request()
         form.add("partner_id", str(self.partner_id))
+        form.add("client_id", str(self.regular_client_id))
         self.http.post("/tuning/subcontract/add", data=form)
         with application_module.app.app_context():
             db = application_module.get_db()
             order = db.execute(
-                "SELECT id FROM tuning_orders WHERE client_id = ? "
+                "SELECT id FROM tuning_orders WHERE partner_id = ? "
                 "AND source = 'subcontract_request' ORDER BY id DESC LIMIT 1",
                 (self.partner_id,),
             ).fetchone()
@@ -544,13 +564,15 @@ class TuningPartnerDashboardTests(unittest.TestCase):
         admin_order_html = self.http.get(
             f"/tuning/edit/{order['id']}"
         ).get_data(as_text=True)
-        self.assertIn("Расчёт партнёра, ₽", admin_order_html)
+        self.assertIn("Закрытая цена, ₽", admin_order_html)
+        self.assertIn("Открытая цена, ₽", admin_order_html)
         self.assertIn("12 500,00 ₽", admin_order_html.replace("\u00a0", " "))
 
     def test_subcontract_rejects_non_partner_recipient(self):
         self._login_admin()
         form = self._valid_request()
         form.add("partner_id", str(self.regular_client_id))
+        form.add("client_id", str(self.regular_client_id))
 
         response = self.http.post("/tuning/subcontract/add", data=form)
 
@@ -562,10 +584,107 @@ class TuningPartnerDashboardTests(unittest.TestCase):
         with application_module.app.app_context():
             count = application_module.get_db().execute(
                 "SELECT COUNT(*) AS count FROM tuning_orders "
-                "WHERE source = 'subcontract_request' AND client_id = ?",
+                "WHERE source = 'subcontract_request' AND partner_id = ?",
                 (self.regular_client_id,),
             ).fetchone()["count"]
         self.assertEqual(count, 0)
+
+    def test_open_price_reaches_client_without_exposing_partner_or_client(self):
+        self._login_admin()
+        create_form = self._valid_request()
+        create_form.add("partner_id", str(self.partner_id))
+        create_form.add("client_id", str(self.regular_client_id))
+        self.http.post("/tuning/subcontract/add", data=create_form)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            order = db.execute(
+                "SELECT id FROM tuning_orders WHERE partner_id = ? "
+                "AND client_id = ? AND source = 'subcontract_request' "
+                "ORDER BY id DESC LIMIT 1",
+                (self.partner_id, self.regular_client_id),
+            ).fetchone()
+            items = db.execute(
+                "SELECT id FROM tuning_order_items WHERE order_id = ? ORDER BY id",
+                (order["id"],),
+            ).fetchall()
+
+        edit_form = MultiDict([
+            ("client_id", str(self.regular_client_id)),
+            ("client_name", "Обычный клиент"),
+            ("equipment_type", "boat"),
+            ("boat_model", self.BOAT_MODEL),
+            ("boat_registration_number", "Р 90-08 ЛО"),
+            ("phone", ""),
+            ("order_date", "2026-09-08"),
+            ("sale_channel", "direct"),
+            ("discount_type", "percent"),
+            ("discount_value", "0"),
+            ("item_id[]", str(items[0]["id"])),
+            ("work_name[]", "Установить картплоттер"),
+            ("open_price[]", "19 000"),
+            ("item_id[]", str(items[1]["id"])),
+            ("work_name[]", "Смонтировать ходовые огни"),
+            ("open_price[]", "21 000"),
+        ])
+        response = self.http.post(f"/tuning/edit/{order['id']}", data=edit_form)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/tuning/subcontracts"))
+        with application_module.app.app_context():
+            saved = application_module.get_db().execute(
+                "SELECT total FROM tuning_orders WHERE id = ?", (order["id"],)
+            ).fetchone()
+        self.assertEqual(saved["total"], 40000.0)
+
+        with self.http.session_transaction() as session:
+            session.clear()
+        client_html = self.http.get(
+            f"/client/{self.CLIENT_TOKEN}"
+        ).get_data(as_text=True).replace("\u00a0", " ")
+        partner_html = self.http.get(
+            f"/client/{self.PARTNER_TOKEN}?requests=incoming"
+        ).get_data(as_text=True).replace("\u00a0", " ")
+
+        self.assertIn("19 000,00 ₽", client_html)
+        self.assertIn("21 000,00 ₽", client_html)
+        self.assertNotIn("Верфь Север", client_html)
+        self.assertNotIn("Обычный клиент", partner_html)
+        self.assertNotIn("19 000,00 ₽", partner_html)
+
+    def test_existing_subcontract_moves_legacy_client_link_to_partner(self):
+        handle, database_path = tempfile.mkstemp(suffix=".db")
+        os.close(handle)
+        self.addCleanup(os.remove, database_path)
+        connection = sqlite3.connect(database_path)
+        connection.execute(
+            "CREATE TABLE tuning_orders ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, client_id INTEGER, "
+            "client_name TEXT NOT NULL, boat_model TEXT NOT NULL, "
+            "sale_channel TEXT NOT NULL, phone TEXT NOT NULL, "
+            "discount_pct REAL NOT NULL DEFAULT 0, subtotal REAL NOT NULL, "
+            "total REAL NOT NULL, status TEXT NOT NULL DEFAULT 'estimate', "
+            "source TEXT NOT NULL DEFAULT 'manual', source_ref TEXT, "
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO tuning_orders "
+            "(client_id, client_name, boat_model, sale_channel, phone, subtotal, "
+            "total, source, created_at, updated_at) VALUES "
+            "(908, 'Старый партнёр', 'Legacy Boat', 'direct', '', 0, 0, "
+            "'subcontract_request', '2026-09-08', '2026-09-08')"
+        )
+        connection.commit()
+        connection.close()
+
+        with patch.object(application_module, "DB_PATH", database_path):
+            application_module.init_db()
+
+        migrated = sqlite3.connect(database_path)
+        row = migrated.execute(
+            "SELECT client_id, partner_id FROM tuning_orders"
+        ).fetchone()
+        migrated.close()
+        self.assertEqual(row, (None, 908))
 
 
 if __name__ == "__main__":

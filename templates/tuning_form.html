@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Тюнинг-центр</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260909-subcontracts">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260909-subcontract-pricing">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
 <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
@@ -36,10 +36,21 @@
 </div>
 
 {% macro work_row(item=None) %}
-<div class="work-row">
+<div class="work-row{{ ' subcontract-work-row' if edit_order and edit_order.source == 'subcontract_request' }}">
   <input type="hidden" name="item_id[]" value="{{ item.id if item else '' }}">
   <input type="text" name="work_name[]" placeholder="Название работы" class="work-name"
          value="{{ item.work_name if item else '' }}">
+  {% if edit_order and edit_order.source == 'subcontract_request' %}
+  <span class="subcontract-price-field subcontract-closed-price">
+    <small>Закрытая цена</small>
+    <strong class="{{ 'work-price-pending' if not item or item.partner_price is none }}">{{ (item.partner_price|money ~ ' ₽') if item and item.partner_price is not none else 'Ждёт расчёта' }}</strong>
+  </span>
+  <label class="subcontract-price-field subcontract-open-price">
+    <small>Открытая цена для клиента</small>
+    <input type="text" inputmode="decimal" name="open_price[]" placeholder="0,00" class="work-direct-price"
+           value="{{ item.price if item and not item.price_pending else '' }}" oninput="updateWorkRow(this)">
+  </label>
+  {% else %}
   <input type="text" inputmode="decimal" name="cost_price[]" placeholder="Себестоимость, ₽" class="work-cost"
          value="{{ '' if item and item.price_pending else item.cost_price if item else '' }}" oninput="updateWorkRow(this)">
   <input type="text" inputmode="decimal" name="multiplier[]" placeholder="Коэффициент" class="work-multiplier"
@@ -48,6 +59,7 @@
         data-value="{{ item.price if item and not item.price_pending else 0 }}">
     {{ (item.price|money ~ ' ₽') if item and not item.price_pending else 'Ждёт расчёта' }}
   </span>
+  {% endif %}
   <button type="button" class="btn-delete" onclick="removeWorkRow(this)" title="Убрать работу">✕</button>
 </div>
 {% endmacro %}
@@ -103,7 +115,7 @@
     </div>
     {% include '_admin_main_nav.html' %}
     <div class="title-block">
-      <h1>{{ 'Редактировать заказ' if edit_order else 'Новый заказ' }}</h1>
+      <h1>{{ 'Редактировать субподряд' if edit_order and edit_order.source == 'subcontract_request' else 'Редактировать заказ' if edit_order else 'Новый заказ' }}</h1>
     </div>
     <div class="topbar-actions">
       <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
@@ -124,12 +136,7 @@
 
 <main class="wrap">
 
-  <nav class="sub-tabs">
-    <a href="{{ url_for('tuning_index') }}" class="{{ 'active' if sub_page == 'orders' }}">Заказы</a>
-    <a href="{{ url_for('tuning_diagnostics') }}" class="{{ 'active' if sub_page == 'diagnostics' }}">Диагностика лодок</a>
-    <a href="{{ url_for('tuning_boat_catalog') }}" class="{{ 'active' if sub_page == 'boat_catalog' }}">Каталог лодок</a>
-    <a href="{{ url_for('tuning_motor_catalog') }}" class="{{ 'active' if sub_page == 'motor_catalog' }}">Каталог моторов</a>
-  </nav>
+  {% include '_tuning_subnav.html' %}
 
   {% if tuning_copy_notice %}
   <div class="alert tuning-copy-notice" role="status">{{ tuning_copy_notice }}</div>
@@ -146,7 +153,7 @@
 
   {% if edit_order %}
   <div class="panel" style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
-    <h2 style="margin:0;">Статус заказа</h2>
+    <h2 style="margin:0;">Статус {{ 'субподряда' if edit_order.source == 'subcontract_request' else 'заказа' }}</h2>
     <span class="status-badge status-{{ edit_order.status }}">{{ edit_order.status|order_status_label }}</span>
     <form action="{{ url_for('copy_tuning_order', order_id=edit_order.id) }}" method="post"
           class="tuning-copy-order-form"
@@ -255,23 +262,24 @@
     <h2>Статусы работ</h2>
     {% if edit_order.source == 'subcontract_request' %}
     <div class="partner-price-lock" role="note">
-      Это субподряд для {{ edit_order.client_name }}. Ответ партнёра отображается в колонке «Расчёт партнёра».
+      Клиент: {{ edit_order.client_name }}. Партнёр: {{ subcontract_partner.client_name if subcontract_partner else 'не назначен' }}.
+      Закрытую цену назначает партнёр, открытую цену для клиента — администратор.
     </div>
     {% endif %}
     {% if items_prefill %}
     <div class="table-scroll">
       <table class="records">
-        <thead><tr><th>Работа</th><th>Цена, ₽</th>{% if edit_order.source == 'subcontract_request' %}<th>Расчёт партнёра, ₽</th>{% endif %}<th>Статус</th><th>Задача</th><th>Фото</th></tr></thead>
+        <thead><tr><th>Работа</th><th>{{ 'Открытая цена, ₽' if edit_order.source == 'subcontract_request' else 'Цена, ₽' }}</th>{% if edit_order.source == 'subcontract_request' %}<th>Закрытая цена, ₽</th>{% endif %}<th>Статус</th><th>Задача</th><th>Фото</th></tr></thead>
         <tbody>
           {% for item in items_prefill %}
           <tr class="{{ 'row-removed' if item.status == 'removed' }}">
             <td>{{ item.work_name }}</td>
             <td class="amount{{ ' work-price-pending' if item.price_pending }}">
-              {{ (item.price|money ~ ' ₽') if not item.price_pending else 'Ждёт расчёта' }}
+              {{ (item.price|money ~ ' ₽') if not item.price_pending else ('Ждёт цены' if edit_order.source == 'subcontract_request' else 'Ждёт расчёта') }}
             </td>
             {% if edit_order.source == 'subcontract_request' %}
             <td class="amount{{ ' work-price-pending' if item.partner_price is none }}">
-              {{ (item.partner_price|money ~ ' ₽') if item.partner_price is not none else 'Ожидаем партнёра' }}
+              {{ (item.partner_price|money ~ ' ₽') if item.partner_price is not none else 'Ждёт расчёта' }}
             </td>
             {% endif %}
             <td>
@@ -655,7 +663,7 @@
   {% endif %}
 
   <section class="panel form-panel">
-    <h2>{{ 'Редактировать заказ' if edit_order else 'Новый заказ в тюнинг-центр' }}</h2>
+    <h2>{{ 'Редактировать субподряд' if edit_order and edit_order.source == 'subcontract_request' else 'Редактировать заказ' if edit_order else 'Новый заказ в тюнинг-центр' }}</h2>
     <form action="{{ url_for('edit_tuning_order', order_id=edit_order.id) if edit_order else url_for('add_tuning_order') }}"
           method="post" class="entry-form" id="tuning-form">
       {% set selected_equipment_type = form_values.equipment_type if form_values and form_values.equipment_type else 'boat' %}
@@ -828,7 +836,7 @@
               {{ work_row() }}
             {% endif %}
           </div>
-          <p class="hint">Себестоимость и коэффициент можно оставить пустыми — цену рассчитаете позже.</p>
+          <p class="hint">{{ 'Открытую цену можно оставить пустой и назначить после ответа партнёра.' if edit_order and edit_order.source == 'subcontract_request' else 'Себестоимость и коэффициент можно оставить пустыми — цену рассчитаете позже.' }}</p>
           <button type="button" class="btn-add" onclick="addWorkRow()">Добавить работу</button>
         </div>
 
@@ -870,7 +878,7 @@
 
       <div class="field field-submit">
         <button type="submit">{{ 'Сохранить изменения' if edit_order else 'Создать заказ' }}</button>
-        <a href="{{ url_for('tuning_index') }}" class="btn-cancel">Отмена</a>
+        <a href="{{ url_for('tuning_subcontracts') if edit_order and edit_order.source == 'subcontract_request' else url_for('tuning_index') }}" class="btn-cancel">Отмена</a>
       </div>
     </form>
   </section>
@@ -1049,9 +1057,14 @@ document.addEventListener('keydown', function (e) {
 
 function updateWorkRow(input) {
   var row = input.closest('.work-row');
+  var directInput = row.querySelector('.work-direct-price');
+  if (directInput) {
+    updateOrderTotal();
+    return;
+  }
+  var span = row.querySelector('.work-price');
   var costRaw = (row.querySelector('.work-cost').value || '').trim();
   var multRaw = (row.querySelector('.work-multiplier').value || '').trim();
-  var span = row.querySelector('.work-price');
   if (!costRaw || !multRaw) {
     span.setAttribute('data-value', '0');
     span.classList.add('work-price-pending');
@@ -1102,8 +1115,14 @@ function updateOrderTotal() {
   // otherwise this preview would silently ignore existing goods and look
   // wrong compared to the actually-saved order total.
   var subtotal = {{ goods_subtotal|default(0) }};
-  document.querySelectorAll('#work-container .work-price').forEach(function (span) {
-    subtotal += parseFloat(span.getAttribute('data-value')) || 0;
+  document.querySelectorAll('#work-container .work-row').forEach(function (row) {
+    var directInput = row.querySelector('.work-direct-price');
+    if (directInput) {
+      subtotal += parseFloat((directInput.value || '').replace(/\s/g, '').replace(',', '.')) || 0;
+      return;
+    }
+    var span = row.querySelector('.work-price');
+    subtotal += span ? (parseFloat(span.getAttribute('data-value')) || 0) : 0;
   });
   var discountInput = document.getElementById('discount_value');
   var discountType = document.getElementById('discount_type').value;

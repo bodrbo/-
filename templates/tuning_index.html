@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{ page_title or 'Тюнинг-центр' }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260909-subcontracts">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260909-subcontract-pricing">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
 <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
@@ -70,12 +70,7 @@
 
 <main class="wrap">
 
-  <nav class="sub-tabs">
-    <a href="{{ url_for('tuning_index') }}" class="{{ 'active' if sub_page == 'orders' }}">Заказы</a>
-    <a href="{{ url_for('tuning_diagnostics') }}" class="{{ 'active' if sub_page == 'diagnostics' }}">Диагностика лодок</a>
-    <a href="{{ url_for('tuning_boat_catalog') }}" class="{{ 'active' if sub_page == 'boat_catalog' }}">Каталог лодок</a>
-    <a href="{{ url_for('tuning_motor_catalog') }}" class="{{ 'active' if sub_page == 'motor_catalog' }}">Каталог моторов</a>
-  </nav>
+  {% include '_tuning_subnav.html' %}
 
   {% if sub_page == 'orders' %}
   <div class="totals-grid">
@@ -256,6 +251,79 @@
     </div>
     {% endif %}
   </section>
+  {% elif sub_page == 'subcontracts' %}
+  {% if tuning_subcontract_notice %}<div class="alert success">{{ tuning_subcontract_notice }}</div>{% endif %}
+  <div class="totals-grid subcontract-totals">
+    <div class="panel total-card total-card-grand">
+      <span class="k">Субподрядов</span>
+      <span class="v">{{ subcontracts|length }}</span>
+    </div>
+    <div class="panel total-card total-card-grand">
+      <span class="k">Закрытая стоимость</span>
+      <span class="v">{{ subcontracts|sum(attribute='closed_total')|money }} ₽</span>
+      <span class="d">Расчёт партнёров</span>
+    </div>
+    <div class="panel total-card total-card-grand">
+      <span class="k">Открытая стоимость</span>
+      <span class="v">{{ subcontracts|sum(attribute='open_total')|money }} ₽</span>
+      <span class="d">Стоимость для клиентов</span>
+    </div>
+  </div>
+
+  <section class="panel">
+    <div class="tuning-orders-heading">
+      <div>
+        <p class="boat-catalog-eyebrow">Заявки партнёрам</p>
+        <h2>Субподряды</h2>
+      </div>
+      <div class="tuning-orders-actions">
+        <a href="{{ url_for('add_tuning_subcontract') }}" class="btn-add">Добавить субподряд</a>
+      </div>
+    </div>
+    {% if subcontracts %}
+    <div class="table-scroll">
+      <table class="records subcontract-table">
+        <thead><tr><th>№</th><th>Дата</th><th>Клиент</th><th>Партнёр</th><th>Техника</th><th>Закрытая цена</th><th>Открытая цена</th><th>Статус</th><th></th></tr></thead>
+        <tbody>
+          {% for subcontract in subcontracts %}
+          <tr>
+            <td><a href="{{ url_for('edit_tuning_order', order_id=subcontract.id) }}" class="term">№{{ subcontract.id }}</a></td>
+            <td class="muted">{{ subcontract.order_date|ru_date }}</td>
+            <td>
+              {% if subcontract.client_id %}<a href="{{ url_for('admin_client_dashboard', client_id=subcontract.client_id) }}">{{ subcontract.client_name }}</a>{% else %}<span class="muted">Не назначен</span>{% endif %}
+            </td>
+            <td>
+              {% if subcontract.partner_id and subcontract.partner_name %}<a href="{{ url_for('admin_client_dashboard', client_id=subcontract.partner_id, section='tuning') }}">{{ subcontract.partner_name }}</a>{% else %}<span class="muted">Не назначен</span>{% endif %}
+            </td>
+            <td>{{ subcontract|tuning_equipment_label }}</td>
+            <td class="amount{{ ' work-price-pending' if not subcontract.closed_ready }}">{{ (subcontract.closed_total|money ~ ' ₽') if subcontract.closed_ready else 'Ждёт расчёта' }}</td>
+            <td class="amount{{ ' work-price-pending' if not subcontract.open_ready }}">{{ (subcontract.open_total|money ~ ' ₽') if subcontract.open_ready else 'Ждёт цены' }}</td>
+            <td><span class="status-badge status-{{ subcontract.status }}">{{ subcontract.status|order_status_label }}</span></td>
+            <td class="row-actions">
+              <a href="{{ url_for('edit_tuning_order', order_id=subcontract.id) }}" class="icon-btn" title="Редактировать субподряд" aria-label="Редактировать субподряд №{{ subcontract.id }}">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 3.5l3 3L6 17H3v-3L13.5 3.5z"/></svg>
+              </a>
+              <form action="{{ url_for('delete_tuning_order', order_id=subcontract.id) }}" method="post" onsubmit="return confirm('Удалить этот субподряд?');">
+                <button type="submit" class="icon-btn danger" title="Удалить субподряд" aria-label="Удалить субподряд №{{ subcontract.id }}">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      <div class="t">Субподрядов пока нет</div>
+      <div class="s">Создайте заявку, выберите клиента и партнёра-исполнителя.</div>
+      <a href="{{ url_for('add_tuning_subcontract') }}" class="btn-secondary">Добавить субподряд</a>
+    </div>
+    {% endif %}
+  </section>
+
   {% elif sub_page in ['boat_catalog', 'motor_catalog'] and catalog_view == 'list' %}
   {% set is_motor_catalog = catalog_equipment_type == 'motor' %}
   <section class="boat-catalog-page" aria-labelledby="boat-catalog-heading">

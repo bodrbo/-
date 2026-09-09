@@ -2451,6 +2451,9 @@ def init_db():
     tuning_cols = [row[1] for row in conn.execute("PRAGMA table_info(tuning_orders)").fetchall()]
     if "client_id" not in tuning_cols:
         conn.execute("ALTER TABLE tuning_orders ADD COLUMN client_id INTEGER")
+    partner_id_added = "partner_id" not in tuning_cols
+    if partner_id_added:
+        conn.execute("ALTER TABLE tuning_orders ADD COLUMN partner_id INTEGER")
     if "status" not in tuning_cols:
         conn.execute(
             "ALTER TABLE tuning_orders ADD COLUMN status TEXT NOT NULL DEFAULT 'estimate'"
@@ -2471,6 +2474,11 @@ def init_db():
         # duplicate order.
         conn.execute("ALTER TABLE tuning_orders ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
         conn.execute("ALTER TABLE tuning_orders ADD COLUMN source_ref TEXT")
+    if partner_id_added:
+        conn.execute(
+            "UPDATE tuning_orders SET partner_id = client_id, client_id = NULL "
+            "WHERE source = 'subcontract_request'"
+        )
     if "equipment_type" not in tuning_cols:
         conn.execute(
             "ALTER TABLE tuning_orders "
@@ -4311,7 +4319,9 @@ def _order_business_date(order):
     return str(order["created_at"])[:10]
 
 
-def _process_tuning_form(form, default_order_date=None):
+def _process_tuning_form(
+    form, default_order_date=None, direct_price_mode=False
+):
     """Validate a tuning-center order form and compute derived amounts.
     Returns (errors, data). data is None if there are errors."""
     errors = []
@@ -4396,6 +4406,7 @@ def _process_tuning_form(form, default_order_date=None):
     names = form.getlist("work_name[]")
     costs = form.getlist("cost_price[]")
     mults = form.getlist("multiplier[]")
+    direct_prices = form.getlist("open_price[]")
     item_ids = form.getlist("item_id[]")
 
     def _get(lst, i):
@@ -4405,25 +4416,52 @@ def _process_tuning_form(form, default_order_date=None):
     subtotal = 0.0
     for i in range(len(names)):
         name = names[i].strip()
+        direct_price_raw = (
+            _get(direct_prices, i).strip().replace("\u00a0", "")
+            .replace(" ", "").replace(",", ".")
+        )
         cost_raw = _get(costs, i).strip().replace(",", ".")
         mult_raw = _get(mults, i).strip().replace(",", ".")
-        if not name and not cost_raw and not mult_raw:
+        if direct_price_mode:
+            cost_raw = mult_raw = ""
+        if not name and not cost_raw and not mult_raw and not direct_price_raw:
             continue  # полностью пустая строка — пропускаем
 
         row_num = i + 1
         if not name:
             errors.append(f"Работа №{row_num}: не указано название.")
 
-        price_pending = not cost_raw and not mult_raw
-        has_partial_price = bool(cost_raw) != bool(mult_raw)
+        price_pending = (
+            not direct_price_raw
+            if direct_price_mode
+            else not cost_raw and not mult_raw
+        )
+        has_partial_price = (
+            False if direct_price_mode else bool(cost_raw) != bool(mult_raw)
+        )
         if has_partial_price:
             errors.append(
                 f"Работа №{row_num}: укажите себестоимость и коэффициент вместе "
                 "либо оставьте оба поля пустыми."
             )
 
-        cost = mult = None
-        if price_pending:
+        cost = mult = price = None
+        if direct_price_mode and price_pending:
+            cost = mult = price = 0.0
+        elif direct_price_mode:
+            cost = mult = 0.0
+            try:
+                price = float(direct_price_raw)
+                if price < 0 or price > 999999999.99:
+                    errors.append(
+                        f"Работа №{row_num}: открытая цена должна быть от 0 "
+                        "до 999 999 999,99 ₽."
+                    )
+            except ValueError:
+                errors.append(
+                    f"Работа №{row_num}: открытая цена должна быть числом."
+                )
+        elif price_pending:
             # Старые версии схемы требуют числовые значения. Отдельный флаг
             # отличает ещё не рассчитанную работу от действительно бесплатной.
             cost = mult = 0.0
@@ -4441,8 +4479,14 @@ def _process_tuning_form(form, default_order_date=None):
             except ValueError:
                 errors.append(f"Работа №{row_num}: коэффициент должен быть числом.")
 
-        if name and cost is not None and mult is not None:
+        if (
+            not direct_price_mode
+            and cost is not None
+            and mult is not None
+        ):
             price = 0.0 if price_pending else cost * mult
+
+        if name and cost is not None and mult is not None and price is not None:
             item_id_raw = _get(item_ids, i).strip()
             items.append({
                 "item_id": int(item_id_raw) if item_id_raw.isdigit() else None,
@@ -5826,8 +5870,8 @@ def tuning_index():
         date_from = ""
         date_to = ""
 
-    conditions = []
-    params = []
+    conditions = ["source != ?"]
+    params = [SUBCONTRACT_REQUEST_SOURCE]
     if date_from:
         conditions.append("order_date >= ?")
         params.append(date_from)
@@ -5927,6 +5971,53 @@ def tuning_index():
         tuning_subcontract_notice=session.pop("tuning_subcontract_notice", None),
         order_statuses=ORDER_STATUSES,
         active_page="tuning", sub_page="orders",
+    )
+
+
+@app.route("/tuning/subcontracts")
+@admin_login_required
+def tuning_subcontracts():
+    db = get_db()
+    rows = db.execute(
+        "SELECT o.*, partner.client_name AS partner_name "
+        "FROM tuning_orders o "
+        "LEFT JOIN clients partner ON partner.id = o.partner_id "
+        "WHERE o.source = ? ORDER BY o.order_date DESC, o.id DESC",
+        (SUBCONTRACT_REQUEST_SOURCE,),
+    ).fetchall()
+    motors_by_order = _tuning_order_motors_by_order(
+        db, [row["id"] for row in rows]
+    )
+    subcontracts = []
+    for row in rows:
+        subcontract = dict(row)
+        subcontract["motors"] = motors_by_order.get(row["id"], [])
+        items = db.execute(
+            "SELECT price, partner_price, price_pending, status "
+            "FROM tuning_order_items WHERE order_id = ? ORDER BY id",
+            (row["id"],),
+        ).fetchall()
+        active_items = [item for item in items if item["status"] != "removed"]
+        subcontract["closed_total"] = sum(
+            item["partner_price"] or 0 for item in active_items
+        )
+        subcontract["open_total"] = sum(
+            item["price"] for item in active_items if not item["price_pending"]
+        )
+        subcontract["closed_ready"] = bool(active_items) and all(
+            item["partner_price"] is not None for item in active_items
+        )
+        subcontract["open_ready"] = bool(active_items) and all(
+            not item["price_pending"] for item in active_items
+        )
+        subcontracts.append(subcontract)
+    return render_template(
+        "tuning_index.html",
+        page_title="Субподряды",
+        active_page="tuning",
+        sub_page="subcontracts",
+        subcontracts=subcontracts,
+        tuning_subcontract_notice=session.pop("tuning_subcontract_notice", None),
     )
 
 
@@ -7477,6 +7568,16 @@ def edit_tuning_order(order_id):
     order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
     if order is None:
         return redirect(url_for("tuning_index"))
+    is_subcontract = order["source"] == SUBCONTRACT_REQUEST_SOURCE
+    subcontract_partner = (
+        db.execute(
+            "SELECT id, client_name, phone FROM clients WHERE id = ?",
+            (order["partner_id"],),
+        ).fetchone()
+        if is_subcontract and order["partner_id"] is not None
+        else None
+    )
+    tuning_sub_page = "subcontracts" if is_subcontract else "orders"
     _sync_tuning_boat_profiles(db)
     db.commit()
     boat_profile_id = (
@@ -7547,7 +7648,7 @@ def edit_tuning_order(order_id):
         return render_template(
             "tuning_form.html", edit_order=order, errors=None, form_values=form_values,
             items_prefill=items, boat_motors_prefill=boat_motors,
-            sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
+            sale_channels=SALE_CHANNELS, active_page="tuning", sub_page=tuning_sub_page,
             today=dt.date.today().isoformat(),
             payments=payments, paid_amount=paid_amount, remaining=remaining,
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
@@ -7566,10 +7667,13 @@ def edit_tuning_order(order_id):
             tuning_client_choices=_tuning_client_choices(db),
             modulkassa_configured=_modulkassa_configured(),
             tuning_copy_notice=session.pop("tuning_copy_notice", None),
+            subcontract_partner=subcontract_partner,
         )
 
     errors, data = _process_tuning_form(
-        request.form, default_order_date=order["order_date"]
+        request.form,
+        default_order_date=order["order_date"],
+        direct_price_mode=is_subcontract,
     )
     if errors:
         payments, paid_amount, remaining = _order_payment_totals(db, order_id, order["total"])
@@ -7585,7 +7689,7 @@ def edit_tuning_order(order_id):
         return render_template(
             "tuning_form.html", edit_order=order, errors=errors, form_values=request.form,
             items_prefill=None, boat_motors_prefill=_boat_motor_form_values(request.form),
-            sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
+            sale_channels=SALE_CHANNELS, active_page="tuning", sub_page=tuning_sub_page,
             today=dt.date.today().isoformat(),
             payments=payments, paid_amount=paid_amount, remaining=remaining,
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
@@ -7598,6 +7702,7 @@ def edit_tuning_order(order_id):
             motor_model_choices=_tuning_motor_model_choices(db),
             tuning_client_choices=_tuning_client_choices(db),
             modulkassa_configured=_modulkassa_configured(),
+            subcontract_partner=subcontract_partner,
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -7661,19 +7766,28 @@ def edit_tuning_order(order_id):
     # _process_tuning_form knows about) — fold in any goods added via the
     # separate "Товары" mini-form now that the new work rows are saved.
     _recompute_order_totals(db, order_id)
-    return redirect(url_for("tuning_index"))
+    return redirect(url_for(
+        "tuning_subcontracts" if is_subcontract else "tuning_index"
+    ))
 
 
 @app.route("/tuning/delete/<int:order_id>", methods=["POST"])
 @admin_login_required
 def delete_tuning_order(order_id):
     db = get_db()
+    order = db.execute(
+        "SELECT source FROM tuning_orders WHERE id = ?", (order_id,)
+    ).fetchone()
     db.execute("DELETE FROM tuning_order_items WHERE order_id = ?", (order_id,))
     db.execute("DELETE FROM tuning_payments WHERE order_id = ?", (order_id,))
     db.execute("DELETE FROM tuning_order_motors WHERE order_id = ?", (order_id,))
     db.execute("DELETE FROM tuning_orders WHERE id = ?", (order_id,))
     db.commit()
-    return redirect(url_for("tuning_index"))
+    return redirect(url_for(
+        "tuning_subcontracts"
+        if order is not None and order["source"] == SUBCONTRACT_REQUEST_SOURCE
+        else "tuning_index"
+    ))
 
 
 @app.route("/tuning/<int:order_id>/status", methods=["POST"])
@@ -8184,11 +8298,25 @@ def _render_client_dashboard(
         order_columns += ", sale_channel, updated_at, source_ref"
     order_rows = []
     if not (is_manager_view and client_section == EXCURSION_SEGMENT):
-        order_rows = db.execute(
-            f"SELECT {order_columns} FROM tuning_orders "
-            "WHERE client_id = ? ORDER BY order_date DESC, id DESC",
-            (client["id"],),
-        ).fetchall()
+        if is_tuning_partner:
+            order_rows = db.execute(
+                f"SELECT {order_columns} FROM tuning_orders "
+                "WHERE (client_id = ? AND source != ?) "
+                "OR (partner_id = ? AND source = ?) "
+                "ORDER BY order_date DESC, id DESC",
+                (
+                    client["id"],
+                    SUBCONTRACT_REQUEST_SOURCE,
+                    client["id"],
+                    SUBCONTRACT_REQUEST_SOURCE,
+                ),
+            ).fetchall()
+        else:
+            order_rows = db.execute(
+                f"SELECT {order_columns} FROM tuning_orders "
+                "WHERE client_id = ? ORDER BY order_date DESC, id DESC",
+                (client["id"],),
+            ).fetchall()
 
     orders = []
     paid_total = 0.0
@@ -8568,14 +8696,29 @@ def _render_partner_estimate_request(
             profile["partner_title"] or DEFAULT_TUNING_PARTNER_TITLE
         )
         profile["logo_url"] = _partner_logo_url(profile)
+    tuning_client_choices = (
+        _tuning_client_choices(db) if admin_subcontract else []
+    )
+    selected_subcontract_client = None
+    if admin_subcontract and form_values is not None:
+        selected_id = str(form_values.get("client_id", "")).strip()
+        selected_subcontract_client = next(
+            (
+                row for row in tuning_client_choices
+                if str(row["id"]) == selected_id
+            ),
+            None,
+        )
     return render_template(
         "partner_estimate_request.html",
         client=client,
         partner_profile=profile,
         admin_subcontract=admin_subcontract,
         partner_choices=_tuning_partner_choices(db) if admin_subcontract else [],
+        tuning_client_choices=tuning_client_choices,
+        selected_subcontract_client=selected_subcontract_client,
         active_page="tuning",
-        sub_page="orders",
+        sub_page="subcontracts" if admin_subcontract else "orders",
         errors=errors,
         form_values=form_values,
         work_names_prefill=(
@@ -8589,20 +8732,23 @@ def _render_partner_estimate_request(
     )
 
 
-def _create_partner_estimate_order(db, client, data, source, source_ref):
+def _create_partner_estimate_order(
+    db, client, data, source, source_ref, partner=None
+):
     """Persist either direction of a partner estimate using one safe model."""
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     cursor = db.execute(
         "INSERT INTO tuning_orders "
-        "(client_id, client_name, equipment_type, boat_model, "
+        "(client_id, partner_id, client_name, equipment_type, boat_model, "
         "boat_registration_number, motor_model, motor_serial_number, "
         "sale_channel, phone, discount_pct, discount_type, discount_value, "
         "subtotal, total, status, order_date, created_at, updated_at, "
         "source, source_ref) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, 'direct', ?, 0, 'percent', 0, "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'direct', ?, 0, 'percent', 0, "
         "0, 0, ?, ?, ?, ?, ?, ?)",
         (
             client["id"],
+            partner["id"] if partner is not None else None,
             client["client_name"],
             data["equipment_type"],
             data["boat_model"],
@@ -8646,7 +8792,9 @@ def add_tuning_subcontract():
         return _render_partner_estimate_request(admin_subcontract=True)
 
     partner_id_raw = request.form.get("partner_id", "").strip()
+    client_id_raw = request.form.get("client_id", "").strip()
     partner = None
+    client = None
     if partner_id_raw.isdigit():
         partner = db.execute(
             "SELECT clients.id, clients.client_name, clients.phone, clients.token "
@@ -8660,13 +8808,31 @@ def add_tuning_subcontract():
                 CLIENT_RELATIONSHIP_PARTNER,
             ),
         ).fetchone()
+    if client_id_raw.isdigit():
+        client = db.execute(
+            "SELECT clients.id, clients.client_name, clients.phone, clients.token "
+            "FROM clients JOIN client_segments "
+            "ON client_segments.client_id = clients.id "
+            "WHERE clients.id = ? AND client_segments.segment = ? "
+            "AND client_segments.relationship_type = ?",
+            (
+                int(client_id_raw),
+                TUNING_SEGMENT,
+                CLIENT_RELATIONSHIP_CLIENT,
+            ),
+        ).fetchone()
 
     errors = []
     data = None
     if partner is None:
         errors.append("Выберите партнёра тюнинг-центра из списка.")
-    else:
-        errors, data = _process_partner_estimate_request(request.form, partner)
+    if client is None:
+        errors.append("Выберите клиента тюнинг-центра из списка.")
+    if partner is not None and client is not None:
+        parser_errors, data = _process_partner_estimate_request(
+            request.form, client
+        )
+        errors.extend(parser_errors)
     if errors:
         return _render_partner_estimate_request(
             errors=errors,
@@ -8676,15 +8842,16 @@ def add_tuning_subcontract():
 
     order_id = _create_partner_estimate_order(
         db,
-        partner,
+        client,
         data,
         SUBCONTRACT_REQUEST_SOURCE,
         f"subcontract:{partner['id']}:{uuid.uuid4().hex}",
+        partner=partner,
     )
     session["tuning_subcontract_notice"] = (
         f"Субподряд №{order_id} отправлен партнёру {partner['client_name']}."
     )
-    return redirect(url_for("tuning_index"))
+    return redirect(url_for("tuning_subcontracts"))
 
 
 @app.route("/client/<token>/estimate-request", methods=["GET", "POST"])
@@ -8731,11 +8898,18 @@ def _partner_order_for_token(db, token, order_id):
     """Resolve an order only when the token belongs to a current partner."""
     return db.execute(
         "SELECT o.* FROM tuning_orders o "
-        "JOIN clients c ON c.id = o.client_id "
+        "JOIN clients c ON c.id = CASE "
+        "WHEN o.source = ? THEN o.partner_id ELSE o.client_id END "
         "JOIN client_segments cs ON cs.client_id = c.id "
         "AND cs.segment = ? AND cs.relationship_type = ? "
         "WHERE c.token = ? AND o.id = ?",
-        (TUNING_SEGMENT, CLIENT_RELATIONSHIP_PARTNER, token, order_id),
+        (
+            SUBCONTRACT_REQUEST_SOURCE,
+            TUNING_SEGMENT,
+            CLIENT_RELATIONSHIP_PARTNER,
+            token,
+            order_id,
+        ),
     ).fetchone()
 
 
@@ -8799,7 +8973,7 @@ def update_partner_open_price(token, order_id, item_id):
                 open_price = None
             if open_price is None or open_price < 0 or open_price > 999999999.99:
                 session["partner_price_error"] = (
-                    "Укажите стоимость партнёра от 0 до 999 999 999,99 ₽."
+                    "Укажите закрытую цену от 0 до 999 999 999,99 ₽."
                     if is_subcontract
                     else "Укажите открытую цену от 0 до 999 999 999,99 ₽."
                 )
@@ -8812,7 +8986,7 @@ def update_partner_open_price(token, order_id, item_id):
     )
     db.commit()
     session["partner_price_notice"] = (
-        ("Расчёт партнёра очищен." if clearing_price else "Расчёт партнёра сохранён.")
+        ("Закрытая цена очищена." if clearing_price else "Закрытая цена сохранена.")
         if is_subcontract
         else ("Открытая цена очищена." if clearing_price else "Открытая цена сохранена.")
     )
@@ -8823,7 +8997,10 @@ def update_partner_open_price(token, order_id, item_id):
 def partner_order_estimate_pdf(token, order_id):
     db = get_db()
     order_row = _partner_order_for_token(db, token, order_id)
-    if order_row is None:
+    if (
+        order_row is None
+        or order_row["source"] == SUBCONTRACT_REQUEST_SOURCE
+    ):
         return "Расчёт не найден.", 404
     partner_profile = _client_segment_profile(
         db, order_row["client_id"], TUNING_SEGMENT

@@ -54,12 +54,7 @@
 </header>
 
 <main class="wrap">
-  <nav class="sub-tabs">
-    <a href="{{ url_for('tuning_index') }}" class="{{ 'active' if sub_page == 'orders' }}">Заказы</a>
-    <a href="{{ url_for('tuning_diagnostics') }}" class="{{ 'active' if sub_page == 'diagnostics' }}">Диагностика лодок</a>
-    <a href="{{ url_for('tuning_boat_catalog') }}" class="{{ 'active' if sub_page == 'boat_catalog' }}">Каталог лодок</a>
-    <a href="{{ url_for('tuning_motor_catalog') }}" class="{{ 'active' if sub_page == 'motor_catalog' }}">Каталог моторов</a>
-  </nav>
+  {% include '_tuning_subnav.html' %}
   <nav class="sub-tabs sub-tabs-nested" aria-label="Виды диагностики">
     <a href="{{ url_for('tuning_diagnostics') }}" class="{{ 'active' if diag_page == 'hull' }}">Корпусная диагностика</a>
     <a href="{{ url_for('field_diagnostics.index') }}" class="{{ 'active' if diag_page == 'field' }}">Выездная диагностика</a>

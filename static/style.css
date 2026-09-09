@@ -4096,6 +4096,49 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .work-row .work-name { flex: 2 1 200px; min-width: 0; }
 .work-row .work-cost,
 .work-row .work-multiplier { flex: 1 1 130px; min-width: 0; }
+.work-row .work-direct-price { width: 100%; min-width: 0; }
+.subcontract-price-field {
+  display: grid;
+  flex: 1 1 175px;
+  min-width: 0;
+  gap: 5px;
+  margin: 0;
+  padding: 8px 11px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--paper-alt);
+}
+.subcontract-price-field small {
+  color: var(--muted);
+  font-family: 'PT Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.subcontract-price-field strong {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  color: var(--ink);
+  font-family: 'PT Mono', monospace;
+  font-size: 12px;
+}
+.subcontract-open-price { background: var(--paper); }
+.subcontract-open-price input {
+  height: 30px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+  font-family: 'PT Mono', monospace;
+  font-weight: 700;
+}
+.subcontract-open-price:focus-within {
+  border-color: var(--brass);
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, .12);
+}
 .work-row .work-price {
   flex: 1 1 110px;
   font-weight: 700;
@@ -9683,6 +9726,12 @@ button.partner-open-price-save svg {
 .tuning-orders-actions { display: flex; align-items: center; gap: 8px; }
 .tuning-orders-actions .btn-add,
 .tuning-orders-actions .btn-secondary { margin: 0; white-space: nowrap; }
+.subcontract-table { min-width: 1050px; }
+.subcontract-table td:nth-child(3),
+.subcontract-table td:nth-child(4) { min-width: 150px; }
+.subcontract-table td:nth-child(6),
+.subcontract-table td:nth-child(7) { min-width: 125px; }
+.subcontract-totals .total-card .d { color: rgba(255, 255, 255, .68); }
 
 @media (max-width: 760px) {
   .partner-identity-card { grid-template-columns: auto minmax(0, 1fr); gap: 17px; padding: 20px; }
