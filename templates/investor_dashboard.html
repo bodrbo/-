@@ -55,6 +55,47 @@
     </form>
   </div>
 
+  {% if investment_metrics %}
+  <section class="panel investor-analytics-panel">
+    <div class="investor-section-heading">
+      <div>
+        <h2>Инвестиционные показатели</h2>
+        <p>Расчёт на {{ investment_metrics.as_of_date|ru_date }} по всей доступной истории.</p>
+      </div>
+      <span class="investor-period-note">
+        Инвестиции с {{ investment_metrics.investment_date|ru_date }}
+        {% if investment_metrics.investor_share is not none %} · доля {{ (investment_metrics.investor_share * 100)|round(0)|int }}%{% endif %}
+      </span>
+    </div>
+    <div class="investor-analytics-grid">
+      <article class="investor-metric-card">
+        <span class="k">Сумма инвестиций</span>
+        <strong class="v tabular">{{ investment_metrics.investment_amount|money }} ₽</strong>
+        <span class="d">Первоначальная стоимость инвестиций</span>
+      </article>
+      <article class="investor-metric-card">
+        <span class="k">Доходность, годовых</span>
+        <strong class="v tabular">
+          {% if investment_metrics.annual_yield is not none %}{{ (investment_metrics.annual_yield * 100)|round(1) }}%{% else %}—{% endif %}
+        </strong>
+        <span class="d">Прибыль / инвестиции, приведённые к финансовому году</span>
+      </article>
+      <article class="investor-metric-card">
+        <span class="k">Доля прибыли инвестора</span>
+        <strong class="v tabular">{{ investment_metrics.profit_share|money }} ₽</strong>
+        <span class="d">За всё время с учётом доходов и расходов</span>
+      </article>
+      <article class="investor-metric-card">
+        <span class="k">Рентабельность актива</span>
+        <strong class="v tabular">
+          {% if investment_metrics.profitability is not none %}{{ (investment_metrics.profitability * 100)|round(1) }}%{% else %}—{% endif %}
+        </strong>
+        <span class="d">Доля прибыли инвестора / сумма инвестиций</span>
+      </article>
+    </div>
+  </section>
+  {% endif %}
+
   <section class="panel filter-panel">
     <h2>Период</h2>
     <form action="{{ url_for('investor_dashboard') }}" method="get" class="filter-form">
@@ -74,7 +115,7 @@
 
   <div class="hero-grid">
     <div class="hero-card">
-      <span class="k">Выплата за период</span>
+      <span class="k">Доля прибыли за период</span>
       <span class="v tabular">{{ grand_payout|money }} ₽</span>
       <span class="d">Доход рейсов {{ grand_revenue|money }} ₽</span>
     </div>
@@ -95,7 +136,7 @@
   </div>
 
   <section class="panel">
-    <h2>Рейсы за период</h2>
+    <h2>Рейсы и расходы за период</h2>
     {% if trips %}
     <div class="table-scroll">
       <table class="records">
@@ -103,7 +144,7 @@
           <tr>
             <th>Дата</th>
             {% if boats|length > 1 %}<th>Катер</th>{% endif %}
-            <th></th>
+            <th>Операция</th>
             <th>Доход</th>
             <th>Комиссия</th>
             <th>Расходы</th>
@@ -114,9 +155,16 @@
         <tbody>
           {% for t in trips %}
           <tr class="{{ 'row-expense' if t.is_expense }}">
-            <td class="muted">{{ t.trip_date|ru_date }}{% if not t.is_expense %} · {{ t.trip_time or '00:00' }}{% endif %}</td>
+            <td class="muted">{{ t.trip_date|ru_date }}{% if not t.is_expense and not t.is_historical %} · {{ t.trip_time or '00:00' }}{% endif %}</td>
             {% if boats|length > 1 %}<td>{{ t.boat }}</td>{% endif %}
-            <td>{% if t.is_expense %}<span class="status-badge status-cancelled">Расход</span> {{ t.work_type }}{% endif %}</td>
+            <td>
+              {% if t.is_expense %}
+                <span class="status-badge status-cancelled">Расход</span> {{ t.work_type }}
+              {% else %}
+                <span class="status-badge status-done">Рейс</span> {{ t.work_type }}
+              {% endif %}
+              {% if t.is_historical %}<span class="investor-history-label">из ретроспективы</span>{% endif %}
+            </td>
             <td>{{ t.revenue|money }}</td>
             <td>{{ t.commission_amount|money }} ({{ t.commission_pct|float|round(1) }}%)</td>
             <td>{{ (t.labor_cost + t.fuel_cost + t.mooring_cost + t.extra_total)|money }}</td>
@@ -130,11 +178,37 @@
     {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">За выбранный период рейсов нет</div>
+      <div class="t">За выбранный период операций нет</div>
       <div class="s">Смените месяц в фильтре выше.</div>
     </div>
     {% endif %}
   </section>
+
+  {% if distributions %}
+  <section class="panel investor-distributions-panel">
+    <div class="investor-section-heading">
+      <div>
+        <h2>История выплат инвестору</h2>
+        <p>Фактически зафиксированные выплаты из прежнего отчёта.</p>
+      </div>
+      <strong class="investor-distribution-total tabular">{{ distribution_total|money }} ₽</strong>
+    </div>
+    <div class="table-scroll">
+      <table class="records investor-distributions-table">
+        <thead><tr><th>Дата выплаты</th>{% if boats|length > 1 %}<th>Катер</th>{% endif %}<th>Сумма</th></tr></thead>
+        <tbody>
+          {% for payout in distributions %}
+          <tr>
+            <td>{{ payout.payout_date|ru_date }}</td>
+            {% if boats|length > 1 %}<td>{{ payout.boat }}</td>{% endif %}
+            <td class="amount">{{ payout.amount|money }} ₽</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
 
 </main>
 

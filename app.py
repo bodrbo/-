@@ -121,6 +121,13 @@ from modules.ai_assistant.constants import (
     DEFAULT_TIMEOUT_SECONDS as AI_DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_USER_REQUESTS_PER_MINUTE as AI_DEFAULT_REQUESTS_PER_MINUTE,
 )
+from modules.investor_finance import (
+    InvestorWorkbookError,
+    build_dashboard_data as build_investor_dashboard_data,
+    import_legacy_workbook as import_investor_legacy_workbook,
+    init_schema as init_investor_finance_schema,
+    parse_legacy_workbook as parse_investor_legacy_workbook,
+)
 from modules.ai_assistant.openai_client import OpenAIResponsesClient
 from modules.clients import (
     create_directory_contact,
@@ -2809,6 +2816,7 @@ def init_db():
     # received their newer client_id columns above.
     init_client_segments_schema(conn)
     init_ai_assistant_schema(conn)
+    init_investor_finance_schema(conn)
     conn.commit()
     conn.close()
 
@@ -3827,6 +3835,8 @@ def trips_index():
         "trips.html", **ctx, **_trips_common_kwargs(db), edit_trip=None,
         trip_expense_error=session.pop("trip_expense_error", None),
         trip_contract_error=session.pop("trip_contract_error", None),
+        investor_history_import_message=session.pop("investor_history_import_message", None),
+        investor_history_import_error=session.pop("investor_history_import_error", None),
     )
 
 
@@ -4103,6 +4113,57 @@ def add_trip_expense():
         )
     db.commit()
     return redirect(url_for("trips_index"))
+
+
+@app.route("/trips/investor-history/import", methods=["POST"])
+@admin_login_required
+def import_investor_history():
+    """Load the old Bodryi Pervyi investor ledger without duplicating rows."""
+    uploaded = request.files.get("investor_workbook")
+    boat = request.form.get("boat", "").strip()
+    boat_data = boat_lookup(boat)
+    if boat != "Бодрый Первый" or boat_data is None:
+        session["investor_history_import_error"] = (
+            "Этот шаблон импорта предназначен для катера «Бодрый Первый»."
+        )
+        return redirect(url_for("trips_index"))
+    if uploaded is None or not uploaded.filename:
+        session["investor_history_import_error"] = "Выберите файл отчёта XLSX."
+        return redirect(url_for("trips_index"))
+    if not uploaded.filename.lower().endswith(".xlsx"):
+        session["investor_history_import_error"] = "Поддерживается только формат XLSX."
+        return redirect(url_for("trips_index"))
+
+    db = get_db()
+    try:
+        parsed = parse_investor_legacy_workbook(uploaded.stream)
+        result = import_investor_legacy_workbook(
+            db,
+            parsed,
+            boat=boat,
+            investor_name=boat_data["investor"],
+        )
+        db.commit()
+    except InvestorWorkbookError as exc:
+        db.rollback()
+        session["investor_history_import_error"] = str(exc)
+        return redirect(url_for("trips_index"))
+    except sqlite3.Error:
+        db.rollback()
+        app.logger.exception("Investor history import failed")
+        session["investor_history_import_error"] = (
+            "Не удалось сохранить ретроспективу. Попробуйте ещё раз."
+        )
+        return redirect(url_for("trips_index"))
+
+    message = (
+        f"Ретроспектива «{boat}» загружена. "
+        f"Операций: {result['entries']}. Выплат: {result['payouts']}."
+    )
+    if result["warnings"]:
+        message += " " + " ".join(result["warnings"])
+    session["investor_history_import_message"] = message
+    return redirect(url_for("trips_index", month="all", boat=boat))
 
 
 @app.route("/trips/contracts/generate", methods=["POST"])
@@ -11403,36 +11464,18 @@ def investor_dashboard():
     db = get_db()
     investor_name = session.get("investor_name")
     investor_boats = [b["name"] for b in BOATS if b["investor"] == investor_name]
-
-    months, current_key = build_month_options(db)
-    selected_month = request.args.get("month", current_key)
-
-    trip_rows = []
-    if investor_boats:
-        query = (
-            "SELECT * FROM trips WHERE boat IN (%s)"
-            % ",".join("?" for _ in investor_boats)
-        )
-        params = list(investor_boats)
-        if selected_month != "all":
-            query += " AND substr(trip_date, 1, 7) = ?"
-            params.append(selected_month)
-        query += " ORDER BY trip_date DESC, id DESC"
-        trip_rows = db.execute(query, params).fetchall()
-
-    by_boat, _by_investor, _grand_my_share, grand_revenue = compute_trip_totals(trip_rows)
-    grand_payout = sum(b["investor_payout"] for b in by_boat.values())
+    dashboard = build_investor_dashboard_data(
+        db,
+        investor_name,
+        investor_boats,
+        selected_month=request.args.get("month"),
+    )
 
     return render_template(
         "investor_dashboard.html",
         investor_name=investor_name,
         boats=investor_boats,
-        months=months,
-        selected_month=selected_month,
-        by_boat=by_boat,
-        trips=trip_rows,
-        grand_revenue=grand_revenue,
-        grand_payout=grand_payout,
+        **dashboard,
     )
 
 

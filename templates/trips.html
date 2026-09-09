@@ -334,6 +334,35 @@
     </div>
   </details>
 
+  <details class="panel collapsible-panel"{{ ' open' if investor_history_import_error or investor_history_import_message }}>
+    <summary>
+      <span>Ретроспектива инвестора</span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
+      {% if investor_history_import_error %}
+      <div class="alert"><strong>Не удалось импортировать отчёт:</strong> {{ investor_history_import_error }}</div>
+      {% endif %}
+      {% if investor_history_import_message %}
+      <div class="alert alert-success">{{ investor_history_import_message }}</div>
+      {% endif %}
+      <form action="{{ url_for('import_investor_history') }}" method="post" enctype="multipart/form-data" class="entry-form">
+        <input type="hidden" name="boat" value="Бодрый Первый">
+        <div class="field">
+          <label for="investor_workbook">Отчёт по катеру «Бодрый Первый», XLSX</label>
+          <input type="file" id="investor_workbook" name="investor_workbook" accept=".xlsx" required>
+        </div>
+        <div class="field field-submit">
+          <button type="submit">Загрузить ретроспективу</button>
+        </div>
+      </form>
+      <p class="hint">
+        Повторная загрузка безопасно обновит ранее импортированные строки. Рейсы и расходы после
+        последней даты отчёта продолжат учитываться из текущего журнала системы.
+      </p>
+    </div>
+  </details>
+
   <details class="panel collapsible-panel"{{ ' open' if trip_expense_error }}>
     <summary>
       <span>Добавить разовый расход</span>
