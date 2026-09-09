@@ -83,6 +83,33 @@ class YclientsHourlyImportTests(unittest.TestCase):
             ],
         }
 
+    def test_records_fetch_reads_next_page_when_meta_is_missing(self):
+        class FakeResponse:
+            ok = True
+            status_code = 200
+            text = ""
+
+            def __init__(self, records):
+                self.records = records
+                self.url = "https://api.yclients.test/records"
+
+            def json(self):
+                return {"success": True, "data": self.records}
+
+        pages = [
+            FakeResponse([{"id": index} for index in range(1, 201)]),
+            FakeResponse([{"id": 201}]),
+        ]
+        with mock.patch.object(
+            application_module.requests, "get", side_effect=pages
+        ) as get:
+            records = self.original_records("2026-08-22", "2026-08-27")
+
+        self.assertEqual(len(records), 201)
+        self.assertEqual(records[-1]["id"], 201)
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(get.call_args_list[1].kwargs["params"]["page"], 2)
+
     def test_hourly_sync_imports_completed_income_once(self):
         records = [
             self.record(1, "09", activity_id=901),
@@ -954,8 +981,9 @@ class YclientsHourlyImportTests(unittest.TestCase):
             )
 
         self.assertEqual(first["imported"], 1)
-        self.assertEqual(refreshed["deleted"], 1)
-        self.assertEqual(refreshed["imported"], 1)
+        self.assertEqual(refreshed["deleted"], 0)
+        self.assertEqual(refreshed["imported"], 0)
+        self.assertEqual(refreshed["payroll_updated"], 1)
         self.assertEqual(repeated["deleted"], 0)
         self.assertEqual(repeated["imported"], 0)
         self.assertEqual(
@@ -964,7 +992,123 @@ class YclientsHourlyImportTests(unittest.TestCase):
         )
         self.assertEqual(
             [row["yclients_ref"] for row in refs],
-            ["slot:673ab7:2026-08-23T14:30"],
+            ["record:1924724769"],
+        )
+
+    def test_august_22_reimport_moves_two_existing_activities_to_current_slots(self):
+        first_trip = self.record(
+            2201, "13", activity_id=62201, color="8bc34a",
+            staff_name="Даниил Галецкий",
+        )
+        second_trip = self.record(
+            2202, "16", activity_id=62202, color="8bc34a",
+            staff_name="Платон Жмаев",
+        )
+        first_trip["datetime"] = "2026-08-21T13:00:00+03:00"
+        second_trip["datetime"] = "2026-08-21T16:00:00+03:00"
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            original = application_module._import_yclients_trip_records(
+                db, [first_trip, second_trip], {}, "2026-08-21", "2026-08-21"
+            )
+
+            first_trip["datetime"] = "2026-08-22T13:00:00+03:00"
+            second_trip["datetime"] = "2026-08-22T16:00:00+03:00"
+            refreshed = application_module._import_yclients_trip_records(
+                db,
+                [first_trip, second_trip],
+                {},  # old activity details may be unavailable; record colour is enough
+                "2026-08-22",
+                "2026-08-22",
+                reconciliation_records=[first_trip, second_trip],
+                reconcile_missing=True,
+            )
+            trips = db.execute(
+                "SELECT trip_date, trip_time, boat FROM trips ORDER BY trip_time"
+            ).fetchall()
+
+        self.assertEqual(original["imported"], 2)
+        self.assertEqual(refreshed["imported"], 0)
+        self.assertEqual(refreshed["payroll_updated"], 2)
+        self.assertEqual(
+            [(row["trip_date"], row["trip_time"], row["boat"]) for row in trips],
+            [
+                ("2026-08-22", "13:00", "Бодрый Первый"),
+                ("2026-08-22", "16:00", "Бодрый Первый"),
+            ],
+        )
+
+    def test_august_25_reimport_removes_third_activity_missing_from_yclients(self):
+        records = [
+            self.record(2501, "13", activity_id=62501, color="8bc34a"),
+            self.record(2502, "16", activity_id=62502, color="8bc34a"),
+            self.record(2503, "17:30", activity_id=62503, color="8bc34a"),
+        ]
+        for record in records:
+            record["datetime"] = record["datetime"].replace("2026-08-23", "2026-08-25")
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            first = application_module._import_yclients_trip_records(
+                db, records, {}, "2026-08-25", "2026-08-25"
+            )
+            refreshed = application_module._import_yclients_trip_records(
+                db,
+                records[:2],
+                {},
+                "2026-08-25",
+                "2026-08-25",
+                reconciliation_records=records[:2],
+                reconcile_missing=True,
+            )
+            times = [
+                row["trip_time"]
+                for row in db.execute(
+                    "SELECT trip_time FROM trips ORDER BY trip_time"
+                ).fetchall()
+            ]
+
+        self.assertEqual(first["imported"], 3)
+        self.assertEqual(refreshed["deleted"], 1)
+        self.assertEqual(times, ["13:00", "16:00"])
+
+    def test_august_27_legacy_slot_skip_does_not_hide_a_different_record(self):
+        first_trip = self.record(2701, "13", color="8bc34a")
+        second_trip = self.record(2702, "14:30", color="8bc34a")
+        first_trip["datetime"] = "2026-08-27T13:00:00+03:00"
+        second_trip["datetime"] = "2026-08-27T14:30:00+03:00"
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            first = application_module._import_yclients_trip_records(
+                db, [first_trip], {}, "2026-08-27", "2026-08-27"
+            )
+            # A slot-based tombstone from the old importer must not suppress
+            # another real paid record now identified by its immutable id.
+            db.execute(
+                "INSERT INTO yclients_imports (yclients_ref, trip_id) VALUES (?, NULL)",
+                ("slot:8bc34a:2026-08-27T14:30",),
+            )
+            db.commit()
+            refreshed = application_module._import_yclients_trip_records(
+                db,
+                [first_trip, second_trip],
+                {},
+                "2026-08-27",
+                "2026-08-27",
+                reconciliation_records=[first_trip, second_trip],
+                reconcile_missing=True,
+            )
+            trips = db.execute(
+                "SELECT trip_time, boat FROM trips ORDER BY trip_time"
+            ).fetchall()
+
+        self.assertEqual(first["imported"], 1)
+        self.assertEqual(refreshed["imported"], 1)
+        self.assertEqual(
+            [(row["trip_time"], row["boat"]) for row in trips],
+            [("13:00", "Бодрый Первый"), ("14:30", "Бодрый Первый")],
         )
 
 

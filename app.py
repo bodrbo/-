@@ -9387,12 +9387,19 @@ def yclients_get_records(start_date, end_date):
     needed. Returns a list of raw record dicts from the Yclients API."""
     headers = _yclients_headers()
     all_records = []
+    page_size = 200
+    seen_page_ids = set()
     page = 1
     while True:
         resp = requests.get(
             f"{YCLIENTS_API_BASE}/records/{YCLIENTS_COMPANY_ID}",
             headers=headers,
-            params={"start_date": start_date, "end_date": end_date, "page": page, "count": 100},
+            params={
+                "start_date": start_date,
+                "end_date": end_date,
+                "page": page,
+                "count": page_size,
+            },
             timeout=20,
         )
         if not resp.ok:
@@ -9404,14 +9411,24 @@ def yclients_get_records(start_date, end_date):
         if not body.get("success"):
             raise RuntimeError("Yclients API вернул success=false: " + json.dumps(body)[:300])
         records = body.get("data") or []
+        if not isinstance(records, list):
+            raise RuntimeError("Yclients API вернул некорректный список записей.")
+        page_ids = tuple(str(record.get("id")) for record in records)
+        if page_ids and page_ids in seen_page_ids:
+            raise RuntimeError("Yclients API повторил страницу записей при пагинации.")
+        seen_page_ids.add(page_ids)
         all_records.extend(records)
         meta = body.get("meta") or {}
-        total_count = meta.get("total_count", len(all_records))
-        if len(all_records) >= total_count or not records:
+        total_count = meta.get("total_count")
+        if not records:
+            break
+        if total_count is not None and len(all_records) >= int(total_count):
+            break
+        if total_count is None and len(records) < page_size:
             break
         page += 1
-        if page > 50:  # safety valve
-            break
+        if page > 100:  # safety valve: never accept a silently truncated snapshot
+            raise RuntimeError("Yclients API вернул слишком много страниц записей.")
     return all_records
 
 
@@ -9552,18 +9569,23 @@ def yclients_get_activity_colors(activity_ids):
         return {}
 
     def fetch_one(activity_id):
-        try:
-            resp = session.get(
-                f"{YCLIENTS_API_BASE}/activity/{YCLIENTS_COMPANY_ID}/{activity_id}",
-                timeout=20,
-            )
-            if not resp.ok:
-                return activity_id, None
-            body = resp.json()
-            data = body.get("data") or {}
-            return activity_id, data.get("color")
-        except requests.RequestException:
-            return activity_id, None
+        for attempt in range(2):
+            try:
+                resp = session.get(
+                    f"{YCLIENTS_API_BASE}/activity/{YCLIENTS_COMPANY_ID}/{activity_id}",
+                    timeout=20,
+                )
+                if resp.ok:
+                    body = resp.json()
+                    data = body.get("data") or {}
+                    if isinstance(data, dict):
+                        return activity_id, data.get("color")
+                if attempt == 0:
+                    time.sleep(0.25)
+            except (requests.RequestException, ValueError):
+                if attempt == 0:
+                    time.sleep(0.25)
+        return activity_id, None
 
     colors = {}
     with requests.Session() as session:
@@ -9626,6 +9648,26 @@ def _yclients_group_key(rec):
     if color and when:
         return f"slot:{color}:{when}"
     return f"record:{rec.get('id')}"
+
+
+def _yclients_record_ref(rec):
+    """Stable source identity for a non-activity YCLIENTS booking.
+
+    A slot (colour + datetime) is useful for grouping crew rows, but it is
+    mutable: managers routinely move a booking or change its vessel colour.
+    The record id survives those edits and therefore must own idempotency.
+    """
+    record_id = rec.get("id")
+    if record_id not in (None, ""):
+        return f"record:{record_id}"
+    return _yclients_group_key(rec)
+
+
+def _yclients_group_source_refs(group_key, records):
+    """Return stable refs represented by one parsed physical trip."""
+    if group_key.startswith("activity:"):
+        return [group_key]
+    return list(dict.fromkeys(_yclients_record_ref(record) for record in records))
 
 
 def _yclients_activity_color(activity_id, activity_colors):
@@ -9722,6 +9764,16 @@ def build_import_candidates(records, activity_colors=None):
         if is_activity_group:
             activity_id_raw = key.split(":", 1)[1]
             color = _yclients_activity_color(activity_id_raw, activity_colors)
+            # The activity lookup occasionally times out or old activities
+            # are no longer available through the detail endpoint. Some
+            # records still carry the event colour themselves, so use that
+            # as a safe fallback before sending a valid trip to review.
+            if not color:
+                color = next(
+                    (_yclients_record_color(record) for record in recs
+                     if _yclients_record_color(record)),
+                    "",
+                )
             raw_color_seen = color
             for c, b in BOAT_COLORS.items():
                 if _normalize_color(c) == color:
@@ -9860,6 +9912,27 @@ def build_import_candidates(records, activity_colors=None):
             "mooring_cost": boat_info["mooring"] if boat_info else "",
             "note": note,
         }
+        source_refs = _yclients_group_source_refs(key, recs)
+        if is_activity_group:
+            candidate_ref = key
+        else:
+            # Make the paid/service-bearing row the canonical ref so a crew
+            # placeholder appearing or disappearing never changes it.
+            primary_record = max(
+                recs,
+                key=lambda record: (
+                    bool(record.get("services")),
+                    _yclients_record_revenue(record),
+                ),
+            )
+            candidate_ref = _yclients_record_ref(primary_record)
+            source_refs = [
+                candidate_ref,
+                *(source_ref for source_ref in source_refs
+                  if source_ref != candidate_ref),
+            ]
+        payload["merged_refs"] = source_refs[1:]
+        payload["legacy_refs"] = [key] if key not in source_refs else []
         employees_label = ", ".join(i["employee"] for i in labor_items if i["employee"]) or "—"
         if boat:
             boat_label = boat
@@ -9870,9 +9943,29 @@ def build_import_candidates(records, activity_colors=None):
         trip_date_label = format_ru_date(trip_date)
         when_label = f"{trip_date_label} {trip_time}".strip() if trip_time else trip_date_label
         summary = f"{when_label} · {boat_label} · {employees_label} · {format_money(revenue)} ₽"
-        candidates.append({"yclients_ref": key, "summary": summary, "payload": payload})
+        candidates.append({
+            "yclients_ref": candidate_ref,
+            "summary": summary,
+            "payload": payload,
+        })
     candidates.sort(key=lambda c: (c["payload"]["trip_date"], c["payload"]["trip_time"]), reverse=True)
     return candidates
+
+
+def _candidate_stable_refs(candidate):
+    """All immutable YCLIENTS refs represented by an import candidate."""
+    return list(dict.fromkeys([
+        candidate["yclients_ref"],
+        *(candidate["payload"].get("merged_refs") or []),
+    ]))
+
+
+def _candidate_lookup_refs(candidate):
+    """Stable refs plus old slot refs used by installations before migration."""
+    return list(dict.fromkeys([
+        *_candidate_stable_refs(candidate),
+        *(candidate["payload"].get("legacy_refs") or []),
+    ]))
 
 
 def apply_minimum_shift_rate(
@@ -10133,6 +10226,7 @@ def merge_pending_candidates(db):
         # comes back as a brand-new, now-partnerless candidate — this is
         # exactly the "исчезнувший рейс" junk that kept resurfacing.
         merged_refs = list(keep_payload.get("merged_refs") or [])
+        legacy_refs = list(keep_payload.get("legacy_refs") or [])
 
         for row, payload in items[1:]:
             for item in (payload.get("labor_items") or []):
@@ -10145,6 +10239,7 @@ def merge_pending_candidates(db):
                 notes.append(payload["note"])
             merged_refs.append(row["yclients_ref"])
             merged_refs.extend(payload.get("merged_refs") or [])
+            legacy_refs.extend(payload.get("legacy_refs") or [])
             db.execute("DELETE FROM import_candidates WHERE id = ?", (row["id"],))
             merged_away += 1
 
@@ -10172,7 +10267,10 @@ def merge_pending_candidates(db):
             {"employee": "", "work_type": "", "quantity": "", "rate": ""}
         ]
         keep_payload["note"] = " / ".join(n for n in notes if n)
-        keep_payload["merged_refs"] = merged_refs
+        keep_payload["merged_refs"] = list(dict.fromkeys(
+            ref for ref in merged_refs if ref != keep_row["yclients_ref"]
+        ))
+        keep_payload["legacy_refs"] = list(dict.fromkeys(legacy_refs))
         # items[0] (picked by revenue above) may have been the boat-less
         # partner if its "revenue" happened to sort first — that candidate's
         # boat/fuel_cost/mooring_cost/commission_pct were all left blank
@@ -10395,10 +10493,15 @@ def _imported_trip_for_cancelled_group(db, group_key, records):
     fallback: same date/time, a service-bearing record and exactly one
     imported trip linked to one of the same employees.
     """
+    lookup_refs = list(dict.fromkeys([
+        group_key,
+        *_yclients_group_source_refs(group_key, records),
+    ]))
+    placeholders = ",".join("?" for _ref in lookup_refs)
     imported = db.execute(
         "SELECT trip_id FROM yclients_imports "
-        "WHERE yclients_ref = ? AND trip_id IS NOT NULL",
-        (group_key,),
+        f"WHERE yclients_ref IN ({placeholders}) AND trip_id IS NOT NULL",
+        lookup_refs,
     ).fetchall()
     trip_ids = {row["trip_id"] for row in imported}
     if len(trip_ids) == 1:
@@ -10460,9 +10563,14 @@ def _remove_cancelled_imported_trips(db, records, activity_colors):
     trip_ids = set()
     cancelled_groups = _cancelled_yclients_groups(records, activity_colors)
     for group_key, grouped_records in cancelled_groups.items():
+        cancelled_refs = list(dict.fromkeys([
+            group_key,
+            *_yclients_group_source_refs(group_key, grouped_records),
+        ]))
+        placeholders = ",".join("?" for _ref in cancelled_refs)
         db.execute(
-            "DELETE FROM import_candidates WHERE yclients_ref = ?",
-            (group_key,),
+            f"DELETE FROM import_candidates WHERE yclients_ref IN ({placeholders})",
+            cancelled_refs,
         )
         trip_id = _imported_trip_for_cancelled_group(
             db, group_key, grouped_records
@@ -10482,11 +10590,13 @@ def _remove_missing_imported_trips(db, records, start_date, end_date):
     backed by several refs (for example an activity plus a guide placeholder)
     and is removed only when none of those refs remains in the snapshot.
     """
-    present_refs = {
-        _yclients_group_key(record)
-        for record in records
-        if not record.get("deleted")
-    }
+    present_refs = set()
+    for record in records:
+        if record.get("deleted"):
+            continue
+        group_key = _yclients_group_key(record)
+        present_refs.add(group_key)  # compatibility with pre-migration rows
+        present_refs.update(_yclients_group_source_refs(group_key, [record]))
     imported_rows = db.execute(
         "SELECT trips.id AS trip_id, yclients_imports.yclients_ref "
         "FROM trips JOIN yclients_imports ON yclients_imports.trip_id = trips.id "
@@ -10576,28 +10686,54 @@ def _import_yclients_trip_records(
     associated_by_trip = {}
     unassociated = []
     for candidate in candidates:
-        ref = candidate["yclients_ref"]
-        if ref in already:
-            trip_id = already[ref]
-            if trip_id is None:
-                # Older versions offered the zero-revenue secondary crew
-                # record as an invalid standalone card, so an administrator
-                # may reasonably have skipped it. If it now matches exactly
-                # one imported physical trip, heal that old tombstone and
-                # attach the employee; never revive a skipped paying record.
-                if not (candidate["payload"].get("revenue") or 0):
-                    trip_id = _imported_trip_for_candidate_slot(
-                        db, candidate["payload"]
-                    )
-                    if trip_id is not None:
-                        db.execute(
-                            "UPDATE yclients_imports SET trip_id = ? "
-                            "WHERE yclients_ref = ? AND trip_id IS NULL",
-                            (trip_id, ref),
-                        )
-                        already[ref] = trip_id
-                if trip_id is None:
-                    continue  # an intentional skip unrelated to a known trip
+        stable_refs = _candidate_stable_refs(candidate)
+        lookup_refs = _candidate_lookup_refs(candidate)
+        mapped = {
+            lookup_ref: already[lookup_ref]
+            for lookup_ref in lookup_refs
+            if lookup_ref in already
+        }
+        mapped_trip_ids = {
+            mapped_trip_id
+            for mapped_trip_id in mapped.values()
+            if mapped_trip_id is not None
+        }
+        trip_id = next(iter(mapped_trip_ids)) if len(mapped_trip_ids) == 1 else None
+        if len(mapped_trip_ids) > 1:
+            candidate["payload"]["needs_review"] = True
+            candidate["summary"] += (
+                " ⚠ Записи YCLIENTS связаны с несколькими рейсами; "
+                "нужна ручная проверка."
+            )
+            unassociated.append(candidate)
+            continue
+
+        stable_tombstone = any(
+            stable_ref in mapped and mapped[stable_ref] is None
+            for stable_ref in stable_refs
+        )
+        if trip_id is None and any(value is None for value in mapped.values()):
+            # Older versions offered a zero-revenue secondary crew record as
+            # an invalid standalone card, so an administrator may reasonably
+            # have skipped it. Heal that old slot tombstone when it now has
+            # one physical trip to join; never revive a skipped paid booking.
+            if not (candidate["payload"].get("revenue") or 0):
+                trip_id = _imported_trip_for_candidate_slot(
+                    db, candidate["payload"]
+                )
+                if trip_id is not None:
+                    for lookup_ref, mapped_trip_id in mapped.items():
+                        if mapped_trip_id is None:
+                            db.execute(
+                                "UPDATE yclients_imports SET trip_id = ? "
+                                "WHERE yclients_ref = ? AND trip_id IS NULL",
+                                (trip_id, lookup_ref),
+                            )
+                            already[lookup_ref] = trip_id
+            if trip_id is None and stable_tombstone:
+                continue  # an intentional skip unrelated to a known trip
+
+        if trip_id is not None:
             if _known_paid_ref_moved_out_of_merged_trip(
                 db, trip_id, candidate["payload"]
             ):
@@ -10605,12 +10741,14 @@ def _import_yclients_trip_records(
                 # colour was unavailable on an earlier import.  Release it;
                 # the normal association/import path below will either join
                 # the now-resolved boat's existing trip or create that trip.
-                db.execute(
-                    "DELETE FROM yclients_imports "
-                    "WHERE yclients_ref = ? AND trip_id = ?",
-                    (ref, trip_id),
-                )
-                already.pop(ref, None)
+                for stable_ref in stable_refs:
+                    db.execute(
+                        "DELETE FROM yclients_imports "
+                        "WHERE yclients_ref = ? AND trip_id = ?",
+                        (stable_ref, trip_id),
+                    )
+                    if already.get(stable_ref) == trip_id:
+                        already.pop(stable_ref, None)
                 resolved_trip_id = _imported_trip_for_candidate_slot(
                     db, candidate["payload"]
                 )
@@ -10636,13 +10774,15 @@ def _import_yclients_trip_records(
         if _sync_imported_trip_labor(db, trip_id, combined_payload):
             payroll_updated += 1
         for candidate, is_known_ref in associated_candidates:
-            refs = [
-                candidate["yclients_ref"],
-                *candidate["payload"].get("merged_refs", []),
-            ]
-            if not is_known_ref:
-                _mark_yclients_refs_imported(db, refs, trip_id)
-            for source_ref in refs:
+            stable_refs = _candidate_stable_refs(candidate)
+            _mark_yclients_refs_imported(db, stable_refs, trip_id)
+            for legacy_ref in candidate["payload"].get("legacy_refs") or []:
+                db.execute(
+                    "DELETE FROM yclients_imports "
+                    "WHERE yclients_ref = ? AND trip_id = ?",
+                    (legacy_ref, trip_id),
+                )
+            for source_ref in _candidate_lookup_refs(candidate):
                 db.execute(
                     "DELETE FROM import_candidates WHERE yclients_ref = ?",
                     (source_ref,),
@@ -10849,16 +10989,38 @@ def import_review(candidate_id):
 def _sync_imported_trip_labor(db, trip_id, payload):
     """Make an imported trip match the latest mutable YCLIENTS fields.
 
-    A booking can be reassigned, shortened or moved to another service after
-    its first import. The YCLIENTS reference still points to the same trip,
-    so update its crew, work type, duration and current sale amount instead
-    of creating a duplicate. Manual trips have no YCLIENTS reference and
-    never pass through this function. Returns whether any stored value
-    changed.
+    A booking can be reassigned, shortened, moved to another slot/boat or
+    moved to another service after its first import. The YCLIENTS reference
+    still points to the same trip, so update its placement, crew, work type,
+    duration and current sale amount instead of creating a duplicate. Manual
+    trips have no YCLIENTS reference and never pass through this function.
+    Returns whether any stored value changed.
     """
     trip = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
     if trip is None:
         return False
+
+    boat = str(payload.get("boat") or "").strip()
+    trip_date = str(payload.get("trip_date") or "").strip()
+    trip_time = str(payload.get("trip_time") or "00:00").strip()
+    if boat not in {item["name"] for item in BOATS}:
+        return False
+    try:
+        dt.date.fromisoformat(trip_date)
+        dt.time.fromisoformat(trip_time)
+        fuel_cost = float(payload.get("fuel_cost"))
+        mooring_cost = float(payload.get("mooring_cost"))
+    except (TypeError, ValueError):
+        return False
+    schedule_changed = any((
+        trip["boat"] != boat,
+        trip["trip_date"] != trip_date,
+        (trip["trip_time"] or "00:00") != trip_time,
+    ))
+    operating_costs_changed = any((
+        abs(float(trip["fuel_cost"]) - fuel_cost) > 0.01,
+        abs(float(trip["mooring_cost"]) - mooring_cost) > 0.01,
+    ))
 
     labor_items = []
     for item in payload.get("labor_items") or []:
@@ -10917,6 +11079,7 @@ def _sync_imported_trip_labor(db, trip_id, payload):
         for item in labor_items
     )
     labor_changed = old_labor_signature != new_labor_signature
+    payroll_changed = labor_changed or trip["trip_date"] != trip_date
 
     revenue = float(trip["revenue"])
     sale_channel = trip["sale_channel"]
@@ -10938,13 +11101,14 @@ def _sync_imported_trip_labor(db, trip_id, payload):
         abs(float(trip["commission_pct"]) - commission_pct) > 0.01,
         abs(float(trip["commission_amount"]) - commission_amount) > 0.01,
     ))
-    if not labor_changed and not financial_changed:
+    if not payroll_changed and not financial_changed and not schedule_changed \
+            and not operating_costs_changed:
         return False
 
     old_staff = {row["employee"] for row in linked_rows}
     new_staff = {item["employee"] for item in labor_items}
 
-    if labor_changed:
+    if payroll_changed:
         db.execute("DELETE FROM trip_labor WHERE trip_id = ?", (trip_id,))
         for entry_id in old_entry_ids:
             db.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
@@ -10953,7 +11117,10 @@ def _sync_imported_trip_labor(db, trip_id, payload):
         # import of this shift. Drop it now; apply_minimum_shift_rate() below
         # recreates the correct amount if that person still works another
         # YCLIENTS trip on the same date.
-        for employee in old_staff - new_staff:
+        employees_losing_old_day = (
+            old_staff if trip["trip_date"] != trip_date else old_staff - new_staff
+        )
+        for employee in employees_losing_old_day:
             db.execute(
                 "DELETE FROM entries WHERE employee = ? AND work_date = ? AND work_type = ?",
                 (employee, trip["trip_date"], MIN_SHIFT_TOPUP_WORK_TYPE),
@@ -10967,7 +11134,7 @@ def _sync_imported_trip_labor(db, trip_id, payload):
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     item["employee"], item["work_type"], item["rate"],
-                    item["quantity"], item["amount"], trip["trip_date"], now,
+                    item["quantity"], item["amount"], trip_date, now,
                 ),
             )
             entry_ids.append(cur.lastrowid)
@@ -10981,16 +11148,18 @@ def _sync_imported_trip_labor(db, trip_id, payload):
     labor_cost = sum(item["amount"] for item in labor_items)
     remainder = (
         revenue - commission_amount - labor_cost
-        - trip["fuel_cost"] - trip["mooring_cost"] - trip["extra_total"]
+        - fuel_cost - mooring_cost - trip["extra_total"]
     )
     work_types = list(dict.fromkeys(item["work_type"] for item in labor_items))
     db.execute(
-        "UPDATE trips SET work_type = ?, entry_id = ?, revenue = ?, sale_channel = ?, "
-        "commission_pct = ?, commission_amount = ?, labor_cost = ?, remainder = ?, "
-        "investor_payout = ?, my_share = ? WHERE id = ?",
+        "UPDATE trips SET boat = ?, trip_date = ?, trip_time = ?, work_type = ?, "
+        "entry_id = ?, revenue = ?, sale_channel = ?, commission_pct = ?, "
+        "commission_amount = ?, labor_cost = ?, fuel_cost = ?, mooring_cost = ?, "
+        "remainder = ?, investor_payout = ?, my_share = ? WHERE id = ?",
         (
-            " + ".join(work_types), entry_ids[0], revenue, sale_channel,
-            commission_pct, commission_amount, labor_cost, remainder,
+            boat, trip_date, trip_time, " + ".join(work_types), entry_ids[0],
+            revenue, sale_channel, commission_pct, commission_amount, labor_cost,
+            fuel_cost, mooring_cost, remainder,
             remainder / 2, commission_amount + remainder / 2, trip_id,
         ),
     )
