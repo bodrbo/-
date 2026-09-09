@@ -9365,20 +9365,6 @@ button.captain-command-alert:hover {
   font-family: 'PT Mono', monospace;
   font-size: 10px;
 }
-.partner-flow-badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 25px;
-  padding: 4px 8px;
-  border: 1px solid rgba(52, 152, 219, .28);
-  border-radius: 7px;
-  background: #edf6fc;
-  color: #245b78;
-  font-family: 'PT Mono', monospace;
-  font-size: 9px;
-  font-weight: 700;
-  white-space: nowrap;
-}
 .partner-totals-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .partner-open-price-cell { min-width: 190px; }
 .partner-open-price-form { position: relative; width: 190px; margin: 0; }

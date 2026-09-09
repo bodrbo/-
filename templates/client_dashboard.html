@@ -273,11 +273,10 @@
           <span class="oc-num">№{{ o.id }}</span>
           <span class="oc-date">{{ o.order_date|ru_date }}</span>
           <span class="oc-boat">{{ o|tuning_equipment_label }}</span>
-          {% if incoming_subcontract %}<span class="partner-flow-badge">Субподряд от нас</span>{% endif %}
           <span class="status-badge status-{{ o.status }}">{{ o.status|order_status_label }}</span>
           {% if incoming_subcontract %}
-          <span class="oc-total">{{ (o.partner_work_total|money ~ ' ₽') if o.partner_response_ready else 'Ждёт расчёта' }}</span>
-          <span class="oc-status{{ ' paid' if o.partner_response_ready }}">{{ 'Расчёт получен' if o.partner_response_ready else 'Ожидаем партнёра' }}</span>
+          <span class="oc-total">{{ (o.partner_work_total|money ~ ' ₽') if o.partner_response_ready else 'Требуется расчёт' }}</span>
+          {% if o.partner_response_ready %}<span class="oc-status paid">{{ 'Расчёт получен' if is_admin_view else 'Расчёт отправлен' }}</span>{% endif %}
           {% else %}
           <span class="oc-total">{{ o.total|money }} ₽</span>
           {% if o.remaining <= 0 %}

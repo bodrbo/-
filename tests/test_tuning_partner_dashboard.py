@@ -499,7 +499,9 @@ class TuningPartnerDashboardTests(unittest.TestCase):
 
         self.assertIn("Входящие заявки", incoming_html)
         self.assertIn("Исходящие заявки", incoming_html)
-        self.assertIn("Субподряд от нас", incoming_html)
+        self.assertNotIn("Субподряд от нас", incoming_html)
+        self.assertNotIn("Ожидаем партнёра", incoming_html)
+        self.assertIn("Требуется расчёт", incoming_html)
         self.assertIn("Расчёт партнёра, ₽", incoming_html)
         self.assertNotIn("Субподряд от нас", outgoing_html)
         self.assertIn("Открытая цена, ₽", outgoing_html)
