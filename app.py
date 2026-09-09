@@ -1757,6 +1757,7 @@ def init_db():
             revenue REAL NOT NULL,
             sale_channel TEXT NOT NULL,
             commission_pct REAL NOT NULL,
+            commission_is_manual INTEGER NOT NULL DEFAULT 0,
             commission_amount REAL NOT NULL,
             labor_cost REAL NOT NULL,
             fuel_cost REAL NOT NULL,
@@ -1776,6 +1777,26 @@ def init_db():
         conn.execute("UPDATE trips SET trip_time = '00:00' WHERE trip_time IS NULL")
     if "is_expense" not in trip_cols:
         conn.execute("ALTER TABLE trips ADD COLUMN is_expense INTEGER NOT NULL DEFAULT 0")
+    if "commission_is_manual" not in trip_cols:
+        conn.execute(
+            "ALTER TABLE trips ADD COLUMN commission_is_manual "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
+        # Preserve detectable historical overrides. Standard percentages are
+        # still managed by YCLIENTS; non-standard ones were entered manually.
+        for boat in BOATS:
+            conn.execute(
+                "UPDATE trips SET commission_is_manual = 1 "
+                "WHERE boat = ? AND ((sale_channel = 'direct' "
+                "AND ABS(commission_pct - ?) > 0.0001) "
+                "OR (sale_channel = 'aggregator' "
+                "AND ABS(commission_pct - ?) > 0.0001))",
+                (
+                    boat["name"],
+                    boat["commission_direct"],
+                    boat["commission_aggregator"],
+                ),
+            )
 
     conn.execute(
         """
@@ -3952,13 +3973,19 @@ def edit_trip(trip_id):
     for eid in entry_ids:
         db.execute("INSERT INTO trip_labor (trip_id, entry_id) VALUES (?, ?)", (trip_id, eid))
 
+    commission_is_manual = int(bool(
+        trip["commission_is_manual"]
+        or abs(float(trip["commission_pct"]) - data["commission_pct"]) > 0.0001
+    ))
     db.execute(
         "UPDATE trips SET boat=?, trip_date=?, trip_time=?, work_type=?, entry_id=?, revenue=?, "
-        "sale_channel=?, commission_pct=?, commission_amount=?, labor_cost=?, fuel_cost=?, "
+        "sale_channel=?, commission_pct=?, commission_is_manual=?, commission_amount=?, "
+        "labor_cost=?, fuel_cost=?, "
         "mooring_cost=?, extra_total=?, remainder=?, investor_payout=?, my_share=? WHERE id=?",
         (data["boat"], data["trip_date"], data["trip_time"], data["work_type"],
          entry_ids[0] if entry_ids else None, data["revenue"],
-         data["sale_channel"], data["commission_pct"], data["commission_amount"],
+         data["sale_channel"], data["commission_pct"], commission_is_manual,
+         data["commission_amount"],
          data["labor_cost"], data["fuel_cost"], data["mooring_cost"], data["extra_total"],
          data["remainder"], data["investor_payout"], data["my_share"], trip_id),
     )
@@ -11087,7 +11114,8 @@ def _sync_imported_trip_labor(db, trip_id, payload):
     if payload.get("_sync_financials"):
         try:
             revenue = float(payload.get("revenue"))
-            commission_pct = float(payload.get("commission_pct"))
+            if not trip["commission_is_manual"]:
+                commission_pct = float(payload.get("commission_pct"))
         except (TypeError, ValueError):
             return False
         candidate_channel = str(payload.get("sale_channel") or "").strip()
@@ -11180,7 +11208,7 @@ def _mark_yclients_refs_imported(db, refs, trip_id):
         )
 
 
-def _insert_trip(db, data):
+def _insert_trip(db, data, *, commission_is_manual=False):
     """Write a validated trip (as returned by _process_trip_form) plus its
     labor entries and extra expenses. Returns the new trip id."""
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -11196,12 +11224,14 @@ def _insert_trip(db, data):
 
     cur2 = db.execute(
         "INSERT INTO trips (boat, trip_date, trip_time, work_type, entry_id, revenue, sale_channel, "
-        "commission_pct, commission_amount, labor_cost, fuel_cost, mooring_cost, extra_total, "
+        "commission_pct, commission_is_manual, commission_amount, labor_cost, fuel_cost, "
+        "mooring_cost, extra_total, "
         "remainder, investor_payout, my_share, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (data["boat"], data["trip_date"], data["trip_time"], data["work_type"],
          entry_ids[0] if entry_ids else None,
-         data["revenue"], data["sale_channel"], data["commission_pct"], data["commission_amount"],
+         data["revenue"], data["sale_channel"], data["commission_pct"],
+         int(bool(commission_is_manual)), data["commission_amount"],
          data["labor_cost"], data["fuel_cost"], data["mooring_cost"], data["extra_total"],
          data["remainder"], data["investor_payout"], data["my_share"], now),
     )
@@ -11290,7 +11320,17 @@ def import_confirm(candidate_id):
             import_note=payload.get("note", ""),
         ), 400
 
-    trip_id = _insert_trip(db, data)
+    try:
+        imported_commission = float(payload.get("commission_pct"))
+    except (TypeError, ValueError):
+        imported_commission = data["commission_pct"]
+    trip_id = _insert_trip(
+        db,
+        data,
+        commission_is_manual=(
+            abs(data["commission_pct"] - imported_commission) > 0.0001
+        ),
+    )
     _mark_yclients_refs_imported(db, [row["yclients_ref"], *payload.get("merged_refs", [])], trip_id)
     db.execute("DELETE FROM import_candidates WHERE id = ?", (candidate_id,))
     db.commit()

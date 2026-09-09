@@ -115,6 +115,22 @@ class TripEditModalTests(unittest.TestCase):
         self.assertEqual(trip["trip_time"], "15:30")
         self.assertEqual(trip["revenue"], 15000)
 
+    def test_changing_commission_marks_it_as_manual(self):
+        response = self.client.post(
+            f"/trips/edit/{self.trip_id}",
+            data=self.trip_form(commission_pct="17"),
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with application_module.app.app_context():
+            trip = application_module.get_db().execute(
+                "SELECT commission_pct, commission_is_manual FROM trips WHERE id = ?",
+                (self.trip_id,),
+            ).fetchone()
+        self.assertEqual(trip["commission_pct"], 17)
+        self.assertEqual(trip["commission_is_manual"], 1)
+
     def test_ajax_validation_error_stays_in_modal(self):
         invalid = self.trip_form(**{"employee[]": "", "work_type[]": ""})
         response = self.client.post(

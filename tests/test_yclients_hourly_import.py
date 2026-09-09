@@ -831,6 +831,41 @@ class YclientsHourlyImportTests(unittest.TestCase):
             [("Андрей Жаворонков", 1900), ("Эльмира Бектаева", 1900)],
         )
 
+    def test_reimport_preserves_manually_overridden_commission(self):
+        record = self.record(
+            1921209222,
+            "12",
+            staff_name="Андрей Жаворонков",
+            color="8bc34a",
+        )
+        record["datetime"] = "2026-08-22T12:00:00+03:00"
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            first = application_module._import_yclients_trip_records(
+                db, [record], {}, "2026-08-22", "2026-08-22"
+            )
+            trip = db.execute("SELECT * FROM trips").fetchone()
+            db.execute(
+                "UPDATE trips SET commission_pct = 17, commission_is_manual = 1, "
+                "commission_amount = revenue * 0.17 WHERE id = ?",
+                (trip["id"],),
+            )
+            db.commit()
+
+            record["services"][0]["cost"] = 20000
+            refreshed = application_module._import_yclients_trip_records(
+                db, [record], {}, "2026-08-22", "2026-08-22"
+            )
+            updated = db.execute("SELECT * FROM trips").fetchone()
+
+        self.assertEqual(first["imported"], 1)
+        self.assertEqual(refreshed["payroll_updated"], 1)
+        self.assertEqual(updated["revenue"], 20000)
+        self.assertEqual(updated["commission_pct"], 17)
+        self.assertEqual(updated["commission_amount"], 3400)
+        self.assertEqual(updated["commission_is_manual"], 1)
+
     def test_activity_marked_red_after_import_removes_existing_trip(self):
         record = self.record(
             1898319087,
