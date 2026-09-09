@@ -8,7 +8,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{ 'ЛК партнёра — режим администратора' if is_admin_view and is_tuning_partner else 'ЛК клиента — режим администратора' if is_admin_view else 'Карточка экскурсионного клиента' if is_manager_view else 'Личный кабинет партнёра' if is_tuning_partner else 'Личный кабинет клиента' }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260901-client-admin-theme">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260901-client-admin-theme-partner-flows">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
 <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
@@ -247,25 +247,44 @@
 
   <section class="panel" id="orders">
     <div class="partner-orders-heading">
-      <h2>{{ 'Заявки и заказы' if is_tuning_partner else 'Ваши заказы' }}</h2>
+      <h2>{{ ('Входящие заявки' if partner_request_view == 'incoming' else 'Исходящие заявки') if is_tuning_partner else 'Ваши заказы' }}</h2>
       {% if is_tuning_partner and not is_admin_view %}
       <a href="{{ url_for('partner_estimate_request', token=client.token) }}" class="btn-secondary">Создать заявку</a>
       {% endif %}
     </div>
-    {% if orders %}
+    {% if is_tuning_partner %}
+    <nav class="partner-request-tabs" aria-label="Направление заявок">
+      <a href="{{ url_for('admin_client_dashboard', client_id=client.id, section=client_section, requests='incoming') if is_admin_view else url_for('client_dashboard', token=client.token, requests='incoming') }}#orders"
+         class="{{ 'active' if partner_request_view == 'incoming' }}">
+        <span>Входящие заявки</span><strong>{{ partner_request_counts.incoming }}</strong>
+      </a>
+      <a href="{{ url_for('admin_client_dashboard', client_id=client.id, section=client_section, requests='outgoing') if is_admin_view else url_for('client_dashboard', token=client.token, requests='outgoing') }}#orders"
+         class="{{ 'active' if partner_request_view == 'outgoing' }}">
+        <span>Исходящие заявки</span><strong>{{ partner_request_counts.outgoing }}</strong>
+      </a>
+    </nav>
+    {% endif %}
+    {% if visible_orders %}
     <div class="order-card-list">
-      {% for o in orders %}
+      {% for o in visible_orders %}
+      {% set incoming_subcontract = is_tuning_partner and o.partner_request_direction == 'incoming' %}
       <details class="panel order-card" id="order-{{ o.id }}" {{ 'open' if open_order_id == o.id }}>
         <summary>
           <span class="oc-num">№{{ o.id }}</span>
           <span class="oc-date">{{ o.order_date|ru_date }}</span>
           <span class="oc-boat">{{ o|tuning_equipment_label }}</span>
+          {% if incoming_subcontract %}<span class="partner-flow-badge">Субподряд от нас</span>{% endif %}
           <span class="status-badge status-{{ o.status }}">{{ o.status|order_status_label }}</span>
+          {% if incoming_subcontract %}
+          <span class="oc-total">{{ (o.partner_work_total|money ~ ' ₽') if o.partner_response_ready else 'Ждёт расчёта' }}</span>
+          <span class="oc-status{{ ' paid' if o.partner_response_ready }}">{{ 'Расчёт получен' if o.partner_response_ready else 'Ожидаем партнёра' }}</span>
+          {% else %}
           <span class="oc-total">{{ o.total|money }} ₽</span>
           {% if o.remaining <= 0 %}
           <span class="oc-status paid">Оплачено</span>
           {% else %}
           <span class="oc-status">К доплате {{ o.remaining|money }} ₽</span>
+          {% endif %}
           {% endif %}
           <span class="chev" aria-hidden="true"></span>
         </summary>
@@ -274,7 +293,7 @@
           {% if o.work_items %}
           <div class="table-scroll">
             <table class="records">
-              <thead><tr><th>Работа</th>{% if is_admin_view %}<th>Себестоимость, ₽</th><th>Коэффициент</th>{% endif %}<th>{{ 'Закрытая цена, ₽' if is_tuning_partner else 'Цена, ₽' }}</th>{% if is_tuning_partner %}<th>Открытая цена, ₽</th>{% endif %}<th>Статус</th><th></th></tr></thead>
+              <thead><tr><th>Работа</th>{% if is_admin_view %}<th>Себестоимость, ₽</th><th>Коэффициент</th>{% endif %}{% if not incoming_subcontract %}<th>{{ 'Закрытая цена, ₽' if is_tuning_partner else 'Цена, ₽' }}</th>{% endif %}{% if is_tuning_partner %}<th>{{ 'Расчёт партнёра, ₽' if incoming_subcontract else 'Открытая цена, ₽' }}</th>{% endif %}<th>Статус</th><th></th></tr></thead>
               <tbody>
                 {% for item in o.work_items %}
                 <tr class="{{ 'row-pending' if item.status == 'pending' else 'row-removed' if item.status == 'removed' }}">
@@ -283,9 +302,9 @@
                   <td class="amount client-admin-cost">{{ item.cost_price|money if not item.price_pending else '—' }}</td>
                   <td class="client-admin-multiplier">{{ ('× ' ~ (item.multiplier|float|round(2))) if not item.price_pending else '—' }}</td>
                   {% endif %}
-                  <td class="amount{{ ' work-price-pending' if item.price_pending }}">
+                  {% if not incoming_subcontract %}<td class="amount{{ ' work-price-pending' if item.price_pending }}">
                     {{ (item.price|money ~ ' ₽') if not item.price_pending else 'Ждёт расчёта' }}
-                  </td>
+                  </td>{% endif %}
                   {% if is_tuning_partner %}
                   <td class="partner-open-price-cell">
                     {% if is_admin_view %}
@@ -298,21 +317,21 @@
                       <div class="partner-open-price-control">
                         <input type="text" inputmode="decimal" name="open_price"
                                value="{{ item.partner_price|money if item.partner_price is not none else '' }}"
-                               aria-label="Открытая цена: {{ item.work_name }}" placeholder="0,00"
-                               aria-haspopup="true" aria-expanded="false"
+                               aria-label="{{ 'Расчёт партнёра' if incoming_subcontract else 'Открытая цена' }}: {{ item.work_name }}" placeholder="0,00"
+                               {% if not incoming_subcontract %}aria-haspopup="true" aria-expanded="false"
                                aria-controls="partner-price-presets-{{ item.id }}"
-                               data-price-hints="partner-price-presets-{{ item.id }}">
+                               data-price-hints="partner-price-presets-{{ item.id }}"{% endif %}>
                         <span class="partner-open-price-currency" aria-hidden="true">₽</span>
                         <button type="submit" class="partner-open-price-save" aria-label="Сохранить открытую цену" title="Сохранить цену">
                           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.5l4 4 8-9"/></svg>
                         </button>
                       </div>
-                      <div class="partner-price-presets" id="partner-price-presets-{{ item.id }}" popover="auto" aria-label="Подсказки наценки">
+                      {% if not incoming_subcontract %}<div class="partner-price-presets" id="partner-price-presets-{{ item.id }}" popover="auto" aria-label="Подсказки наценки">
                         <span>Наценка к {{ item.price|money }} ₽</span>
                         {% for markup in (10, 15, 20) %}
                         <button type="submit" name="markup" value="{{ markup }}" {{ 'disabled' if item.price_pending }} title="Закрытая цена + {{ markup }}%">+{{ markup }}%</button>
                         {% endfor %}
-                      </div>
+                      </div>{% endif %}
                     </form>
                     {% endif %}
                   </td>
@@ -368,7 +387,7 @@
           </div>
           {% endif %}
 
-          {% if is_tuning_partner %}
+          {% if is_tuning_partner and not incoming_subcontract %}
           <section class="partner-quote-panel" aria-label="Цены и PDF-расчёт заказа №{{ o.id }}">
             <div class="partner-quote-totals">
               <div><span>Закрытая стоимость</span><strong>{{ o.total|money }} ₽</strong></div>
@@ -393,10 +412,16 @@
           </section>
           {% endif %}
 
+          {% if incoming_subcontract %}
+          <p class="hint" style="margin-top:14px;">
+            {{ ('Расчёт партнёра: ' ~ (o.partner_work_total|money) ~ ' ₽') if o.partner_response_ready else 'Партнёр ещё не указал стоимость всех работ.' }}
+          </p>
+          {% else %}
           <p class="hint" style="margin-top:14px;">
             Скидка {{ (o.discount_value|float|round(1)|string ~ '%') if o.discount_type != 'amount' else (o.discount_value|money ~ ' ₽') }} · Оплачено {{ o.paid_amount|money }} ₽ ·
             К доплате {{ o.remaining|money }} ₽
           </p>
+          {% endif %}
           {% if o.receipt_payments %}
           <div class="client-receipts" aria-label="Кассовые чеки по заказу №{{ o.id }}">
             <div class="client-receipts-heading">
@@ -431,7 +456,7 @@
               <a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="client-admin-edit-link">Редактировать заказ</a>
             </div>
             <dl class="client-admin-order-facts">
-              <div><dt>Источник</dt><dd>{{ {'manual': 'Создан вручную', 'tilda': 'Заявка Tilda', 'tuning_site': 'Сайт тюнинга', 'partner_request': 'Заявка партнёра'}.get(o.source, o.source or '—') }}</dd></div>
+              <div><dt>Источник</dt><dd>{{ {'manual': 'Создан вручную', 'tilda': 'Заявка Tilda', 'tuning_site': 'Сайт тюнинга', 'partner_request': 'Исходящая заявка партнёра', 'subcontract_request': 'Субподряд партнёру'}.get(o.source, o.source or '—') }}</dd></div>
               <div><dt>Канал продажи</dt><dd>{{ 'Напрямую' if o.sale_channel == 'direct' else ('Агрегатор' if o.sale_channel == 'aggregator' else 'Смешанный') }}</dd></div>
               <div><dt>Внутренняя себестоимость</dt><dd>{{ o.internal_cost|money }} ₽</dd></div>
               <div><dt>Расчётная маржа</dt><dd class="{{ 'is-negative' if o.gross_margin < 0 else 'is-positive' }}">{{ o.gross_margin|money }} ₽</dd></div>
@@ -483,8 +508,8 @@
     {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">Заказов пока нет</div>
-      <div class="s">{{ 'Создайте заявку на расчёт — после ответа она останется здесь как заказ.' if is_tuning_partner else 'Здесь появятся ваши заказы из тюнинг-центра.' }}</div>
+      <div class="t">{{ ('Входящих заявок пока нет' if partner_request_view == 'incoming' else 'Исходящих заявок пока нет') if is_tuning_partner else 'Заказов пока нет' }}</div>
+      <div class="s">{{ ('Сюда попадут субподряды, которые Бодрый тюнинг-центр отправит партнёру.' if partner_request_view == 'incoming' else 'Создайте заявку на расчёт — после ответа она останется здесь как заказ.') if is_tuning_partner else 'Здесь появятся ваши заказы из тюнинг-центра.' }}</div>
     </div>
     {% endif %}
   </section>

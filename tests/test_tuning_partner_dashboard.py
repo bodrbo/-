@@ -219,7 +219,7 @@ class TuningPartnerDashboardTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertTrue(response.headers["Location"].endswith(
-            f"/client/{self.PARTNER_TOKEN}#orders"
+            f"/client/{self.PARTNER_TOKEN}?requests=outgoing#orders"
         ))
         with application_module.app.app_context():
             db = application_module.get_db()
@@ -423,6 +423,147 @@ class TuningPartnerDashboardTests(unittest.TestCase):
         self.assertIn("inline;", response.headers["Content-Disposition"])
         self.assertEqual(response.headers["Cache-Control"], "no-store")
         self.assertEqual(other_client_response.status_code, 404)
+
+    def test_admin_creates_subcontract_for_selected_tuning_partner(self):
+        self._login_admin()
+
+        index_html = self.http.get("/tuning").get_data(as_text=True)
+        form_response = self.http.get("/tuning/subcontract/add")
+        form_html = form_response.get_data(as_text=True)
+
+        self.assertIn("Добавить субподряд", index_html)
+        self.assertIn('href="/tuning/subcontract/add"', index_html)
+        self.assertEqual(form_response.status_code, 200)
+        self.assertIn("Новый субподряд", form_html)
+        self.assertIn('name="partner_id"', form_html)
+        self.assertIn("Верфь Север", form_html)
+        self.assertNotIn("Обычный клиент", form_html)
+        self.assertNotIn("data-hide-software-request-widget", form_html)
+
+        form = self._valid_request()
+        form.add("partner_id", str(self.partner_id))
+        response = self.http.post("/tuning/subcontract/add", data=form)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/tuning"))
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            order = db.execute(
+                "SELECT * FROM tuning_orders WHERE client_id = ? "
+                "AND source = 'subcontract_request'",
+                (self.partner_id,),
+            ).fetchone()
+            items = db.execute(
+                "SELECT work_name, price_pending, price FROM tuning_order_items "
+                "WHERE order_id = ? ORDER BY id",
+                (order["id"],),
+            ).fetchall()
+            project = db.execute(
+                "SELECT id FROM projects WHERE tuning_order_id = ?", (order["id"],)
+            ).fetchone()
+
+        self.assertEqual(order["client_name"], "Верфь Север")
+        self.assertEqual(order["phone"], "+79991112233")
+        self.assertEqual(order["status"], "estimate")
+        self.assertTrue(order["source_ref"].startswith(
+            f"subcontract:{self.partner_id}:"
+        ))
+        self.assertEqual(
+            [tuple(item) for item in items],
+            [
+                ("Установить картплоттер", 1, 0.0),
+                ("Смонтировать ходовые огни", 1, 0.0),
+            ],
+        )
+        self.assertIsNotNone(project)
+
+    def test_subcontracts_and_partner_requests_are_split_by_direction(self):
+        self._login_admin()
+        subcontract_form = self._valid_request()
+        subcontract_form.add("partner_id", str(self.partner_id))
+        self.http.post("/tuning/subcontract/add", data=subcontract_form)
+
+        with self.http.session_transaction() as session:
+            session.clear()
+        self.http.post(
+            f"/client/{self.PARTNER_TOKEN}/estimate-request",
+            data=self._valid_request(),
+        )
+
+        incoming_html = self.http.get(
+            f"/client/{self.PARTNER_TOKEN}?requests=incoming"
+        ).get_data(as_text=True)
+        outgoing_html = self.http.get(
+            f"/client/{self.PARTNER_TOKEN}?requests=outgoing"
+        ).get_data(as_text=True)
+
+        self.assertIn("Входящие заявки", incoming_html)
+        self.assertIn("Исходящие заявки", incoming_html)
+        self.assertIn("Субподряд от нас", incoming_html)
+        self.assertIn("Расчёт партнёра, ₽", incoming_html)
+        self.assertNotIn("Субподряд от нас", outgoing_html)
+        self.assertIn("Открытая цена, ₽", outgoing_html)
+
+    def test_partner_can_return_price_for_incoming_subcontract(self):
+        self._login_admin()
+        form = self._valid_request()
+        form.add("partner_id", str(self.partner_id))
+        self.http.post("/tuning/subcontract/add", data=form)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            order = db.execute(
+                "SELECT id FROM tuning_orders WHERE client_id = ? "
+                "AND source = 'subcontract_request' ORDER BY id DESC LIMIT 1",
+                (self.partner_id,),
+            ).fetchone()
+            item = db.execute(
+                "SELECT id FROM tuning_order_items WHERE order_id = ? ORDER BY id LIMIT 1",
+                (order["id"],),
+            ).fetchone()
+
+        with self.http.session_transaction() as session:
+            session.clear()
+        response = self.http.post(
+            f"/client/{self.PARTNER_TOKEN}/orders/{order['id']}/items/"
+            f"{item['id']}/open-price",
+            data={"open_price": "12 500"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("requests=incoming", response.headers["Location"])
+        with application_module.app.app_context():
+            partner_price = application_module.get_db().execute(
+                "SELECT partner_price FROM tuning_order_items WHERE id = ?",
+                (item["id"],),
+            ).fetchone()["partner_price"]
+        self.assertEqual(partner_price, 12500.0)
+
+        self._login_admin()
+        admin_order_html = self.http.get(
+            f"/tuning/edit/{order['id']}"
+        ).get_data(as_text=True)
+        self.assertIn("Расчёт партнёра, ₽", admin_order_html)
+        self.assertIn("12 500,00 ₽", admin_order_html.replace("\u00a0", " "))
+
+    def test_subcontract_rejects_non_partner_recipient(self):
+        self._login_admin()
+        form = self._valid_request()
+        form.add("partner_id", str(self.regular_client_id))
+
+        response = self.http.post("/tuning/subcontract/add", data=form)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(
+            "Выберите партнёра тюнинг-центра из списка",
+            response.get_data(as_text=True),
+        )
+        with application_module.app.app_context():
+            count = application_module.get_db().execute(
+                "SELECT COUNT(*) AS count FROM tuning_orders "
+                "WHERE source = 'subcontract_request' AND client_id = ?",
+                (self.regular_client_id,),
+            ).fetchone()["count"]
+        self.assertEqual(count, 0)
 
 
 if __name__ == "__main__":

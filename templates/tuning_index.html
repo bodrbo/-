@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{ page_title or 'Тюнинг-центр' }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260909-subcontracts">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
 <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
@@ -98,6 +98,9 @@
   {% if date_filter_error %}
   <div class="alert tuning-orders-date-error">{{ date_filter_error }}</div>
   {% endif %}
+  {% if tuning_subcontract_notice %}
+  <div class="alert success">{{ tuning_subcontract_notice }}</div>
+  {% endif %}
   <details class="panel tuning-orders-filter"{% if date_filter_error %} open{% endif %}>
     <summary>
       <span class="tuning-orders-filter-icon" aria-hidden="true">
@@ -147,10 +150,13 @@
   </details>
 
   <section class="panel">
-    <h2>
-      Заказы
-      <a href="{{ url_for('add_tuning_order') }}" class="btn-add" style="float:right; margin-top:-2px;">Добавить заказ</a>
-    </h2>
+    <div class="tuning-orders-heading">
+      <h2>Заказы</h2>
+      <div class="tuning-orders-actions">
+        <a href="{{ url_for('add_tuning_subcontract') }}" class="btn-secondary">Добавить субподряд</a>
+        <a href="{{ url_for('add_tuning_order') }}" class="btn-add">Добавить заказ</a>
+      </div>
+    </div>
     {% if orders %}
     <div class="table-scroll">
       <table class="records" id="orders-table">

@@ -263,6 +263,8 @@ PARTNER_REQUEST_MOTOR_LIMIT = 10
 PARTNER_REQUEST_WORK_NAME_LIMIT = 500
 PARTNER_REQUEST_SERIAL_LIMIT = 160
 DEFAULT_TUNING_PARTNER_TITLE = "Партнёрский тюнинг-центр"
+PARTNER_REQUEST_SOURCE = "partner_request"
+SUBCONTRACT_REQUEST_SOURCE = "subcontract_request"
 TUNING_BOAT_MODEL_NAME_LIMIT = 200
 TUNING_BOAT_SPECIFICATIONS_LIMIT = 8000
 TUNING_BOAT_SOURCE_NAME_LIMIT = 250
@@ -576,6 +578,19 @@ def _tuning_client_choices(db):
         " WHERE client_segments.client_id = clients.id) "
         "ORDER BY clients.client_name COLLATE NOCASE, clients.phone, clients.id",
         (TUNING_SEGMENT,),
+    ).fetchall()
+
+
+def _tuning_partner_choices(db):
+    """Active tuning partners available as subcontract request recipients."""
+    return db.execute(
+        "SELECT clients.id, clients.client_name, clients.phone, clients.token "
+        "FROM clients JOIN client_segments "
+        "ON client_segments.client_id = clients.id "
+        "WHERE client_segments.segment = ? "
+        "AND client_segments.relationship_type = ? "
+        "ORDER BY clients.client_name COLLATE NOCASE, clients.phone, clients.id",
+        (TUNING_SEGMENT, CLIENT_RELATIONSHIP_PARTNER),
     ).fetchall()
 
 
@@ -5909,6 +5924,7 @@ def tuning_index():
         filters_active=filters_active,
         active_filter_count=active_filter_count,
         date_filter_error=date_filter_error,
+        tuning_subcontract_notice=session.pop("tuning_subcontract_notice", None),
         order_statuses=ORDER_STATUSES,
         active_page="tuning", sub_page="orders",
     )
@@ -8162,10 +8178,10 @@ def _render_client_dashboard(
     order_columns = (
         "id, equipment_type, boat_model, boat_registration_number, motor_model, "
         "motor_serial_number, discount_type, discount_value, total, status, "
-        "order_date, created_at"
+        "order_date, created_at, source"
     )
     if is_admin_view:
-        order_columns += ", sale_channel, updated_at, source, source_ref"
+        order_columns += ", sale_channel, updated_at, source_ref"
     order_rows = []
     if not (is_manager_view and client_section == EXCURSION_SEGMENT):
         order_rows = db.execute(
@@ -8210,6 +8226,11 @@ def _render_client_dashboard(
             (o["id"],),
         ).fetchall()
         order = dict(o)
+        order["partner_request_direction"] = (
+            "incoming"
+            if order.get("source") == SUBCONTRACT_REQUEST_SOURCE
+            else "outgoing"
+        )
         order["motors"] = _tuning_order_motors(db, o["id"])
         order["paid_amount"] = paid_amount
         order["remaining"] = remaining
@@ -8227,6 +8248,9 @@ def _render_client_dashboard(
             )
             order["partner_quote_total"] = (
                 order["partner_work_total"] + order["partner_goods_total"]
+            )
+            order["partner_response_ready"] = bool(active_partner_items) and all(
+                item["partner_price"] is not None for item in active_partner_items
             )
             order["partner_quote_ready"] = bool(active_partner_items or goods_items) and all(
                 item["partner_price"] is not None for item in active_partner_items
@@ -8252,6 +8276,21 @@ def _render_client_dashboard(
         remaining_total += remaining
 
     grand_total = sum(o["total"] for o in order_rows)
+    partner_request_view = "outgoing"
+    partner_request_counts = {"incoming": 0, "outgoing": 0}
+    visible_orders = orders
+    if is_tuning_partner:
+        for order in orders:
+            partner_request_counts[order["partner_request_direction"]] += 1
+        requested_view = request.args.get("requests", "").strip()
+        if requested_view in partner_request_counts:
+            partner_request_view = requested_view
+        elif partner_request_counts["incoming"]:
+            partner_request_view = "incoming"
+        visible_orders = [
+            order for order in orders
+            if order["partner_request_direction"] == partner_request_view
+        ]
 
     # Payment URLs are client actions, so the administrative view does not
     # even load them; it exposes only the recorded payment history instead.
@@ -8272,7 +8311,8 @@ def _render_client_dashboard(
             work_photos_by_item[item["id"]] = get_work_item_photos(db, item["id"])
 
     return render_template(
-        "client_dashboard.html", client=client, orders=orders, grand_total=grand_total,
+        "client_dashboard.html", client=client, orders=orders,
+        visible_orders=visible_orders, grand_total=grand_total,
         paid_total=paid_total, remaining_total=remaining_total,
         primary_equipment=(
             tuning_equipment_label(orders[0])
@@ -8291,6 +8331,8 @@ def _render_client_dashboard(
         partner_request_notice=session.pop("partner_request_notice", None),
         partner_price_notice=session.pop("partner_price_notice", None),
         partner_price_error=session.pop("partner_price_error", None),
+        partner_request_view=partner_request_view,
+        partner_request_counts=partner_request_counts,
         open_order_id=request.args.get("open_order", type=int),
         excursion_trips=excursion_trips,
         admin_name=(
@@ -8508,11 +8550,19 @@ def update_tuning_partner_profile(client_id):
     ))
 
 
-def _render_partner_estimate_request(client, errors=None, form_values=None):
+def _render_partner_estimate_request(
+    client=None,
+    errors=None,
+    form_values=None,
+    admin_subcontract=False,
+):
     db = get_db()
     _sync_tuning_boat_profiles(db)
     db.commit()
-    profile = _client_segment_profile(db, client["id"], TUNING_SEGMENT)
+    profile = (
+        _client_segment_profile(db, client["id"], TUNING_SEGMENT)
+        if client is not None else None
+    )
     if profile is not None:
         profile["display_title"] = (
             profile["partner_title"] or DEFAULT_TUNING_PARTNER_TITLE
@@ -8522,6 +8572,10 @@ def _render_partner_estimate_request(client, errors=None, form_values=None):
         "partner_estimate_request.html",
         client=client,
         partner_profile=profile,
+        admin_subcontract=admin_subcontract,
+        partner_choices=_tuning_partner_choices(db) if admin_subcontract else [],
+        active_page="tuning",
+        sub_page="orders",
         errors=errors,
         form_values=form_values,
         work_names_prefill=(
@@ -8533,6 +8587,104 @@ def _render_partner_estimate_request(client, errors=None, form_values=None):
         boat_model_choices=_tuning_boat_model_choices(db),
         motor_model_choices=_tuning_motor_model_choices(db),
     )
+
+
+def _create_partner_estimate_order(db, client, data, source, source_ref):
+    """Persist either direction of a partner estimate using one safe model."""
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    cursor = db.execute(
+        "INSERT INTO tuning_orders "
+        "(client_id, client_name, equipment_type, boat_model, "
+        "boat_registration_number, motor_model, motor_serial_number, "
+        "sale_channel, phone, discount_pct, discount_type, discount_value, "
+        "subtotal, total, status, order_date, created_at, updated_at, "
+        "source, source_ref) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 'direct', ?, 0, 'percent', 0, "
+        "0, 0, ?, ?, ?, ?, ?, ?)",
+        (
+            client["id"],
+            client["client_name"],
+            data["equipment_type"],
+            data["boat_model"],
+            data["boat_registration_number"],
+            data["motor_model"],
+            data["motor_serial_number"],
+            client["phone"] or "",
+            DEFAULT_ORDER_STATUS,
+            data["order_date"],
+            now,
+            now,
+            source,
+            source_ref,
+        ),
+    )
+    order_id = cursor.lastrowid
+    _replace_tuning_order_motors(
+        db, order_id, data["equipment_type"], data["boat_motors"], now
+    )
+    for item in data["items"]:
+        db.execute(
+            "INSERT INTO tuning_order_items "
+            "(order_id, work_name, cost_price, multiplier, price, "
+            "price_pending, status) VALUES (?, ?, 0, 0, 0, 1, ?)",
+            (order_id, item["work_name"], DEFAULT_WORK_STATUS),
+        )
+    db.execute(
+        "INSERT INTO projects (name, tuning_order_id, created_at) VALUES (?, ?, ?)",
+        (f"Заказ №{order_id}", order_id, now),
+    )
+    _sync_tuning_boat_profiles(db)
+    db.commit()
+    return order_id
+
+
+@app.route("/tuning/subcontract/add", methods=["GET", "POST"])
+@admin_login_required
+def add_tuning_subcontract():
+    db = get_db()
+    if request.method == "GET":
+        return _render_partner_estimate_request(admin_subcontract=True)
+
+    partner_id_raw = request.form.get("partner_id", "").strip()
+    partner = None
+    if partner_id_raw.isdigit():
+        partner = db.execute(
+            "SELECT clients.id, clients.client_name, clients.phone, clients.token "
+            "FROM clients JOIN client_segments "
+            "ON client_segments.client_id = clients.id "
+            "WHERE clients.id = ? AND client_segments.segment = ? "
+            "AND client_segments.relationship_type = ?",
+            (
+                int(partner_id_raw),
+                TUNING_SEGMENT,
+                CLIENT_RELATIONSHIP_PARTNER,
+            ),
+        ).fetchone()
+
+    errors = []
+    data = None
+    if partner is None:
+        errors.append("Выберите партнёра тюнинг-центра из списка.")
+    else:
+        errors, data = _process_partner_estimate_request(request.form, partner)
+    if errors:
+        return _render_partner_estimate_request(
+            errors=errors,
+            form_values=request.form,
+            admin_subcontract=True,
+        ), 400
+
+    order_id = _create_partner_estimate_order(
+        db,
+        partner,
+        data,
+        SUBCONTRACT_REQUEST_SOURCE,
+        f"subcontract:{partner['id']}:{uuid.uuid4().hex}",
+    )
+    session["tuning_subcontract_notice"] = (
+        f"Субподряд №{order_id} отправлен партнёру {partner['client_name']}."
+    )
+    return redirect(url_for("tuning_index"))
 
 
 @app.route("/client/<token>/estimate-request", methods=["GET", "POST"])
@@ -8560,53 +8712,19 @@ def partner_estimate_request(token):
             client, errors=errors, form_values=request.form
         ), 400
 
-    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    cursor = db.execute(
-        "INSERT INTO tuning_orders "
-        "(client_id, client_name, equipment_type, boat_model, "
-        "boat_registration_number, motor_model, motor_serial_number, "
-        "sale_channel, phone, discount_pct, discount_type, discount_value, "
-        "subtotal, total, status, order_date, created_at, updated_at, "
-        "source, source_ref) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, 'direct', ?, 0, 'percent', 0, "
-        "0, 0, ?, ?, ?, ?, 'partner_request', ?)",
-        (
-            client["id"],
-            client["client_name"],
-            data["equipment_type"],
-            data["boat_model"],
-            data["boat_registration_number"],
-            data["motor_model"],
-            data["motor_serial_number"],
-            client["phone"] or "",
-            DEFAULT_ORDER_STATUS,
-            data["order_date"],
-            now,
-            now,
-            f"partner:{client['id']}:{uuid.uuid4().hex}",
-        ),
+    order_id = _create_partner_estimate_order(
+        db,
+        client,
+        data,
+        PARTNER_REQUEST_SOURCE,
+        f"partner:{client['id']}:{uuid.uuid4().hex}",
     )
-    order_id = cursor.lastrowid
-    _replace_tuning_order_motors(
-        db, order_id, data["equipment_type"], data["boat_motors"], now
-    )
-    for item in data["items"]:
-        db.execute(
-            "INSERT INTO tuning_order_items "
-            "(order_id, work_name, cost_price, multiplier, price, "
-            "price_pending, status) VALUES (?, ?, 0, 0, 0, 1, ?)",
-            (order_id, item["work_name"], DEFAULT_WORK_STATUS),
-        )
-    db.execute(
-        "INSERT INTO projects (name, tuning_order_id, created_at) VALUES (?, ?, ?)",
-        (f"Заказ №{order_id}", order_id, now),
-    )
-    _sync_tuning_boat_profiles(db)
-    db.commit()
     session["partner_request_notice"] = (
         f"Заявка №{order_id} отправлена. Мы добавим расчёт в этот кабинет."
     )
-    return redirect(url_for("client_dashboard", token=token) + "#orders")
+    return redirect(
+        url_for("client_dashboard", token=token, requests="outgoing") + "#orders"
+    )
 
 
 def _partner_order_for_token(db, token, order_id):
@@ -8621,9 +8739,15 @@ def _partner_order_for_token(db, token, order_id):
     ).fetchone()
 
 
-def _partner_order_cabinet_url(token, order_id):
+def _partner_order_cabinet_url(token, order_id, source=None):
+    direction = (
+        "incoming" if source == SUBCONTRACT_REQUEST_SOURCE else "outgoing"
+    )
     return url_for(
-        "client_dashboard", token=token, open_order=order_id
+        "client_dashboard",
+        token=token,
+        open_order=order_id,
+        requests=direction,
     ) + f"#order-{order_id}"
 
 
@@ -8636,6 +8760,7 @@ def update_partner_open_price(token, order_id, item_id):
     order = _partner_order_for_token(db, token, order_id)
     if order is None:
         return redirect(url_for("home"))
+    is_subcontract = order["source"] == SUBCONTRACT_REQUEST_SOURCE
     item = db.execute(
         "SELECT id, price, price_pending, status FROM tuning_order_items "
         "WHERE id = ? AND order_id = ?",
@@ -8643,7 +8768,7 @@ def update_partner_open_price(token, order_id, item_id):
     ).fetchone()
     if item is None or item["status"] == "removed":
         session["partner_price_error"] = "Работа для изменения цены не найдена."
-        return redirect(_partner_order_cabinet_url(token, order_id))
+        return redirect(_partner_order_cabinet_url(token, order_id, order["source"]))
 
     markup_raw = request.form.get("markup", "").strip()
     open_price = None
@@ -8653,7 +8778,7 @@ def update_partner_open_price(token, order_id, item_id):
             session["partner_price_error"] = (
                 "Сначала дождитесь закрытой цены от тюнинг-центра."
             )
-            return redirect(_partner_order_cabinet_url(token, order_id))
+            return redirect(_partner_order_cabinet_url(token, order_id, order["source"]))
         open_price = round(
             float(item["price"]) * (1 + int(markup_raw) / 100), 2
         )
@@ -8674,9 +8799,11 @@ def update_partner_open_price(token, order_id, item_id):
                 open_price = None
             if open_price is None or open_price < 0 or open_price > 999999999.99:
                 session["partner_price_error"] = (
-                    "Укажите открытую цену от 0 до 999 999 999,99 ₽."
+                    "Укажите стоимость партнёра от 0 до 999 999 999,99 ₽."
+                    if is_subcontract
+                    else "Укажите открытую цену от 0 до 999 999 999,99 ₽."
                 )
-                return redirect(_partner_order_cabinet_url(token, order_id))
+                return redirect(_partner_order_cabinet_url(token, order_id, order["source"]))
 
     db.execute(
         "UPDATE tuning_order_items SET partner_price = ? "
@@ -8685,10 +8812,11 @@ def update_partner_open_price(token, order_id, item_id):
     )
     db.commit()
     session["partner_price_notice"] = (
-        "Открытая цена очищена."
-        if clearing_price else "Открытая цена сохранена."
+        ("Расчёт партнёра очищен." if clearing_price else "Расчёт партнёра сохранён.")
+        if is_subcontract
+        else ("Открытая цена очищена." if clearing_price else "Открытая цена сохранена.")
     )
-    return redirect(_partner_order_cabinet_url(token, order_id))
+    return redirect(_partner_order_cabinet_url(token, order_id, order["source"]))
 
 
 @app.route("/client/<token>/orders/<int:order_id>/estimate.pdf")

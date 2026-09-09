@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Тюнинг-центр</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260909-subcontracts">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
 <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
@@ -253,10 +253,15 @@
 
   <section class="panel">
     <h2>Статусы работ</h2>
+    {% if edit_order.source == 'subcontract_request' %}
+    <div class="partner-price-lock" role="note">
+      Это субподряд для {{ edit_order.client_name }}. Ответ партнёра отображается в колонке «Расчёт партнёра».
+    </div>
+    {% endif %}
     {% if items_prefill %}
     <div class="table-scroll">
       <table class="records">
-        <thead><tr><th>Работа</th><th>Цена, ₽</th><th>Статус</th><th>Задача</th><th>Фото</th></tr></thead>
+        <thead><tr><th>Работа</th><th>Цена, ₽</th>{% if edit_order.source == 'subcontract_request' %}<th>Расчёт партнёра, ₽</th>{% endif %}<th>Статус</th><th>Задача</th><th>Фото</th></tr></thead>
         <tbody>
           {% for item in items_prefill %}
           <tr class="{{ 'row-removed' if item.status == 'removed' }}">
@@ -264,6 +269,11 @@
             <td class="amount{{ ' work-price-pending' if item.price_pending }}">
               {{ (item.price|money ~ ' ₽') if not item.price_pending else 'Ждёт расчёта' }}
             </td>
+            {% if edit_order.source == 'subcontract_request' %}
+            <td class="amount{{ ' work-price-pending' if item.partner_price is none }}">
+              {{ (item.partner_price|money ~ ' ₽') if item.partner_price is not none else 'Ожидаем партнёра' }}
+            </td>
+            {% endif %}
             <td>
               <form action="{{ url_for('set_tuning_item_status', order_id=edit_order.id, item_id=item.id) }}"
                     method="post" class="status-select-form">

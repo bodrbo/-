@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Новая заявка на расчёт</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<title>{{ 'Новый субподряд' if admin_subcontract else 'Новая заявка на расчёт' }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260909-subcontracts">
 <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
 <meta name="theme-color" content="#123848">
 </head>
-<body class="client-dashboard-body client-dashboard-partner partner-request-page" data-hide-software-request-widget>
+<body class="{{ 'partner-request-admin' if admin_subcontract else 'client-dashboard-body client-dashboard-partner' }} partner-request-page"{% if not admin_subcontract %} data-hide-software-request-widget{% endif %}>
 
 <div class="page-loader" id="pageLoader" aria-hidden="true">
   <div class="loader-body">
@@ -20,24 +20,43 @@
       </g>
       <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
     </svg>
-    <span class="loader-label">Отправляем заявку…</span>
+    <span class="loader-label">{{ 'Создаём субподряд…' if admin_subcontract else 'Отправляем заявку…' }}</span>
   </div>
 </div>
 
 <header class="topbar">
   <div class="topbar-inner">
+    {% if admin_subcontract %}
+    <div class="topbar-top-row">
+      <div class="brand">
+        <a href="{{ url_for('home') }}">
+          <img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo">
+        </a>
+      </div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>
+      </button>
+    </div>
+    {% include '_admin_main_nav.html' %}
+    <div class="title-block"><h1>Новый субподряд</h1></div>
+    <div class="topbar-actions">
+      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
+    </div>
+    {% else %}
     <div class="brand">
       <a href="{{ url_for('client_dashboard', token=client.token) }}">
         <img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo brand-logo-large">
       </a>
     </div>
     <div class="title-block"><h1>Заявка на расчёт</h1></div>
+    {% endif %}
   </div>
 </header>
 
 <main class="wrap partner-request-wrap">
-  <a class="partner-request-back" href="{{ url_for('client_dashboard', token=client.token) }}">← Вернуться в кабинет</a>
+  <a class="partner-request-back" href="{{ url_for('tuning_index') if admin_subcontract else url_for('client_dashboard', token=client.token) }}">← {{ 'Вернуться к заказам' if admin_subcontract else 'Вернуться в кабинет' }}</a>
 
+  {% if not admin_subcontract %}
   <section class="partner-request-intro">
     <div class="partner-logo-frame partner-logo-frame-small">
       {% if partner_profile.logo_url %}
@@ -52,6 +71,7 @@
       <p>{{ partner_profile.display_title }}</p>
     </div>
   </section>
+  {% endif %}
 
   {% if errors %}
   <div class="alert" role="alert">
@@ -61,9 +81,31 @@
   {% endif %}
 
   <form method="post" class="partner-request-form" id="partnerRequestForm">
-    <section class="panel partner-request-section">
+    {% if admin_subcontract %}
+    <section class="panel partner-request-section partner-recipient-section">
       <div class="partner-request-section-heading">
         <span>01</span>
+        <div><h2>Партнёр-исполнитель</h2><p>Выберите тюнинг-центр, которому отправляем заявку на расчёт.</p></div>
+      </div>
+      <div class="partner-request-fields partner-recipient-fields">
+        <div class="field">
+          <label for="subcontract_partner_id">Партнёр</label>
+          <select id="subcontract_partner_id" name="partner_id" required>
+            <option value="">Выберите партнёра тюнинг-центра</option>
+            {% for partner in partner_choices %}
+            <option value="{{ partner.id }}" {{ 'selected' if form_values and form_values.get('partner_id') == partner.id|string }}>
+              {{ partner.client_name }}{% if partner.phone %} · {{ partner.phone }}{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+          {% if not partner_choices %}<small>Сначала добавьте контакт в подраздел «Партнёры тюнинга».</small>{% endif %}
+        </div>
+      </div>
+    </section>
+    {% endif %}
+    <section class="panel partner-request-section">
+      <div class="partner-request-section-heading">
+        <span>{{ '02' if admin_subcontract else '01' }}</span>
         <div><h2>Техника</h2><p>Выберите тип и укажите модель, которую нужно рассчитать.</p></div>
       </div>
 
@@ -122,8 +164,8 @@
 
     <section class="panel partner-request-section">
       <div class="partner-request-section-heading">
-        <span>02</span>
-        <div><h2>Работы для расчёта</h2><p>Опишите каждую работу отдельной строкой. Стоимость назначит администратор.</p></div>
+        <span>{{ '03' if admin_subcontract else '02' }}</span>
+        <div><h2>Работы для расчёта</h2><p>Опишите каждую работу отдельной строкой. {{ 'Стоимость укажет выбранный партнёр.' if admin_subcontract else 'Стоимость назначит администратор.' }}</p></div>
       </div>
       <div class="partner-price-lock" role="note">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4" y="8" width="12" height="9" rx="2"/><path d="M7 8V6a3 3 0 016 0v2"/></svg>
@@ -141,8 +183,13 @@
     </section>
 
     <div class="partner-request-submitbar">
+      {% if admin_subcontract %}
+      <p><strong>Субподряд</strong><br><span>После создания он появится во входящих заявках выбранного партнёра.</span></p>
+      <button type="submit" {{ 'disabled' if not partner_choices }}>Отправить партнёру</button>
+      {% else %}
       <p><strong>Клиент:</strong> {{ client.client_name }}<br><span>После отправки заявку можно будет открыть в кабинете.</span></p>
       <button type="submit">Отправить на расчёт</button>
+      {% endif %}
     </div>
   </form>
 </main>

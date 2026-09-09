@@ -9324,6 +9324,61 @@ button.captain-command-alert:hover {
 .partner-orders-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
 .partner-orders-heading h2 { margin: 0; }
 .partner-orders-heading .btn-secondary { margin: 0; }
+.partner-request-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0 0 18px;
+  padding: 5px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 10px;
+  background: var(--paper-alt);
+}
+.partner-request-tabs a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  gap: 9px;
+  padding: 8px 12px;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.partner-request-tabs a:hover { color: var(--partner-deep); }
+.partner-request-tabs a.active {
+  background: var(--paper);
+  color: var(--partner-deep);
+  box-shadow: 0 2px 9px rgba(15, 42, 53, .09);
+}
+.partner-request-tabs strong {
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 12px;
+  background: rgba(52, 152, 219, .13);
+  color: var(--team-action);
+  font-family: 'PT Mono', monospace;
+  font-size: 10px;
+}
+.partner-flow-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 4px 8px;
+  border: 1px solid rgba(52, 152, 219, .28);
+  border-radius: 7px;
+  background: #edf6fc;
+  color: #245b78;
+  font-family: 'PT Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
 .partner-totals-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .partner-open-price-cell { min-width: 190px; }
 .partner-open-price-form { position: relative; width: 190px; margin: 0; }
@@ -9580,6 +9635,8 @@ button.partner-open-price-save svg {
 .partner-request-fields input,
 .partner-request-fields textarea { width: 100%; }
 .partner-request-fields .field small { color: var(--muted); font-size: 10px; }
+.partner-recipient-fields { grid-template-columns: 1fr; }
+.partner-recipient-fields select { width: 100%; min-height: 44px; }
 .partner-motors-block { grid-column: 1 / -1; padding-top: 4px; }
 .partner-repeatable-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .partner-repeatable-heading h3 { margin: 0; font-size: 13px; }
@@ -9629,6 +9686,18 @@ button.partner-open-price-save svg {
 .partner-request-submitbar p span { color: var(--muted); }
 .partner-request-submitbar button { min-height: 44px; margin: 0; white-space: nowrap; }
 
+.tuning-orders-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.tuning-orders-heading h2 { margin: 0; }
+.tuning-orders-actions { display: flex; align-items: center; gap: 8px; }
+.tuning-orders-actions .btn-add,
+.tuning-orders-actions .btn-secondary { margin: 0; white-space: nowrap; }
+
 @media (max-width: 760px) {
   .partner-identity-card { grid-template-columns: auto minmax(0, 1fr); gap: 17px; padding: 20px; }
   .partner-request-cta { grid-column: 1 / -1; width: 100%; }
@@ -9653,6 +9722,11 @@ button.partner-open-price-save svg {
   .partner-title { font-size: 11px; }
   .partner-orders-heading { align-items: stretch; flex-direction: column; }
   .partner-orders-heading .btn-secondary { min-height: 42px; text-align: center; }
+  .partner-request-tabs a { padding-inline: 7px; font-size: 10.5px; }
+  .tuning-orders-heading { align-items: stretch; flex-direction: column; }
+  .tuning-orders-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .tuning-orders-actions .btn-add,
+  .tuning-orders-actions .btn-secondary { display: grid; place-items: center; min-height: 42px; text-align: center; }
   .partner-quote-totals { grid-template-columns: 1fr; }
   .partner-quote-totals > div,
   .partner-quote-totals > div:nth-child(2n),
