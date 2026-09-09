@@ -8192,7 +8192,7 @@ button.captain-command-alert:hover {
 }
 
 @media (max-width: 700px) {
-  .team-dashboard-body.is-captain { padding-bottom: 78px; }
+  .team-dashboard-body.has-mobile-nav { padding-bottom: 78px; }
   .team-topbar { padding: 10px 12px; }
   .team-topbar .topbar-inner { flex-flow: row nowrap; align-items: center; gap: 12px; }
   .team-topbar .brand-logo { height: 35px; }

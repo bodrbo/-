@@ -185,12 +185,12 @@
           {% else %}
           <span class="connection-badge"><i></i> Нет связи</span>
           {% endif %}
-          {% if employee.account_id %}
           <form action="{{ url_for('employees.reset_password', employee_id=employee.id) }}" method="post"
-                onsubmit='return confirm({{ ("Выпустить новый пароль для " ~ employee.name ~ "? Старый пароль сразу перестанет работать.")|tojson }});'>
-            <button type="submit" class="employee-secondary-btn" title="Выпустить новый пароль">Новый пароль</button>
+                onsubmit='return confirm({{ (("Выпустить новый пароль для " ~ employee.name ~ "? Старый пароль сразу перестанет работать.") if employee.account_id else ("Создать личный кабинет для " ~ employee.name ~ "?") )|tojson }});'>
+            <button type="submit" class="employee-secondary-btn" title="{{ 'Выпустить новый пароль' if employee.account_id else 'Создать личный кабинет' }}">
+              {{ 'Новый пароль' if employee.account_id else 'Создать кабинет' }}
+            </button>
           </form>
-          {% endif %}
           <form action="{{ url_for('employees.delete_employee', employee_id=employee.id) }}" method="post" class="row-actions"
                 onsubmit='return confirm({{ ("Удалить " ~ employee.name ~ " из активного состава? Личный кабинет и Telegram будут отключены, история работ сохранится.")|tojson }});'>
             <button type="submit" class="icon-btn danger" title="Удалить сотрудника" aria-label="Удалить сотрудника {{ employee.name }}">

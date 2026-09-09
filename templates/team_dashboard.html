@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{ 'Кабинет капитана' if is_captain else 'Личный кабинет сотрудника' }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260829-captain-dashboard">
+<title>{{ dashboard_title }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260909-team-capabilities">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
 <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
@@ -14,7 +14,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Боцман">
 </head>
-<body class="team-dashboard-body{{ ' is-captain' if is_captain }}">
+<body class="team-dashboard-body has-mobile-nav{{ ' is-captain' if can_access_fleet }}">
 
 <div class="page-loader" id="pageLoader" aria-hidden="true">
   <div class="loader-body">
@@ -49,7 +49,7 @@
       <a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a>
     </div>
     <div class="title-block">
-      <h1>{{ 'Кабинет капитана' if is_captain else 'Личный кабинет сотрудника' }}</h1>
+      <h1>{{ dashboard_title }}</h1>
     </div>
   </div>
 </header>
@@ -76,7 +76,7 @@
     </form>
   </div>
 
-  {% if is_captain %}
+  {% if can_access_fleet %}
   <details id="captain-fleet" class="panel collapsible-panel captain-fleet-panel"{{ ' open' if fleet_open }}>
     <summary>
       <span>Флот</span>
@@ -280,6 +280,9 @@
     </div>
   </details>
 
+  {% endif %}
+
+  {% if can_access_documents %}
   <details id="team-documents" class="panel collapsible-panel"{{ ' open' if documents_open }}>
     <summary>
       <span>Мои документы</span>
@@ -303,7 +306,7 @@
     </summary>
     <div class="collapsible-body">
       <form action="{{ url_for('team_dashboard') }}" method="get" class="filter-form">
-        {% if is_captain %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
+        {% if can_access_fleet %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
         <input type="hidden" name="section" value="income">
         <div class="field">
           <label for="week">Неделя</label>
@@ -418,12 +421,12 @@
         {% if task.assignment_status == 'pending' %}
         <div class="task-card-actions">
           <form action="{{ url_for('team_task_respond' if task.kind == 'defect' else 'team_tuning_task_respond', assignment_id=task.id) }}" method="post">
-            {% if is_captain %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
+            {% if can_access_fleet %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
             <input type="hidden" name="response" value="accepted">
             <button type="submit" class="btn-accept">Принять</button>
           </form>
           <form action="{{ url_for('team_task_respond' if task.kind == 'defect' else 'team_tuning_task_respond', assignment_id=task.id) }}" method="post">
-            {% if is_captain %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
+            {% if can_access_fleet %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
             <input type="hidden" name="response" value="rejected">
             <button type="submit" class="btn-reject">Отклонить</button>
           </form>
@@ -436,7 +439,7 @@
           </span>
           <form action="{{ url_for('team_task_set_status', assignment_id=task.id) }}"
                 method="post" class="status-select-form">
-            {% if is_captain %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
+            {% if can_access_fleet %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
             <select name="status" onchange="this.form.submit()">
               {% for s in defect_statuses %}
               <option value="{{ s.value }}" {{ 'selected' if task.defect_status == s.value }}>{{ s.label }}</option>
@@ -449,7 +452,7 @@
           </span>
           <form action="{{ url_for('team_tuning_task_set_status', assignment_id=task.id) }}"
                 method="post" class="status-select-form">
-            {% if is_captain %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
+            {% if can_access_fleet %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
             <select name="status" onchange="this.form.submit()">
               {% for s in work_statuses %}
               <option value="{{ s.value }}" {{ 'selected' if task.item_status == s.value }}
@@ -496,7 +499,7 @@
         </svg>
       </button>
       <form id="material-form" method="post" class="assign-modal-card">
-        {% if is_captain %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
+        {% if can_access_fleet %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
         <h3>Списать материалы</h3>
         <div class="field">
           <label for="material-select">Материал и склад</label>
@@ -515,7 +518,9 @@
       </form>
     </div>
   </div>
+  {% endif %}
 
+  {% if can_request_supply %}
   <details id="team-supply" class="panel collapsible-panel"{{ ' open' if supply_open }}>
     <summary>
       <span>Заявки на снабжение</span>
@@ -556,7 +561,7 @@
         </svg>
       </button>
       <form id="supply-request-form" method="post" action="{{ url_for('team_create_supply_request') }}" class="assign-modal-card">
-        {% if is_captain %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
+        {% if can_access_fleet %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
         <h3>Заявка на особое снабжение</h3>
         <div id="supply-request-container">
           {{ supply_request_row() }}
@@ -581,7 +586,7 @@
   </div>
   {% endif %}
 
-  {% if is_captain %}
+  {% if can_access_fleet or can_access_documents %}
   <div id="photo-modal" class="photo-modal hidden" onclick="if (event.target === this) closePhotoModal();">
     <div class="photo-modal-inner">
       <button type="button" class="photo-modal-close" onclick="closePhotoModal()" aria-label="Закрыть">
@@ -619,12 +624,13 @@
 
 </main>
 
-{% if is_captain %}
 <nav class="team-mobile-nav" aria-label="Разделы личного кабинета">
+  {% if can_access_fleet %}
   <a href="#captain-fleet" data-dashboard-target>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 14l3 5h12l3-5-9-4-9 4zM7 14V7h7l3 5"/></svg>
     <span>Флот</span>
   </a>
+  {% endif %}
   {% if can_have_tasks %}
   <a href="#team-tasks" data-dashboard-target>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4h8M9 3v3m6-3v3M6 5.5h12a1.5 1.5 0 011.5 1.5v13H4.5V7A1.5 1.5 0 016 5.5z"/><path d="M8 12l2 2 5-5"/></svg>
@@ -635,14 +641,31 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16v11H4zM7 7V5h10v2M8 12h8M8 15h5"/></svg>
     <span>Доход</span>
   </a>
+  {% if can_request_supply and not can_access_fleet %}
+  <a href="#team-supply" data-dashboard-target>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7.5h16v12H4zM8 7.5V5h8v2.5M8 12h8M8 16h5"/></svg>
+    <span>Снабжение</span>
+  </a>
+  {% endif %}
+  {% if can_access_documents %}
   <a href="#team-documents" data-dashboard-target>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v5h4M9 13h6M9 17h6"/></svg>
     <span>Документы</span>
   </a>
+  {% endif %}
 </nav>
-{% endif %}
 
-{% if can_have_tasks %}
+{# Keep dashboard anchors useful on mobile for every capability combination. #}
+<script>
+document.querySelectorAll('[data-dashboard-target]').forEach(function (link) {
+  link.addEventListener('click', function () {
+    var target = document.querySelector(link.getAttribute('href'));
+    if (target && target.tagName === 'DETAILS') target.open = true;
+  });
+});
+</script>
+
+{% if can_have_tasks or can_request_supply %}
 <script>
 function openMaterialModal(actionUrl) {
   document.getElementById('material-form').action = actionUrl;
@@ -695,7 +718,7 @@ document.addEventListener('keydown', function (e) {
 </script>
 {% endif %}
 
-{% if is_captain %}
+{% if can_access_fleet or can_access_documents %}
 <script>
 function openCaptainSection(sectionId) {
   var section = document.getElementById(sectionId);
@@ -714,13 +737,6 @@ function openCaptainDefectForm() {
     if (field) field.focus({preventScroll: true});
   });
 }
-
-document.querySelectorAll('[data-dashboard-target]').forEach(function (link) {
-  link.addEventListener('click', function () {
-    var target = document.querySelector(link.getAttribute('href'));
-    if (target && target.tagName === 'DETAILS') target.open = true;
-  });
-});
 
 // Images reuse the existing photo modal (openPhotoModal below); a PDF can't
 // go in an <img>, so it gets its own tiny iframe-based modal instead — no
@@ -803,7 +819,7 @@ document.addEventListener('keydown', function (e) {
 </script>
 {% endif %}
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
-{% if is_captain %}<script src="{{ url_for('static', filename='offline.js') }}"></script>{% endif %}
+{% if can_access_fleet %}<script src="{{ url_for('static', filename='offline.js') }}"></script>{% endif %}
 
 </body>
 </html>

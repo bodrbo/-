@@ -133,6 +133,18 @@ def get_team_account(db, employee_id):
     ).fetchone()
 
 
+def create_team_account(
+    db, employee_id, employee_name, username, password_hash, created_at
+):
+    db.execute(
+        "INSERT INTO team_accounts "
+        "(employee_id, employee_name, username, password_hash, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (employee_id, employee_name, username, password_hash, created_at),
+    )
+    db.commit()
+
+
 def count_open_assignments(db, employee_name):
     query = (
         "SELECT "

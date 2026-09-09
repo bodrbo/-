@@ -223,22 +223,30 @@ def reset_employee_password(db, employee_id):
     if employee is None:
         return False, "Сотрудник не найден.", None
     account = repository.get_team_account(db, employee_id)
-    if account is None:
-        return False, "У сотрудника нет личного кабинета.", None
-
     password = _generate_password()
-    repository.update_team_password(
-        db,
-        employee_id,
-        generate_password_hash(password, method="pbkdf2:sha256"),
-    )
+    password_hash = generate_password_hash(password, method="pbkdf2:sha256")
+    if account is None:
+        username = _unique_login(db, employee["name"])
+        repository.create_team_account(
+            db,
+            employee_id,
+            employee["name"],
+            username,
+            password_hash,
+            current_timestamp(),
+        )
+        message = f"Личный кабинет для {employee['name']} создан."
+    else:
+        username = account["username"]
+        repository.update_team_password(db, employee_id, password_hash)
+        message = f"Новый пароль для {employee['name']} создан."
     credentials = {
         "employee_id": employee_id,
         "employee_name": employee["name"],
-        "username": account["username"],
+        "username": username,
         "password": password,
     }
-    return True, f"Новый пароль для {employee['name']} создан.", credentials
+    return True, message, credentials
 
 
 def delete_employee(db, employee_id):

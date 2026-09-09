@@ -62,6 +62,14 @@ from modules.fleet.services import (
 from integrations.telegram import fetch_recent_contacts as fetch_recent_telegram_contacts
 from integrations.tripster import fetch_orders as fetch_tripster_orders
 from modules.employees import create_employees_blueprint
+from modules.employees.capabilities import (
+    DOCUMENTS as TEAM_DOCUMENTS,
+    FLEET as TEAM_FLEET,
+    SUPPLY as TEAM_SUPPLY,
+    TASKS as TEAM_TASKS,
+    dashboard_capabilities as _dashboard_capabilities,
+    dashboard_title as _dashboard_title,
+)
 from modules.employees.constants import (
     ADMIN_POSITION,
     CUSTOMER_MANAGER_POSITION,
@@ -10927,6 +10935,19 @@ def _employee_has_position(db, employee_name, position):
     ).fetchone() is not None
 
 
+def _employee_position_names(db, employee_name):
+    return [
+        row["position"]
+        for row in db.execute(
+            "SELECT employee_positions.position FROM employees "
+            "JOIN employee_positions ON employee_positions.employee_id = employees.id "
+            "WHERE employees.name = ? AND employees.deleted_at IS NULL "
+            "ORDER BY employee_positions.position",
+            (employee_name,),
+        ).fetchall()
+    ]
+
+
 def _employees_with_any_position(db, positions):
     placeholders = ",".join("?" * len(positions))
     rows = db.execute(
@@ -11053,6 +11074,12 @@ def team_dashboard():
         return redirect(url_for("schedule.index"))
     employee_name = session.get("team_employee_name")
     active_section = request.args.get("section", "").strip()
+    employee_positions = _employee_position_names(db, employee_name)
+    capabilities = _dashboard_capabilities(employee_positions)
+    can_access_fleet = TEAM_FLEET in capabilities
+    can_access_documents = TEAM_DOCUMENTS in capabilities
+    can_have_tasks = TEAM_TASKS in capabilities
+    can_request_supply = TEAM_SUPPLY in capabilities
 
     weeks, current_monday = build_week_options(db)
     selected_week = request.args.get("week", current_monday.isoformat())
@@ -11090,8 +11117,6 @@ def team_dashboard():
             (employee_name, selected_week),
         ).fetchone() is not None
 
-    is_captain = _employee_has_position(db, employee_name, "Капитан")
-
     # Fleet workspace — one selected boat drives its checklists, documents
     # and defect lists. Only captains see it.
     boat_index = 0
@@ -11101,7 +11126,7 @@ def team_dashboard():
     boat_archived_defects = []
     fuel = None
     diploma_url = None
-    if is_captain:
+    if can_access_fleet:
         try:
             boat_index = int(request.args.get("boat_index", "0"))
         except ValueError:
@@ -11126,10 +11151,6 @@ def team_dashboard():
     # has been handed as paid work. Anyone eligible to be assigned one sees
     # the module, whether or not they currently have any (matches the other
     # modules always showing, just possibly empty).
-    can_have_tasks = any(
-        _employee_has_position(db, employee_name, p)
-        for p in set(DEFECT_ASSIGNABLE_POSITIONS) | set(TUNING_ASSIGNABLE_POSITIONS)
-    )
     my_tasks = []
     if can_have_tasks:
         defect_tasks = db.execute(
@@ -11197,7 +11218,7 @@ def team_dashboard():
     # admin in /supply/requests show up here on next load, since both sides
     # read the same supply_requests row.
     my_supply_requests = []
-    if can_have_tasks:
+    if can_request_supply:
         my_supply_requests = []
         for r in db.execute(
             "SELECT * FROM supply_requests WHERE employee_name = ? ORDER BY created_at DESC, id DESC",
@@ -11220,7 +11241,10 @@ def team_dashboard():
         selected_week=selected_week,
         entries=entries,
         total=total,
-        is_captain=is_captain,
+        dashboard_title=_dashboard_title(employee_positions),
+        can_access_fleet=can_access_fleet,
+        can_access_documents=can_access_documents,
+        can_request_supply=can_request_supply,
         is_paid=is_paid,
         avatar_url=find_avatar_url(session.get("team_username")),
         boats=BOATS, boat_index=boat_index, selected_boat=selected_boat,
@@ -11232,10 +11256,10 @@ def team_dashboard():
             active_section == "income"
             or ("week" in request.args and "boat_index" not in request.args)
         ),
-        fleet_open=is_captain and active_section not in {
+        fleet_open=can_access_fleet and active_section not in {
             "income", "tasks", "supply", "documents",
         },
-        documents_open=active_section == "documents",
+        documents_open=can_access_documents and active_section == "documents",
         tasks_open=active_section == "tasks",
         supply_open=active_section == "supply",
         can_have_tasks=can_have_tasks, my_tasks=my_tasks, defect_statuses=DEFECT_STATUSES,
