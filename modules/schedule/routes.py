@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, redirect, render_template, request, sessio
 
 from modules.excursion_services import repository as service_repository
 
+from . import notifications as schedule_notifications
 from . import repository, services, tripster_services
 from .constants import CREW_ROLES, ITEM_KINDS
 
@@ -19,6 +20,7 @@ def create_schedule_blueprint(
     boats,
     boat_colors,
     avatar_url,
+    employee_notifier=None,
     tripster_fetcher=None,
     tripster_configured=lambda: False,
     cron_secret=None,
@@ -35,6 +37,11 @@ def create_schedule_blueprint(
             "message": message,
             "type": "success" if success else "error",
         }
+
+    def notify_item_changes(before, after):
+        return schedule_notifications.notify_item_changes(
+            get_db(), before, after, employee_notifier
+        )
 
     @blueprint.route("/schedule")
     @access_required
@@ -115,9 +122,13 @@ def create_schedule_blueprint(
         day = services.parse_day(request.form.get("trip_date")).isoformat()
         selected_employee = request.form.get("return_employee", "all")
         db = get_db()
-        success, message, _item_id = services.save_item(
+        success, message, item_id = services.save_item(
             db, request.form, boats, service_repository.list_services(db),
         )
+        if success:
+            notify_item_changes(
+                None, schedule_notifications.item_snapshot(db, item_id)
+            )
         set_notice(message, success)
         return redirect_to_day(day, selected_employee)
 
@@ -127,16 +138,22 @@ def create_schedule_blueprint(
         day = services.parse_day(request.form.get("trip_date")).isoformat()
         selected_employee = request.form.get("return_employee", "all")
         db = get_db()
+        before = schedule_notifications.item_snapshot(db, item_id)
         success, message, _saved_id = services.save_item(
             db, request.form, boats, service_repository.list_services(db),
             item_id=item_id,
         )
+        if success:
+            notify_item_changes(
+                before, schedule_notifications.item_snapshot(db, item_id)
+            )
         set_notice(message, success)
         return redirect_to_day(day, selected_employee)
 
     @blueprint.route("/schedule/items/<int:item_id>/delete", methods=["POST"])
     @manage_required
     def delete_item(item_id):
+        before = schedule_notifications.item_snapshot(get_db(), item_id)
         item = repository.get_item(get_db(), item_id)
         day = (
             item["starts_at"][:10]
@@ -144,6 +161,8 @@ def create_schedule_blueprint(
             else services.parse_day(request.form.get("return_date")).isoformat()
         )
         success, message = services.delete_item(get_db(), item_id)
+        if success:
+            notify_item_changes(before, None)
         set_notice(message, success)
         return redirect_to_day(day, request.form.get("return_employee", "all"))
 
@@ -157,7 +176,8 @@ def create_schedule_blueprint(
             return redirect_to_day(day, selected_employee)
         try:
             stats = tripster_services.sync_orders(
-                get_db(), tripster_fetcher, force_full=True
+                get_db(), tripster_fetcher, force_full=True,
+                employee_notifier=employee_notifier,
             )
         except (RuntimeError, ValueError) as error:
             set_notice(f"Не удалось загрузить Tripster: {error}", False)
@@ -180,7 +200,10 @@ def create_schedule_blueprint(
         if not tripster_configured() or tripster_fetcher is None:
             return "tripster not configured", 503
         try:
-            stats = tripster_services.sync_orders(get_db(), tripster_fetcher)
+            stats = tripster_services.sync_orders(
+                get_db(), tripster_fetcher,
+                employee_notifier=employee_notifier,
+            )
         except (RuntimeError, ValueError) as error:
             return f"error: {error}", 502
         return (

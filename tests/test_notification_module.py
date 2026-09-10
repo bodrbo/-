@@ -9,6 +9,10 @@ from modules.notifications import (
     EVENT_TASK_ASSIGNED,
     EVENT_TASK_UNACCEPTED_3H,
     EVENT_TASK_UNACCEPTED_6H,
+    EVENT_SCHEDULE_ASSIGNED,
+    EVENT_SCHEDULE_BOAT_CHANGED,
+    EVENT_SCHEDULE_CANCELLED,
+    EVENT_SCHEDULE_RESCHEDULED,
     EVENT_TUNING_WORK_APPROVED,
     dispatch_notification,
     dispatch_photos,
@@ -83,6 +87,10 @@ class NotificationModuleTestCase(unittest.TestCase):
             EVENT_TASK_ASSIGNED,
             EVENT_TASK_UNACCEPTED_3H,
             EVENT_TASK_UNACCEPTED_6H,
+            EVENT_SCHEDULE_ASSIGNED,
+            EVENT_SCHEDULE_RESCHEDULED,
+            EVENT_SCHEDULE_BOAT_CHANGED,
+            EVENT_SCHEDULE_CANCELLED,
         ):
             self.assertEqual(
                 notification_rule(event).recipient, "assigned_employee"

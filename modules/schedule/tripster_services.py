@@ -8,6 +8,8 @@ from modules.clients.constants import EXCURSION_SEGMENT, TRIPSTER_CHANNEL
 from modules.clients.services import ensure_segment
 from modules.excursion_services import repository as service_repository
 
+from . import notifications as schedule_notifications
+
 
 PAID_STATUS = "paid"
 CANCELLED_STATUS = "cancelled"
@@ -498,7 +500,13 @@ def _apply_catalog_mappings(db, timestamp):
     return matched
 
 
-def sync_orders(db, fetcher, now=None, force_full=False):
+def sync_orders(
+    db,
+    fetcher,
+    now=None,
+    force_full=False,
+    employee_notifier=None,
+):
     """Fetch order deltas and apply paid/cancelled bookings atomically."""
     now = (now or dt.datetime.now()).replace(second=0, microsecond=0)
     timestamp = now.strftime("%Y-%m-%d %H:%M")
@@ -526,6 +534,7 @@ def sync_orders(db, fetcher, now=None, force_full=False):
         "matched": 0,
     }
     affected_item_ids = set()
+    notification_snapshots = {}
     try:
         for payload in payloads:
             order = _normalise_order(payload)
@@ -539,6 +548,13 @@ def sync_orders(db, fetcher, now=None, force_full=False):
             old_item_id = existing["schedule_item_id"] if existing else None
             if old_item_id is not None:
                 affected_item_ids.add(old_item_id)
+                if (
+                    employee_notifier is not None
+                    and old_item_id not in notification_snapshots
+                ):
+                    notification_snapshots[old_item_id] = (
+                        schedule_notifications.item_snapshot(db, old_item_id)
+                    )
 
             schedule_item_id = old_item_id
             if order["status"] == PAID_STATUS and order["event_start"]:
@@ -546,6 +562,14 @@ def sync_orders(db, fetcher, now=None, force_full=False):
                     db, order, timestamp
                 )
                 affected_item_ids.add(schedule_item_id)
+                if (
+                    employee_notifier is not None
+                    and schedule_item_id not in notification_snapshots
+                ):
+                    notification_snapshots[schedule_item_id] = (
+                        None if created
+                        else schedule_notifications.item_snapshot(db, schedule_item_id)
+                    )
                 stats["created" if created else "updated"] += 1
             elif order["status"] == CANCELLED_STATUS:
                 stats["cancelled"] += 1
@@ -602,4 +626,12 @@ def sync_orders(db, fetcher, now=None, force_full=False):
     except Exception:
         db.rollback()
         raise
+    if employee_notifier is not None:
+        for item_id, before in notification_snapshots.items():
+            schedule_notifications.notify_item_changes(
+                db,
+                before,
+                schedule_notifications.item_snapshot(db, item_id),
+                employee_notifier,
+            )
     return stats

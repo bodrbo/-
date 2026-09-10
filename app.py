@@ -4416,6 +4416,9 @@ app.register_blueprint(
         boats=BOATS,
         boat_colors=BOAT_COLORS,
         avatar_url=find_avatar_url,
+        employee_notifier=lambda db, employee_name, text: (
+            send_telegram_notification_to_employee(db, employee_name, text)
+        ),
         tripster_fetcher=lambda updated_after=None: fetch_tripster_orders(
             TRIPSTER_API_TOKEN, updated_after=updated_after
         ),

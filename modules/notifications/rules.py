@@ -16,6 +16,10 @@ EVENT_FLEET_EXTRA_DEFECT = "fleet.extra_defect"
 EVENT_TASK_ASSIGNED = "task.assigned"
 EVENT_TASK_UNACCEPTED_3H = "task.unaccepted_3h"
 EVENT_TASK_UNACCEPTED_6H = "task.unaccepted_6h"
+EVENT_SCHEDULE_ASSIGNED = "schedule.assigned"
+EVENT_SCHEDULE_RESCHEDULED = "schedule.rescheduled"
+EVENT_SCHEDULE_BOAT_CHANGED = "schedule.boat_changed"
+EVENT_SCHEDULE_CANCELLED = "schedule.cancelled"
 
 
 @dataclass(frozen=True)
@@ -76,6 +80,34 @@ NOTIFICATION_RULES = {
         description="Задача не принята через 6 часов после поручения",
         recipient="assigned_employee",
         delay_hours=6,
+    ),
+    EVENT_SCHEDULE_ASSIGNED: NotificationRule(
+        event=EVENT_SCHEDULE_ASSIGNED,
+        positions=(),
+        delivery="immediate",
+        description="Сотрудник назначен на новый рейс",
+        recipient="assigned_employee",
+    ),
+    EVENT_SCHEDULE_RESCHEDULED: NotificationRule(
+        event=EVENT_SCHEDULE_RESCHEDULED,
+        positions=(),
+        delivery="immediate",
+        description="Назначенный сотруднику рейс перенесён",
+        recipient="assigned_employee",
+    ),
+    EVENT_SCHEDULE_BOAT_CHANGED: NotificationRule(
+        event=EVENT_SCHEDULE_BOAT_CHANGED,
+        positions=(),
+        delivery="immediate",
+        description="У назначенного сотруднику рейса изменено судно",
+        recipient="assigned_employee",
+    ),
+    EVENT_SCHEDULE_CANCELLED: NotificationRule(
+        event=EVENT_SCHEDULE_CANCELLED,
+        positions=(),
+        delivery="immediate",
+        description="Назначенный сотруднику рейс отменён",
+        recipient="assigned_employee",
     ),
 }
 

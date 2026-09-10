@@ -348,6 +348,39 @@ class TripsterScheduleImportTests(unittest.TestCase):
         self.assertEqual(segment["segment"], "excursion")
         self.assertEqual(imported_client["acquisition_channel"], "tripster")
 
+    def test_tripster_cancellation_notifies_assigned_employee(self):
+        self.sync([self.order()])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = db.execute(
+                "SELECT id FROM schedule_items WHERE source_ref = 'order:7001'"
+            ).fetchone()["id"]
+            employee = db.execute(
+                "SELECT employees.id, employees.name FROM employees "
+                "JOIN employee_positions ON employee_positions.employee_id = employees.id "
+                "WHERE employees.deleted_at IS NULL AND employee_positions.position "
+                "IN ('Капитан', 'Гид', 'Гид-капитан') LIMIT 1"
+            ).fetchone()
+            db.execute(
+                "INSERT INTO schedule_assignments "
+                "(schedule_item_id, employee_id, employee_name, role, created_at) "
+                "VALUES (?, ?, ?, 'captain', '2026-09-05 12:00')",
+                (item_id, employee["id"], employee["name"]),
+            )
+            db.commit()
+
+        with patch.object(
+            application_module, "send_telegram_notification_to_employee"
+        ) as notifier:
+            response, _fetcher = self.sync([
+                self.order(status="cancelled")
+            ])
+
+        self.assertEqual(response.status_code, 302)
+        notifier.assert_called_once()
+        self.assertEqual(notifier.call_args.args[1], employee["name"])
+        self.assertIn("Рейс отменён", notifier.call_args.args[2])
+
     def test_manual_full_sync_refreshes_guest_count(self):
         self.sync([self.order(persons_count=2)])
         response, fetcher = self.sync([self.order(persons_count=5)])

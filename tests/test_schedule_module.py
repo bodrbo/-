@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+from unittest.mock import patch
 
 from support import application_module
 from modules.schedule.schema import init_schema
@@ -299,6 +300,50 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn("--schedule-card-color: #673ab7", page)
         self.assertIn("--schedule-card-ink: #ffffff", page)
         self.assertIn("Аренда катера", page)
+
+    def test_schedule_routes_notify_on_assignment_change_and_deletion(self):
+        self.login()
+        with patch.object(
+            application_module, "send_telegram_notification_to_employee"
+        ) as notifier:
+            response = self.create_booking()
+        self.assertEqual(response.status_code, 302)
+        notifier.assert_called_once()
+        self.assertEqual(notifier.call_args.args[1], "Даниил Галецкий")
+        self.assertIn("Вам назначен новый рейс", notifier.call_args.args[2])
+
+        with application_module.app.app_context():
+            item_id = application_module.get_db().execute(
+                "SELECT id FROM schedule_items"
+            ).fetchone()["id"]
+
+        with patch.object(
+            application_module, "send_telegram_notification_to_employee"
+        ) as notifier:
+            response = self.client.post(
+                f"/schedule/items/{item_id}",
+                data=self.booking_data(
+                    boat="Ларус",
+                    trip_date="2026-09-06",
+                    start_time="14:00",
+                    end_time="16:30",
+                ),
+            )
+        self.assertEqual(response.status_code, 302)
+        notifier.assert_called_once()
+        self.assertIn("Рейс перенесён", notifier.call_args.args[2])
+        self.assertIn("Судно стало: Ларус", notifier.call_args.args[2])
+
+        with patch.object(
+            application_module, "send_telegram_notification_to_employee"
+        ) as notifier:
+            response = self.client.post(
+                f"/schedule/items/{item_id}/delete",
+                data={"return_date": "2026-09-06", "return_employee": "all"},
+            )
+        self.assertEqual(response.status_code, 302)
+        notifier.assert_called_once()
+        self.assertIn("Рейс отменён", notifier.call_args.args[2])
 
     def test_individual_booking_allows_client_without_phone(self):
         self.login()
