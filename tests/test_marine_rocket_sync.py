@@ -62,6 +62,7 @@ class MarineRocketSyncTests(unittest.TestCase):
             db.execute("DELETE FROM supply_stock")
             db.execute("DELETE FROM supply_products")
             db.execute("DELETE FROM supply_warehouses")
+            db.execute("DELETE FROM supply_external_sync_state")
             db.executemany(
                 "INSERT INTO supply_warehouses (name, address, created_at) VALUES (?, NULL, ?)",
                 (
@@ -80,6 +81,7 @@ class MarineRocketSyncTests(unittest.TestCase):
             db.execute("DELETE FROM supply_stock")
             db.execute("DELETE FROM supply_products")
             db.execute("DELETE FROM supply_warehouses")
+            db.execute("DELETE FROM supply_external_sync_state")
             db.commit()
 
     def test_parser_keeps_only_motor_tree_and_sums_duplicate_locations(self):
@@ -177,6 +179,10 @@ class MarineRocketSyncTests(unittest.TestCase):
         self.assertIn("https://static.marinerocket.ru/mr99.jpg", body)
         self.assertIn("Москва — 5 шт.", body)
 
+        status = self.client.get("/supply/catalog/marine-rocket/status")
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.get_json()["status"], "success")
+
     def test_manual_sync_requires_admin_login(self):
         anonymous = application_module.app.test_client()
         response = anonymous.post("/supply/catalog/marine-rocket/sync")
@@ -197,7 +203,7 @@ class MarineRocketSyncTests(unittest.TestCase):
                 "/internal/cron/sync-marine-rocket?token=marine-test-secret"
             )
         self.assertEqual(response.status_code, 200)
-        self.assertIn("1 motors", response.get_data(as_text=True))
+        self.assertIn("карточек — 1", response.get_data(as_text=True))
 
 
 if __name__ == "__main__":

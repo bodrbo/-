@@ -24,6 +24,7 @@ import secrets
 import sqlite3
 import calendar
 import datetime as dt
+import threading
 from functools import wraps
 from concurrent.futures import ThreadPoolExecutor
 
@@ -63,7 +64,6 @@ from integrations.telegram import fetch_recent_contacts as fetch_recent_telegram
 from integrations.tripster import fetch_orders as fetch_tripster_orders
 from integrations.marine_rocket import (
     DEFAULT_YML_URL as MARINE_ROCKET_DEFAULT_YML_URL,
-    MarineRocketError,
     SOURCE_KEY as MARINE_ROCKET_SOURCE_KEY,
     fetch_yml as fetch_marine_rocket_yml,
     sync_motor_catalog as sync_marine_rocket_motor_catalog,
@@ -2374,6 +2374,18 @@ def init_db():
             rack TEXT,
             spot TEXT,
             UNIQUE(product_id, warehouse_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS supply_external_sync_state (
+            source TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            requested_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT,
+            message TEXT
         )
         """
     )
@@ -13771,6 +13783,103 @@ def _sync_marine_rocket(db):
     return sync_marine_rocket_motor_catalog(db, content)
 
 
+def _marine_rocket_success_message(stats):
+    return (
+        "Marine Rocket обновлён: карточек — {received}, новых — {created}, "
+        "обновлено — {updated}; Москва — {moscow:g} шт., "
+        "Владивосток — {vladivostok:g} шт."
+    ).format(
+        moscow=stats["totals"]["Москва"],
+        vladivostok=stats["totals"]["Владивосток"],
+        **stats
+    )
+
+
+def _run_marine_rocket_sync_job(requested_at):
+    """Run outside the HTTP request so Passenger cannot time out the button."""
+    with app.app_context():
+        db = get_db()
+        started_at = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        db.execute(
+            "UPDATE supply_external_sync_state SET status = 'running', started_at = ?, "
+            "message = ? WHERE source = ? AND requested_at = ?",
+            (started_at, "Загружаем каталог и остатки Marine Rocket…",
+             MARINE_ROCKET_SOURCE_KEY, requested_at),
+        )
+        db.commit()
+        try:
+            stats = _sync_marine_rocket(db)
+        except Exception as error:
+            db.rollback()
+            message = "Не удалось обновить Marine Rocket: {}.".format(error)
+            print(message, file=sys.stderr, flush=True)
+            status = "error"
+        else:
+            message = _marine_rocket_success_message(stats)
+            status = "success"
+        finished_at = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        db.execute(
+            "UPDATE supply_external_sync_state SET status = ?, finished_at = ?, message = ? "
+            "WHERE source = ? AND requested_at = ?",
+            (status, finished_at, message[:1000], MARINE_ROCKET_SOURCE_KEY, requested_at),
+        )
+        db.commit()
+
+
+def _queue_marine_rocket_sync(db):
+    """Queue one job, restarting one abandoned by a Passenger recycle."""
+    now = dt.datetime.now()
+    current = db.execute(
+        "SELECT * FROM supply_external_sync_state WHERE source = ?",
+        (MARINE_ROCKET_SOURCE_KEY,),
+    ).fetchone()
+    if current is not None and current["status"] in ("queued", "running"):
+        try:
+            requested = dt.datetime.strptime(current["requested_at"], "%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError):
+            requested = now - dt.timedelta(hours=1)
+        if now - requested < dt.timedelta(minutes=10):
+            return False
+
+    requested_at = now.strftime("%Y-%m-%d %H:%M:%S")
+    db.execute(
+        "INSERT INTO supply_external_sync_state "
+        "(source, status, requested_at, started_at, finished_at, message) "
+        "VALUES (?, 'queued', ?, NULL, NULL, ?) "
+        "ON CONFLICT(source) DO UPDATE SET status = 'queued', "
+        "requested_at = excluded.requested_at, started_at = NULL, "
+        "finished_at = NULL, message = excluded.message",
+        (MARINE_ROCKET_SOURCE_KEY, requested_at,
+         "Обновление Marine Rocket поставлено в очередь…"),
+    )
+    db.commit()
+    if app.testing:
+        _run_marine_rocket_sync_job(requested_at)
+    else:
+        worker = threading.Thread(
+            target=_run_marine_rocket_sync_job,
+            args=(requested_at,),
+            name="marine-rocket-sync",
+        )
+        worker.daemon = True
+        try:
+            worker.start()
+        except Exception as error:
+            db.execute(
+                "UPDATE supply_external_sync_state SET status = 'error', finished_at = ?, "
+                "message = ? WHERE source = ? AND requested_at = ?",
+                (
+                    dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "Не удалось запустить фоновое обновление: {}".format(error)[:1000],
+                    MARINE_ROCKET_SOURCE_KEY,
+                    requested_at,
+                ),
+            )
+            db.commit()
+            raise
+    return True
+
+
 def _maybe_create_low_stock_request(db, product_id):
     """Call after anything that decreases a product's stock. If the total
     across all warehouses has hit (or dropped below) the product's
@@ -13957,12 +14066,17 @@ def supply_catalog():
         "FROM supply_products WHERE external_source = ?",
         (MARINE_ROCKET_SOURCE_KEY,),
     ).fetchone()
+    marine_rocket_job = db.execute(
+        "SELECT * FROM supply_external_sync_state WHERE source = ?",
+        (MARINE_ROCKET_SOURCE_KEY,),
+    ).fetchone()
     return render_template(
         "supply_catalog.html", active_page="supply", sub_page="catalog",
         products=products, cost_units=SUPPLY_COST_UNITS,
         product_error=session.pop("product_error", None),
         marine_rocket_notice=session.pop("marine_rocket_notice", None),
         marine_rocket_state=marine_rocket_state,
+        marine_rocket_job=marine_rocket_job,
     )
 
 
@@ -13970,26 +14084,39 @@ def supply_catalog():
 @admin_login_required
 def sync_marine_rocket_now():
     try:
-        stats = _sync_marine_rocket(get_db())
-    except (MarineRocketError, requests.RequestException, ValueError) as error:
+        queued = _queue_marine_rocket_sync(get_db())
+    except Exception as error:
+        print(
+            "Could not queue Marine Rocket sync: {}".format(error),
+            file=sys.stderr,
+            flush=True,
+        )
         session["marine_rocket_notice"] = {
             "type": "error",
-            "message": "Не удалось обновить Marine Rocket: {}.".format(error),
+            "message": "Не удалось запустить обновление Marine Rocket: {}.".format(error),
         }
     else:
         session["marine_rocket_notice"] = {
             "type": "success",
             "message": (
-                "Marine Rocket обновлён: карточек — {received}, новых — {created}, "
-                "обновлено — {updated}; Москва — {moscow:g} шт., "
-                "Владивосток — {vladivostok:g} шт."
-            ).format(
-                moscow=stats["totals"]["Москва"],
-                vladivostok=stats["totals"]["Владивосток"],
-                **stats
+                "Обновление Marine Rocket запущено."
+                if queued else "Обновление Marine Rocket уже выполняется."
             ),
         }
     return redirect(url_for("supply_catalog"))
+
+
+@app.route("/supply/catalog/marine-rocket/status")
+@admin_login_required
+def marine_rocket_sync_status():
+    row = get_db().execute(
+        "SELECT status, requested_at, started_at, finished_at, message "
+        "FROM supply_external_sync_state WHERE source = ?",
+        (MARINE_ROCKET_SOURCE_KEY,),
+    ).fetchone()
+    if row is None:
+        return jsonify({"status": "idle", "message": ""})
+    return jsonify(dict(row))
 
 
 @app.route("/supply/catalog/add", methods=["POST"])
@@ -14580,7 +14707,7 @@ def cron_sync_fuel():
     marine_summary = "skipped in test mode"
     if not app.testing:
         try:
-            marine_stats = _sync_marine_rocket(db)
+            marine_queued = _queue_marine_rocket_sync(db)
         except Exception as error:
             # Supplier availability must never prevent payroll/fuel imports.
             print(
@@ -14590,13 +14717,7 @@ def cron_sync_fuel():
             )
             marine_summary = "error: {}".format(error)
         else:
-            marine_summary = (
-                "{received} motors, Moscow {moscow:g}, Vladivostok {vladivostok:g}"
-            ).format(
-                moscow=marine_stats["totals"]["Москва"],
-                vladivostok=marine_stats["totals"]["Владивосток"],
-                **marine_stats
-            )
+            marine_summary = "queued" if marine_queued else "already running"
     reminder_stats = send_due_task_reminders(
         db, send_telegram_notification_to_employee
     )
@@ -14664,18 +14785,16 @@ def cron_sync_marine_rocket():
     if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
         return "forbidden", 403
     try:
-        stats = _sync_marine_rocket(get_db())
-    except (MarineRocketError, requests.RequestException, ValueError) as error:
+        queued = _queue_marine_rocket_sync(get_db())
+    except Exception as error:
         return "error: {}".format(error), 502
-    return (
-        "ok: {received} motors, {created} created, {updated} updated, "
-        "Moscow {moscow:g}, Vladivostok {vladivostok:g}".format(
-            moscow=stats["totals"]["Москва"],
-            vladivostok=stats["totals"]["Владивосток"],
-            **stats
-        ),
-        200,
-    )
+    state = get_db().execute(
+        "SELECT status, message FROM supply_external_sync_state WHERE source = ?",
+        (MARINE_ROCKET_SOURCE_KEY,),
+    ).fetchone()
+    if state is not None and state["status"] in ("success", "error"):
+        return state["message"], 200 if state["status"] == "success" else 502
+    return "queued" if queued else "already running", 202
 
 
 @app.route("/internal/cron/check-tbank-payouts")

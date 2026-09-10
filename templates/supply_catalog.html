@@ -87,6 +87,12 @@
   </div>
   {% endif %}
 
+  {% if marine_rocket_job %}
+  <div class="alert {{ 'alert-success' if marine_rocket_job.status != 'error' }}" role="status">
+    {{ marine_rocket_job.message }}
+  </div>
+  {% endif %}
+
   <section class="panel">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
       <div>
@@ -100,7 +106,14 @@
         </p>
       </div>
       <form action="{{ url_for('sync_marine_rocket_now') }}" method="post">
-        <button type="submit">Обновить моторы и остатки</button>
+        <button type="submit"
+                {% if marine_rocket_job and marine_rocket_job.status in ('queued', 'running') %}disabled aria-busy="true"{% endif %}>
+          {% if marine_rocket_job and marine_rocket_job.status in ('queued', 'running') %}
+          Обновление выполняется…
+          {% else %}
+          Обновить моторы и остатки
+          {% endif %}
+        </button>
       </form>
     </div>
   </section>
@@ -213,6 +226,27 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+{% if marine_rocket_job and marine_rocket_job.status in ('queued', 'running') %}
+<script>
+(function pollMarineRocketStatus() {
+  window.setTimeout(function () {
+    fetch({{ url_for('marine_rocket_sync_status')|tojson }}, {
+      credentials: 'same-origin',
+      headers: { 'Accept': 'application/json' }
+    })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (state) {
+        if (!state) return pollMarineRocketStatus();
+        if (state.status === 'queued' || state.status === 'running') {
+          return pollMarineRocketStatus();
+        }
+        window.location.reload();
+      })
+      .catch(pollMarineRocketStatus);
+  }, 1800);
+})();
+</script>
+{% endif %}
 
 </body>
 </html>
