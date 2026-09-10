@@ -10,6 +10,7 @@ class CustomerManagerAccessTests(unittest.TestCase):
     GUIDE_USERNAME = "guide-role-test"
     EXCURSION_TOKEN = "manager-excursion-client-test"
     TUNING_TOKEN = "manager-tuning-client-test"
+    TRIPSTER_SOURCE_REF = "manager-access-tripster-unassigned"
 
     def setUp(self):
         application_module.init_db()
@@ -47,6 +48,10 @@ class CustomerManagerAccessTests(unittest.TestCase):
 
     @classmethod
     def _clear_test_data(cls, db):
+        db.execute(
+            "DELETE FROM schedule_items WHERE source_ref = ?",
+            (cls.TRIPSTER_SOURCE_REF,),
+        )
         db.execute(
             "DELETE FROM client_segments WHERE client_id IN "
             "(SELECT id FROM clients WHERE token IN (?, ?))",
@@ -323,6 +328,36 @@ class CustomerManagerAccessTests(unittest.TestCase):
             response = getattr(self.client, method)(path)
             self.assertEqual(response.status_code, 302)
             self.assertTrue(response.headers["Location"].endswith("/team/"))
+
+    def test_unassigned_tripster_orders_are_hidden_from_crew_only(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO schedule_items "
+                "(kind, boat, service_name, starts_at, ends_at, capacity, "
+                "participants_count, customer_name, customer_phone, revenue, "
+                "note, status, source, source_ref, created_at, updated_at) "
+                "VALUES ('event', 'Не назначен', 'Скрытая заявка Tripster', "
+                "'2026-09-05 13:00', '2026-09-05 14:00', 10, 2, '', '', 0, "
+                "'', 'scheduled', 'tripster', ?, "
+                "'2026-09-01 15:00', '2026-09-01 15:00')",
+                (self.TRIPSTER_SOURCE_REF,),
+            )
+            db.commit()
+
+        self.login_as_guide()
+        crew_html = self.client.get(
+            "/schedule?date=2026-09-05"
+        ).get_data(as_text=True)
+        self.assertNotIn("Скрытая заявка Tripster", crew_html)
+        self.assertNotIn("Не назначено", crew_html)
+
+        self.login_as_manager()
+        manager_html = self.client.get(
+            "/schedule?date=2026-09-05"
+        ).get_data(as_text=True)
+        self.assertIn("Скрытая заявка Tripster", manager_html)
+        self.assertIn("Не назначено", manager_html)
 
 
 if __name__ == "__main__":

@@ -564,9 +564,22 @@ def _display_colors_by_boat(boat_colors):
     return result
 
 
-def day_view(db, day, selected_employee, boats, boat_colors, avatar_url):
+def day_view(
+    db,
+    day,
+    selected_employee,
+    boats,
+    boat_colors,
+    avatar_url,
+    include_unassigned_tripster=True,
+):
     crew = repository.list_crew_employees(db)
     raw_items = repository.list_day_items(db, day.isoformat())
+    if not include_unassigned_tripster:
+        raw_items = [
+            item for item in raw_items
+            if item["source"] != "tripster" or item["assignments"]
+        ]
     has_unassigned = any(not item["assignments"] for item in raw_items)
     unassigned_employee = {
         "id": 0,

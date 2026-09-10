@@ -44,7 +44,13 @@ def create_schedule_blueprint(
         selected_employee = request.args.get("employee", "all")
         team_view = is_team_view()
         context = services.day_view(
-            db, day, selected_employee, boats, boat_colors, avatar_url
+            db,
+            day,
+            selected_employee,
+            boats,
+            boat_colors,
+            avatar_url,
+            include_unassigned_tripster=not team_view,
         )
         return render_template(
             "schedule/index.html",
