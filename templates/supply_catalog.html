@@ -113,6 +113,18 @@
   </div>
   {% endif %}
 
+  {% if thousand_sizes_notice %}
+  <div class="alert {{ 'alert-success' if thousand_sizes_notice.type == 'success' }}" role="status">
+    {{ thousand_sizes_notice.message }}
+  </div>
+  {% endif %}
+
+  {% if thousand_sizes_job %}
+  <div class="alert {{ 'alert-success' if thousand_sizes_job.status != 'error' }}" role="status">
+    {{ thousand_sizes_job.message }}
+  </div>
+  {% endif %}
+
   <section class="panel">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
       <div>
@@ -132,6 +144,31 @@
           Обновление выполняется…
           {% else %}
           Обновить моторы и остатки
+          {% endif %}
+        </button>
+      </form>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+      <div>
+        <h2 style="margin-bottom:4px;">1000 размеров</h2>
+        <p class="hint" style="margin:0;">
+          {% if thousand_sizes_state.product_count %}
+          В каталоге {{ thousand_sizes_state.product_count }} позиций · обновлено {{ thousand_sizes_state.updated_at }}
+          {% else %}
+          Полный каталог и остатки по складам Москвы и Владивостока ещё не загружены.
+          {% endif %}
+        </p>
+      </div>
+      <form action="{{ url_for('sync_thousand_sizes_now') }}" method="post">
+        <button type="submit"
+                {% if thousand_sizes_job and thousand_sizes_job.status in ('queued', 'running') %}disabled aria-busy="true"{% endif %}>
+          {% if thousand_sizes_job and thousand_sizes_job.status in ('queued', 'running') %}
+          Обновление выполняется…
+          {% else %}
+          Обновить каталог и остатки
           {% endif %}
         </button>
       </form>
@@ -264,11 +301,14 @@
       <a href="{{ url_for('supply_catalog') }}#supply-products">Показать весь каталог</a>
     </div>
     {% endif %}
+    <form class="table-search" method="get" action="{{ url_for('supply_catalog') }}">
+      {% if selected_category %}<input type="hidden" name="category_id" value="{{ selected_category.id }}">{% endif %}
+      <input type="search" name="q" value="{{ catalog_query }}"
+             placeholder="Поиск по названию, артикулу или поставщику…" aria-label="Поиск по товарам">
+      <button type="submit">Найти</button>
+      {% if catalog_query %}<a href="{{ url_for('supply_catalog', category_id=selected_category.id if selected_category else none) }}#supply-products">Сбросить</a>{% endif %}
+    </form>
     {% if products %}
-    <div class="table-search">
-      <input type="search" placeholder="Поиск по названию или артикулу…"
-             data-filter-table="#catalog-table" aria-label="Поиск по товарам">
-    </div>
     <form action="{{ url_for('bulk_assign_supply_category') }}" method="post" id="supply-bulk-form">
       <div class="supply-bulk-toolbar" aria-label="Массовое изменение категории">
         <div class="supply-bulk-count" aria-live="polite">
@@ -338,12 +378,28 @@
         </table>
       </div>
     </form>
-    <p id="catalog-table-no-results" class="hint hidden">Ничего не найдено.</p>
+    <nav class="tuning-clients-pagination" aria-label="Страницы каталога">
+      <span class="tuning-clients-page-summary">
+        {{ (catalog_page - 1) * 50 + 1 }}–{{ [catalog_page * 50, catalog_total]|min }} из {{ catalog_total }}
+        {% if catalog_query %}<small>по запросу «{{ catalog_query }}»</small>{% endif %}
+      </span>
+      {% if catalog_total_pages > 1 %}
+      <div class="tuning-clients-page-links">
+        {% if catalog_page > 1 %}<a href="{{ url_for('supply_catalog', category_id=selected_category.id if selected_category else none, q=catalog_query or none, page=catalog_page - 1) }}#supply-products">←</a>{% else %}<span class="disabled">←</span>{% endif %}
+        {% for page_number in catalog_pagination_items %}
+          {% if page_number is none %}<span class="ellipsis">…</span>
+          {% elif page_number == catalog_page %}<span class="current" aria-current="page">{{ page_number }}</span>
+          {% else %}<a href="{{ url_for('supply_catalog', category_id=selected_category.id if selected_category else none, q=catalog_query or none, page=page_number) }}#supply-products">{{ page_number }}</a>{% endif %}
+        {% endfor %}
+        {% if catalog_page < catalog_total_pages %}<a href="{{ url_for('supply_catalog', category_id=selected_category.id if selected_category else none, q=catalog_query or none, page=catalog_page + 1) }}#supply-products">→</a>{% else %}<span class="disabled">→</span>{% endif %}
+      </div>
+      {% endif %}
+    </nav>
     {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">{{ 'В этой категории пока нет товаров' if selected_category else 'В каталоге пока нет товаров' }}</div>
-      <div class="s">{{ 'Назначьте категорию товарам или выберите другой раздел.' if selected_category else 'Добавьте первый товар через форму выше.' }}</div>
+      <div class="t">{{ 'По вашему запросу товары не найдены' if catalog_query else 'В этой категории пока нет товаров' if selected_category else 'В каталоге пока нет товаров' }}</div>
+      <div class="s">{{ 'Измените запрос и повторите поиск.' if catalog_query else 'Назначьте категорию товарам или выберите другой раздел.' if selected_category else 'Добавьте первый товар через форму выше.' }}</div>
     </div>
     {% endif %}
   </section>
@@ -425,6 +481,25 @@
       })
       .catch(pollMarineRocketStatus);
   }, 1800);
+})();
+</script>
+{% endif %}
+{% if thousand_sizes_job and thousand_sizes_job.status in ('queued', 'running') %}
+<script>
+(function pollThousandSizesStatus() {
+  window.setTimeout(function () {
+    fetch({{ url_for('thousand_sizes_sync_status')|tojson }}, {
+      credentials: 'same-origin', headers: { 'Accept': 'application/json' }
+    })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (state) {
+        if (!state || state.status === 'queued' || state.status === 'running') {
+          return pollThousandSizesStatus();
+        }
+        window.location.reload();
+      })
+      .catch(pollThousandSizesStatus);
+  }, 2500);
 })();
 </script>
 {% endif %}

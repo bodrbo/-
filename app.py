@@ -68,6 +68,12 @@ from integrations.marine_rocket import (
     fetch_yml as fetch_marine_rocket_yml,
     sync_motor_catalog as sync_marine_rocket_motor_catalog,
 )
+from integrations.thousand_sizes import (
+    DEFAULT_YML_URL as THOUSAND_SIZES_DEFAULT_YML_URL,
+    SOURCE_KEY as THOUSAND_SIZES_SOURCE_KEY,
+    fetch_yml as fetch_thousand_sizes_yml,
+    sync_catalog as sync_thousand_sizes_catalog,
+)
 from modules.employees import create_employees_blueprint
 from modules.employees.capabilities import (
     DOCUMENTS as TEAM_DOCUMENTS,
@@ -751,6 +757,9 @@ CRON_SECRET = os.environ.get("CRON_SECRET")
 # env override lets it be rotated without a code deploy.
 MARINE_ROCKET_YML_URL = (
     os.environ.get("MARINE_ROCKET_YML_URL") or MARINE_ROCKET_DEFAULT_YML_URL
+)
+THOUSAND_SIZES_YML_URL = (
+    os.environ.get("THOUSAND_SIZES_YML_URL") or THOUSAND_SIZES_DEFAULT_YML_URL
 )
 
 # ---------------------------------------------------------------------
@@ -2345,8 +2354,11 @@ def init_db():
     ]
     if "parent_id" not in supply_category_cols:
         conn.execute("ALTER TABLE supply_categories ADD COLUMN parent_id INTEGER")
+    # Category names need only be unique among siblings. Supplier feeds may
+    # legitimately repeat labels under different branches.
+    conn.execute("DROP INDEX IF EXISTS idx_supply_categories_name")
     conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_supply_categories_name "
+        "CREATE INDEX IF NOT EXISTS idx_supply_categories_name "
         "ON supply_categories (name)"
     )
     conn.execute(
@@ -14181,6 +14193,109 @@ def _queue_marine_rocket_sync(db):
     return True
 
 
+def _sync_thousand_sizes(db):
+    content = fetch_thousand_sizes_yml(THOUSAND_SIZES_YML_URL)
+    return sync_thousand_sizes_catalog(db, content)
+
+
+def _thousand_sizes_success_message(stats):
+    return (
+        "1000 размеров обновлён: карточек — {received}, новых — {created}, "
+        "обновлено — {updated}; Москва — {moscow:g} шт., "
+        "Владивосток — {vladivostok:g} шт."
+    ).format(
+        moscow=stats["totals"]["Москва"],
+        vladivostok=stats["totals"]["Владивосток"],
+        **stats
+    )
+
+
+def _run_thousand_sizes_sync_job(requested_at):
+    """Run the large supplier download outside the HTTP request."""
+    with app.app_context():
+        db = get_db()
+        started_at = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        db.execute(
+            "UPDATE supply_external_sync_state SET status = 'running', started_at = ?, "
+            "message = ? WHERE source = ? AND requested_at = ?",
+            (started_at, "Загружаем каталог и остатки 1000 размеров…",
+             THOUSAND_SIZES_SOURCE_KEY, requested_at),
+        )
+        db.commit()
+        try:
+            stats = _sync_thousand_sizes(db)
+        except Exception as error:
+            db.rollback()
+            message = "Не удалось обновить 1000 размеров: {}.".format(error)
+            print(message, file=sys.stderr, flush=True)
+            status = "error"
+        else:
+            message = _thousand_sizes_success_message(stats)
+            status = "success"
+        finished_at = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        db.execute(
+            "UPDATE supply_external_sync_state SET status = ?, finished_at = ?, message = ? "
+            "WHERE source = ? AND requested_at = ?",
+            (status, finished_at, message[:1000], THOUSAND_SIZES_SOURCE_KEY, requested_at),
+        )
+        db.commit()
+
+
+def _queue_thousand_sizes_sync(db):
+    """Queue one full 1000 размеров synchronization job."""
+    now = dt.datetime.now()
+    current = db.execute(
+        "SELECT * FROM supply_external_sync_state WHERE source = ?",
+        (THOUSAND_SIZES_SOURCE_KEY,),
+    ).fetchone()
+    if current is not None and current["status"] in ("queued", "running"):
+        try:
+            requested = dt.datetime.strptime(current["requested_at"], "%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError):
+            requested = now - dt.timedelta(hours=1)
+        if now - requested < dt.timedelta(minutes=20):
+            return False
+
+    requested_at = now.strftime("%Y-%m-%d %H:%M:%S")
+    queued_message = "Обновление 1000 размеров поставлено в очередь…"
+    if current is None:
+        db.execute(
+            "INSERT INTO supply_external_sync_state "
+            "(source, status, requested_at, started_at, finished_at, message) "
+            "VALUES (?, 'queued', ?, NULL, NULL, ?)",
+            (THOUSAND_SIZES_SOURCE_KEY, requested_at, queued_message),
+        )
+    else:
+        db.execute(
+            "UPDATE supply_external_sync_state SET status = 'queued', requested_at = ?, "
+            "started_at = NULL, finished_at = NULL, message = ? WHERE source = ?",
+            (requested_at, queued_message, THOUSAND_SIZES_SOURCE_KEY),
+        )
+    db.commit()
+    if app.testing:
+        _run_thousand_sizes_sync_job(requested_at)
+    else:
+        worker = threading.Thread(
+            target=_run_thousand_sizes_sync_job,
+            args=(requested_at,),
+            name="thousand-sizes-sync",
+        )
+        worker.daemon = True
+        try:
+            worker.start()
+        except Exception as error:
+            db.execute(
+                "UPDATE supply_external_sync_state SET status = 'error', finished_at = ?, "
+                "message = ? WHERE source = ? AND requested_at = ?",
+                (dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                 "Не удалось запустить фоновое обновление: {}".format(error)[:1000],
+                 THOUSAND_SIZES_SOURCE_KEY, requested_at),
+            )
+            db.commit()
+            raise
+    return True
+
+
 def _maybe_create_low_stock_request(db, product_id):
     """Call after anything that decreases a product's stock. If the total
     across all warehouses has hit (or dropped below) the product's
@@ -14364,24 +14479,50 @@ def supply_catalog():
     if raw_category_id.isdigit():
         selected_category = categories_by_id.get(int(raw_category_id))
 
-    product_rows = db.execute(
-        "SELECT sp.*, sc.name AS category_name, "
-        "(SELECT COALESCE(SUM(quantity), 0) FROM supply_stock WHERE product_id = sp.id) AS total_quantity "
-        "FROM supply_products sp "
-        "LEFT JOIN supply_categories sc ON sc.id = sp.category_id "
-        "ORDER BY sp.created_at DESC, sp.id DESC"
-    ).fetchall()
     allowed_category_ids = (
         _supply_category_descendant_ids(categories, selected_category["id"])
         if selected_category else None
     )
+    query = " ".join(request.args.get("q", "").split())[:120]
+    where_parts = []
+    params = []
+    if allowed_category_ids is not None:
+        category_ids = sorted(allowed_category_ids)
+        where_parts.append(
+            "sp.category_id IN ({})".format(",".join("?" for _ in category_ids))
+        )
+        params.extend(category_ids)
+    if query:
+        search_pattern = "%{}%".format(query.casefold())
+        where_parts.append(
+            "(CASEFOLD(sp.name) LIKE ? OR CASEFOLD(COALESCE(sp.sku, '')) LIKE ? "
+            "OR CASEFOLD(COALESCE(sp.supplier, '')) LIKE ?)"
+        )
+        params.extend((search_pattern, search_pattern, search_pattern))
+    where_sql = " WHERE " + " AND ".join(where_parts) if where_parts else ""
+    total_products = db.execute(
+        "SELECT COUNT(*) AS count FROM supply_products sp" + where_sql, params
+    ).fetchone()["count"]
+    per_page = 50
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+    except (TypeError, ValueError):
+        page = 1
+    total_pages = max(1, (total_products + per_page - 1) // per_page)
+    page = min(page, total_pages)
+    product_rows = db.execute(
+        "SELECT sp.*, sc.name AS category_name, "
+        "(SELECT COALESCE(SUM(quantity), 0) FROM supply_stock WHERE product_id = sp.id) AS total_quantity "
+        "FROM supply_products sp LEFT JOIN supply_categories sc ON sc.id = sp.category_id" +
+        where_sql + " ORDER BY sp.created_at DESC, sp.id DESC LIMIT ? OFFSET ?",
+        params + [per_page, (page - 1) * per_page],
+    ).fetchall()
     products = []
     for row in product_rows:
         product = dict(row)
         category = categories_by_id.get(product.get("category_id"))
         product["category_breadcrumb"] = category["breadcrumb"] if category else []
-        if allowed_category_ids is None or product.get("category_id") in allowed_category_ids:
-            products.append(product)
+        products.append(product)
     marine_rocket_state = db.execute(
         "SELECT COUNT(*) AS product_count, MAX(external_updated_at) AS updated_at "
         "FROM supply_products WHERE external_source = ?",
@@ -14390,6 +14531,15 @@ def supply_catalog():
     marine_rocket_job = db.execute(
         "SELECT * FROM supply_external_sync_state WHERE source = ?",
         (MARINE_ROCKET_SOURCE_KEY,),
+    ).fetchone()
+    thousand_sizes_state = db.execute(
+        "SELECT COUNT(*) AS product_count, MAX(external_updated_at) AS updated_at "
+        "FROM supply_products WHERE external_source = ?",
+        (THOUSAND_SIZES_SOURCE_KEY,),
+    ).fetchone()
+    thousand_sizes_job = db.execute(
+        "SELECT * FROM supply_external_sync_state WHERE source = ?",
+        (THOUSAND_SIZES_SOURCE_KEY,),
     ).fetchone()
     return render_template(
         "supply_catalog.html", active_page="supply", sub_page="catalog",
@@ -14404,6 +14554,12 @@ def supply_catalog():
         marine_rocket_notice=session.pop("marine_rocket_notice", None),
         marine_rocket_state=marine_rocket_state,
         marine_rocket_job=marine_rocket_job,
+        thousand_sizes_notice=session.pop("thousand_sizes_notice", None),
+        thousand_sizes_state=thousand_sizes_state,
+        thousand_sizes_job=thousand_sizes_job,
+        catalog_query=query, catalog_page=page, catalog_total=total_products,
+        catalog_total_pages=total_pages,
+        catalog_pagination_items=_client_pagination_items(page, total_pages),
     )
 
 
@@ -14421,8 +14577,9 @@ def add_supply_category():
     elif len(name) > 80:
         errors.append("Название категории не должно быть длиннее 80 символов.")
     elif db.execute(
-        "SELECT id FROM supply_categories WHERE CASEFOLD(name) = ?",
-        (name.casefold(),),
+        "SELECT id FROM supply_categories WHERE CASEFOLD(name) = ? "
+        "AND ((parent_id IS NULL AND ? IS NULL) OR parent_id = ?)",
+        (name.casefold(), parent_id, parent_id),
     ).fetchone() is not None:
         errors.append("Категория с таким названием уже существует.")
     if errors:
@@ -14599,6 +14756,41 @@ def marine_rocket_sync_status():
         "SELECT status, requested_at, started_at, finished_at, message "
         "FROM supply_external_sync_state WHERE source = ?",
         (MARINE_ROCKET_SOURCE_KEY,),
+    ).fetchone()
+    if row is None:
+        return jsonify({"status": "idle", "message": ""})
+    return jsonify(dict(row))
+
+
+@app.route("/supply/catalog/1000-sizes/sync", methods=["POST"])
+@admin_login_required
+def sync_thousand_sizes_now():
+    try:
+        queued = _queue_thousand_sizes_sync(get_db())
+    except Exception as error:
+        print("Could not queue 1000 sizes sync: {}".format(error), file=sys.stderr, flush=True)
+        session["thousand_sizes_notice"] = {
+            "type": "error",
+            "message": "Не удалось запустить обновление 1000 размеров: {}.".format(error),
+        }
+    else:
+        session["thousand_sizes_notice"] = {
+            "type": "success",
+            "message": (
+                "Обновление 1000 размеров запущено."
+                if queued else "Обновление 1000 размеров уже выполняется."
+            ),
+        }
+    return redirect(url_for("supply_catalog"))
+
+
+@app.route("/supply/catalog/1000-sizes/status")
+@admin_login_required
+def thousand_sizes_sync_status():
+    row = get_db().execute(
+        "SELECT status, requested_at, started_at, finished_at, message "
+        "FROM supply_external_sync_state WHERE source = ?",
+        (THOUSAND_SIZES_SOURCE_KEY,),
     ).fetchone()
     if row is None:
         return jsonify({"status": "idle", "message": ""})
@@ -15214,6 +15406,7 @@ def cron_sync_fuel():
         return "forbidden", 403
     db = get_db()
     marine_summary = "skipped in test mode"
+    thousand_sizes_summary = "skipped in test mode"
     if not app.testing:
         try:
             marine_queued = _queue_marine_rocket_sync(db)
@@ -15227,6 +15420,13 @@ def cron_sync_fuel():
             marine_summary = "error: {}".format(error)
         else:
             marine_summary = "queued" if marine_queued else "already running"
+        try:
+            thousand_sizes_queued = _queue_thousand_sizes_sync(db)
+        except Exception as error:
+            print("1000 sizes stock sync failed: {}".format(error), file=sys.stderr, flush=True)
+            thousand_sizes_summary = "error: {}".format(error)
+        else:
+            thousand_sizes_summary = "queued" if thousand_sizes_queued else "already running"
     reminder_stats = send_due_task_reminders(
         db, send_telegram_notification_to_employee
     )
@@ -15254,7 +15454,8 @@ def cron_sync_fuel():
             f"task reminders: {reminder_stats['sent_3h']} after 3h, "
             f"{reminder_stats['sent_6h']} after 6h; "
             f"tbank payouts: {payout_summary}; "
-            f"marine rocket: {marine_summary}",
+            f"marine rocket: {marine_summary}; "
+            f"1000 sizes: {thousand_sizes_summary}",
             503,
         )
     try:
@@ -15283,7 +15484,8 @@ def cron_sync_fuel():
         f"task reminders: {reminder_stats['sent_3h']} after 3h, "
         f"{reminder_stats['sent_6h']} after 6h; "
         f"tbank payouts: {payout_summary}; "
-        f"marine rocket: {marine_summary}",
+        f"marine rocket: {marine_summary}; "
+        f"1000 sizes: {thousand_sizes_summary}",
         200,
     )
 
@@ -15300,6 +15502,24 @@ def cron_sync_marine_rocket():
     state = get_db().execute(
         "SELECT status, message FROM supply_external_sync_state WHERE source = ?",
         (MARINE_ROCKET_SOURCE_KEY,),
+    ).fetchone()
+    if state is not None and state["status"] in ("success", "error"):
+        return state["message"], 200 if state["status"] == "success" else 502
+    return "queued" if queued else "already running", 202
+
+
+@app.route("/internal/cron/sync-1000-sizes")
+def cron_sync_thousand_sizes():
+    """Standalone 1000 размеров sync for diagnostics or a separate cron."""
+    if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
+        return "forbidden", 403
+    try:
+        queued = _queue_thousand_sizes_sync(get_db())
+    except Exception as error:
+        return "error: {}".format(error), 502
+    state = get_db().execute(
+        "SELECT status, message FROM supply_external_sync_state WHERE source = ?",
+        (THOUSAND_SIZES_SOURCE_KEY,),
     ).fetchone()
     if state is not None and state["status"] in ("success", "error"):
         return state["message"], 200 if state["status"] == "success" else 502
