@@ -7655,6 +7655,36 @@ table.records tr.row-expense td.amount { color: var(--danger); }
   padding-top: 16px;
   border-top: 1px solid var(--hairline-soft);
 }
+.order-card-amount-breakdown {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin-bottom: 18px;
+  overflow: hidden;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 10px;
+  background: var(--hairline-soft);
+}
+.order-card-amount-breakdown > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--paper-alt);
+}
+.order-card-amount-breakdown span { color: var(--muted); font-size: 11px; }
+.order-card-amount-breakdown strong { color: var(--ink); font-size: 15px; }
+.tuning-order-amount-breakdown strong,
+.tuning-order-amount-breakdown small { display: block; white-space: nowrap; }
+.tuning-order-amount-breakdown small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+@media (max-width: 560px) {
+  .order-card-amount-breakdown { grid-template-columns: 1fr; }
+}
 .order-card-body h3 {
   margin: 0 0 12px;
   font-size: 14px;

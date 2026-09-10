@@ -6139,7 +6139,13 @@ def tuning_index():
         params.append(selected_status)
     where = " WHERE " + " AND ".join(conditions) if conditions else ""
     order_rows = db.execute(
-        "SELECT * FROM tuning_orders" + where + " ORDER BY order_date DESC, id DESC",
+        "SELECT tuning_orders.*, "
+        "COALESCE((SELECT SUM(price) FROM tuning_order_items "
+        "WHERE order_id = tuning_orders.id AND status != 'removed' "
+        "AND COALESCE(price_pending, 0) = 0), 0) AS work_total, "
+        "COALESCE((SELECT SUM(quantity * unit_price) FROM tuning_order_products "
+        "WHERE order_id = tuning_orders.id), 0) AS goods_total "
+        "FROM tuning_orders" + where + " ORDER BY order_date DESC, id DESC",
         params,
     ).fetchall()
     motors_by_order = _tuning_order_motors_by_order(
@@ -7847,6 +7853,16 @@ def edit_tuning_order(order_id):
         _tuning_equipment_profile_id(db, "motor", order["motor_model"])
         if order["motor_model"] else None
     )
+    work_subtotal = db.execute(
+        "SELECT COALESCE(SUM(price), 0) AS total FROM tuning_order_items "
+        "WHERE order_id = ? AND status != 'removed' AND COALESCE(price_pending, 0) = 0",
+        (order_id,),
+    ).fetchone()["total"]
+    goods_subtotal = db.execute(
+        "SELECT COALESCE(SUM(quantity * unit_price), 0) AS total "
+        "FROM tuning_order_products WHERE order_id = ?",
+        (order_id,),
+    ).fetchone()["total"]
 
     if request.method == "GET":
         boat_motors = _tuning_order_motors(db, order_id)
@@ -7876,7 +7892,6 @@ def edit_tuning_order(order_id):
             "WHERE tuning_order_products.order_id = ? ORDER BY tuning_order_products.id",
             (order_id,),
         ).fetchall()
-        goods_subtotal = sum(g["quantity"] * g["unit_price"] for g in goods)
         catalog_products = db.execute("SELECT * FROM supply_products ORDER BY name").fetchall()
         payments, paid_amount, remaining = _order_payment_totals(db, order_id, order["total"])
         yookassa_payments = db.execute(
@@ -7915,7 +7930,8 @@ def edit_tuning_order(order_id):
             hull_sheets=hull_sheets, available_hull_sheets=available_hull_sheets,
             work_photos_by_item=work_photos_by_item,
             assignable_employees=assignable_employees,
-            goods=goods, goods_subtotal=goods_subtotal, catalog_products=catalog_products,
+            goods=goods, goods_subtotal=goods_subtotal, work_subtotal=work_subtotal,
+            catalog_products=catalog_products,
             cost_units=SUPPLY_COST_UNITS,
             notes=notes, reminder_recipients=reminder_recipients,
             boat_profile_id=boat_profile_id,
@@ -7961,6 +7977,7 @@ def edit_tuning_order(order_id):
             tuning_client_choices=_tuning_client_choices(db),
             modulkassa_configured=_modulkassa_configured(),
             subcontract_partner=subcontract_partner,
+            work_subtotal=work_subtotal, goods_subtotal=goods_subtotal,
         ), 400
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -8736,6 +8753,13 @@ def _render_client_dashboard(
         order["remaining"] = remaining
         order["work_items"] = items
         order["goods_items"] = goods_items
+        order["work_total"] = sum(
+            item["price"] for item in items
+            if item["status"] != "removed" and not item["price_pending"]
+        )
+        order["goods_total"] = sum(
+            item["quantity"] * item["unit_price"] for item in goods_items
+        )
         if is_tuning_partner:
             active_partner_items = [
                 item for item in items if item["status"] != "removed"

@@ -288,6 +288,22 @@
           <span class="chev" aria-hidden="true"></span>
         </summary>
         <div class="order-card-body">
+          <div class="order-card-amount-breakdown" aria-label="Состав суммы заказа">
+            <div>
+              <span>Общая сумма</span>
+              {% if incoming_subcontract %}
+              <strong>{{ (o.partner_quote_total|money ~ ' ₽') if o.partner_quote_ready else 'Ждёт расчёта' }}</strong>
+              {% else %}<strong>{{ o.total|money }} ₽</strong>{% endif %}
+            </div>
+            <div>
+              <span>Работы{% if not incoming_subcontract and o.discount_value %}, до скидки{% endif %}</span>
+              <strong>{{ (o.partner_work_total if incoming_subcontract else o.work_total)|money }} ₽</strong>
+            </div>
+            <div>
+              <span>Товары{% if not incoming_subcontract and o.discount_value %}, до скидки{% endif %}</span>
+              <strong>{{ (o.partner_goods_total if incoming_subcontract else o.goods_total)|money }} ₽</strong>
+            </div>
+          </div>
           <h3>Работы по заказу</h3>
           {% if o.work_items %}
           <div class="table-scroll">

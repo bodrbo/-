@@ -178,9 +178,24 @@
 
   <div class="hero-grid">
     <div class="hero-card">
+      <span class="k">Общая сумма</span>
+      <span class="v tabular">{{ edit_order.total|money }} ₽</span>
+      <span class="d">С учётом скидки</span>
+    </div>
+    <div class="hero-card">
+      <span class="k">Работы</span>
+      <span class="v tabular">{{ work_subtotal|money }} ₽</span>
+      <span class="d">{{ 'До применения скидки' if edit_order.discount_value else 'Без скидки' }}</span>
+    </div>
+    <div class="hero-card">
+      <span class="k">Товары</span>
+      <span class="v tabular">{{ goods_subtotal|money }} ₽</span>
+      <span class="d">{{ 'До применения скидки' if edit_order.discount_value else 'Без скидки' }}</span>
+    </div>
+    <div class="hero-card">
       <span class="k">К доплате</span>
       <span class="v tabular">{{ remaining|money }} ₽</span>
-      <span class="d">Итог заказа {{ edit_order.total|money }} ₽</span>
+      <span class="d">Оплачено {{ paid_amount|money }} ₽</span>
     </div>
   </div>
   <div class="split-bar" aria-hidden="true">
@@ -863,7 +878,11 @@
         <div class="totals-grid" style="margin-top:16px;">
           <div class="panel total-card">
             <span class="k">Сумма работ</span>
-            <span class="v" id="order-subtotal">0 ₽</span>
+            <span class="v" id="order-work-subtotal">0 ₽</span>
+          </div>
+          <div class="panel total-card">
+            <span class="k">Сумма товаров</span>
+            <span class="v" id="order-goods-subtotal">{{ goods_subtotal|default(0)|money }} ₽</span>
           </div>
           <div class="panel total-card">
             <span class="k">Скидка</span>
@@ -1114,23 +1133,26 @@ function updateOrderTotal() {
   // as a constant rather than read from any live input on this page —
   // otherwise this preview would silently ignore existing goods and look
   // wrong compared to the actually-saved order total.
-  var subtotal = {{ goods_subtotal|default(0) }};
+  var goodsSubtotal = {{ goods_subtotal|default(0) }};
+  var workSubtotal = 0;
   document.querySelectorAll('#work-container .work-row').forEach(function (row) {
     var directInput = row.querySelector('.work-direct-price');
     if (directInput) {
-      subtotal += parseFloat((directInput.value || '').replace(/\s/g, '').replace(',', '.')) || 0;
+      workSubtotal += parseFloat((directInput.value || '').replace(/\s/g, '').replace(',', '.')) || 0;
       return;
     }
     var span = row.querySelector('.work-price');
-    subtotal += span ? (parseFloat(span.getAttribute('data-value')) || 0) : 0;
+    workSubtotal += span ? (parseFloat(span.getAttribute('data-value')) || 0) : 0;
   });
+  var subtotal = workSubtotal + goodsSubtotal;
   var discountInput = document.getElementById('discount_value');
   var discountType = document.getElementById('discount_type').value;
   var discountValue = parseFloat((discountInput.value || '0').replace(',', '.')) || 0;
   var discountAmount = discountType === 'amount' ? discountValue : subtotal * discountValue / 100;
   if (discountAmount > subtotal) discountAmount = subtotal;
   var total = subtotal - discountAmount;
-  document.getElementById('order-subtotal').textContent = subtotal.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
+  document.getElementById('order-work-subtotal').textContent = workSubtotal.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
+  document.getElementById('order-goods-subtotal').textContent = goodsSubtotal.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
   document.getElementById('order-discount-amount').textContent = discountAmount.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
   document.getElementById('order-total').textContent = total.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
 }

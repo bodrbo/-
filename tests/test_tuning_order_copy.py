@@ -259,6 +259,34 @@ class TuningOrderCopyTests(unittest.TestCase):
             f'aria-label="Копировать заказ №{self.source_order_id}"', html
         )
 
+    def test_order_cards_show_work_goods_and_final_amounts_separately(self):
+        order_list = self.client.get("/tuning").get_data(as_text=True).replace("\xa0", " ")
+        edit_page = self.client.get(
+            f"/tuning/edit/{self.source_order_id}"
+        ).get_data(as_text=True).replace("\xa0", " ")
+        client_page = self.client.get(
+            f"/client/{self.CLIENT_TOKEN}"
+        ).get_data(as_text=True).replace("\xa0", " ")
+
+        self.assertIn("Работы: 3 000,00 ₽", order_list)
+        self.assertIn("Товары: 1 000,00 ₽", order_list)
+        for html in (edit_page, client_page):
+            self.assertIn("Общая сумма", html)
+            self.assertIn("3 600,00 ₽", html)
+            self.assertIn("3 000,00 ₽", html)
+            self.assertIn("1 000,00 ₽", html)
+            self.assertIn("скидк", html.lower())
+        self.assertIn("Сумма работ", edit_page)
+        self.assertIn("Сумма товаров", edit_page)
+
+        invalid_response = self.client.post(
+            f"/tuning/edit/{self.source_order_id}", data={}
+        )
+        self.assertEqual(invalid_response.status_code, 400)
+        invalid_page = invalid_response.get_data(as_text=True)
+        self.assertIn("Общая сумма", invalid_page)
+        self.assertIn("Сумма товаров", invalid_page)
+
     def test_missing_order_is_not_copied(self):
         response = self.client.post("/tuning/999999999/copy")
 
