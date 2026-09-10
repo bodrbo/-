@@ -7438,8 +7438,10 @@ table.records tr.row-expense td.amount { color: var(--danger); }
 
 .table-scroll { overflow-x: auto; }
 
-.table-search { margin-bottom: 14px; }
+.table-search { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .table-search input[type="search"] { width: 100%; max-width: 360px; }
+.table-search a { color: var(--ink-soft); font-size: 12px; font-weight: 700; text-decoration: none; }
+.table-search a:hover { color: var(--brass-strong); }
 
 /* Searchable combobox — swaps a giant <select> (e.g. picking a catalog
    product to add to an order, out of ~2800) for instant text search over

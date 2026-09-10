@@ -14383,19 +14383,54 @@ def supply_warehouse(warehouse_id):
     warehouse = db.execute("SELECT * FROM supply_warehouses WHERE id = ?", (warehouse_id,)).fetchone()
     if warehouse is None:
         return redirect(url_for("supply_warehouses"))
+    summary = db.execute(
+        "SELECT COUNT(*) AS product_count, COALESCE(SUM(quantity), 0) AS total_quantity "
+        "FROM supply_stock WHERE warehouse_id = ? AND quantity > 0",
+        (warehouse_id,),
+    ).fetchone()
+    query = " ".join(request.args.get("q", "").split())[:120]
+    where_sql = "WHERE supply_stock.warehouse_id = ? AND supply_stock.quantity > 0"
+    params = [warehouse_id]
+    if query:
+        pattern = "%{}%".format(query.casefold())
+        where_sql += (
+            " AND (CASEFOLD(supply_products.name) LIKE ? "
+            "OR CASEFOLD(COALESCE(supply_products.sku, '')) LIKE ? "
+            "OR CASEFOLD(COALESCE(supply_stock.zone, '')) LIKE ? "
+            "OR CASEFOLD(COALESCE(supply_stock.rack, '')) LIKE ? "
+            "OR CASEFOLD(COALESCE(supply_stock.spot, '')) LIKE ?)"
+        )
+        params.extend([pattern] * 5)
+    filtered_count = db.execute(
+        "SELECT COUNT(*) AS count FROM supply_stock "
+        "JOIN supply_products ON supply_products.id = supply_stock.product_id " + where_sql,
+        params,
+    ).fetchone()["count"]
+    per_page = 50
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+    except (TypeError, ValueError):
+        page = 1
+    total_pages = max(1, (filtered_count + per_page - 1) // per_page)
+    page = min(page, total_pages)
+    offset = (page - 1) * per_page
     stock = db.execute(
         "SELECT supply_stock.*, supply_products.name AS product_name, supply_products.sku AS product_sku, "
         "supply_products.photo_filename AS product_photo, "
         "supply_products.external_photo_url AS product_external_photo "
         "FROM supply_stock JOIN supply_products ON supply_products.id = supply_stock.product_id "
-        "WHERE supply_stock.warehouse_id = ? AND supply_stock.quantity > 0 "
-        "ORDER BY supply_products.name",
-        (warehouse_id,),
+        + where_sql + " ORDER BY supply_products.name, supply_products.id LIMIT ? OFFSET ?",
+        params + [per_page, offset],
     ).fetchall()
-    total_quantity = sum(s["quantity"] for s in stock)
     return render_template(
         "supply_warehouse.html", active_page="supply", sub_page="warehouses",
-        warehouse=warehouse, stock=stock, total_quantity=total_quantity,
+        warehouse=warehouse, stock=stock,
+        total_quantity=summary["total_quantity"], product_count=summary["product_count"],
+        search_query=query, page=page, total_pages=total_pages,
+        pagination_items=_client_pagination_items(page, total_pages),
+        filtered_count=filtered_count,
+        page_first=(offset + 1 if filtered_count else 0),
+        page_last=min(offset + len(stock), filtered_count),
     )
 
 
