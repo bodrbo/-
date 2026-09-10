@@ -73,6 +73,7 @@ from modules.employees.capabilities import (
     DOCUMENTS as TEAM_DOCUMENTS,
     FLEET as TEAM_FLEET,
     SCHEDULE as TEAM_SCHEDULE,
+    SCHEDULE_CLIENTS as TEAM_SCHEDULE_CLIENTS,
     SUPPLY as TEAM_SUPPLY,
     TASKS as TEAM_TASKS,
     dashboard_capabilities as _dashboard_capabilities,
@@ -3307,6 +3308,21 @@ def _is_schedule_team_view(db=None):
     )
 
 
+def _can_view_schedule_clients(db=None):
+    """Limit the detailed client manifest to captains and guide-captains."""
+    db = db or get_db()
+    account = _active_team_account(db)
+    if account is None:
+        return False
+    positions = db.execute(
+        "SELECT position FROM employee_positions WHERE employee_id = ?",
+        (account["employee_id"],),
+    ).fetchall()
+    return TEAM_SCHEDULE_CLIENTS in _dashboard_capabilities(
+        row["position"] for row in positions
+    )
+
+
 def schedule_viewer_or_manager_or_admin_required(view):
     """Allow crew to view the board without granting schedule mutations."""
     @wraps(view)
@@ -4413,6 +4429,7 @@ app.register_blueprint(
         manage_required=excursion_manager_or_admin_required,
         is_manager_view=_is_customer_manager,
         is_team_view=_is_schedule_team_view,
+        can_view_team_clients=_can_view_schedule_clients,
         boats=BOATS,
         boat_colors=BOAT_COLORS,
         avatar_url=find_avatar_url,

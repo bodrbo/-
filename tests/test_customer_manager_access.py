@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from support import application_module
@@ -8,9 +9,12 @@ class CustomerManagerAccessTests(unittest.TestCase):
     MANAGER_USERNAME = "customer-manager-role-test"
     GUIDE_NAME = "Георгий Ограниченный"
     GUIDE_USERNAME = "guide-role-test"
+    CAPTAIN_NAME = "Кирилл Капитанов"
+    CAPTAIN_USERNAME = "captain-role-test"
     EXCURSION_TOKEN = "manager-excursion-client-test"
     TUNING_TOKEN = "manager-tuning-client-test"
     TRIPSTER_SOURCE_REF = "manager-access-tripster-unassigned"
+    CAPTAIN_TRIP_SOURCE_REF = "captain-manifest-access-trip"
 
     def setUp(self):
         application_module.init_db()
@@ -27,6 +31,9 @@ class CustomerManagerAccessTests(unittest.TestCase):
             )
             self.guide_id, self.guide_account_id = self._create_team_member(
                 db, self.GUIDE_NAME, self.GUIDE_USERNAME, "Гид"
+            )
+            self.captain_id, self.captain_account_id = self._create_team_member(
+                db, self.CAPTAIN_NAME, self.CAPTAIN_USERNAME, "Капитан"
             )
             self.excursion_client_id = self._create_client(
                 db,
@@ -48,9 +55,25 @@ class CustomerManagerAccessTests(unittest.TestCase):
 
     @classmethod
     def _clear_test_data(cls, db):
+        test_refs = (cls.TRIPSTER_SOURCE_REF, cls.CAPTAIN_TRIP_SOURCE_REF)
         db.execute(
-            "DELETE FROM schedule_items WHERE source_ref = ?",
-            (cls.TRIPSTER_SOURCE_REF,),
+            "DELETE FROM schedule_participants WHERE schedule_item_id IN "
+            "(SELECT id FROM schedule_items WHERE source_ref IN (?, ?))",
+            test_refs,
+        )
+        db.execute(
+            "DELETE FROM schedule_assignments WHERE schedule_item_id IN "
+            "(SELECT id FROM schedule_items WHERE source_ref IN (?, ?))",
+            test_refs,
+        )
+        db.execute(
+            "DELETE FROM schedule_items WHERE source_ref IN (?, ?)",
+            test_refs,
+        )
+        db.execute(
+            "DELETE FROM schedule_day_crew WHERE employee_id IN "
+            "(SELECT id FROM employees WHERE name IN (?, ?, ?))",
+            (cls.MANAGER_NAME, cls.GUIDE_NAME, cls.CAPTAIN_NAME),
         )
         db.execute(
             "DELETE FROM client_segments WHERE client_id IN "
@@ -62,17 +85,17 @@ class CustomerManagerAccessTests(unittest.TestCase):
             (cls.EXCURSION_TOKEN, cls.TUNING_TOKEN),
         )
         db.execute(
-            "DELETE FROM team_accounts WHERE username IN (?, ?)",
-            (cls.MANAGER_USERNAME, cls.GUIDE_USERNAME),
+            "DELETE FROM team_accounts WHERE username IN (?, ?, ?)",
+            (cls.MANAGER_USERNAME, cls.GUIDE_USERNAME, cls.CAPTAIN_USERNAME),
         )
         db.execute(
             "DELETE FROM employee_positions WHERE employee_id IN "
-            "(SELECT id FROM employees WHERE name IN (?, ?))",
-            (cls.MANAGER_NAME, cls.GUIDE_NAME),
+            "(SELECT id FROM employees WHERE name IN (?, ?, ?))",
+            (cls.MANAGER_NAME, cls.GUIDE_NAME, cls.CAPTAIN_NAME),
         )
         db.execute(
-            "DELETE FROM employees WHERE name IN (?, ?)",
-            (cls.MANAGER_NAME, cls.GUIDE_NAME),
+            "DELETE FROM employees WHERE name IN (?, ?, ?)",
+            (cls.MANAGER_NAME, cls.GUIDE_NAME, cls.CAPTAIN_NAME),
         )
         db.commit()
 
@@ -125,6 +148,13 @@ class CustomerManagerAccessTests(unittest.TestCase):
             session["team_id"] = self.guide_account_id
             session["team_employee_name"] = self.GUIDE_NAME
             session["team_username"] = self.GUIDE_USERNAME
+
+    def login_as_captain(self):
+        with self.client.session_transaction() as session:
+            session.clear()
+            session["team_id"] = self.captain_account_id
+            session["team_employee_name"] = self.CAPTAIN_NAME
+            session["team_username"] = self.CAPTAIN_USERNAME
 
     def test_position_is_available_in_employee_creation_list(self):
         with self.client.session_transaction() as session:
@@ -328,6 +358,78 @@ class CustomerManagerAccessTests(unittest.TestCase):
             response = getattr(self.client, method)(path)
             self.assertEqual(response.status_code, 302)
             self.assertTrue(response.headers["Location"].endswith("/team/"))
+
+    def test_captain_can_open_readonly_trip_manifest(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item = db.execute(
+                "INSERT INTO schedule_items "
+                "(kind, boat, service_name, starts_at, ends_at, capacity, "
+                "participants_count, customer_name, customer_phone, revenue, "
+                "note, status, source, source_ref, created_at, updated_at) "
+                "VALUES ('event', 'Бодрый Первый', 'Большой тур', "
+                "'2026-09-05 13:00', '2026-09-05 15:30', 10, 3, '', '', "
+                "33300, 'Служебная заметка', 'scheduled', 'internal', ?, "
+                "'2026-09-01 15:00', '2026-09-01 15:00')",
+                (self.CAPTAIN_TRIP_SOURCE_REF,),
+            )
+            item_id = item.lastrowid
+            db.execute(
+                "INSERT INTO schedule_assignments "
+                "(schedule_item_id, employee_id, employee_name, role, created_at) "
+                "VALUES (?, ?, ?, 'captain', '2026-09-01 15:00')",
+                (item_id, self.captain_id, self.CAPTAIN_NAME),
+            )
+            db.execute(
+                "INSERT INTO schedule_participants "
+                "(schedule_item_id, client_id, client_name, client_phone, "
+                "guests_count, price, prepayment, payment_due, created_at) "
+                "VALUES (?, ?, 'Экскурсионный Клиент', '+79990001122', "
+                "3, 33300, 3000, 30300, '2026-09-01 15:00')",
+                (item_id, self.excursion_client_id),
+            )
+            db.execute(
+                "INSERT INTO schedule_day_crew "
+                "(work_date, employee_id, created_at) VALUES "
+                "('2026-09-05', ?, '2026-09-01 15:00')",
+                (self.captain_id,),
+            )
+            db.commit()
+
+        self.login_as_captain()
+        response = self.client.get("/schedule?date=2026-09-05")
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('id="scheduleViewModal"', html)
+        self.assertIn(f"openScheduleView({item_id})", html)
+        payload = html.split("const scheduleItems = ", 1)[1].split(";", 1)[0]
+        items = json.loads(payload)
+        manifest = next(item for item in items if item["id"] == item_id)
+        self.assertEqual(manifest["participants_count"], 3)
+        self.assertEqual(manifest["participants"], [{
+            "client_name": "Экскурсионный Клиент",
+            "client_phone": "+79990001122",
+            "guests_count": 3,
+        }])
+        self.assertEqual(manifest["assignments"], [{
+            "employee_name": self.CAPTAIN_NAME,
+            "role_label": "Капитан",
+        }])
+        for private_field in ("revenue", "note", "price", "prepayment", "payment_due"):
+            self.assertNotIn(private_field, json.dumps(manifest, ensure_ascii=False))
+
+        self.login_as_guide()
+        guide_html = self.client.get(
+            "/schedule?date=2026-09-05"
+        ).get_data(as_text=True)
+        self.assertNotIn('id="scheduleViewModal"', guide_html)
+        self.assertNotIn(
+            'onclick="event.stopPropagation(); openScheduleView', guide_html
+        )
+        guide_payload = guide_html.split(
+            "const scheduleItems = ", 1
+        )[1].split(";", 1)[0]
+        self.assertEqual(json.loads(guide_payload), [])
 
     def test_unassigned_tripster_orders_are_hidden_from_crew_only(self):
         with application_module.app.app_context():

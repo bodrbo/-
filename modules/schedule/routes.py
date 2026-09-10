@@ -17,6 +17,7 @@ def create_schedule_blueprint(
     manage_required,
     is_manager_view,
     is_team_view,
+    can_view_team_clients,
     boats,
     boat_colors,
     avatar_url,
@@ -50,6 +51,7 @@ def create_schedule_blueprint(
         day = services.parse_day(request.args.get("date"))
         selected_employee = request.args.get("employee", "all")
         team_view = is_team_view()
+        can_view_clients = team_view and can_view_team_clients()
         context = services.day_view(
             db,
             day,
@@ -76,7 +78,13 @@ def create_schedule_blueprint(
             manager_view=is_manager_view(),
             team_view=team_view,
             can_manage=not team_view,
-            schedule_items_json=[] if team_view else context["items"],
+            can_view_clients=can_view_clients,
+            schedule_items_json=(
+                services.readonly_item_details(context["items"])
+                if can_view_clients
+                else [] if team_view
+                else context["items"]
+            ),
             tripster_configured=tripster_configured(),
         )
 

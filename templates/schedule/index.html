@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
 </head>
-<body class="schedule-body{{ ' is-read-only' if team_view }}">
+<body class="schedule-body{{ ' is-read-only' if team_view }}{{ ' can-view-clients' if can_view_clients }}">
 <div class="page-loader hidden" id="pageLoader" aria-hidden="true">
   <div class="loader-body">
     <svg class="propeller" viewBox="0 0 100 100">
@@ -168,12 +168,12 @@
             {% if now_line_px is not none %}<span class="schedule-now-line" style="top: {{ now_line_px }}px"><i></i></span>{% endif %}
 
             {% for card in cards_by_employee.get(employee.id, []) %}
-            {% set card_tag = 'button' if can_manage else 'article' %}
-            <{{ card_tag }}{% if can_manage %} type="button"{% endif %}
+            {% set card_tag = 'button' if can_manage or can_view_clients else 'article' %}
+            <{{ card_tag }}{% if can_manage or can_view_clients %} type="button"{% endif %}
                     class="schedule-card {{ card.kind }} {{ 'is-compact' if card.height_px < 50 else 'is-medium' if card.height_px < 105 }}"
                     style="top: {{ card.top_px }}px; height: {{ card.height_px }}px; --schedule-card-color: {{ card.boat_color }}; --schedule-card-ink: {{ card.boat_ink }}"
                     title="{{ card.start_time }}–{{ card.end_time }} · {{ card.service_name }} · {{ card.boat }}"
-                    {% if can_manage %}onclick="event.stopPropagation(); openScheduleEdit({{ card.id }})"{% endif %}>
+                    {% if can_manage %}onclick="event.stopPropagation(); openScheduleEdit({{ card.id }})"{% elif can_view_clients %}onclick="event.stopPropagation(); openScheduleView({{ card.id }})"{% endif %}>
               <span class="schedule-card-topline">
                 <span class="schedule-card-time">{{ card.start_time }}–{{ card.end_time }}</span>
                 <span class="schedule-card-kind">{{ card.kind_label }}</span>
@@ -196,7 +196,7 @@
       </div>
     </div>
   </section>
-  <p class="schedule-board-hint">{{ 'Для изменений расписания обратитесь к администратору или менеджеру по работе с клиентами.' if team_view else 'Нажмите на свободное время, чтобы создать рейс. Нажмите на карточку, чтобы перенести, переназначить или удалить её.' }}</p>
+  <p class="schedule-board-hint">{% if can_manage %}Нажмите на свободное время, чтобы создать рейс. Нажмите на карточку, чтобы перенести, переназначить или удалить её.{% elif can_view_clients %}Нажмите на карточку рейса, чтобы посмотреть экипаж и список клиентов.{% else %}Для изменений расписания обратитесь к администратору или менеджеру по работе с клиентами.{% endif %}</p>
   {% else %}
   <section class="panel empty-state schedule-empty">
     <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
@@ -488,11 +488,42 @@
     </div>
   </div>
 </template>
+{% elif can_view_clients %}
+<div class="schedule-modal" id="scheduleViewModal" hidden>
+  <div class="schedule-modal-backdrop" onclick="closeScheduleView()"></div>
+  <section class="schedule-modal-card schedule-view-card" role="dialog" aria-modal="true" aria-labelledby="scheduleViewTitle">
+    <header class="schedule-modal-header">
+      <div>
+        <span id="scheduleViewKind">Рейс</span>
+        <h2 id="scheduleViewTitle">Карточка рейса</h2>
+      </div>
+      <button type="button" class="schedule-modal-close" onclick="closeScheduleView()" aria-label="Закрыть карточку">×</button>
+    </header>
+    <div class="schedule-view-body">
+      <dl class="schedule-view-facts">
+        <div><dt>Дата и время</dt><dd id="scheduleViewTime"></dd></div>
+        <div><dt>Судно</dt><dd id="scheduleViewBoat"></dd></div>
+      </dl>
+      <section class="schedule-view-section" aria-labelledby="scheduleViewCrewTitle">
+        <h3 id="scheduleViewCrewTitle">Экипаж</h3>
+        <div id="scheduleViewCrew" class="schedule-view-list"></div>
+      </section>
+      <section class="schedule-view-section" aria-labelledby="scheduleViewClientsTitle">
+        <div class="schedule-view-section-heading">
+          <h3 id="scheduleViewClientsTitle">Клиенты</h3>
+          <span id="scheduleViewGuestTotal"></span>
+        </div>
+        <div id="scheduleViewClients" class="schedule-view-list"></div>
+      </section>
+    </div>
+  </section>
+</div>
 {% endif %}
 
 <script>
   const scheduleItems = {{ schedule_items_json|tojson }};
   const scheduleCanManage = {{ can_manage|tojson }};
+  const scheduleCanViewClients = {{ can_view_clients|tojson }};
   const scheduleDayStart = {{ day_start_minutes }};
   const schedulePxPerMinute = {{ px_per_minute }};
   const scheduleCrewCount = {{ visible_crew|length }};
@@ -504,6 +535,7 @@
   let scheduleParticipantSerial = 0;
   let scheduleModalTrigger = null;
   let scheduleRosterModalTrigger = null;
+  let scheduleViewModalTrigger = null;
   let scheduleScrollSync = false;
 
   function showScheduleTripsterLoader(form) {
@@ -671,6 +703,100 @@
     deleteForm.hidden = false;
     syncScheduleKind();
     setScheduleModalOpen(true);
+  }
+  function scheduleViewDate(item) {
+    const parts = String(item.trip_date || '').split('-');
+    if (parts.length !== 3) return item.trip_date || '';
+    return `${parts[2]}.${parts[1]}.${parts[0]}`;
+  }
+  function scheduleViewRow(primary, secondary, phone) {
+    const row = document.createElement('div');
+    row.className = 'schedule-view-row';
+    const copy = document.createElement('span');
+    const title = document.createElement('strong');
+    title.textContent = primary;
+    copy.appendChild(title);
+    if (secondary) {
+      const detail = document.createElement('small');
+      detail.textContent = secondary;
+      copy.appendChild(detail);
+    }
+    row.appendChild(copy);
+    if (phone) {
+      const link = document.createElement('a');
+      link.href = `tel:${phone}`;
+      link.textContent = phone;
+      link.setAttribute('aria-label', `Позвонить ${primary}`);
+      row.appendChild(link);
+    }
+    return row;
+  }
+  function scheduleGuestLabel(value) {
+    const count = Number(value || 0);
+    const lastTwo = count % 100;
+    const last = count % 10;
+    const word = lastTwo >= 11 && lastTwo <= 14
+      ? 'гостей'
+      : last === 1 ? 'гость' : last >= 2 && last <= 4 ? 'гостя' : 'гостей';
+    return `${count} ${word}`;
+  }
+  function openScheduleView(itemId) {
+    if (!scheduleCanViewClients) return;
+    const item = scheduleItems.find(candidate => candidate.id === itemId);
+    const modal = document.getElementById('scheduleViewModal');
+    if (!item || !modal) return;
+    scheduleViewModalTrigger = document.activeElement;
+    document.getElementById('scheduleViewKind').textContent = item.kind_label;
+    document.getElementById('scheduleViewTitle').textContent = item.service_name;
+    document.getElementById('scheduleViewTime').textContent =
+      `${scheduleViewDate(item)}, ${item.start_time}–${item.end_time}`;
+    document.getElementById('scheduleViewBoat').textContent = item.boat;
+    const crew = document.getElementById('scheduleViewCrew');
+    crew.replaceChildren();
+    item.assignments.forEach(assignment => {
+      crew.appendChild(scheduleViewRow(
+        assignment.employee_name, assignment.role_label, ''
+      ));
+    });
+    if (!item.assignments.length) {
+      crew.appendChild(scheduleViewRow('Экипаж ещё не назначен', '', ''));
+    }
+    const clients = document.getElementById('scheduleViewClients');
+    clients.replaceChildren();
+    item.participants.forEach(participant => {
+      clients.appendChild(scheduleViewRow(
+        participant.client_name,
+        scheduleGuestLabel(participant.guests_count),
+        participant.client_phone
+      ));
+    });
+    if (!item.participants.length) {
+      clients.appendChild(scheduleViewRow('Клиенты пока не добавлены', '', ''));
+    }
+    const total = Number(item.participants_count || 0);
+    document.getElementById('scheduleViewGuestTotal').textContent =
+      item.capacity ? `${total} из ${item.capacity} мест` : scheduleGuestLabel(total);
+    modal.hidden = false;
+    document.body.classList.add('schedule-modal-open');
+    const header = document.querySelector('.schedule-topbar');
+    const shell = document.querySelector('.schedule-shell');
+    if (header) header.inert = true;
+    if (shell) shell.inert = true;
+    setTimeout(() => modal.querySelector('.schedule-modal-close').focus(), 20);
+  }
+  function closeScheduleView() {
+    const modal = document.getElementById('scheduleViewModal');
+    if (!modal) return;
+    modal.hidden = true;
+    document.body.classList.remove('schedule-modal-open');
+    const header = document.querySelector('.schedule-topbar');
+    const shell = document.querySelector('.schedule-shell');
+    if (header) header.inert = false;
+    if (shell) shell.inert = false;
+    if (scheduleViewModalTrigger && scheduleViewModalTrigger !== document.body) {
+      scheduleViewModalTrigger.focus();
+    }
+    scheduleViewModalTrigger = null;
   }
   function closeScheduleModal() { setScheduleModalOpen(false); }
   function openScheduleRosterModal() {
@@ -1218,12 +1344,16 @@
   document.addEventListener('keydown', event => {
     const itemModal = document.getElementById('scheduleModal');
     const rosterModal = document.getElementById('scheduleRosterModal');
+    const viewModal = document.getElementById('scheduleViewModal');
     const modal = itemModal && !itemModal.hidden
       ? itemModal
-      : (rosterModal && !rosterModal.hidden ? rosterModal : null);
+      : (rosterModal && !rosterModal.hidden
+        ? rosterModal
+        : (viewModal && !viewModal.hidden ? viewModal : null));
     if (!modal) return;
     if (event.key === 'Escape') {
       if (modal === rosterModal) closeScheduleRosterModal();
+      else if (modal === viewModal) closeScheduleView();
       else closeScheduleModal();
       return;
     }

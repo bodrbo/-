@@ -5,6 +5,7 @@ from modules.employees.capabilities import (
     FLEET,
     INCOME,
     SCHEDULE,
+    SCHEDULE_CLIENTS,
     SUPPLY,
     TASKS,
     dashboard_capabilities,
@@ -76,7 +77,10 @@ class TeamDashboardCapabilitiesTests(unittest.TestCase):
         captain_and_tuningman = dashboard_capabilities(["Тюнингмэн", "Капитан"])
         self.assertEqual(
             captain_and_tuningman,
-            frozenset({INCOME, TASKS, SUPPLY, FLEET, DOCUMENTS, SCHEDULE}),
+            frozenset({
+                INCOME, TASKS, SUPPLY, FLEET, DOCUMENTS,
+                SCHEDULE, SCHEDULE_CLIENTS,
+            }),
         )
         self.assertEqual(
             dashboard_capabilities(["Гид"]),
@@ -84,7 +88,7 @@ class TeamDashboardCapabilitiesTests(unittest.TestCase):
         )
         self.assertEqual(
             dashboard_capabilities(["Гид-капитан"]),
-            frozenset({INCOME, SCHEDULE}),
+            frozenset({INCOME, SCHEDULE, SCHEDULE_CLIENTS}),
         )
 
     def test_tuningman_cabinet_has_work_modules_without_fleet_or_documents(self):

@@ -564,6 +564,52 @@ def _display_colors_by_boat(boat_colors):
     return result
 
 
+def readonly_item_details(items):
+    """Return the operational trip manifest without prices or internal notes."""
+    result = []
+    for item in items:
+        participants = [
+            {
+                "client_name": participant["client_name"],
+                "client_phone": participant["client_phone"],
+                "guests_count": participant["guests_count"],
+            }
+            for participant in item["participants"]
+        ]
+        if not participants and item["customer_name"]:
+            participants.append({
+                "client_name": item["customer_name"],
+                "client_phone": item["customer_phone"],
+                "guests_count": 1,
+            })
+        participant_total = sum(
+            max(0, int(participant["guests_count"] or 0))
+            for participant in participants
+        )
+        result.append({
+            "id": item["id"],
+            "kind_label": item["kind_label"],
+            "service_name": item["service_name"],
+            "boat": item["boat"],
+            "trip_date": item["trip_date"],
+            "start_time": item["start_time"],
+            "end_time": item["end_time"],
+            "capacity": item["capacity"],
+            "participants_count": participant_total or item["participants_count"],
+            "participants": participants,
+            "assignments": [
+                {
+                    "employee_name": assignment["employee_name"],
+                    "role_label": CREW_ROLES.get(
+                        assignment["role"], assignment["role"]
+                    ),
+                }
+                for assignment in item["assignments"]
+            ],
+        })
+    return result
+
+
 def day_view(
     db,
     day,
