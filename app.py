@@ -6187,6 +6187,8 @@ def tuning_index():
         active_filter_count=active_filter_count,
         date_filter_error=date_filter_error,
         tuning_subcontract_notice=session.pop("tuning_subcontract_notice", None),
+        tuning_bulk_error=session.pop("tuning_bulk_error", None),
+        tuning_bulk_notice=session.pop("tuning_bulk_notice", None),
         order_statuses=ORDER_STATUSES,
         active_page="tuning", sub_page="orders",
     )
@@ -7989,6 +7991,123 @@ def edit_tuning_order(order_id):
     ))
 
 
+def _delete_tuning_order_records(db, order_ids):
+    parameters = [(order_id,) for order_id in order_ids]
+    for table_name in (
+        "tuning_order_items",
+        "tuning_payments",
+        "tuning_order_motors",
+        "tuning_orders",
+    ):
+        db.executemany(
+            f"DELETE FROM {table_name} WHERE "
+            f"{'id' if table_name == 'tuning_orders' else 'order_id'} = ?",
+            parameters,
+        )
+
+
+def _tuning_bulk_return_url():
+    query = {}
+    search_query = request.form.get("return_q", "").strip()[:120]
+    status = request.form.get("return_status", "").strip()
+    date_from = request.form.get("return_date_from", "").strip()
+    date_to = request.form.get("return_date_to", "").strip()
+    if search_query:
+        query["q"] = search_query
+    if status in {item["value"] for item in ORDER_STATUSES}:
+        query["status"] = status
+    for key, value in (("date_from", date_from), ("date_to", date_to)):
+        try:
+            if value:
+                dt.date.fromisoformat(value)
+                query[key] = value
+        except ValueError:
+            pass
+    return url_for("tuning_index", **query) + "#tuning-orders"
+
+
+@app.route("/tuning/bulk", methods=["POST"])
+@admin_login_required
+def bulk_edit_tuning_orders():
+    db = get_db()
+    return_url = _tuning_bulk_return_url()
+    raw_order_ids = request.form.getlist("order_id")
+    order_ids = []
+    seen_ids = set()
+    invalid_order_id = False
+    for raw_order_id in raw_order_ids:
+        try:
+            order_id = int(str(raw_order_id).strip())
+        except (TypeError, ValueError):
+            invalid_order_id = True
+            break
+        if order_id <= 0:
+            invalid_order_id = True
+            break
+        if order_id not in seen_ids:
+            seen_ids.add(order_id)
+            order_ids.append(order_id)
+
+    errors = []
+    if invalid_order_id:
+        errors.append("Список выбранных заказов повреждён. Обновите страницу.")
+    elif not order_ids:
+        errors.append("Выберите хотя бы один заказ.")
+    elif len(order_ids) > 5000:
+        errors.append("За один раз можно изменить не более 5000 заказов.")
+
+    existing_ids = set()
+    if order_ids and not invalid_order_id and len(order_ids) <= 5000:
+        for offset in range(0, len(order_ids), 500):
+            chunk = order_ids[offset:offset + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = db.execute(
+                f"SELECT id FROM tuning_orders WHERE id IN ({placeholders}) "
+                "AND source != ?",
+                [*chunk, SUBCONTRACT_REQUEST_SOURCE],
+            ).fetchall()
+            existing_ids.update(row["id"] for row in rows)
+        if existing_ids != set(order_ids):
+            errors.append(
+                "Некоторые выбранные заказы уже недоступны. Обновите страницу."
+            )
+
+    action = request.form.get("action", "").strip()
+    new_status = request.form.get("bulk_status", "").strip()
+    if action == "status":
+        if new_status not in {item["value"] for item in ORDER_STATUSES}:
+            errors.append("Выберите новый статус заказа.")
+    elif action != "delete":
+        errors.append("Выберите массовое действие.")
+
+    if errors:
+        session["tuning_bulk_error"] = " ".join(errors)
+        return redirect(return_url)
+
+    if action == "status":
+        db.executemany(
+            "UPDATE tuning_orders SET status = ? WHERE id = ?",
+            [(new_status, order_id) for order_id in order_ids],
+        )
+        status_label = next(
+            item["label"] for item in ORDER_STATUSES
+            if item["value"] == new_status
+        )
+        message = (
+            f"Статус «{status_label}» установлен для {len(order_ids)} "
+            f"{_plural_ru(len(order_ids), ('заказа', 'заказов', 'заказов'))}."
+        )
+    else:
+        _delete_tuning_order_records(db, order_ids)
+        message = (
+            f"Удалено {len(order_ids)} "
+            f"{_plural_ru(len(order_ids), ('заказ', 'заказа', 'заказов'))}."
+        )
+    db.commit()
+    session["tuning_bulk_notice"] = message
+    return redirect(return_url)
+
+
 @app.route("/tuning/delete/<int:order_id>", methods=["POST"])
 @admin_login_required
 def delete_tuning_order(order_id):
@@ -7996,10 +8115,7 @@ def delete_tuning_order(order_id):
     order = db.execute(
         "SELECT source FROM tuning_orders WHERE id = ?", (order_id,)
     ).fetchone()
-    db.execute("DELETE FROM tuning_order_items WHERE order_id = ?", (order_id,))
-    db.execute("DELETE FROM tuning_payments WHERE order_id = ?", (order_id,))
-    db.execute("DELETE FROM tuning_order_motors WHERE order_id = ?", (order_id,))
-    db.execute("DELETE FROM tuning_orders WHERE id = ?", (order_id,))
+    _delete_tuning_order_records(db, [order_id])
     db.commit()
     return redirect(url_for(
         "tuning_subcontracts"

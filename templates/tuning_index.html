@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{ page_title or 'Тюнинг-центр' }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260909-subcontract-pricing">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260910-tuning-bulk">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
 <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
@@ -96,6 +96,12 @@
   {% if tuning_subcontract_notice %}
   <div class="alert success">{{ tuning_subcontract_notice }}</div>
   {% endif %}
+  {% if tuning_bulk_error %}
+  <div class="alert"><strong>Не удалось изменить заказы:</strong> {{ tuning_bulk_error }}</div>
+  {% endif %}
+  {% if tuning_bulk_notice %}
+  <div class="alert success" role="status">{{ tuning_bulk_notice }}</div>
+  {% endif %}
   <details class="panel tuning-orders-filter"{% if date_filter_error %} open{% endif %}>
     <summary>
       <span class="tuning-orders-filter-icon" aria-hidden="true">
@@ -144,7 +150,7 @@
     </form>
   </details>
 
-  <section class="panel">
+  <section class="panel" id="tuning-orders">
     <div class="tuning-orders-heading">
       <h2>Заказы</h2>
       <div class="tuning-orders-actions">
@@ -153,10 +159,41 @@
       </div>
     </div>
     {% if orders %}
+    <form action="{{ url_for('bulk_edit_tuning_orders') }}" method="post"
+          class="tuning-bulk-form" id="tuning-bulk-form">
+      <input type="hidden" name="return_q" value="{{ search_query }}">
+      <input type="hidden" name="return_status" value="{{ selected_status }}">
+      <input type="hidden" name="return_date_from" value="{{ date_from }}">
+      <input type="hidden" name="return_date_to" value="{{ date_to }}">
+      <div class="tuning-bulk-count" aria-live="polite">
+        Выбрано: <strong id="tuning-bulk-count">0</strong>
+      </div>
+      <label for="tuning-bulk-status">
+        <span>Новый статус</span>
+        <select name="bulk_status" id="tuning-bulk-status">
+          <option value="" selected>Выберите статус…</option>
+          {% for status in order_statuses %}
+          <option value="{{ status.value }}">{{ status.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" name="action" value="status"
+              id="tuning-bulk-status-submit" disabled>Изменить статус</button>
+      <button type="submit" name="action" value="delete"
+              class="tuning-bulk-delete" id="tuning-bulk-delete" disabled>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+          <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
+        </svg>
+        Удалить
+      </button>
+    </form>
     <div class="table-scroll">
       <table class="records" id="orders-table">
         <thead>
           <tr>
+            <th class="tuning-select-cell">
+              <input type="checkbox" id="tuning-select-all" aria-label="Выбрать все показанные заказы">
+            </th>
             <th>№</th>
             <th>Дата</th>
             <th>Клиент</th>
@@ -172,6 +209,11 @@
         <tbody>
           {% for o in orders %}
           <tr data-status="{{ o.status }}">
+            <td class="tuning-select-cell">
+              <input type="checkbox" name="order_id" value="{{ o.id }}"
+                     form="tuning-bulk-form" class="tuning-order-check"
+                     aria-label="Выбрать заказ №{{ o.id }}">
+            </td>
             <td><a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="term">№{{ o.id }}</a></td>
             <td class="muted">{{ o.order_date|ru_date }}</td>
             <td>
@@ -575,6 +617,60 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+{% if sub_page == 'orders' and orders %}
+<script>
+(function initTuningBulkActions() {
+  var form = document.getElementById('tuning-bulk-form');
+  if (!form) return;
+  var selectAll = document.getElementById('tuning-select-all');
+  var checks = Array.prototype.slice.call(document.querySelectorAll('.tuning-order-check'));
+  var count = document.getElementById('tuning-bulk-count');
+  var status = document.getElementById('tuning-bulk-status');
+  var statusSubmit = document.getElementById('tuning-bulk-status-submit');
+  var deleteSubmit = document.getElementById('tuning-bulk-delete');
+
+  function selectedCount() {
+    return checks.filter(function (checkbox) { return checkbox.checked; }).length;
+  }
+
+  function refreshState() {
+    var selected = selectedCount();
+    count.textContent = String(selected);
+    selectAll.checked = checks.length > 0 && selected === checks.length;
+    selectAll.indeterminate = selected > 0 && selected < checks.length;
+    statusSubmit.disabled = selected === 0 || !status.value;
+    deleteSubmit.disabled = selected === 0;
+  }
+
+  selectAll.addEventListener('change', function () {
+    checks.forEach(function (checkbox) { checkbox.checked = selectAll.checked; });
+    refreshState();
+  });
+  checks.forEach(function (checkbox) {
+    checkbox.addEventListener('change', refreshState);
+  });
+  status.addEventListener('change', refreshState);
+  form.addEventListener('submit', function (event) {
+    var selected = selectedCount();
+    var submitter = event.submitter || document.activeElement;
+    if (!selected || !submitter) {
+      event.preventDefault();
+      return;
+    }
+    if (submitter.value === 'delete') {
+      if (!window.confirm('Удалить выбранные заказы без возможности восстановления: ' + selected + '?')) {
+        event.preventDefault();
+      }
+      return;
+    }
+    if (!status.value || !window.confirm('Изменить статус выбранных заказов: ' + selected + '?')) {
+      event.preventDefault();
+    }
+  });
+  refreshState();
+})();
+</script>
+{% endif %}
 {% if sub_page in ['boat_catalog', 'motor_catalog'] and catalog_view == 'list' and boat_profiles %}
 <script>
 (function () {

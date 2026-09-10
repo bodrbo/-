@@ -5546,6 +5546,63 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 
 /* --- totals / dashboard cards --- */
 .tuning-orders-date-error { margin-bottom: 14px; }
+.tuning-bulk-form {
+  display: grid;
+  grid-template-columns: auto minmax(220px, 380px) auto auto;
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  background: var(--paper-alt);
+}
+.tuning-bulk-count {
+  align-self: center;
+  min-width: 92px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.tuning-bulk-count strong { color: var(--ink); font-size: 15px; }
+.tuning-bulk-form label { display: grid; min-width: 0; gap: 5px; }
+.tuning-bulk-form label > span {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.tuning-bulk-form select { width: 100%; min-width: 0; min-height: 40px; }
+.tuning-bulk-form button { min-height: 40px; margin: 0; white-space: nowrap; }
+.tuning-bulk-form button.tuning-bulk-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgba(179, 64, 44, .35);
+  background: transparent;
+  color: var(--danger);
+}
+.tuning-bulk-form button.tuning-bulk-delete:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+.tuning-bulk-delete svg { width: 15px; height: 15px; }
+.tuning-select-cell {
+  width: 24px;
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+.tuning-select-cell input[type="checkbox"] {
+  display: block;
+  width: 17px;
+  height: 17px;
+  margin: 0 auto;
+  accent-color: var(--brass);
+  cursor: pointer;
+}
+#orders-table { min-width: 1120px; }
 .tuning-orders-filter {
   padding: 0;
   margin-bottom: 14px;
@@ -5692,6 +5749,9 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 }
 
 @media (max-width: 680px) {
+  .tuning-bulk-form { grid-template-columns: 1fr 1fr; }
+  .tuning-bulk-form label { grid-column: 1 / -1; }
+  .tuning-bulk-form button { width: 100%; }
   .tuning-orders-filter-form { grid-template-columns: 1fr 1fr; }
   .tuning-orders-filter-search,
   .tuning-orders-filter-form label:nth-child(2),
@@ -5700,6 +5760,8 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 }
 
 @media (max-width: 420px) {
+  .tuning-bulk-form { grid-template-columns: 1fr; }
+  .tuning-bulk-form label { grid-column: auto; }
   .tuning-orders-filter-state { font-size: 10px; }
   .tuning-orders-filter-form { gap: 10px; padding: 12px; }
 }
