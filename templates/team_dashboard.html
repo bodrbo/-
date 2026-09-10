@@ -76,6 +76,20 @@
     </form>
   </div>
 
+  {% if can_access_schedule %}
+  <section id="team-schedule" class="panel team-schedule-panel" aria-labelledby="team-schedule-title">
+    <div class="team-schedule-copy">
+      <span class="captain-section-eyebrow">Рабочий день</span>
+      <h2 id="team-schedule-title">Расписание</h2>
+      <p>Рейсы, катера и состав экипажа на выбранную дату.</p>
+    </div>
+    <a href="{{ url_for('schedule.index') }}" class="team-schedule-link">
+      <span>Открыть расписание</span>
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h12v11H4zM7 3.5v4M13 3.5v4M4 9h12M8 12h4"/></svg>
+    </a>
+  </section>
+  {% endif %}
+
   {% if can_access_fleet %}
   <details id="captain-fleet" class="panel collapsible-panel captain-fleet-panel"{{ ' open' if fleet_open }}>
     <summary>
@@ -625,6 +639,12 @@
 </main>
 
 <nav class="team-mobile-nav" aria-label="Разделы личного кабинета">
+  {% if can_access_schedule %}
+  <a href="{{ url_for('schedule.index') }}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18M8 14h3M13 14h3M8 17h3"/></svg>
+    <span>Расписание</span>
+  </a>
+  {% endif %}
   {% if can_access_fleet %}
   <a href="#captain-fleet" data-dashboard-target>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 14l3 5h12l3-5-9-4-9 4zM7 14V7h7l3 5"/></svg>

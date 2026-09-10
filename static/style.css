@@ -4740,6 +4740,8 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   transition: transform .15s ease, box-shadow .15s ease;
 }
 .schedule-card:hover { z-index: 5; transform: translateY(-1px); box-shadow: 0 12px 24px -14px rgba(15,42,53,.82); }
+.schedule-body.is-read-only .schedule-card { cursor: default; }
+.schedule-body.is-read-only .schedule-card:hover { z-index: 2; transform: none; box-shadow: 0 8px 18px -13px rgba(15,42,53,.7); }
 .schedule-card.event { border-left-style: double; border-left-width: 6px; }
 .schedule-card-topline {
   display: flex;
@@ -4816,6 +4818,20 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   white-space: nowrap;
 }
 .schedule-board-hint { flex: none; margin: 5px 4px 0; color: var(--muted); font-size: 11px; }
+.schedule-view-mode {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  gap: 7px;
+  padding: 7px 11px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--paper-alt);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.schedule-view-mode svg { width: 17px; height: 17px; }
 .schedule-empty { max-width: 620px; margin: 50px auto; }
 
 .schedule-modal[hidden],
@@ -8303,6 +8319,32 @@ button.captain-command-alert:hover {
 .team-task-material-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .team-task-material-row { margin-top: 8px; }
 .team-supply-create { margin-bottom: 14px; }
+.team-schedule-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  overflow: hidden;
+  background: linear-gradient(135deg, var(--paper) 0%, var(--paper-alt) 100%);
+}
+.team-schedule-copy h2 { margin: 2px 0 5px; font-size: 22px; }
+.team-schedule-copy p { margin: 0; color: var(--muted); font-size: 13px; }
+.team-schedule-link {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  gap: 9px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--team-action);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+.team-schedule-link:hover { filter: brightness(.94); }
+.team-schedule-link svg { width: 19px; height: 19px; }
 .team-income-cards { display: none; }
 .team-mobile-nav { display: none; }
 
@@ -8370,6 +8412,9 @@ button.captain-command-alert:hover {
   .team-task-status-row .status-select-form,
   .team-task-status-row .status-select-form select { width: 100%; min-height: 44px; }
   .team-supply-create { width: 100%; min-height: 44px; }
+  .team-schedule-panel { align-items: stretch; gap: 12px; flex-direction: column; }
+  .team-schedule-copy h2 { font-size: 19px; }
+  .team-schedule-link { width: 100%; }
   .team-income-table { display: none; }
   .team-income-cards { display: grid; gap: 8px; }
   .team-income-card { padding: 12px; border: 1px solid var(--hairline-soft); border-radius: 9px; background: var(--paper-alt); }

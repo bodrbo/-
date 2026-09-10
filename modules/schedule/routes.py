@@ -13,7 +13,9 @@ from .constants import CREW_ROLES, ITEM_KINDS
 def create_schedule_blueprint(
     get_db,
     access_required,
+    manage_required,
     is_manager_view,
+    is_team_view,
     boats,
     boat_colors,
     avatar_url,
@@ -40,6 +42,7 @@ def create_schedule_blueprint(
         db = get_db()
         day = services.parse_day(request.args.get("date"))
         selected_employee = request.args.get("employee", "all")
+        team_view = is_team_view()
         context = services.day_view(
             db, day, selected_employee, boats, boat_colors, avatar_url
         )
@@ -58,11 +61,14 @@ def create_schedule_blueprint(
             crew_roles=CREW_ROLES,
             notice=session.pop("schedule_notice", None),
             manager_view=is_manager_view(),
+            team_view=team_view,
+            can_manage=not team_view,
+            schedule_items_json=[] if team_view else context["items"],
             tripster_configured=tripster_configured(),
         )
 
     @blueprint.route("/schedule/clients/search")
-    @access_required
+    @manage_required
     def search_clients():
         query = request.args.get("q", "").strip()
         if len(query) < 2:
@@ -72,7 +78,7 @@ def create_schedule_blueprint(
         })
 
     @blueprint.route("/schedule/crew", methods=["POST"])
-    @access_required
+    @manage_required
     def add_crew_member():
         day = services.parse_day(request.form.get("work_date"))
         try:
@@ -88,7 +94,7 @@ def create_schedule_blueprint(
     @blueprint.route(
         "/schedule/crew/<int:employee_id>/remove", methods=["POST"]
     )
-    @access_required
+    @manage_required
     def remove_crew_member(employee_id):
         day = services.parse_day(request.form.get("work_date"))
         success, message = services.remove_day_crew_member(
@@ -98,7 +104,7 @@ def create_schedule_blueprint(
         return redirect_to_day(day.isoformat())
 
     @blueprint.route("/schedule/items", methods=["POST"])
-    @access_required
+    @manage_required
     def create_item():
         day = services.parse_day(request.form.get("trip_date")).isoformat()
         selected_employee = request.form.get("return_employee", "all")
@@ -110,7 +116,7 @@ def create_schedule_blueprint(
         return redirect_to_day(day, selected_employee)
 
     @blueprint.route("/schedule/items/<int:item_id>", methods=["POST"])
-    @access_required
+    @manage_required
     def update_item(item_id):
         day = services.parse_day(request.form.get("trip_date")).isoformat()
         selected_employee = request.form.get("return_employee", "all")
@@ -123,7 +129,7 @@ def create_schedule_blueprint(
         return redirect_to_day(day, selected_employee)
 
     @blueprint.route("/schedule/items/<int:item_id>/delete", methods=["POST"])
-    @access_required
+    @manage_required
     def delete_item(item_id):
         item = repository.get_item(get_db(), item_id)
         day = (
@@ -136,7 +142,7 @@ def create_schedule_blueprint(
         return redirect_to_day(day, request.form.get("return_employee", "all"))
 
     @blueprint.route("/schedule/tripster/sync", methods=["POST"])
-    @access_required
+    @manage_required
     def sync_tripster():
         day = services.parse_day(request.form.get("return_date")).isoformat()
         selected_employee = request.form.get("return_employee", "all")

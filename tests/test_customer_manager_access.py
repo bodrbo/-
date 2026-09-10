@@ -292,11 +292,35 @@ class CustomerManagerAccessTests(unittest.TestCase):
         self.assertEqual(excursion_channel, "sputnik")
         self.assertEqual(tuning_channel, "")
 
-    def test_other_team_roles_cannot_open_manager_sections(self):
+    def test_guide_can_view_schedule_but_cannot_manage_it(self):
         self.login_as_guide()
 
-        for path in ("/schedule", "/services", "/admin/clients"):
+        schedule = self.client.get("/schedule?date=2026-09-05")
+        schedule_html = schedule.get_data(as_text=True)
+        self.assertEqual(schedule.status_code, 200)
+        self.assertIn("Расписание рейсов", schedule_html)
+        self.assertIn("Режим просмотра", schedule_html)
+        self.assertNotIn("schedule-create-button", schedule_html)
+        self.assertNotIn("schedule-tripster-button", schedule_html)
+        self.assertNotIn("schedule-day-total", schedule_html)
+        self.assertNotIn("const scheduleItems = [{", schedule_html)
+
+        cabinet_html = self.client.get("/team/").get_data(as_text=True)
+        self.assertIn('id="team-schedule"', cabinet_html)
+        self.assertIn('href="/schedule"', cabinet_html)
+
+        for path in ("/services", "/admin/clients"):
             response = self.client.get(path)
+            self.assertEqual(response.status_code, 302)
+            self.assertTrue(response.headers["Location"].endswith("/team/"))
+
+        for path, method in (
+            ("/schedule/clients/search?q=ал", "get"),
+            ("/schedule/crew", "post"),
+            ("/schedule/items", "post"),
+            ("/schedule/tripster/sync", "post"),
+        ):
+            response = getattr(self.client, method)(path)
             self.assertEqual(response.status_code, 302)
             self.assertTrue(response.headers["Location"].endswith("/team/"))
 

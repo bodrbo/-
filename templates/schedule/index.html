@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
 </head>
-<body class="schedule-body">
+<body class="schedule-body{{ ' is-read-only' if team_view }}">
 <div class="page-loader hidden" id="pageLoader" aria-hidden="true">
   <div class="loader-body">
     <svg class="propeller" viewBox="0 0 100 100">
@@ -27,18 +27,20 @@
       <div class="brand">
         <a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a>
       </div>
-      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+      {% if not team_view %}<button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>
-      </button>
+      </button>{% endif %}
     </div>
-    {% include '_admin_main_nav.html' %}
+    {% if not team_view %}{% include '_admin_main_nav.html' %}{% endif %}
     <div class="title-block">
       {% if manager_view %}<span class="kicker">Менеджер по работе с клиентами</span>{% endif %}
+      {% if team_view %}<span class="kicker">Личный кабинет сотрудника · режим просмотра</span>{% endif %}
       <h1>Расписание рейсов</h1>
-      <p>Оперативное управление катерами и экипажами</p>
+      <p>{{ 'Рейсы, катера и состав экипажа' if team_view else 'Оперативное управление катерами и экипажами' }}</p>
     </div>
     <div class="topbar-actions">
-      <form action="{{ url_for('team_logout') if manager_view else url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
+      {% if team_view %}<a href="{{ url_for('team_dashboard') }}" class="btn-secondary">Личный кабинет</a>{% endif %}
+      <form action="{{ url_for('team_logout') if manager_view or team_view else url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
     </div>
   </div>
 </header>
@@ -75,7 +77,7 @@
           {% endfor %}
         </select>
       </label>
-      <form method="post" action="{{ url_for('schedule.sync_tripster') }}" class="schedule-tripster-form" onsubmit="showScheduleTripsterLoader(this)">
+      {% if can_manage %}<form method="post" action="{{ url_for('schedule.sync_tripster') }}" class="schedule-tripster-form" onsubmit="showScheduleTripsterLoader(this)">
         <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
         <input type="hidden" name="return_employee" value="{{ selected_employee }}">
         <button type="submit" class="schedule-tripster-button" {{ 'disabled' if not tripster_configured }} title="{{ 'Полностью сверить заказы, услуги и количество гостей с Tripster' if tripster_configured else 'Токен Tripster не настроен' }}">
@@ -96,6 +98,12 @@
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 3v14M3 10h14"/></svg>
         <span>Новый рейс</span>
       </button>
+      {% else %}
+      <div class="schedule-view-mode" aria-label="Доступ только для просмотра">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 10s2.7-4.5 7.5-4.5 7.5 4.5 7.5 4.5-2.7 4.5-7.5 4.5S2.5 10 2.5 10z"/><circle cx="10" cy="10" r="2.2"/></svg>
+        <span>Режим просмотра</span>
+      </div>
+      {% endif %}
     </div>
   </section>
 
@@ -146,9 +154,9 @@
         <div class="schedule-columns" style="height: {{ grid_height }}px">
           {% for employee in visible_crew %}
           <div class="schedule-column{{ ' is-unassigned' if employee.is_unassigned|default(false) }}" data-employee-id="{{ employee.id }}"
-               data-employee-name="{{ employee.name }}" tabindex="0" role="region"
-               aria-label="{{ 'Заказы без назначенного экипажа' if employee.is_unassigned|default(false) else 'Создать рейс для ' ~ employee.name ~ '. Стрелки вверх и вниз меняют время, Enter открывает форму' }}"
-               {% if not employee.is_unassigned|default(false) %}
+               data-employee-name="{{ employee.name }}" {% if can_manage %}tabindex="0"{% endif %} role="region"
+               aria-label="{{ 'Заказы без назначенного экипажа' if employee.is_unassigned|default(false) else ('Создать рейс для ' ~ employee.name ~ '. Стрелки вверх и вниз меняют время, Enter открывает форму' if can_manage else 'Расписание сотрудника ' ~ employee.name) }}"
+               {% if can_manage and not employee.is_unassigned|default(false) %}
                onclick="handleScheduleColumnClick(event, {{ employee.id }})"
                onfocus="prepareScheduleColumnKeyboard(this)"
                onkeydown="handleScheduleColumnKeydown(event, {{ employee.id }})"
@@ -160,11 +168,12 @@
             {% if now_line_px is not none %}<span class="schedule-now-line" style="top: {{ now_line_px }}px"><i></i></span>{% endif %}
 
             {% for card in cards_by_employee.get(employee.id, []) %}
-            <button type="button"
+            {% set card_tag = 'button' if can_manage else 'article' %}
+            <{{ card_tag }}{% if can_manage %} type="button"{% endif %}
                     class="schedule-card {{ card.kind }} {{ 'is-compact' if card.height_px < 50 else 'is-medium' if card.height_px < 105 }}"
                     style="top: {{ card.top_px }}px; height: {{ card.height_px }}px; --schedule-card-color: {{ card.boat_color }}; --schedule-card-ink: {{ card.boat_ink }}"
                     title="{{ card.start_time }}–{{ card.end_time }} · {{ card.service_name }} · {{ card.boat }}"
-                    onclick="event.stopPropagation(); openScheduleEdit({{ card.id }})">
+                    {% if can_manage %}onclick="event.stopPropagation(); openScheduleEdit({{ card.id }})"{% endif %}>
               <span class="schedule-card-topline">
                 <span class="schedule-card-time">{{ card.start_time }}–{{ card.end_time }}</span>
                 <span class="schedule-card-kind">{{ card.kind_label }}</span>
@@ -179,7 +188,7 @@
               {% else %}
               <span class="schedule-card-meta">{{ card.customer_name }}{% if card.customer_phone %} · {{ card.customer_phone }}{% endif %}</span>
               {% endif %}
-            </button>
+            </{{ card_tag }}>
             {% endfor %}
           </div>
           {% endfor %}
@@ -187,23 +196,27 @@
       </div>
     </div>
   </section>
-  <p class="schedule-board-hint">Нажмите на свободное время, чтобы создать рейс. Нажмите на карточку, чтобы перенести, переназначить или удалить её.</p>
+  <p class="schedule-board-hint">{{ 'Для изменений расписания обратитесь к администратору или менеджеру по работе с клиентами.' if team_view else 'Нажмите на свободное время, чтобы создать рейс. Нажмите на карточку, чтобы перенести, переназначить или удалить её.' }}</p>
   {% else %}
   <section class="panel empty-state schedule-empty">
     <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-    {% if crew %}
+    {% if crew and can_manage %}
     <div class="t">Состав на этот день пока не добавлен</div>
     <div class="s">Добавьте капитанов и гидов, которые работают {{ day_label }}.</div>
     <button type="button" class="btn-secondary" onclick="openScheduleRosterModal()">Добавить сотрудников</button>
-    {% else %}
+    {% elif can_manage %}
     <div class="t">Нет сотрудников для расписания</div>
     <div class="s">Добавьте сотруднику должность «Капитан», «Гид» или «Гид-капитан».</div>
     <a href="{{ url_for('employees.index') }}" class="btn-secondary">Открыть сотрудников</a>
+    {% else %}
+    <div class="t">На эту дату расписание пустое</div>
+    <div class="s">Выберите другую дату или уточните состав смены у администратора.</div>
     {% endif %}
   </section>
   {% endif %}
 </main>
 
+{% if can_manage %}
 <div class="schedule-modal" id="scheduleModal" hidden>
   <div class="schedule-modal-backdrop" onclick="closeScheduleModal()"></div>
   <section class="schedule-modal-card" role="dialog" aria-modal="true" aria-labelledby="scheduleModalTitle">
@@ -475,9 +488,11 @@
     </div>
   </div>
 </template>
+{% endif %}
 
 <script>
-  const scheduleItems = {{ items|tojson }};
+  const scheduleItems = {{ schedule_items_json|tojson }};
+  const scheduleCanManage = {{ can_manage|tojson }};
   const scheduleDayStart = {{ day_start_minutes }};
   const schedulePxPerMinute = {{ px_per_minute }};
   const scheduleCrewCount = {{ visible_crew|length }};
@@ -571,6 +586,7 @@
     syncScheduleKind();
   }
   function openScheduleCreate(employeeId, startTime) {
+    if (!scheduleCanManage) return;
     resetScheduleForm();
     if (startTime) {
       document.getElementById('scheduleStart').value = startTime;
@@ -582,6 +598,7 @@
     setScheduleModalOpen(true);
   }
   function openScheduleEdit(itemId) {
+    if (!scheduleCanManage) return;
     resetScheduleForm();
     const item = scheduleItems.find(candidate => candidate.id === itemId);
     if (!item) return;
@@ -1201,7 +1218,9 @@
   document.addEventListener('keydown', event => {
     const itemModal = document.getElementById('scheduleModal');
     const rosterModal = document.getElementById('scheduleRosterModal');
-    const modal = !itemModal.hidden ? itemModal : (!rosterModal.hidden ? rosterModal : null);
+    const modal = itemModal && !itemModal.hidden
+      ? itemModal
+      : (rosterModal && !rosterModal.hidden ? rosterModal : null);
     if (!modal) return;
     if (event.key === 'Escape') {
       if (modal === rosterModal) closeScheduleRosterModal();

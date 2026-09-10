@@ -4,6 +4,7 @@ from modules.employees.capabilities import (
     DOCUMENTS,
     FLEET,
     INCOME,
+    SCHEDULE,
     SUPPLY,
     TASKS,
     dashboard_capabilities,
@@ -75,7 +76,15 @@ class TeamDashboardCapabilitiesTests(unittest.TestCase):
         captain_and_tuningman = dashboard_capabilities(["Тюнингмэн", "Капитан"])
         self.assertEqual(
             captain_and_tuningman,
-            frozenset({INCOME, TASKS, SUPPLY, FLEET, DOCUMENTS}),
+            frozenset({INCOME, TASKS, SUPPLY, FLEET, DOCUMENTS, SCHEDULE}),
+        )
+        self.assertEqual(
+            dashboard_capabilities(["Гид"]),
+            frozenset({INCOME, SCHEDULE}),
+        )
+        self.assertEqual(
+            dashboard_capabilities(["Гид-капитан"]),
+            frozenset({INCOME, SCHEDULE}),
         )
 
     def test_tuningman_cabinet_has_work_modules_without_fleet_or_documents(self):
@@ -108,6 +117,7 @@ class TeamDashboardCapabilitiesTests(unittest.TestCase):
         self.assertIn('id="captain-fleet"', captain_html)
         self.assertIn('id="team-documents"', captain_html)
         self.assertIn("offline.js", captain_html)
+        self.assertIn('id="team-schedule"', captain_html)
 
         with application_module.app.app_context():
             db = application_module.get_db()

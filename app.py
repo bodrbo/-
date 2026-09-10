@@ -72,6 +72,7 @@ from modules.employees import create_employees_blueprint
 from modules.employees.capabilities import (
     DOCUMENTS as TEAM_DOCUMENTS,
     FLEET as TEAM_FLEET,
+    SCHEDULE as TEAM_SCHEDULE,
     SUPPLY as TEAM_SUPPLY,
     TASKS as TEAM_TASKS,
     dashboard_capabilities as _dashboard_capabilities,
@@ -3289,6 +3290,40 @@ def excursion_manager_or_admin_required(view):
     return wrapped
 
 
+def _is_schedule_team_view(db=None):
+    """Return whether the active employee has view-only schedule access."""
+    if _active_admin_account(db) is not None or _is_customer_manager(db):
+        return False
+    db = db or get_db()
+    account = _active_team_account(db)
+    if account is None:
+        return False
+    positions = db.execute(
+        "SELECT position FROM employee_positions WHERE employee_id = ?",
+        (account["employee_id"],),
+    ).fetchall()
+    return TEAM_SCHEDULE in _dashboard_capabilities(
+        row["position"] for row in positions
+    )
+
+
+def schedule_viewer_or_manager_or_admin_required(view):
+    """Allow crew to view the board without granting schedule mutations."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if _active_admin_account() is not None or _is_customer_manager():
+            return view(*args, **kwargs)
+        if _is_schedule_team_view():
+            return view(*args, **kwargs)
+        if session.get("team_id"):
+            if _active_team_account(get_db()) is None:
+                session.clear()
+                return redirect(url_for("team_login"))
+            return redirect(url_for("team_dashboard"))
+        return redirect(url_for("admin_login"))
+    return wrapped
+
+
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     if request.method == "GET":
@@ -4374,8 +4409,10 @@ app.register_blueprint(
 app.register_blueprint(
     create_schedule_blueprint(
         get_db=get_db,
-        access_required=excursion_manager_or_admin_required,
+        access_required=schedule_viewer_or_manager_or_admin_required,
+        manage_required=excursion_manager_or_admin_required,
         is_manager_view=_is_customer_manager,
+        is_team_view=_is_schedule_team_view,
         boats=BOATS,
         boat_colors=BOAT_COLORS,
         avatar_url=find_avatar_url,
@@ -11676,6 +11713,7 @@ def team_dashboard():
     capabilities = _dashboard_capabilities(employee_positions)
     can_access_fleet = TEAM_FLEET in capabilities
     can_access_documents = TEAM_DOCUMENTS in capabilities
+    can_access_schedule = TEAM_SCHEDULE in capabilities
     can_have_tasks = TEAM_TASKS in capabilities
     can_request_supply = TEAM_SUPPLY in capabilities
 
@@ -11842,6 +11880,7 @@ def team_dashboard():
         dashboard_title=_dashboard_title(employee_positions),
         can_access_fleet=can_access_fleet,
         can_access_documents=can_access_documents,
+        can_access_schedule=can_access_schedule,
         can_request_supply=can_request_supply,
         is_paid=is_paid,
         avatar_url=find_avatar_url(session.get("team_username")),

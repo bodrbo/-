@@ -12,11 +12,14 @@ TASKS = "tasks"
 SUPPLY = "supply"
 FLEET = "fleet"
 DOCUMENTS = "documents"
+SCHEDULE = "schedule"
 
 BASE_CAPABILITIES = frozenset({INCOME})
 
 POSITION_CAPABILITIES = {
-    "Капитан": frozenset({TASKS, SUPPLY, FLEET, DOCUMENTS}),
+    "Капитан": frozenset({TASKS, SUPPLY, FLEET, DOCUMENTS, SCHEDULE}),
+    "Гид": frozenset({SCHEDULE}),
+    "Гид-капитан": frozenset({SCHEDULE}),
     "Тюнингмэн": frozenset({TASKS, SUPPLY}),
 }
 
