@@ -14194,6 +14194,8 @@ def supply_catalog():
         product_error=session.pop("product_error", None),
         category_error=session.pop("category_error", None),
         category_notice=session.pop("category_notice", None),
+        bulk_category_error=session.pop("bulk_category_error", None),
+        bulk_category_notice=session.pop("bulk_category_notice", None),
         marine_rocket_notice=session.pop("marine_rocket_notice", None),
         marine_rocket_state=marine_rocket_state,
         marine_rocket_job=marine_rocket_job,
@@ -14255,6 +14257,92 @@ def delete_supply_category(category_id):
                 "message": f"Категория «{category['name']}» удалена.",
             }
     return redirect(url_for("supply_catalog") + "#supply-categories")
+
+
+@app.route("/supply/catalog/categories/bulk-assign", methods=["POST"])
+@admin_login_required
+def bulk_assign_supply_category():
+    db = get_db()
+    raw_product_ids = request.form.getlist("product_id")
+    product_ids = []
+    seen_ids = set()
+    invalid_product_id = False
+    for raw_product_id in raw_product_ids:
+        try:
+            product_id = int(str(raw_product_id).strip())
+        except (TypeError, ValueError):
+            invalid_product_id = True
+            break
+        if product_id <= 0:
+            invalid_product_id = True
+            break
+        if product_id not in seen_ids:
+            seen_ids.add(product_id)
+            product_ids.append(product_id)
+
+    errors = []
+    raw_category_id = request.form.get("category_id", "").strip()
+    if raw_category_id == "__none__":
+        category_id = None
+    elif not raw_category_id:
+        category_id = None
+        errors.append("Выберите категорию или действие «Снять категорию».")
+    else:
+        category_id = _parse_supply_category_id(db, raw_category_id, errors)
+    if invalid_product_id:
+        errors.append("Список выбранных товаров повреждён. Обновите страницу.")
+    elif not product_ids:
+        errors.append("Выберите хотя бы один товар.")
+    elif len(product_ids) > 5000:
+        errors.append("За один раз можно изменить не более 5000 товаров.")
+
+    existing_ids = set()
+    if product_ids and not invalid_product_id and len(product_ids) <= 5000:
+        # SQLite installations may cap the number of placeholders in one
+        # statement, so validate a large selection in conservative chunks.
+        for offset in range(0, len(product_ids), 500):
+            chunk = product_ids[offset:offset + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = db.execute(
+                f"SELECT id FROM supply_products WHERE id IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            existing_ids.update(row["id"] for row in rows)
+        if existing_ids != set(product_ids):
+            errors.append(
+                "Некоторые выбранные товары уже недоступны. Обновите страницу."
+            )
+
+    if errors:
+        session["bulk_category_error"] = " ".join(errors)
+        return redirect(url_for("supply_catalog") + "#supply-products")
+
+    db.executemany(
+        "UPDATE supply_products SET category_id = ? WHERE id = ?",
+        [(category_id, product_id) for product_id in product_ids],
+    )
+    db.commit()
+    if category_id is None:
+        action = "Категория снята"
+    else:
+        category_name = db.execute(
+            "SELECT name FROM supply_categories WHERE id = ?", (category_id,)
+        ).fetchone()["name"]
+        action = f"Категория «{category_name}» назначена"
+    product_count = len(product_ids)
+    product_word = (
+        "товар"
+        if product_count % 10 == 1 and product_count % 100 != 11
+        else "товара"
+        if product_count % 10 in (2, 3, 4)
+        and product_count % 100 not in (12, 13, 14)
+        else "товаров"
+    )
+    session["bulk_category_notice"] = {
+        "type": "success",
+        "message": f"{action} для {product_count} {product_word}.",
+    }
+    return redirect(url_for("supply_catalog") + "#supply-products")
 
 
 @app.route("/supply/catalog/marine-rocket/sync", methods=["POST"])

@@ -91,6 +91,16 @@
   </div>
   {% endif %}
 
+  {% if bulk_category_error %}
+  <div class="alert"><strong>Не удалось изменить товары:</strong> {{ bulk_category_error }}</div>
+  {% endif %}
+
+  {% if bulk_category_notice %}
+  <div class="alert {{ 'alert-success' if bulk_category_notice.type == 'success' }}" role="status">
+    {{ bulk_category_notice.message }}
+  </div>
+  {% endif %}
+
   {% if marine_rocket_notice %}
   <div class="alert {{ 'alert-success' if marine_rocket_notice.type == 'success' }}" role="status">
     {{ marine_rocket_notice.message }}
@@ -230,47 +240,72 @@
     </div>
   </details>
 
-  <section class="panel">
+  <section class="panel" id="supply-products">
     <h2>Товары</h2>
     {% if products %}
     <div class="table-search">
       <input type="search" placeholder="Поиск по названию или артикулу…"
              data-filter-table="#catalog-table" aria-label="Поиск по товарам">
     </div>
-    <div class="table-scroll">
-      <table class="records" id="catalog-table">
-        <thead>
-          <tr>
-            <th></th><th>Название</th><th>Категория</th><th>Артикул</th><th>Поставщик</th>
-            <th>Себестоимость</th><th>Цена продажи</th><th>Остаток, всего</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for p in products %}
-          <tr class="row-clickable" onclick="window.location.href='{{ url_for('supply_product', product_id=p.id) }}'">
-            <td>
-              {% if p.photo_filename %}
-              <img src="{{ url_for('static', filename='supply_photos/' ~ p.photo_filename) }}" alt="" class="supply-thumb">
-              {% elif p.external_photo_url %}
-              <img src="{{ p.external_photo_url }}" alt="" class="supply-thumb" loading="lazy" referrerpolicy="no-referrer">
-              {% else %}
-              <span class="supply-thumb supply-thumb-empty"></span>
-              {% endif %}
-            </td>
-            <td class="term"><a href="{{ url_for('supply_product', product_id=p.id) }}">{{ p.name }}</a></td>
-            <td>{% if p.category_name %}<span class="supply-category-badge">{{ p.category_name }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
-            <td class="muted">{{ p.sku or '—' }}</td>
-            <td class="muted">{{ p.supplier or '—' }}</td>
-            <td>{{ p.cost_price|money }} ₽ / {{ cost_units|selectattr('value', 'equalto', p.cost_unit)|map(attribute='label')|first }}</td>
-            <td>{{ p.sale_price|money }} ₽</td>
-            <td class="amount" style="{{ 'color:var(--danger);' if p.min_stock and p.total_quantity <= p.min_stock }}">
-              {{ p.total_quantity|float|round(2) }}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+    <form action="{{ url_for('bulk_assign_supply_category') }}" method="post" id="supply-bulk-form">
+      <div class="supply-bulk-toolbar" aria-label="Массовое изменение категории">
+        <div class="supply-bulk-count" aria-live="polite">
+          Выбрано: <strong id="supply-bulk-count">0</strong>
+        </div>
+        <label class="supply-bulk-category" for="supply-bulk-category">
+          <span>Категория</span>
+          <select name="category_id" id="supply-bulk-category" required>
+            <option value="" selected disabled>Выберите действие…</option>
+            <option value="__none__">Снять категорию</option>
+            {% for category in categories %}
+            <option value="{{ category.id }}">{{ category.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit" id="supply-bulk-submit" disabled>Применить</button>
+      </div>
+      <div class="table-scroll">
+        <table class="records" id="catalog-table">
+          <thead>
+            <tr>
+              <th class="supply-select-cell">
+                <input type="checkbox" id="supply-select-visible" aria-label="Выбрать все показанные товары">
+              </th>
+              <th></th><th>Название</th><th>Категория</th><th>Артикул</th><th>Поставщик</th>
+              <th>Себестоимость</th><th>Цена продажи</th><th>Остаток, всего</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in products %}
+            <tr class="row-clickable" onclick="if (!event.target.closest('a, button, input, select, label')) window.location.href='{{ url_for('supply_product', product_id=p.id) }}'">
+              <td class="supply-select-cell">
+                <input type="checkbox" name="product_id" value="{{ p.id }}"
+                       class="supply-product-check" aria-label="Выбрать товар {{ p.name }}">
+              </td>
+              <td>
+                {% if p.photo_filename %}
+                <img src="{{ url_for('static', filename='supply_photos/' ~ p.photo_filename) }}" alt="" class="supply-thumb">
+                {% elif p.external_photo_url %}
+                <img src="{{ p.external_photo_url }}" alt="" class="supply-thumb" loading="lazy" referrerpolicy="no-referrer">
+                {% else %}
+                <span class="supply-thumb supply-thumb-empty"></span>
+                {% endif %}
+              </td>
+              <td class="term"><a href="{{ url_for('supply_product', product_id=p.id) }}">{{ p.name }}</a></td>
+              <td>{% if p.category_name %}<span class="supply-category-badge">{{ p.category_name }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+              <td class="muted">{{ p.sku or '—' }}</td>
+              <td class="muted">{{ p.supplier or '—' }}</td>
+              <td>{{ p.cost_price|money }} ₽ / {{ cost_units|selectattr('value', 'equalto', p.cost_unit)|map(attribute='label')|first }}</td>
+              <td>{{ p.sale_price|money }} ₽</td>
+              <td class="amount" style="{{ 'color:var(--danger);' if p.min_stock and p.total_quantity <= p.min_stock }}">
+                {{ p.total_quantity|float|round(2) }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
     <p id="catalog-table-no-results" class="hint hidden">Ничего не найдено.</p>
     {% else %}
     <div class="empty-state">
@@ -284,6 +319,62 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+(function initSupplyBulkCategories() {
+  var form = document.getElementById('supply-bulk-form');
+  if (!form) return;
+  var selectVisible = document.getElementById('supply-select-visible');
+  var checks = Array.prototype.slice.call(form.querySelectorAll('.supply-product-check'));
+  var count = document.getElementById('supply-bulk-count');
+  var submit = document.getElementById('supply-bulk-submit');
+  var category = document.getElementById('supply-bulk-category');
+  var search = document.querySelector('input[data-filter-table="#catalog-table"]');
+
+  function visibleChecks() {
+    return checks.filter(function (checkbox) {
+      var row = checkbox.closest('tr');
+      return row && !row.classList.contains('hidden');
+    });
+  }
+
+  function refreshState() {
+    var selectedCount = checks.filter(function (checkbox) { return checkbox.checked; }).length;
+    var visible = visibleChecks();
+    var visibleSelected = visible.filter(function (checkbox) { return checkbox.checked; }).length;
+    count.textContent = String(selectedCount);
+    submit.disabled = selectedCount === 0 || !category.value;
+    selectVisible.checked = visible.length > 0 && visibleSelected === visible.length;
+    selectVisible.indeterminate = visibleSelected > 0 && visibleSelected < visible.length;
+  }
+
+  selectVisible.addEventListener('change', function () {
+    visibleChecks().forEach(function (checkbox) {
+      checkbox.checked = selectVisible.checked;
+    });
+    refreshState();
+  });
+  checks.forEach(function (checkbox) {
+    checkbox.addEventListener('change', refreshState);
+  });
+  category.addEventListener('change', refreshState);
+  if (search) {
+    search.addEventListener('input', function () {
+      window.setTimeout(refreshState, 160);
+    });
+  }
+  form.addEventListener('submit', function (event) {
+    var selectedCount = checks.filter(function (checkbox) { return checkbox.checked; }).length;
+    if (!selectedCount) {
+      event.preventDefault();
+      return;
+    }
+    if (!window.confirm('Изменить категорию у выбранных товаров: ' + selectedCount + '?')) {
+      event.preventDefault();
+    }
+  });
+  refreshState();
+})();
+</script>
 {% if marine_rocket_job and marine_rocket_job.status in ('queued', 'running') %}
 <script>
 (function pollMarineRocketStatus() {

@@ -7,6 +7,7 @@ class SupplyCategoryIntegrationTests(unittest.TestCase):
     CATEGORY_NAME = "Тестовые комплектующие"
     PRODUCT_NAME = "Тестовый винт категории"
     PRODUCT_SKU = "category-test-propeller"
+    SECOND_PRODUCT_SKU = "category-test-propeller-2"
 
     def setUp(self):
         application_module.init_db()
@@ -26,8 +27,8 @@ class SupplyCategoryIntegrationTests(unittest.TestCase):
     def _clear_test_data(cls, db):
         product_ids = [
             row["id"] for row in db.execute(
-                "SELECT id FROM supply_products WHERE sku = ?",
-                (cls.PRODUCT_SKU,),
+                "SELECT id FROM supply_products WHERE sku IN (?, ?)",
+                (cls.PRODUCT_SKU, cls.SECOND_PRODUCT_SKU),
             ).fetchall()
         ]
         for product_id in product_ids:
@@ -56,12 +57,12 @@ class SupplyCategoryIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(category)
         return category["id"]
 
-    def _add_product(self, category_id):
+    def _add_product(self, category_id, sku=None, name=None):
         return self.client.post(
             "/supply/catalog/add",
             data={
-                "name": self.PRODUCT_NAME,
-                "sku": self.PRODUCT_SKU,
+                "name": name or self.PRODUCT_NAME,
+                "sku": sku or self.PRODUCT_SKU,
                 "supplier": "Тестовый поставщик",
                 "description": "Тест категории",
                 "category_id": str(category_id) if category_id is not None else "",
@@ -199,6 +200,96 @@ class SupplyCategoryIntegrationTests(unittest.TestCase):
             ).fetchone()
         self.assertIsNone(product)
 
+    def test_category_can_be_assigned_and_removed_in_bulk(self):
+        category_id = self._create_category()
+        self._add_product(None)
+        self._add_product(
+            None,
+            sku=self.SECOND_PRODUCT_SKU,
+            name="Второй тестовый товар",
+        )
+        with application_module.app.app_context():
+            rows = application_module.get_db().execute(
+                "SELECT id FROM supply_products WHERE sku IN (?, ?) ORDER BY id",
+                (self.PRODUCT_SKU, self.SECOND_PRODUCT_SKU),
+            ).fetchall()
+            product_ids = [row["id"] for row in rows]
+
+        assigned = self.client.post(
+            "/supply/catalog/categories/bulk-assign",
+            data={
+                "category_id": str(category_id),
+                "product_id": [str(product_id) for product_id in product_ids],
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(assigned.status_code, 200)
+        self.assertIn("назначена", assigned.get_data(as_text=True))
+        with application_module.app.app_context():
+            category_ids = {
+                row["category_id"] for row in application_module.get_db().execute(
+                    "SELECT category_id FROM supply_products WHERE sku IN (?, ?)",
+                    (self.PRODUCT_SKU, self.SECOND_PRODUCT_SKU),
+                ).fetchall()
+            }
+        self.assertEqual(category_ids, {category_id})
+
+        removed = self.client.post(
+            "/supply/catalog/categories/bulk-assign",
+            data={
+                "category_id": "__none__",
+                "product_id": [str(product_id) for product_id in product_ids],
+            },
+            follow_redirects=True,
+        )
+        self.assertIn("Категория снята", removed.get_data(as_text=True))
+        with application_module.app.app_context():
+            category_ids = {
+                row["category_id"] for row in application_module.get_db().execute(
+                    "SELECT category_id FROM supply_products WHERE sku IN (?, ?)",
+                    (self.PRODUCT_SKU, self.SECOND_PRODUCT_SKU),
+                ).fetchall()
+            }
+        self.assertEqual(category_ids, {None})
+
+    def test_bulk_assignment_rejects_missing_products_and_forged_category(self):
+        self._add_product(None)
+        with application_module.app.app_context():
+            product_id = application_module.get_db().execute(
+                "SELECT id FROM supply_products WHERE sku = ?",
+                (self.PRODUCT_SKU,),
+            ).fetchone()["id"]
+
+        forged_category = self.client.post(
+            "/supply/catalog/categories/bulk-assign",
+            data={"category_id": "99999999", "product_id": str(product_id)},
+            follow_redirects=True,
+        )
+        self.assertIn(
+            "Выберите существующую категорию",
+            forged_category.get_data(as_text=True),
+        )
+
+        missing_action = self.client.post(
+            "/supply/catalog/categories/bulk-assign",
+            data={"category_id": "", "product_id": str(product_id)},
+            follow_redirects=True,
+        )
+        self.assertIn(
+            "Выберите категорию или действие",
+            missing_action.get_data(as_text=True),
+        )
+
+        missing_product = self.client.post(
+            "/supply/catalog/categories/bulk-assign",
+            data={"category_id": "__none__", "product_id": "99999999"},
+            follow_redirects=True,
+        )
+        self.assertIn(
+            "Некоторые выбранные товары уже недоступны",
+            missing_product.get_data(as_text=True),
+        )
+
     def test_category_mutations_require_admin_login(self):
         with self.client.session_transaction() as session:
             session.clear()
@@ -211,6 +302,13 @@ class SupplyCategoryIntegrationTests(unittest.TestCase):
         self.assertEqual(
             self.client.post(
                 "/supply/catalog/categories/1/delete"
+            ).status_code,
+            302,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/supply/catalog/categories/bulk-assign",
+                data={"category_id": "", "product_id": "1"},
             ).status_code,
             302,
         )

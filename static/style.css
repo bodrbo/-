@@ -7184,10 +7184,47 @@ table.records td.amount, table.gloss td.amount { font-weight: 700; color: var(--
   font-weight: 700;
   line-height: 1.25;
 }
+.supply-bulk-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(240px, 420px) auto;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  background: var(--paper-alt);
+}
+.supply-bulk-count {
+  align-self: center;
+  min-width: 92px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.supply-bulk-count strong { color: var(--ink); font-size: 15px; }
+.supply-bulk-category {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+.supply-bulk-category select { width: 100%; min-width: 0; }
+.supply-bulk-toolbar button { min-height: 40px; }
+.supply-select-cell { width: 24px; text-align: center !important; vertical-align: middle !important; }
+.supply-select-cell input[type="checkbox"] {
+  display: block;
+  width: 17px;
+  height: 17px;
+  margin: 0 auto;
+  accent-color: var(--brass);
+  cursor: pointer;
+}
 
 @media (max-width: 620px) {
   .supply-category-create { grid-template-columns: 1fr; }
   .supply-category-create button { width: 100%; }
+  .supply-bulk-toolbar { grid-template-columns: 1fr; align-items: stretch; }
+  .supply-bulk-toolbar button { width: 100%; }
 }
 table.gloss td.term { font-weight: 700; color: var(--ink); font-variant-numeric: normal; }
 
