@@ -255,9 +255,16 @@ def sync_motor_catalog(db, content, now=None):
     try:
         for offer in offers:
             product = db.execute(
-                "SELECT * FROM supply_products WHERE external_source = ? AND external_ref = ?",
+                "SELECT sp.* FROM supply_product_external_links link "
+                "JOIN supply_products sp ON sp.id = link.product_id "
+                "WHERE link.source = ? AND link.external_ref = ?",
                 (SOURCE_KEY, offer["external_ref"]),
             ).fetchone()
+            if product is None:
+                product = db.execute(
+                    "SELECT * FROM supply_products WHERE external_source = ? AND external_ref = ?",
+                    (SOURCE_KEY, offer["external_ref"]),
+                ).fetchone()
             was_adopted = False
             if product is None and offer["sku"]:
                 product = db.execute(
@@ -295,6 +302,27 @@ def sync_motor_catalog(db, content, now=None):
                 updated += 1
                 if was_adopted:
                     adopted += 1
+            link = db.execute(
+                "SELECT product_id FROM supply_product_external_links "
+                "WHERE source = ? AND external_ref = ?",
+                (SOURCE_KEY, offer["external_ref"]),
+            ).fetchone()
+            link_values = (
+                product_id, offer["external_url"], offer["external_photo_url"],
+                updated_at, SOURCE_KEY, offer["external_ref"],
+            )
+            if link is None:
+                db.execute(
+                    "INSERT INTO supply_product_external_links "
+                    "(product_id, external_url, external_photo_url, external_updated_at, source, external_ref) "
+                    "VALUES (?, ?, ?, ?, ?, ?)", link_values,
+                )
+            else:
+                db.execute(
+                    "UPDATE supply_product_external_links SET product_id = ?, external_url = ?, "
+                    "external_photo_url = ?, external_updated_at = ? "
+                    "WHERE source = ? AND external_ref = ?", link_values,
+                )
             active_product_ids.add(product_id)
 
             for location, warehouse_id in warehouse_ids.items():
@@ -303,7 +331,7 @@ def sync_motor_catalog(db, content, now=None):
                 )
 
         stale_rows = db.execute(
-            "SELECT id FROM supply_products WHERE external_source = ?",
+            "SELECT DISTINCT product_id AS id FROM supply_product_external_links WHERE source = ?",
             (SOURCE_KEY,),
         ).fetchall()
         stale_ids = [row["id"] for row in stale_rows if row["id"] not in active_product_ids]
@@ -319,8 +347,9 @@ def sync_motor_catalog(db, content, now=None):
     for location, warehouse_id in warehouse_ids.items():
         totals[location] = db.execute(
             "SELECT COALESCE(SUM(ss.quantity), 0) AS total "
-            "FROM supply_stock ss JOIN supply_products sp ON sp.id = ss.product_id "
-            "WHERE ss.warehouse_id = ? AND sp.external_source = ?",
+            "FROM supply_stock ss WHERE ss.warehouse_id = ? AND EXISTS ("
+            "SELECT 1 FROM supply_product_external_links link "
+            "WHERE link.product_id = ss.product_id AND link.source = ?)",
             (warehouse_id, SOURCE_KEY),
         ).fetchone()["total"]
     return {

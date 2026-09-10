@@ -2409,6 +2409,32 @@ def init_db():
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_supply_products_external_identity "
         "ON supply_products (external_source, external_ref)"
     )
+    # One physical catalog card may be sold by several suppliers. Keep every
+    # supplier identity here instead of forcing duplicate product cards.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS supply_product_external_links (
+            source TEXT NOT NULL,
+            external_ref TEXT NOT NULL,
+            product_id INTEGER NOT NULL,
+            external_url TEXT,
+            external_photo_url TEXT,
+            external_updated_at TEXT,
+            PRIMARY KEY (source, external_ref)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_supply_product_external_links_product "
+        "ON supply_product_external_links (product_id)"
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO supply_product_external_links "
+        "(source, external_ref, product_id, external_url, external_photo_url, external_updated_at) "
+        "SELECT external_source, external_ref, id, external_url, external_photo_url, external_updated_at "
+        "FROM supply_products WHERE external_source IS NOT NULL AND external_source != '' "
+        "AND external_ref IS NOT NULL AND external_ref != ''"
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS supply_stock (
@@ -14201,7 +14227,7 @@ def _sync_thousand_sizes(db):
 def _thousand_sizes_success_message(stats):
     return (
         "1000 размеров обновлён: карточек — {received}, новых — {created}, "
-        "обновлено — {updated}; Москва — {moscow:g} шт., "
+        "обновлено — {updated}, объединено дублей — {merged}; Москва — {moscow:g} шт., "
         "Владивосток — {vladivostok:g} шт."
     ).format(
         moscow=stats["totals"]["Москва"],
@@ -14524,8 +14550,8 @@ def supply_catalog():
         product["category_breadcrumb"] = category["breadcrumb"] if category else []
         products.append(product)
     marine_rocket_state = db.execute(
-        "SELECT COUNT(*) AS product_count, MAX(external_updated_at) AS updated_at "
-        "FROM supply_products WHERE external_source = ?",
+        "SELECT COUNT(DISTINCT product_id) AS product_count, MAX(external_updated_at) AS updated_at "
+        "FROM supply_product_external_links WHERE source = ?",
         (MARINE_ROCKET_SOURCE_KEY,),
     ).fetchone()
     marine_rocket_job = db.execute(
@@ -14533,8 +14559,8 @@ def supply_catalog():
         (MARINE_ROCKET_SOURCE_KEY,),
     ).fetchone()
     thousand_sizes_state = db.execute(
-        "SELECT COUNT(*) AS product_count, MAX(external_updated_at) AS updated_at "
-        "FROM supply_products WHERE external_source = ?",
+        "SELECT COUNT(DISTINCT product_id) AS product_count, MAX(external_updated_at) AS updated_at "
+        "FROM supply_product_external_links WHERE source = ?",
         (THOUSAND_SIZES_SOURCE_KEY,),
     ).fetchone()
     thousand_sizes_job = db.execute(

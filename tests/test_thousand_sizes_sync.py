@@ -40,6 +40,7 @@ class ThousandSizesSyncTests(unittest.TestCase):
         self.client = application_module.app.test_client()
         with application_module.app.app_context():
             db = application_module.get_db()
+            db.execute("DELETE FROM supply_product_external_links")
             db.execute("DELETE FROM supply_stock")
             db.execute("DELETE FROM supply_products")
             db.execute("DELETE FROM supply_categories")
@@ -53,6 +54,7 @@ class ThousandSizesSyncTests(unittest.TestCase):
     def tearDown(self):
         with application_module.app.app_context():
             db = application_module.get_db()
+            db.execute("DELETE FROM supply_product_external_links")
             db.execute("DELETE FROM supply_stock")
             db.execute("DELETE FROM supply_products")
             db.execute("DELETE FROM supply_categories")
@@ -107,6 +109,108 @@ class ThousandSizesSyncTests(unittest.TestCase):
             row = db.execute("SELECT * FROM supply_products").fetchone()
             self.assertEqual(row["external_source"], "thousand_sizes")
             self.assertEqual(row["name"], "Рым-болт")
+
+    def test_manual_card_is_adopted_by_normalized_name(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO supply_products (name, sku, cost_price, cost_unit, sale_price, created_at) "
+                "VALUES ('  РЫМ-БОЛТ  ', 'OLD-SKU', 1, 'piece', 2, '2026-09-01 10:00')"
+            )
+            db.commit()
+            stats = sync_catalog(db, feed(include_second=False))
+            self.assertEqual(stats["created"], 0)
+            self.assertEqual(stats["adopted"], 1)
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) AS n FROM supply_products"
+            ).fetchone()["n"], 1)
+
+    def test_name_and_sku_matches_are_merged_with_history_and_stock(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            warehouse_id = db.execute(
+                "INSERT INTO supply_warehouses (name, created_at) VALUES ('Ручной склад', '2026-09-01')"
+            ).lastrowid
+            first_id = db.execute(
+                "INSERT INTO supply_products (name, sku, cost_price, cost_unit, sale_price, created_at) "
+                "VALUES ('Рым-болт', 'OTHER', 1, 'piece', 2, '2026-09-01')"
+            ).lastrowid
+            second_id = db.execute(
+                "INSERT INTO supply_products (name, sku, cost_price, cost_unit, sale_price, created_at) "
+                "VALUES ('Другое название', 'TS-001', 1, 'piece', 2, '2026-09-01')"
+            ).lastrowid
+            db.executemany(
+                "INSERT INTO supply_stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)",
+                ((first_id, warehouse_id, 2), (second_id, warehouse_id, 3)),
+            )
+            db.execute(
+                "INSERT INTO supply_receipts (product_id, warehouse_id, quantity, created_at) "
+                "VALUES (?, ?, 3, '2026-09-01')", (second_id, warehouse_id),
+            )
+            db.commit()
+
+            stats = sync_catalog(db, feed(include_second=False))
+
+            self.assertEqual(stats["merged"], 1)
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) AS n FROM supply_products"
+            ).fetchone()["n"], 1)
+            winner_id = db.execute("SELECT id FROM supply_products").fetchone()["id"]
+            self.assertEqual(db.execute(
+                "SELECT quantity FROM supply_stock WHERE product_id = ? AND warehouse_id = ?",
+                (winner_id, warehouse_id),
+            ).fetchone()["quantity"], 5)
+            self.assertEqual(db.execute(
+                "SELECT product_id FROM supply_receipts"
+            ).fetchone()["product_id"], winner_id)
+            self.assertEqual(db.execute(
+                "SELECT product_id FROM supply_product_external_links WHERE source = 'thousand_sizes'"
+            ).fetchone()["product_id"], winner_id)
+
+    def test_feed_duplicates_by_name_merge_and_sum_supplier_stock(self):
+        duplicate_feed = feed().replace(
+            b'<offer id="item-2" available="false">',
+            b'<offer id="item-2" available="true">',
+        ).replace(
+            b'<name>\xd0\x92\xd1\x82\xd0\xbe\xd1\x80\xd0\xbe\xd0\xb9 \xd1\x82\xd0\xbe\xd0\xb2\xd0\xb0\xd1\x80</name>',
+            b'<name>  \xd0\xa0\xd0\xab\xd0\x9c-\xd0\x91\xd0\x9e\xd0\x9b\xd0\xa2  </name>',
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            stats = sync_catalog(db, duplicate_feed)
+            self.assertEqual(stats["created"], 1)
+            self.assertEqual(stats["merged"], 0)
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) AS n FROM supply_products"
+            ).fetchone()["n"], 1)
+            self.assertEqual(stats["totals"], {"Москва": 104, "Владивосток": 4})
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) AS n FROM supply_product_external_links"
+            ).fetchone()["n"], 2)
+
+    def test_matching_other_supplier_card_keeps_both_external_links(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            product_id = db.execute(
+                "INSERT INTO supply_products (name, sku, cost_price, cost_unit, sale_price, "
+                "created_at, external_source, external_ref) "
+                "VALUES ('Старое имя', 'TS-001', 1, 'piece', 2, '2026-09-01', "
+                "'marine_rocket', 'motor-1')"
+            ).lastrowid
+            db.execute(
+                "INSERT INTO supply_product_external_links (source, external_ref, product_id) "
+                "VALUES ('marine_rocket', 'motor-1', ?)", (product_id,),
+            )
+            db.commit()
+
+            sync_catalog(db, feed(include_second=False))
+
+            row = db.execute("SELECT * FROM supply_products").fetchone()
+            self.assertEqual(row["external_source"], "marine_rocket")
+            links = db.execute(
+                "SELECT source FROM supply_product_external_links ORDER BY source"
+            ).fetchall()
+            self.assertEqual([link["source"] for link in links], ["marine_rocket", "thousand_sizes"])
 
     def test_admin_manual_sync_and_paginated_search(self):
         with mock.patch.object(

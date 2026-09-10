@@ -193,6 +193,79 @@ def _replace_stock_quantity(db, product_id, warehouse_id, quantity):
         db.execute("UPDATE supply_stock SET quantity = ? WHERE id = ?", (quantity, row["id"]))
 
 
+def _identity_key(value):
+    """Case-insensitive key with repeated whitespace normalized."""
+    return " ".join(str(value or "").split()).casefold()
+
+
+def _merge_products(db, winner_id, duplicate_id):
+    """Move all product history to winner and remove the duplicate card."""
+    if winner_id == duplicate_id:
+        return
+    # Keep manually uploaded imagery and catalog settings when only one of the
+    # two cards has them. Supplier fields themselves are refreshed afterwards.
+    db.execute(
+        "UPDATE supply_products SET "
+        "photo_filename = COALESCE(photo_filename, (SELECT photo_filename FROM supply_products WHERE id = ?)), "
+        "min_stock = COALESCE(min_stock, (SELECT min_stock FROM supply_products WHERE id = ?)), "
+        "category_id = COALESCE(category_id, (SELECT category_id FROM supply_products WHERE id = ?)) "
+        "WHERE id = ?",
+        (duplicate_id, duplicate_id, duplicate_id, winner_id),
+    )
+    duplicate_stock = db.execute(
+        "SELECT * FROM supply_stock WHERE product_id = ?", (duplicate_id,)
+    ).fetchall()
+    for row in duplicate_stock:
+        winner_stock = db.execute(
+            "SELECT id FROM supply_stock WHERE product_id = ? AND warehouse_id = ?",
+            (winner_id, row["warehouse_id"]),
+        ).fetchone()
+        if winner_stock is None:
+            db.execute(
+                "UPDATE supply_stock SET product_id = ? WHERE id = ?",
+                (winner_id, row["id"]),
+            )
+        else:
+            db.execute(
+                "UPDATE supply_stock SET quantity = quantity + ? WHERE id = ?",
+                (row["quantity"], winner_stock["id"]),
+            )
+            db.execute("DELETE FROM supply_stock WHERE id = ?", (row["id"],))
+    for table_name in (
+        "supply_receipts", "supply_writeoffs", "supply_requests",
+        "tuning_order_products", "supply_product_external_links",
+    ):
+        db.execute(
+            "UPDATE {} SET product_id = ? WHERE product_id = ?".format(table_name),
+            (winner_id, duplicate_id),
+        )
+    db.execute("DELETE FROM supply_products WHERE id = ?", (duplicate_id,))
+
+
+def _upsert_external_link(db, product_id, offer, updated_at):
+    existing = db.execute(
+        "SELECT product_id FROM supply_product_external_links "
+        "WHERE source = ? AND external_ref = ?",
+        (SOURCE_KEY, offer["external_ref"]),
+    ).fetchone()
+    values = (
+        product_id, offer["external_url"], offer["external_photo_url"], updated_at,
+        SOURCE_KEY, offer["external_ref"],
+    )
+    if existing is None:
+        db.execute(
+            "INSERT INTO supply_product_external_links "
+            "(product_id, external_url, external_photo_url, external_updated_at, source, external_ref) "
+            "VALUES (?, ?, ?, ?, ?, ?)", values,
+        )
+    else:
+        db.execute(
+            "UPDATE supply_product_external_links SET product_id = ?, external_url = ?, "
+            "external_photo_url = ?, external_updated_at = ? "
+            "WHERE source = ? AND external_ref = ?", values,
+        )
+
+
 def _ensure_categories(db, offers, now):
     """Mirror category paths below one supplier root and return path -> id."""
     root_name = SUPPLIER_NAME
@@ -233,27 +306,83 @@ def _ensure_categories(db, offers, now):
 
 
 def sync_catalog(db, content, now=None):
-    """Upsert the full supplier catalog and replace both warehouse balances."""
+    """Upsert feed and merge cards matching either normalized name or SKU."""
     offers = parse_offers(content)
     updated_at = (now or dt.datetime.now()).strftime("%Y-%m-%d %H:%M")
     warehouse_ids = _ensure_warehouses(db, updated_at)
     category_ids = _ensure_categories(db, offers, updated_at)
-    created = updated = adopted = 0
+    created = updated = adopted = merged = 0
     active_product_ids = set()
+    feed_quantities = {}
+    products = {row["id"]: dict(row) for row in db.execute(
+        "SELECT * FROM supply_products ORDER BY id"
+    ).fetchall()}
+    initial_product_ids = set(products)
+    names = {}
+    skus = {}
+
+    def add_to_indexes(product):
+        name_key = _identity_key(product.get("name"))
+        sku_key = _identity_key(product.get("sku"))
+        if name_key:
+            names.setdefault(name_key, set()).add(product["id"])
+        if sku_key:
+            skus.setdefault(sku_key, set()).add(product["id"])
+
+    def remove_from_indexes(product):
+        for index, key in ((names, _identity_key(product.get("name"))),
+                           (skus, _identity_key(product.get("sku")))):
+            if key and key in index:
+                index[key].discard(product["id"])
+                if not index[key]:
+                    del index[key]
+
+    for product in products.values():
+        add_to_indexes(product)
+    source_links = {
+        row["external_ref"]: row["product_id"]
+        for row in db.execute(
+            "SELECT external_ref, product_id FROM supply_product_external_links WHERE source = ?",
+            (SOURCE_KEY,),
+        ).fetchall()
+    }
     try:
         for offer in offers:
-            product = db.execute(
-                "SELECT * FROM supply_products WHERE external_source = ? AND external_ref = ?",
-                (SOURCE_KEY, offer["external_ref"]),
-            ).fetchone()
-            was_adopted = False
-            if product is None and offer["sku"]:
-                product = db.execute(
-                    "SELECT * FROM supply_products WHERE sku = ? "
-                    "AND (external_source IS NULL OR external_source = '') ORDER BY id LIMIT 1",
-                    (offer["sku"],),
-                ).fetchone()
-                was_adopted = product is not None
+            mapped_id = source_links.get(offer["external_ref"])
+            candidate_ids = set()
+            candidate_ids.update(names.get(_identity_key(offer["name"]), set()))
+            if offer["sku"]:
+                candidate_ids.update(skus.get(_identity_key(offer["sku"]), set()))
+            if mapped_id in products:
+                candidate_ids.add(mapped_id)
+            winner_id = mapped_id if mapped_id in products else (
+                min(candidate_ids) if candidate_ids else None
+            )
+            was_adopted = (
+                winner_id is not None and mapped_id is None
+                and winner_id in initial_product_ids
+            )
+            if winner_id is not None:
+                for duplicate_id in sorted(candidate_ids - {winner_id}):
+                    duplicate = products.get(duplicate_id)
+                    if duplicate is None:
+                        continue
+                    _merge_products(db, winner_id, duplicate_id)
+                    remove_from_indexes(duplicate)
+                    del products[duplicate_id]
+                    for reference, product_id in list(source_links.items()):
+                        if product_id == duplicate_id:
+                            source_links[reference] = winner_id
+                    for location in WAREHOUSE_NAMES:
+                        duplicate_key = (duplicate_id, location)
+                        if duplicate_key in feed_quantities:
+                            winner_key = (winner_id, location)
+                            feed_quantities[winner_key] = (
+                                feed_quantities.get(winner_key, 0)
+                                + feed_quantities.pop(duplicate_key)
+                            )
+                    merged += 1
+            product = products.get(winner_id) if winner_id is not None else None
             values = (
                 offer["name"], offer["sku"], offer["description"], SUPPLIER_NAME,
                 offer["cost_price"], "piece", offer["sale_price"],
@@ -271,27 +400,58 @@ def sync_catalog(db, content, now=None):
                 )
                 product_id = cursor.lastrowid
                 created += 1
+                product = {
+                    "id": product_id, "name": offer["name"], "sku": offer["sku"],
+                    "external_source": SOURCE_KEY, "external_ref": offer["external_ref"],
+                }
+                products[product_id] = product
+                add_to_indexes(product)
             else:
                 product_id = product["id"]
+                remove_from_indexes(product)
                 db.execute(
-                    "UPDATE supply_products SET name = ?, sku = ?, description = ?, supplier = ?, "
+                    "UPDATE supply_products SET name = ?, sku = COALESCE(?, sku), description = ?, supplier = ?, "
                     "cost_price = ?, cost_unit = ?, sale_price = ?, "
-                    "category_id = COALESCE(category_id, ?), external_source = ?, "
-                    "external_ref = ?, external_url = ?, external_photo_url = ?, "
+                    "category_id = COALESCE(category_id, ?), "
+                    "external_url = COALESCE(external_url, ?), "
+                    "external_photo_url = COALESCE(external_photo_url, ?), "
                     "external_updated_at = ? WHERE id = ?",
-                    values + (product_id,),
+                    values[:8] + (offer["external_url"], offer["external_photo_url"],
+                                  updated_at, product_id),
                 )
+                if not product.get("external_source"):
+                    db.execute(
+                        "UPDATE supply_products SET external_source = ?, external_ref = ? WHERE id = ?",
+                        (SOURCE_KEY, offer["external_ref"], product_id),
+                    )
+                    product["external_source"] = SOURCE_KEY
+                    product["external_ref"] = offer["external_ref"]
+                product["name"] = offer["name"]
+                if offer["sku"]:
+                    product["sku"] = offer["sku"]
+                add_to_indexes(product)
                 updated += 1
                 if was_adopted:
                     adopted += 1
+            _upsert_external_link(db, product_id, offer, updated_at)
+            source_links[offer["external_ref"]] = product_id
             active_product_ids.add(product_id)
+            for location in warehouse_ids:
+                key = (product_id, location)
+                feed_quantities[key] = (
+                    feed_quantities.get(key, 0) + offer["quantities"][location]
+                )
+
+        for product_id in active_product_ids:
             for location, warehouse_id in warehouse_ids.items():
                 _replace_stock_quantity(
-                    db, product_id, warehouse_id, offer["quantities"][location]
+                    db, product_id, warehouse_id,
+                    feed_quantities.get((product_id, location), 0),
                 )
 
         stale_rows = db.execute(
-            "SELECT id FROM supply_products WHERE external_source = ?", (SOURCE_KEY,)
+            "SELECT DISTINCT product_id AS id FROM supply_product_external_links WHERE source = ?",
+            (SOURCE_KEY,),
         ).fetchall()
         stale_ids = [row["id"] for row in stale_rows if row["id"] not in active_product_ids]
         for product_id in stale_ids:
@@ -306,12 +466,13 @@ def sync_catalog(db, content, now=None):
     for location, warehouse_id in warehouse_ids.items():
         totals[location] = db.execute(
             "SELECT COALESCE(SUM(ss.quantity), 0) AS total FROM supply_stock ss "
-            "JOIN supply_products sp ON sp.id = ss.product_id "
-            "WHERE ss.warehouse_id = ? AND sp.external_source = ?",
+            "WHERE ss.warehouse_id = ? AND EXISTS ("
+            "SELECT 1 FROM supply_product_external_links link "
+            "WHERE link.product_id = ss.product_id AND link.source = ?)",
             (warehouse_id, SOURCE_KEY),
         ).fetchone()["total"]
     return {
         "received": len(offers), "created": created, "updated": updated,
-        "adopted": adopted, "stale": len(stale_ids), "totals": totals,
+        "adopted": adopted, "merged": merged, "stale": len(stale_ids), "totals": totals,
         "updated_at": updated_at,
     }

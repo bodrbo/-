@@ -59,6 +59,7 @@ class MarineRocketSyncTests(unittest.TestCase):
         self.client = application_module.app.test_client()
         with application_module.app.app_context():
             db = application_module.get_db()
+            db.execute("DELETE FROM supply_product_external_links")
             db.execute("DELETE FROM supply_stock")
             db.execute("DELETE FROM supply_products")
             db.execute("DELETE FROM supply_warehouses")
@@ -78,6 +79,7 @@ class MarineRocketSyncTests(unittest.TestCase):
     def tearDown(self):
         with application_module.app.app_context():
             db = application_module.get_db()
+            db.execute("DELETE FROM supply_product_external_links")
             db.execute("DELETE FROM supply_stock")
             db.execute("DELETE FROM supply_products")
             db.execute("DELETE FROM supply_warehouses")
