@@ -83,6 +83,7 @@
     {% endif %}
     <div style="flex:1 1 260px;">
       <table class="gloss">
+        <tr><th>Категория</th><td>{% if product.category_name %}<span class="supply-category-badge">{{ product.category_name }}</span>{% else %}—{% endif %}</td></tr>
         <tr><th>Артикул</th><td>{{ product.sku or '—' }}</td></tr>
         <tr><th>Поставщик</th><td>{{ product.supplier or '—' }}</td></tr>
         {% if product.external_url %}
@@ -134,6 +135,15 @@
         <div class="field field-narrow">
           <label for="edit_supplier">Поставщик</label>
           <input type="text" id="edit_supplier" name="supplier" value="{{ product.supplier or '' }}">
+        </div>
+        <div class="field field-narrow">
+          <label for="edit_category">Категория</label>
+          <select id="edit_category" name="category_id">
+            <option value="">Без категории</option>
+            {% for category in categories %}
+            <option value="{{ category.id }}" {{ 'selected' if category.id == product.category_id }}>{{ category.name }}</option>
+            {% endfor %}
+          </select>
         </div>
         <div class="field field-wide">
           <label for="edit_description">Описание</label>

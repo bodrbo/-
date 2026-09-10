@@ -81,6 +81,16 @@
   <div class="alert"><strong>Не удалось добавить товар:</strong> {{ product_error }}</div>
   {% endif %}
 
+  {% if category_error %}
+  <div class="alert"><strong>Не удалось изменить категории:</strong> {{ category_error }}</div>
+  {% endif %}
+
+  {% if category_notice %}
+  <div class="alert {{ 'alert-success' if category_notice.type == 'success' }}" role="status">
+    {{ category_notice.message }}
+  </div>
+  {% endif %}
+
   {% if marine_rocket_notice %}
   <div class="alert {{ 'alert-success' if marine_rocket_notice.type == 'success' }}" role="status">
     {{ marine_rocket_notice.message }}
@@ -118,6 +128,44 @@
     </div>
   </section>
 
+  <details class="panel collapsible-panel" id="supply-categories" {{ 'open' if category_error }}>
+    <summary>
+      <span>Категории <small class="muted">{{ categories|length }}</small></span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body supply-category-manager">
+      <form action="{{ url_for('add_supply_category') }}" method="post" class="supply-category-create">
+        <label class="field">
+          <span>Новая категория</span>
+          <input type="text" name="name" maxlength="80" placeholder="Например, лодочные моторы" required>
+        </label>
+        <button type="submit">Создать категорию</button>
+      </form>
+      {% if categories %}
+      <div class="supply-category-list">
+        {% for category in categories %}
+        <div class="supply-category-row">
+          <span>
+            <strong>{{ category.name }}</strong>
+            <small>{{ category.product_count }} товар{{ '' if category.product_count % 10 == 1 and category.product_count % 100 != 11 else 'а' if category.product_count % 10 in [2, 3, 4] and category.product_count % 100 not in [12, 13, 14] else 'ов' }}</small>
+          </span>
+          <form action="{{ url_for('delete_supply_category', category_id=category.id) }}" method="post"
+                onsubmit="return confirm('Удалить эту категорию?')">
+            <button type="submit" class="icon-btn danger" aria-label="Удалить категорию {{ category.name }}"
+                    {{ 'disabled' if category.product_count }}
+                    title="{{ 'Сначала уберите категорию у товаров' if category.product_count else 'Удалить категорию' }}">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h12M8 3h4l1 3H7l1-3zM6 6l.7 11h6.6L14 6M8.5 9v5M11.5 9v5"/></svg>
+            </button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="hint">Категорий пока нет. Товары можно оставить без категории.</p>
+      {% endif %}
+    </div>
+  </details>
+
   <details class="panel collapsible-panel">
     <summary>
       <span>Добавить товар</span>
@@ -136,6 +184,15 @@
         <div class="field field-narrow">
           <label for="product_supplier">Поставщик</label>
           <input type="text" id="product_supplier" name="supplier">
+        </div>
+        <div class="field field-narrow">
+          <label for="product_category">Категория</label>
+          <select id="product_category" name="category_id">
+            <option value="">Без категории</option>
+            {% for category in categories %}
+            <option value="{{ category.id }}">{{ category.name }}</option>
+            {% endfor %}
+          </select>
         </div>
         <div class="field field-wide">
           <label for="product_description">Описание</label>
@@ -184,7 +241,7 @@
       <table class="records" id="catalog-table">
         <thead>
           <tr>
-            <th></th><th>Название</th><th>Артикул</th><th>Поставщик</th>
+            <th></th><th>Название</th><th>Категория</th><th>Артикул</th><th>Поставщик</th>
             <th>Себестоимость</th><th>Цена продажи</th><th>Остаток, всего</th>
           </tr>
         </thead>
@@ -201,6 +258,7 @@
               {% endif %}
             </td>
             <td class="term"><a href="{{ url_for('supply_product', product_id=p.id) }}">{{ p.name }}</a></td>
+            <td>{% if p.category_name %}<span class="supply-category-badge">{{ p.category_name }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
             <td class="muted">{{ p.sku or '—' }}</td>
             <td class="muted">{{ p.supplier or '—' }}</td>
             <td>{{ p.cost_price|money }} ₽ / {{ cost_units|selectattr('value', 'equalto', p.cost_unit)|map(attribute='label')|first }}</td>

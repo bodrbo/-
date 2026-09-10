@@ -2330,6 +2330,19 @@ def init_db():
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS supply_categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_supply_categories_name "
+        "ON supply_categories (name)"
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS supply_products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -2350,6 +2363,13 @@ def init_db():
     supply_product_cols = [row[1] for row in conn.execute("PRAGMA table_info(supply_products)").fetchall()]
     if "min_stock" not in supply_product_cols:
         conn.execute("ALTER TABLE supply_products ADD COLUMN min_stock REAL")
+    if "category_id" not in supply_product_cols:
+        conn.execute("ALTER TABLE supply_products ADD COLUMN category_id INTEGER")
+        supply_product_cols.append("category_id")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_supply_products_category "
+        "ON supply_products (category_id, name)"
+    )
     # External catalog links are deliberately optional: ordinary products
     # remain fully manual, while integrations get a stable idempotency key and
     # may display the supplier's current card/photo without downloading files.
@@ -13837,6 +13857,37 @@ def _supply_warehouses(db):
     return db.execute("SELECT * FROM supply_warehouses ORDER BY name").fetchall()
 
 
+def _supply_categories(db, with_counts=False):
+    if with_counts:
+        return db.execute(
+            "SELECT sc.*, COUNT(sp.id) AS product_count "
+            "FROM supply_categories sc "
+            "LEFT JOIN supply_products sp ON sp.category_id = sc.id "
+            "GROUP BY sc.id ORDER BY CASEFOLD(sc.name), sc.id"
+        ).fetchall()
+    return db.execute(
+        "SELECT * FROM supply_categories ORDER BY CASEFOLD(name), id"
+    ).fetchall()
+
+
+def _parse_supply_category_id(db, raw_value, errors):
+    raw_value = str(raw_value or "").strip()
+    if not raw_value:
+        return None
+    try:
+        category_id = int(raw_value)
+    except (TypeError, ValueError):
+        errors.append("Выберите существующую категорию.")
+        return None
+    category = db.execute(
+        "SELECT id FROM supply_categories WHERE id = ?", (category_id,)
+    ).fetchone()
+    if category is None:
+        errors.append("Выберите существующую категорию.")
+        return None
+    return category_id
+
+
 def _sync_marine_rocket(db):
     content = fetch_marine_rocket_yml(MARINE_ROCKET_YML_URL)
     return sync_marine_rocket_motor_catalog(db, content)
@@ -14121,9 +14172,11 @@ def import_moysklad_catalog():
 def supply_catalog():
     db = get_db()
     products = db.execute(
-        "SELECT sp.*, "
+        "SELECT sp.*, sc.name AS category_name, "
         "(SELECT COALESCE(SUM(quantity), 0) FROM supply_stock WHERE product_id = sp.id) AS total_quantity "
-        "FROM supply_products sp ORDER BY sp.created_at DESC, sp.id DESC"
+        "FROM supply_products sp "
+        "LEFT JOIN supply_categories sc ON sc.id = sp.category_id "
+        "ORDER BY sp.created_at DESC, sp.id DESC"
     ).fetchall()
     marine_rocket_state = db.execute(
         "SELECT COUNT(*) AS product_count, MAX(external_updated_at) AS updated_at "
@@ -14136,12 +14189,72 @@ def supply_catalog():
     ).fetchone()
     return render_template(
         "supply_catalog.html", active_page="supply", sub_page="catalog",
-        products=products, cost_units=SUPPLY_COST_UNITS,
+        products=products, categories=_supply_categories(db, with_counts=True),
+        cost_units=SUPPLY_COST_UNITS,
         product_error=session.pop("product_error", None),
+        category_error=session.pop("category_error", None),
+        category_notice=session.pop("category_notice", None),
         marine_rocket_notice=session.pop("marine_rocket_notice", None),
         marine_rocket_state=marine_rocket_state,
         marine_rocket_job=marine_rocket_job,
     )
+
+
+@app.route("/supply/catalog/categories/add", methods=["POST"])
+@admin_login_required
+def add_supply_category():
+    db = get_db()
+    name = " ".join(request.form.get("name", "").split())
+    if not name:
+        session["category_error"] = "Укажите название категории."
+    elif len(name) > 80:
+        session["category_error"] = "Название категории не должно быть длиннее 80 символов."
+    elif db.execute(
+        "SELECT id FROM supply_categories WHERE CASEFOLD(name) = ?",
+        (name.casefold(),),
+    ).fetchone() is not None:
+        session["category_error"] = "Категория с таким названием уже существует."
+    else:
+        db.execute(
+            "INSERT INTO supply_categories (name, created_at) VALUES (?, ?)",
+            (name, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+        )
+        db.commit()
+        session["category_notice"] = {
+            "type": "success", "message": f"Категория «{name}» создана."
+        }
+    return redirect(url_for("supply_catalog") + "#supply-categories")
+
+
+@app.route(
+    "/supply/catalog/categories/<int:category_id>/delete", methods=["POST"]
+)
+@admin_login_required
+def delete_supply_category(category_id):
+    db = get_db()
+    category = db.execute(
+        "SELECT * FROM supply_categories WHERE id = ?", (category_id,)
+    ).fetchone()
+    if category is None:
+        session["category_error"] = "Категория не найдена."
+    else:
+        product_count = db.execute(
+            "SELECT COUNT(*) AS count FROM supply_products WHERE category_id = ?",
+            (category_id,),
+        ).fetchone()["count"]
+        if product_count:
+            session["category_error"] = (
+                f"Нельзя удалить категорию «{category['name']}»: "
+                f"к ней привязаны товары ({product_count})."
+            )
+        else:
+            db.execute("DELETE FROM supply_categories WHERE id = ?", (category_id,))
+            db.commit()
+            session["category_notice"] = {
+                "type": "success",
+                "message": f"Категория «{category['name']}» удалена.",
+            }
+    return redirect(url_for("supply_catalog") + "#supply-categories")
 
 
 @app.route("/supply/catalog/marine-rocket/sync", methods=["POST"])
@@ -14197,6 +14310,9 @@ def add_supply_product():
     min_stock_raw = request.form.get("min_stock", "").strip().replace(",", ".")
 
     errors = []
+    category_id = _parse_supply_category_id(
+        db, request.form.get("category_id"), errors
+    )
     if not name:
         errors.append("Укажите название товара.")
     if cost_unit not in [u["value"] for u in SUPPLY_COST_UNITS]:
@@ -14235,9 +14351,10 @@ def add_supply_product():
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     cur = db.execute(
         "INSERT INTO supply_products (name, sku, description, supplier, photo_filename, "
-        "cost_price, cost_unit, sale_price, min_stock, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "cost_price, cost_unit, sale_price, min_stock, category_id, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (name, sku or None, description or None, supplier or None, None,
-         cost_price, cost_unit, sale_price, min_stock, now),
+         cost_price, cost_unit, sale_price, min_stock, category_id, now),
     )
     product_id = cur.lastrowid
 
@@ -14265,7 +14382,12 @@ def add_supply_product():
 @admin_login_required
 def supply_product(product_id):
     db = get_db()
-    product = db.execute("SELECT * FROM supply_products WHERE id = ?", (product_id,)).fetchone()
+    product = db.execute(
+        "SELECT sp.*, sc.name AS category_name FROM supply_products sp "
+        "LEFT JOIN supply_categories sc ON sc.id = sp.category_id "
+        "WHERE sp.id = ?",
+        (product_id,),
+    ).fetchone()
     if product is None:
         return redirect(url_for("supply_catalog"))
 
@@ -14305,6 +14427,7 @@ def supply_product(product_id):
         product=product, stock=stock, total_quantity=total_quantity,
         history=history,
         warehouses=_supply_warehouses(db),
+        categories=_supply_categories(db),
         cost_units=SUPPLY_COST_UNITS, writeoff_reasons=SUPPLY_WRITEOFF_REASONS,
         custom_value=CUSTOM_VALUE,
         receive_error=session.pop("receive_error", None),
@@ -14356,6 +14479,9 @@ def edit_supply_product(product_id):
     sale_price_raw = request.form.get("sale_price", "").strip().replace(",", ".")
 
     errors = []
+    category_id = _parse_supply_category_id(
+        db, request.form.get("category_id"), errors
+    )
     if not name:
         errors.append("Укажите название товара.")
     if cost_unit not in [u["value"] for u in SUPPLY_COST_UNITS]:
@@ -14383,9 +14509,9 @@ def edit_supply_product(product_id):
 
     db.execute(
         "UPDATE supply_products SET name = ?, sku = ?, description = ?, supplier = ?, "
-        "cost_price = ?, cost_unit = ?, sale_price = ? WHERE id = ?",
+        "cost_price = ?, cost_unit = ?, sale_price = ?, category_id = ? WHERE id = ?",
         (name, sku or None, description or None, supplier or None,
-         cost_price, cost_unit, sale_price, product_id),
+         cost_price, cost_unit, sale_price, category_id, product_id),
     )
 
     file = request.files.get("photo")

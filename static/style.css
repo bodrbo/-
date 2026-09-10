@@ -7128,6 +7128,67 @@ table.records td.amount, table.gloss td.amount { font-weight: 700; color: var(--
   background: var(--paper-alt) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2362707f' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 2.3l7 3.5v8.4l-7 3.5-7-3.5V5.8l7-3.5z'/%3E%3Cpath d='M3 5.8l7 3.5 7-3.5'/%3E%3Cpath d='M10 9.3v8.4'/%3E%3C/svg%3E") no-repeat center;
   background-size: 20px;
 }
+.supply-category-manager { display: grid; gap: 16px; }
+.supply-category-create {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+.supply-category-create button { min-height: 42px; }
+.supply-category-list {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+}
+.supply-category-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 54px;
+  gap: 12px;
+  padding: 9px 12px;
+  background: var(--paper);
+}
+.supply-category-row + .supply-category-row { border-top: 1px solid var(--hairline); }
+.supply-category-row > span { display: grid; min-width: 0; gap: 2px; }
+.supply-category-row strong { overflow-wrap: anywhere; font-size: 13px; }
+.supply-category-row small { color: var(--muted); font-size: 11px; }
+.supply-category-row .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+}
+.supply-category-row .icon-btn:hover:not(:disabled) { border-color: var(--danger); background: var(--danger); color: #fff; }
+.supply-category-row .icon-btn:disabled { opacity: .32; cursor: not-allowed; }
+.supply-category-row .icon-btn svg { width: 14px; height: 14px; }
+.supply-category-badge {
+  display: inline-flex;
+  align-items: center;
+  max-width: 180px;
+  padding: 3px 8px;
+  border: 1px solid #b8d2e4;
+  border-radius: 999px;
+  background: #edf6fc;
+  color: #236185;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+@media (max-width: 620px) {
+  .supply-category-create { grid-template-columns: 1fr; }
+  .supply-category-create button { width: 100%; }
+}
 table.gloss td.term { font-weight: 700; color: var(--ink); font-variant-numeric: normal; }
 
 /* "button." (not just ".btn-delete") so this out-specifies the generic
