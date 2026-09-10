@@ -13842,16 +13842,21 @@ def _queue_marine_rocket_sync(db):
             return False
 
     requested_at = now.strftime("%Y-%m-%d %H:%M:%S")
-    db.execute(
-        "INSERT INTO supply_external_sync_state "
-        "(source, status, requested_at, started_at, finished_at, message) "
-        "VALUES (?, 'queued', ?, NULL, NULL, ?) "
-        "ON CONFLICT(source) DO UPDATE SET status = 'queued', "
-        "requested_at = excluded.requested_at, started_at = NULL, "
-        "finished_at = NULL, message = excluded.message",
-        (MARINE_ROCKET_SOURCE_KEY, requested_at,
-         "Обновление Marine Rocket поставлено в очередь…"),
-    )
+    queued_message = "Обновление Marine Rocket поставлено в очередь…"
+    if current is None:
+        db.execute(
+            "INSERT INTO supply_external_sync_state "
+            "(source, status, requested_at, started_at, finished_at, message) "
+            "VALUES (?, 'queued', ?, NULL, NULL, ?)",
+            (MARINE_ROCKET_SOURCE_KEY, requested_at, queued_message),
+        )
+    else:
+        db.execute(
+            "UPDATE supply_external_sync_state SET status = 'queued', "
+            "requested_at = ?, started_at = NULL, finished_at = NULL, message = ? "
+            "WHERE source = ?",
+            (requested_at, queued_message, MARINE_ROCKET_SOURCE_KEY),
+        )
     db.commit()
     if app.testing:
         _run_marine_rocket_sync_job(requested_at)

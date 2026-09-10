@@ -218,6 +218,24 @@ def _resolve_warehouses(db):
     return resolved
 
 
+def _replace_stock_quantity(db, product_id, warehouse_id, quantity):
+    """Portable upsert for Beget's older SQLite build."""
+    existing = db.execute(
+        "SELECT id FROM supply_stock WHERE product_id = ? AND warehouse_id = ?",
+        (product_id, warehouse_id),
+    ).fetchone()
+    if existing is None:
+        db.execute(
+            "INSERT INTO supply_stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)",
+            (product_id, warehouse_id, quantity),
+        )
+    else:
+        db.execute(
+            "UPDATE supply_stock SET quantity = ? WHERE id = ?",
+            (quantity, existing["id"]),
+        )
+
+
 def sync_motor_catalog(db, content, now=None):
     """Upsert product cards and replace supplier warehouse balances.
 
@@ -280,10 +298,8 @@ def sync_motor_catalog(db, content, now=None):
             active_product_ids.add(product_id)
 
             for location, warehouse_id in warehouse_ids.items():
-                db.execute(
-                    "INSERT INTO supply_stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?) "
-                    "ON CONFLICT(product_id, warehouse_id) DO UPDATE SET quantity = excluded.quantity",
-                    (product_id, warehouse_id, offer["quantities"][location]),
+                _replace_stock_quantity(
+                    db, product_id, warehouse_id, offer["quantities"][location]
                 )
 
         stale_rows = db.execute(
@@ -293,11 +309,7 @@ def sync_motor_catalog(db, content, now=None):
         stale_ids = [row["id"] for row in stale_rows if row["id"] not in active_product_ids]
         for product_id in stale_ids:
             for warehouse_id in warehouse_ids.values():
-                db.execute(
-                    "INSERT INTO supply_stock (product_id, warehouse_id, quantity) VALUES (?, ?, 0) "
-                    "ON CONFLICT(product_id, warehouse_id) DO UPDATE SET quantity = 0",
-                    (product_id, warehouse_id),
-                )
+                _replace_stock_quantity(db, product_id, warehouse_id, 0)
         db.commit()
     except Exception:
         db.rollback()
