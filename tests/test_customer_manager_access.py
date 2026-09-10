@@ -339,6 +339,7 @@ class CustomerManagerAccessTests(unittest.TestCase):
         self.assertNotIn("schedule-tripster-button", schedule_html)
         self.assertNotIn("schedule-day-total", schedule_html)
         self.assertNotIn("const scheduleItems = [{", schedule_html)
+        self.assertNotIn("startScheduleDrag(event, this)", schedule_html)
 
         cabinet_html = self.client.get("/team/").get_data(as_text=True)
         self.assertIn('id="team-schedule"', cabinet_html)

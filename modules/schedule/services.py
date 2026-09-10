@@ -477,6 +477,124 @@ def save_item(db, form, boats, services, item_id=None):
     return True, f"Рейс {action}.", saved_id
 
 
+def _default_role_for_employee(employee):
+    positions = set(employee.get("positions") or ())
+    if "Гид-капитан" in positions or {"Гид", "Капитан"} <= positions:
+        return "guide_captain"
+    if "Капитан" in positions:
+        return "captain"
+    if "Гид" in positions:
+        return "guide"
+    return "guide_captain"
+
+
+def move_item(db, item_id, start_time, source_employee_id, target_employee_id):
+    """Move a trip on its current day and replace only the dragged assignment."""
+    item = repository.get_item(db, item_id)
+    if item is None:
+        return False, "Рейс не найден.", None
+    try:
+        source_employee_id = int(source_employee_id)
+        target_employee_id = int(target_employee_id)
+    except (TypeError, ValueError):
+        return False, "Не удалось определить сотрудника для переноса.", None
+
+    eligible = {
+        employee["id"]: employee
+        for employee in repository.list_crew_employees(db)
+    }
+    target_employee = eligible.get(target_employee_id)
+    if target_employee is None:
+        return False, "Выбранный сотрудник недоступен для расписания.", None
+    work_day = item["starts_at"][:10]
+    if target_employee_id not in repository.list_day_crew_ids(db, work_day):
+        return False, "Сначала добавьте сотрудника в состав на этот день.", None
+
+    try:
+        parsed_time = dt.datetime.strptime(str(start_time or ""), "%H:%M").time()
+        old_start = dt.datetime.strptime(item["starts_at"], "%Y-%m-%d %H:%M")
+        old_end = dt.datetime.strptime(item["ends_at"], "%Y-%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return False, "Не удалось определить новое время рейса.", None
+    if parsed_time.minute not in (0, 30):
+        return False, "Перетаскивание доступно с шагом 30 минут.", None
+    duration = old_end - old_start
+    new_start = dt.datetime.combine(old_start.date(), parsed_time)
+    new_end = new_start + duration
+    if duration.total_seconds() < MIN_ITEM_MINUTES * 60:
+        return False, "Некорректная продолжительность рейса.", None
+    if new_end.date() != new_start.date():
+        return False, "Рейс нельзя перетащить за границы выбранного дня.", None
+
+    assignments = [dict(row) for row in repository.list_assignments(db, item_id)]
+    assignments_by_employee = {
+        assignment["employee_id"]: assignment for assignment in assignments
+    }
+    if source_employee_id == 0:
+        if assignments:
+            return False, "Исходный сотрудник рейса изменился. Обновите страницу.", None
+        source_role = _default_role_for_employee(target_employee)
+    else:
+        source_assignment = assignments_by_employee.get(source_employee_id)
+        if source_assignment is None:
+            return False, "Назначение рейса изменилось. Обновите страницу.", None
+        source_role = source_assignment["role"]
+    if (
+        target_employee_id != source_employee_id
+        and target_employee_id in assignments_by_employee
+    ):
+        return False, "Этот сотрудник уже назначен на рейс.", None
+
+    resulting_employee_ids = [
+        target_employee_id
+        if assignment["employee_id"] == source_employee_id
+        else assignment["employee_id"]
+        for assignment in assignments
+    ]
+    if source_employee_id == 0:
+        resulting_employee_ids.append(target_employee_id)
+    starts_value = new_start.strftime("%Y-%m-%d %H:%M")
+    ends_value = new_end.strftime("%Y-%m-%d %H:%M")
+    employee_conflicts = repository.find_employee_conflicts(
+        db, resulting_employee_ids, starts_value, ends_value, item_id
+    )
+    if employee_conflicts:
+        names = sorted({row["employee_name"] for row in employee_conflicts})
+        return False, "Уже заняты в это время: " + ", ".join(names) + ".", None
+    if repository.find_boat_conflicts(
+        db, item["boat"], starts_value, ends_value, item_id
+    ):
+        return False, f"Катер «{item['boat']}» уже занят в это время.", None
+
+    if (
+        starts_value == item["starts_at"]
+        and source_employee_id == target_employee_id
+    ):
+        return True, "Положение рейса не изменилось.", {
+            "starts_at": starts_value,
+            "ends_at": ends_value,
+            "assignments": assignments,
+        }
+    moved = repository.move_item(
+        db, item_id, starts_value, ends_value, source_employee_id,
+        target_employee, source_role, current_timestamp(),
+    )
+    if not moved:
+        return False, "Рейс изменился во время переноса. Обновите страницу.", None
+    return True, "Рейс перенесён.", {
+        "starts_at": starts_value,
+        "ends_at": ends_value,
+        "assignments": [
+            {
+                "employee_id": row["employee_id"],
+                "employee_name": row["employee_name"],
+                "role": row["role"],
+            }
+            for row in repository.list_assignments(db, item_id)
+        ],
+    }
+
+
 def delete_item(db, item_id):
     item = repository.get_item(db, item_id)
     if item is None:

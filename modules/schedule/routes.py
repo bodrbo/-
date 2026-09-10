@@ -158,6 +158,27 @@ def create_schedule_blueprint(
         set_notice(message, success)
         return redirect_to_day(day, selected_employee)
 
+    @blueprint.route("/schedule/items/<int:item_id>/move", methods=["POST"])
+    @manage_required
+    def move_item(item_id):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"ok": False, "message": "Некорректный запрос."}), 400
+        db = get_db()
+        before = schedule_notifications.item_snapshot(db, item_id)
+        success, message, result = services.move_item(
+            db,
+            item_id,
+            payload.get("start_time"),
+            payload.get("source_employee_id"),
+            payload.get("target_employee_id"),
+        )
+        if not success:
+            return jsonify({"ok": False, "message": message}), 400
+        after = schedule_notifications.item_snapshot(db, item_id)
+        notify_item_changes(before, after)
+        return jsonify({"ok": True, "message": message, "item": result})
+
     @blueprint.route("/schedule/items/<int:item_id>/delete", methods=["POST"])
     @manage_required
     def delete_item(item_id):

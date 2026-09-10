@@ -114,6 +114,17 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             ).status_code,
             302,
         )
+        self.assertEqual(
+            self.client.post(
+                "/schedule/items/1/move",
+                json={
+                    "start_time": "13:30",
+                    "source_employee_id": self.daniil_id,
+                    "target_employee_id": self.platon_id,
+                },
+            ).status_code,
+            302,
+        )
 
     def test_day_board_renders_crew_and_navigation(self):
         self.login()
@@ -131,6 +142,8 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn("schedule-board-nav is-contained", html)
         self.assertIn('data-crew-count="2"', html)
         self.assertIn("/schedule/clients/search", html)
+        self.assertIn("function startScheduleDrag", html)
+        self.assertIn("перетащите её по времени и между сотрудниками", html)
         self.assertRegex(html, r"/static/style\.css\?v=\d+")
 
     def test_admin_can_add_and_remove_employee_from_day_schedule(self):
@@ -300,6 +313,10 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn("--schedule-card-color: #673ab7", page)
         self.assertIn("--schedule-card-ink: #ffffff", page)
         self.assertIn("Аренда катера", page)
+        self.assertIn(
+            f'data-move-url="/schedule/items/{item["id"]}/move"', page
+        )
+        self.assertIn('onpointerdown="startScheduleDrag(event, this)"', page)
 
     def test_schedule_routes_notify_on_assignment_change_and_deletion(self):
         self.login()
@@ -344,6 +361,113 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         notifier.assert_called_once()
         self.assertIn("Рейс отменён", notifier.call_args.args[2])
+
+    def test_admin_can_drag_trip_in_time_and_to_another_employee(self):
+        self.login()
+        self.create_booking()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item = db.execute("SELECT * FROM schedule_items").fetchone()
+            item_id = item["id"]
+            participant_before = dict(db.execute(
+                "SELECT * FROM schedule_participants WHERE schedule_item_id = ?",
+                (item_id,),
+            ).fetchone())
+
+        with patch.object(
+            application_module, "send_telegram_notification_to_employee"
+        ) as notifier:
+            response = self.client.post(
+                f"/schedule/items/{item_id}/move",
+                json={
+                    "start_time": "14:00",
+                    "source_employee_id": self.daniil_id,
+                    "target_employee_id": self.platon_id,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["item"]["starts_at"], "2026-09-05 14:00")
+        self.assertEqual(payload["item"]["ends_at"], "2026-09-05 16:30")
+        self.assertEqual(
+            payload["item"]["assignments"],
+            [{
+                "employee_id": self.platon_id,
+                "employee_name": "Платон Жмаев",
+                "role": "guide_captain",
+            }],
+        )
+        notifier.assert_called_once()
+        self.assertEqual(notifier.call_args.args[1], "Платон Жмаев")
+        self.assertIn("Вам назначен новый рейс", notifier.call_args.args[2])
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            moved = db.execute(
+                "SELECT * FROM schedule_items WHERE id = ?", (item_id,)
+            ).fetchone()
+            assignment = db.execute(
+                "SELECT * FROM schedule_assignments WHERE schedule_item_id = ?",
+                (item_id,),
+            ).fetchone()
+            participant_after = dict(db.execute(
+                "SELECT * FROM schedule_participants WHERE schedule_item_id = ?",
+                (item_id,),
+            ).fetchone())
+        self.assertEqual(moved["starts_at"], "2026-09-05 14:00")
+        self.assertEqual(moved["ends_at"], "2026-09-05 16:30")
+        self.assertEqual(moved["revenue"], 18000)
+        self.assertEqual(assignment["employee_id"], self.platon_id)
+        self.assertEqual(assignment["role"], "guide_captain")
+        self.assertEqual(participant_after, participant_before)
+
+    def test_drag_rejects_employee_or_boat_conflicts_without_partial_update(self):
+        self.login()
+        self.create_booking()
+        with application_module.app.app_context():
+            first_id = application_module.get_db().execute(
+                "SELECT id FROM schedule_items"
+            ).fetchone()["id"]
+        self.create_booking(
+            boat="Ларус",
+            start_time="16:00",
+            end_time="17:00",
+            customer_name="Мария",
+            customer_phone="+79998880003",
+            **{
+                "employee_id[]": [str(self.platon_id)],
+                "role[]": ["captain"],
+            },
+        )
+
+        response = self.client.post(
+            f"/schedule/items/{first_id}/move",
+            json={
+                "start_time": "16:00",
+                "source_employee_id": self.daniil_id,
+                "target_employee_id": self.platon_id,
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.get_json()["ok"])
+        self.assertIn("Уже заняты", response.get_json()["message"])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            original = db.execute(
+                "SELECT starts_at, ends_at FROM schedule_items WHERE id = ?",
+                (first_id,),
+            ).fetchone()
+            assignment = db.execute(
+                "SELECT employee_id FROM schedule_assignments "
+                "WHERE schedule_item_id = ?",
+                (first_id,),
+            ).fetchone()
+        self.assertEqual(original["starts_at"], "2026-09-05 13:00")
+        self.assertEqual(original["ends_at"], "2026-09-05 15:30")
+        self.assertEqual(assignment["employee_id"], self.daniil_id)
 
     def test_individual_booking_allows_client_without_phone(self):
         self.login()

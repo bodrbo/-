@@ -171,9 +171,12 @@
             {% set card_tag = 'button' if can_manage or can_view_clients else 'article' %}
             <{{ card_tag }}{% if can_manage or can_view_clients %} type="button"{% endif %}
                     class="schedule-card {{ card.kind }} {{ 'is-compact' if card.height_px < 50 else 'is-medium' if card.height_px < 105 }}"
+                    data-schedule-item-id="{{ card.id }}"
+                    data-assignment-employee-id="{{ employee.id }}"
+                    {% if can_manage %}data-move-url="{{ url_for('schedule.move_item', item_id=card.id) }}"{% endif %}
                     style="top: {{ card.top_px }}px; height: {{ card.height_px }}px; --schedule-card-color: {{ card.boat_color }}; --schedule-card-ink: {{ card.boat_ink }}"
                     title="{{ card.start_time }}–{{ card.end_time }} · {{ card.service_name }} · {{ card.boat }}"
-                    {% if can_manage %}onclick="event.stopPropagation(); openScheduleEdit({{ card.id }})"{% elif can_view_clients %}onclick="event.stopPropagation(); openScheduleView({{ card.id }})"{% endif %}>
+                    {% if can_manage %}onpointerdown="startScheduleDrag(event, this)" onclick="handleScheduleCardClick(event, {{ card.id }})"{% elif can_view_clients %}onclick="event.stopPropagation(); openScheduleView({{ card.id }})"{% endif %}>
               <span class="schedule-card-topline">
                 <span class="schedule-card-time">{{ card.start_time }}–{{ card.end_time }}</span>
                 <span class="schedule-card-kind">{{ card.kind_label }}</span>
@@ -196,7 +199,7 @@
       </div>
     </div>
   </section>
-  <p class="schedule-board-hint">{% if can_manage %}Нажмите на свободное время, чтобы создать рейс. Нажмите на карточку, чтобы перенести, переназначить или удалить её.{% elif can_view_clients %}Нажмите на карточку рейса, чтобы посмотреть экипаж и список клиентов.{% else %}Для изменений расписания обратитесь к администратору или менеджеру по работе с клиентами.{% endif %}</p>
+  <p class="schedule-board-hint">{% if can_manage %}Нажмите на карточку для редактирования или перетащите её по времени и между сотрудниками.{% elif can_view_clients %}Нажмите на карточку рейса, чтобы посмотреть экипаж и список клиентов.{% else %}Для изменений расписания обратитесь к администратору или менеджеру по работе с клиентами.{% endif %}</p>
   {% else %}
   <section class="panel empty-state schedule-empty">
     <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
@@ -524,6 +527,7 @@
   const scheduleItems = {{ schedule_items_json|tojson }};
   const scheduleCanManage = {{ can_manage|tojson }};
   const scheduleCanViewClients = {{ can_view_clients|tojson }};
+  const scheduleCrewRoleLabels = {{ crew_roles|tojson }};
   const scheduleDayStart = {{ day_start_minutes }};
   const schedulePxPerMinute = {{ px_per_minute }};
   const scheduleCrewCount = {{ visible_crew|length }};
@@ -536,6 +540,9 @@
   let scheduleModalTrigger = null;
   let scheduleRosterModalTrigger = null;
   let scheduleViewModalTrigger = null;
+  let scheduleDrag = null;
+  let scheduleDragSaving = false;
+  const scheduleDraggedCards = new WeakSet();
   let scheduleScrollSync = false;
 
   function showScheduleTripsterLoader(form) {
@@ -703,6 +710,230 @@
     deleteForm.hidden = false;
     syncScheduleKind();
     setScheduleModalOpen(true);
+  }
+  function handleScheduleCardClick(event, itemId) {
+    event.stopPropagation();
+    if (scheduleDraggedCards.has(event.currentTarget)) return;
+    openScheduleEdit(itemId);
+  }
+  function scheduleItemMinutes(item, field) {
+    const value = String(item[field] || '');
+    return Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
+  }
+  function scheduleDragTime(minutes) {
+    return minutesToTime(Math.round(minutes / 30) * 30);
+  }
+  function scheduleDragColumnAt(x, y) {
+    const target = document.elementFromPoint(x, y);
+    const column = target ? target.closest('.schedule-column') : null;
+    if (!column || column.classList.contains('is-unassigned')) return null;
+    return column;
+  }
+  function clearScheduleDragVisuals(state) {
+    state.card.classList.remove('is-drag-source');
+    if (state.preview) state.preview.remove();
+    document.querySelectorAll('.schedule-column.is-drop-target').forEach(column => {
+      column.classList.remove('is-drop-target');
+    });
+    document.body.classList.remove('schedule-is-dragging');
+  }
+  function updateScheduleDrag(event) {
+    const state = scheduleDrag;
+    if (!state || event.pointerId !== state.pointerId) return;
+    const distance = Math.hypot(
+      event.clientX - state.originX, event.clientY - state.originY
+    );
+    if (!state.moved && distance < 6) return;
+    if (!state.moved) {
+      state.moved = true;
+      state.card.classList.add('is-drag-source');
+      state.preview = state.card.cloneNode(true);
+      state.preview.removeAttribute('onpointerdown');
+      state.preview.removeAttribute('onclick');
+      state.preview.removeAttribute('data-move-url');
+      state.preview.classList.add('schedule-drag-preview');
+      state.preview.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(state.preview);
+      document.body.classList.add('schedule-is-dragging');
+    }
+    event.preventDefault();
+    const deltaSteps = Math.round(
+      (event.clientY - state.originY) / schedulePxPerMinute / 30
+    );
+    const timeline = document.querySelector('.schedule-columns');
+    const timelineMinutes = timeline
+      ? timeline.getBoundingClientRect().height / schedulePxPerMinute
+      : 14 * 60;
+    const latestStart = Math.floor(Math.min(
+      24 * 60 - state.durationMinutes - 1,
+      scheduleDayStart + timelineMinutes - state.durationMinutes,
+    ) / 30) * 30;
+    state.startMinutes = Math.max(
+      scheduleDayStart,
+      Math.min(latestStart, state.originalStartMinutes + deltaSteps * 30),
+    );
+    const targetColumn = scheduleDragColumnAt(event.clientX, event.clientY);
+    document.querySelectorAll('.schedule-column.is-drop-target').forEach(column => {
+      column.classList.toggle('is-drop-target', column === targetColumn);
+    });
+    state.targetColumn = targetColumn;
+    state.targetEmployeeId = targetColumn
+      ? Number(targetColumn.dataset.employeeId)
+      : null;
+    const previewColumn = targetColumn || state.sourceColumn;
+    const columnRect = previewColumn.getBoundingClientRect();
+    state.preview.style.left = `${columnRect.left + 7}px`;
+    state.preview.style.width = `${Math.max(40, columnRect.width - 14)}px`;
+    state.preview.style.top = `${
+      columnRect.top + (state.startMinutes - scheduleDayStart) * schedulePxPerMinute
+    }px`;
+    const start = scheduleDragTime(state.startMinutes);
+    const end = scheduleDragTime(state.startMinutes + state.durationMinutes);
+    const time = state.preview.querySelector('.schedule-card-time');
+    if (time) time.textContent = `${start}–${end}`;
+  }
+  function showScheduleNotice(message, success) {
+    const shell = document.querySelector('.schedule-shell');
+    if (!shell) return;
+    const current = shell.querySelector('.schedule-notice');
+    if (current) current.remove();
+    const notice = document.createElement('div');
+    notice.className = `schedule-notice ${success ? 'success' : 'error'}`;
+    notice.setAttribute('role', 'status');
+    const copy = document.createElement('span');
+    copy.textContent = message;
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Закрыть');
+    close.textContent = '×';
+    close.addEventListener('click', () => notice.remove());
+    notice.append(copy, close);
+    shell.prepend(notice);
+  }
+  function applyScheduleDragResult(state, result) {
+    const item = scheduleItems.find(candidate => candidate.id === state.itemId);
+    if (!item) return;
+    item.starts_at = result.starts_at;
+    item.ends_at = result.ends_at;
+    item.trip_date = result.starts_at.slice(0, 10);
+    item.start_time = result.starts_at.slice(11, 16);
+    item.end_time = result.ends_at.slice(11, 16);
+    item.assignments = result.assignments;
+    item.assignment_ids = result.assignments.map(assignment => assignment.employee_id);
+    item.assignment_roles = result.assignments.map(assignment => assignment.role);
+    const top = (
+      scheduleItemMinutes(item, 'start_time') - scheduleDayStart
+    ) * schedulePxPerMinute;
+    document.querySelectorAll(
+      `[data-schedule-item-id="${state.itemId}"]`
+    ).forEach(card => {
+      card.style.top = `${top}px`;
+      const time = card.querySelector('.schedule-card-time');
+      if (time) time.textContent = `${item.start_time}–${item.end_time}`;
+      card.title = `${item.start_time}–${item.end_time} · ${item.service_name} · ${item.boat}`;
+    });
+    if (
+      state.targetEmployeeId !== null
+      && state.targetEmployeeId !== state.sourceEmployeeId
+    ) {
+      state.card.dataset.assignmentEmployeeId = String(state.targetEmployeeId);
+      state.targetColumn.appendChild(state.card);
+      const movedAssignment = result.assignments.find(
+        assignment => assignment.employee_id === state.targetEmployeeId
+      );
+      const role = state.card.querySelector('.schedule-card-role');
+      if (role && movedAssignment) {
+        role.textContent = ` · ${
+          scheduleCrewRoleLabels[movedAssignment.role] || movedAssignment.role
+        }`;
+      }
+    }
+  }
+  async function finishScheduleDrag(event) {
+    const state = scheduleDrag;
+    if (!state || event.pointerId !== state.pointerId) return;
+    scheduleDrag = null;
+    state.card.removeEventListener('pointermove', updateScheduleDrag);
+    state.card.removeEventListener('pointerup', finishScheduleDrag);
+    state.card.removeEventListener('pointercancel', cancelScheduleDrag);
+    if (state.card.hasPointerCapture(event.pointerId)) {
+      state.card.releasePointerCapture(event.pointerId);
+    }
+    if (!state.moved) return;
+    scheduleDraggedCards.add(state.card);
+    setTimeout(() => scheduleDraggedCards.delete(state.card), 0);
+    if (!state.targetColumn || state.targetEmployeeId === null) {
+      clearScheduleDragVisuals(state);
+      showScheduleNotice('Перетащите рейс в колонку сотрудника.', false);
+      return;
+    }
+    scheduleDragSaving = true;
+    const startTime = scheduleDragTime(state.startMinutes);
+    try {
+      const response = await fetch(state.card.dataset.moveUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+        body: JSON.stringify({
+          start_time: startTime,
+          source_employee_id: state.sourceEmployeeId,
+          target_employee_id: state.targetEmployeeId,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.message || 'Не удалось перенести рейс.');
+      }
+      applyScheduleDragResult(state, payload.item);
+      clearScheduleDragVisuals(state);
+      showScheduleNotice(payload.message || 'Рейс перенесён.', true);
+    } catch (error) {
+      clearScheduleDragVisuals(state);
+      showScheduleNotice(error.message || 'Не удалось перенести рейс.', false);
+    } finally {
+      scheduleDragSaving = false;
+    }
+  }
+  function cancelScheduleDrag(event) {
+    const state = scheduleDrag;
+    if (!state || event.pointerId !== state.pointerId) return;
+    scheduleDrag = null;
+    state.card.removeEventListener('pointermove', updateScheduleDrag);
+    state.card.removeEventListener('pointerup', finishScheduleDrag);
+    state.card.removeEventListener('pointercancel', cancelScheduleDrag);
+    clearScheduleDragVisuals(state);
+  }
+  function startScheduleDrag(event, card) {
+    if (!scheduleCanManage || event.button !== 0 || event.pointerType !== 'mouse') return;
+    const itemId = Number(card.dataset.scheduleItemId);
+    const item = scheduleItems.find(candidate => candidate.id === itemId);
+    const sourceColumn = card.closest('.schedule-column');
+    if (!item || !sourceColumn || scheduleDrag || scheduleDragSaving) return;
+    const startMinutes = scheduleItemMinutes(item, 'start_time');
+    const durationMinutes = Math.max(
+      30, scheduleItemMinutes(item, 'end_time') - startMinutes
+    );
+    scheduleDrag = {
+      pointerId: event.pointerId,
+      card,
+      itemId,
+      sourceColumn,
+      sourceEmployeeId: Number(card.dataset.assignmentEmployeeId),
+      targetColumn: sourceColumn.classList.contains('is-unassigned') ? null : sourceColumn,
+      targetEmployeeId: sourceColumn.classList.contains('is-unassigned')
+        ? null
+        : Number(sourceColumn.dataset.employeeId),
+      originX: event.clientX,
+      originY: event.clientY,
+      originalStartMinutes: startMinutes,
+      startMinutes,
+      durationMinutes,
+      moved: false,
+      preview: null,
+    };
+    card.setPointerCapture(event.pointerId);
+    card.addEventListener('pointermove', updateScheduleDrag);
+    card.addEventListener('pointerup', finishScheduleDrag);
+    card.addEventListener('pointercancel', cancelScheduleDrag);
   }
   function scheduleViewDate(item) {
     const parts = String(item.trip_date || '').split('-');

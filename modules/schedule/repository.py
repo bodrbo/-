@@ -294,6 +294,63 @@ def save_item(db, item_id, data, assignments, participants, timestamp):
         raise
 
 
+def move_item(
+    db,
+    item_id,
+    starts_at,
+    ends_at,
+    source_employee_id,
+    target_employee,
+    target_role,
+    timestamp,
+):
+    """Move a trip in time and optionally replace one crew assignment."""
+    try:
+        cursor = db.execute(
+            "UPDATE schedule_items SET starts_at = ?, ends_at = ?, updated_at = ? "
+            "WHERE id = ? AND deleted_at IS NULL",
+            (starts_at, ends_at, timestamp, item_id),
+        )
+        if cursor.rowcount == 0:
+            db.rollback()
+            return False
+        target_employee_id = target_employee["id"]
+        if source_employee_id != target_employee_id:
+            if source_employee_id == 0:
+                db.execute(
+                    "INSERT INTO schedule_assignments "
+                    "(schedule_item_id, employee_id, employee_name, role, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        item_id, target_employee_id, target_employee["name"],
+                        target_role, timestamp,
+                    ),
+                )
+            else:
+                assignment = db.execute(
+                    "UPDATE schedule_assignments SET employee_id = ?, "
+                    "employee_name = ? WHERE schedule_item_id = ? "
+                    "AND employee_id = ?",
+                    (
+                        target_employee_id, target_employee["name"], item_id,
+                        source_employee_id,
+                    ),
+                )
+                if assignment.rowcount == 0:
+                    db.rollback()
+                    return False
+            db.execute(
+                "INSERT OR IGNORE INTO schedule_day_crew "
+                "(work_date, employee_id, created_at) VALUES (?, ?, ?)",
+                (starts_at[:10], target_employee_id, timestamp),
+            )
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise
+
+
 def soft_delete_item(db, item_id, timestamp):
     cursor = db.execute(
         "UPDATE schedule_items SET deleted_at = ?, updated_at = ? "
