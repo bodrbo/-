@@ -77,11 +77,20 @@
     {% if product.photo_filename %}
     <img src="{{ url_for('static', filename='supply_photos/' ~ product.photo_filename) }}" alt=""
          style="width:160px; height:160px; object-fit:cover; border-radius:12px; border:1px solid var(--hairline); flex:none;">
+    {% elif product.external_photo_url %}
+    <img src="{{ product.external_photo_url }}" alt="" loading="lazy" referrerpolicy="no-referrer"
+         style="width:160px; height:160px; object-fit:contain; background:#fff; border-radius:12px; border:1px solid var(--hairline); flex:none;">
     {% endif %}
     <div style="flex:1 1 260px;">
       <table class="gloss">
         <tr><th>Артикул</th><td>{{ product.sku or '—' }}</td></tr>
         <tr><th>Поставщик</th><td>{{ product.supplier or '—' }}</td></tr>
+        {% if product.external_url %}
+        <tr><th>Карточка поставщика</th><td><a href="{{ product.external_url }}" target="_blank" rel="noopener noreferrer">Открыть на Marine Rocket</a></td></tr>
+        {% endif %}
+        {% if product.external_updated_at %}
+        <tr><th>Обновлено из каталога</th><td>{{ product.external_updated_at }}</td></tr>
+        {% endif %}
         <tr><th>Описание</th><td>{{ product.description or '—' }}</td></tr>
         <tr><th>Себестоимость</th>
           <td>{{ product.cost_price|money }} ₽ / {{ cost_units|selectattr('value', 'equalto', product.cost_unit)|map(attribute='label')|first }}</td></tr>

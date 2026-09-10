@@ -99,6 +99,8 @@
             <td>
               {% if s.product_photo %}
               <img src="{{ url_for('static', filename='supply_photos/' ~ s.product_photo) }}" alt="" class="supply-thumb">
+              {% elif s.product_external_photo %}
+              <img src="{{ s.product_external_photo }}" alt="" class="supply-thumb" loading="lazy" referrerpolicy="no-referrer">
               {% else %}
               <span class="supply-thumb supply-thumb-empty"></span>
               {% endif %}

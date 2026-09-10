@@ -61,6 +61,13 @@ from modules.fleet.services import (
 )
 from integrations.telegram import fetch_recent_contacts as fetch_recent_telegram_contacts
 from integrations.tripster import fetch_orders as fetch_tripster_orders
+from integrations.marine_rocket import (
+    DEFAULT_YML_URL as MARINE_ROCKET_DEFAULT_YML_URL,
+    MarineRocketError,
+    SOURCE_KEY as MARINE_ROCKET_SOURCE_KEY,
+    fetch_yml as fetch_marine_rocket_yml,
+    sync_motor_catalog as sync_marine_rocket_motor_catalog,
+)
 from modules.employees import create_employees_blueprint
 from modules.employees.capabilities import (
     DOCUMENTS as TEAM_DOCUMENTS,
@@ -736,6 +743,13 @@ TBANK_PAYOUT_AUTO_CHECK_LIMIT = 50
 # Без неё эндпоинт всегда отвечает 403 — по умолчанию выключен.
 # ---------------------------------------------------------------------
 CRON_SECRET = os.environ.get("CRON_SECRET")
+
+# Public dealer feed used to mirror Marine Rocket motor cards and supplier
+# balances. The default is the URL supplied by the distributor; the optional
+# env override lets it be rotated without a code deploy.
+MARINE_ROCKET_YML_URL = (
+    os.environ.get("MARINE_ROCKET_YML_URL") or MARINE_ROCKET_DEFAULT_YML_URL
+)
 
 # ---------------------------------------------------------------------
 # Секрет для эндпоинта, который принимает лиды с формы обратной связи на
@@ -2334,6 +2348,21 @@ def init_db():
     supply_product_cols = [row[1] for row in conn.execute("PRAGMA table_info(supply_products)").fetchall()]
     if "min_stock" not in supply_product_cols:
         conn.execute("ALTER TABLE supply_products ADD COLUMN min_stock REAL")
+    # External catalog links are deliberately optional: ordinary products
+    # remain fully manual, while integrations get a stable idempotency key and
+    # may display the supplier's current card/photo without downloading files.
+    for column_name in (
+        "external_source", "external_ref", "external_url",
+        "external_photo_url", "external_updated_at",
+    ):
+        if column_name not in supply_product_cols:
+            conn.execute(
+                "ALTER TABLE supply_products ADD COLUMN {} TEXT".format(column_name)
+            )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_supply_products_external_identity "
+        "ON supply_products (external_source, external_ref)"
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS supply_stock (
@@ -13737,6 +13766,11 @@ def _supply_warehouses(db):
     return db.execute("SELECT * FROM supply_warehouses ORDER BY name").fetchall()
 
 
+def _sync_marine_rocket(db):
+    content = fetch_marine_rocket_yml(MARINE_ROCKET_YML_URL)
+    return sync_marine_rocket_motor_catalog(db, content)
+
+
 def _maybe_create_low_stock_request(db, product_id):
     """Call after anything that decreases a product's stock. If the total
     across all warehouses has hit (or dropped below) the product's
@@ -13800,7 +13834,8 @@ def supply_warehouse(warehouse_id):
         return redirect(url_for("supply_warehouses"))
     stock = db.execute(
         "SELECT supply_stock.*, supply_products.name AS product_name, supply_products.sku AS product_sku, "
-        "supply_products.photo_filename AS product_photo "
+        "supply_products.photo_filename AS product_photo, "
+        "supply_products.external_photo_url AS product_external_photo "
         "FROM supply_stock JOIN supply_products ON supply_products.id = supply_stock.product_id "
         "WHERE supply_stock.warehouse_id = ? AND supply_stock.quantity > 0 "
         "ORDER BY supply_products.name",
@@ -13917,11 +13952,44 @@ def supply_catalog():
         "(SELECT COALESCE(SUM(quantity), 0) FROM supply_stock WHERE product_id = sp.id) AS total_quantity "
         "FROM supply_products sp ORDER BY sp.created_at DESC, sp.id DESC"
     ).fetchall()
+    marine_rocket_state = db.execute(
+        "SELECT COUNT(*) AS product_count, MAX(external_updated_at) AS updated_at "
+        "FROM supply_products WHERE external_source = ?",
+        (MARINE_ROCKET_SOURCE_KEY,),
+    ).fetchone()
     return render_template(
         "supply_catalog.html", active_page="supply", sub_page="catalog",
         products=products, cost_units=SUPPLY_COST_UNITS,
         product_error=session.pop("product_error", None),
+        marine_rocket_notice=session.pop("marine_rocket_notice", None),
+        marine_rocket_state=marine_rocket_state,
     )
+
+
+@app.route("/supply/catalog/marine-rocket/sync", methods=["POST"])
+@admin_login_required
+def sync_marine_rocket_now():
+    try:
+        stats = _sync_marine_rocket(get_db())
+    except (MarineRocketError, requests.RequestException, ValueError) as error:
+        session["marine_rocket_notice"] = {
+            "type": "error",
+            "message": "Не удалось обновить Marine Rocket: {}.".format(error),
+        }
+    else:
+        session["marine_rocket_notice"] = {
+            "type": "success",
+            "message": (
+                "Marine Rocket обновлён: карточек — {received}, новых — {created}, "
+                "обновлено — {updated}; Москва — {moscow:g} шт., "
+                "Владивосток — {vladivostok:g} шт."
+            ).format(
+                moscow=stats["totals"]["Москва"],
+                vladivostok=stats["totals"]["Владивосток"],
+                **stats
+            ),
+        }
+    return redirect(url_for("supply_catalog"))
 
 
 @app.route("/supply/catalog/add", methods=["POST"])
@@ -14505,10 +14573,30 @@ def fuel_sync_now():
 
 @app.route("/internal/cron/sync-fuel")
 def cron_sync_fuel():
-    """Hourly Beget cron target for trips, fuel, reminders and payouts."""
+    """Hourly Beget cron target for trips, fuel, stock, reminders and payouts."""
     if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
         return "forbidden", 403
     db = get_db()
+    marine_summary = "skipped in test mode"
+    if not app.testing:
+        try:
+            marine_stats = _sync_marine_rocket(db)
+        except Exception as error:
+            # Supplier availability must never prevent payroll/fuel imports.
+            print(
+                "Marine Rocket stock sync failed: {}".format(error),
+                file=sys.stderr,
+                flush=True,
+            )
+            marine_summary = "error: {}".format(error)
+        else:
+            marine_summary = (
+                "{received} motors, Moscow {moscow:g}, Vladivostok {vladivostok:g}"
+            ).format(
+                moscow=marine_stats["totals"]["Москва"],
+                vladivostok=marine_stats["totals"]["Владивосток"],
+                **marine_stats
+            )
     reminder_stats = send_due_task_reminders(
         db, send_telegram_notification_to_employee
     )
@@ -14535,7 +14623,8 @@ def cron_sync_fuel():
             "yclients not configured; "
             f"task reminders: {reminder_stats['sent_3h']} after 3h, "
             f"{reminder_stats['sent_6h']} after 6h; "
-            f"tbank payouts: {payout_summary}",
+            f"tbank payouts: {payout_summary}; "
+            f"marine rocket: {marine_summary}",
             503,
         )
     try:
@@ -14563,7 +14652,28 @@ def cron_sync_fuel():
         f"{fuel_stats['pending']} pending, {fuel_stats['skipped']} skipped; "
         f"task reminders: {reminder_stats['sent_3h']} after 3h, "
         f"{reminder_stats['sent_6h']} after 6h; "
-        f"tbank payouts: {payout_summary}",
+        f"tbank payouts: {payout_summary}; "
+        f"marine rocket: {marine_summary}",
+        200,
+    )
+
+
+@app.route("/internal/cron/sync-marine-rocket")
+def cron_sync_marine_rocket():
+    """Standalone Marine Rocket stock sync for diagnostics or a separate cron."""
+    if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
+        return "forbidden", 403
+    try:
+        stats = _sync_marine_rocket(get_db())
+    except (MarineRocketError, requests.RequestException, ValueError) as error:
+        return "error: {}".format(error), 502
+    return (
+        "ok: {received} motors, {created} created, {updated} updated, "
+        "Moscow {moscow:g}, Vladivostok {vladivostok:g}".format(
+            moscow=stats["totals"]["Москва"],
+            vladivostok=stats["totals"]["Владивосток"],
+            **stats
+        ),
         200,
     )
 

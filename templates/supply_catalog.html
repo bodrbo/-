@@ -81,6 +81,30 @@
   <div class="alert"><strong>Не удалось добавить товар:</strong> {{ product_error }}</div>
   {% endif %}
 
+  {% if marine_rocket_notice %}
+  <div class="alert {{ 'alert-success' if marine_rocket_notice.type == 'success' }}" role="status">
+    {{ marine_rocket_notice.message }}
+  </div>
+  {% endif %}
+
+  <section class="panel">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+      <div>
+        <h2 style="margin-bottom:4px;">Marine Rocket</h2>
+        <p class="hint" style="margin:0;">
+          {% if marine_rocket_state.product_count %}
+          В каталоге {{ marine_rocket_state.product_count }} моторных позиций · обновлено {{ marine_rocket_state.updated_at }}
+          {% else %}
+          Карточки и остатки по складам Москвы и Владивостока ещё не загружены.
+          {% endif %}
+        </p>
+      </div>
+      <form action="{{ url_for('sync_marine_rocket_now') }}" method="post">
+        <button type="submit">Обновить моторы и остатки</button>
+      </form>
+    </div>
+  </section>
+
   <details class="panel collapsible-panel">
     <summary>
       <span>Добавить товар</span>
@@ -157,6 +181,8 @@
             <td>
               {% if p.photo_filename %}
               <img src="{{ url_for('static', filename='supply_photos/' ~ p.photo_filename) }}" alt="" class="supply-thumb">
+              {% elif p.external_photo_url %}
+              <img src="{{ p.external_photo_url }}" alt="" class="supply-thumb" loading="lazy" referrerpolicy="no-referrer">
               {% else %}
               <span class="supply-thumb supply-thumb-empty"></span>
               {% endif %}
