@@ -2333,13 +2333,25 @@ def init_db():
         CREATE TABLE IF NOT EXISTS supply_categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
+            parent_id INTEGER,
             created_at TEXT NOT NULL
         )
         """
     )
+    supply_category_cols = [
+        row[1] for row in conn.execute(
+            "PRAGMA table_info(supply_categories)"
+        ).fetchall()
+    ]
+    if "parent_id" not in supply_category_cols:
+        conn.execute("ALTER TABLE supply_categories ADD COLUMN parent_id INTEGER")
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_supply_categories_name "
         "ON supply_categories (name)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_supply_categories_parent "
+        "ON supply_categories (parent_id, name)"
     )
     conn.execute(
         """
@@ -13859,15 +13871,73 @@ def _supply_warehouses(db):
 
 def _supply_categories(db, with_counts=False):
     if with_counts:
-        return db.execute(
+        rows = db.execute(
             "SELECT sc.*, COUNT(sp.id) AS product_count "
             "FROM supply_categories sc "
             "LEFT JOIN supply_products sp ON sp.category_id = sc.id "
-            "GROUP BY sc.id ORDER BY CASEFOLD(sc.name), sc.id"
+            "GROUP BY sc.id"
         ).fetchall()
-    return db.execute(
-        "SELECT * FROM supply_categories ORDER BY CASEFOLD(name), id"
-    ).fetchall()
+    else:
+        rows = db.execute("SELECT * FROM supply_categories").fetchall()
+
+    categories = [dict(row) for row in rows]
+    by_id = {category["id"]: category for category in categories}
+    children = {}
+    for category in categories:
+        parent_id = category.get("parent_id")
+        if parent_id == category["id"] or parent_id not in by_id:
+            parent_id = None
+        children.setdefault(parent_id, []).append(category)
+
+    def sort_key(category):
+        return (category["name"].casefold(), category["id"])
+
+    for child_categories in children.values():
+        child_categories.sort(key=sort_key)
+
+    ordered = []
+    visited = set()
+
+    def append_branch(category, depth, breadcrumb):
+        category_id = category["id"]
+        if category_id in visited:
+            return
+        visited.add(category_id)
+        category_breadcrumb = breadcrumb + [
+            {"id": category_id, "name": category["name"]}
+        ]
+        category["depth"] = depth
+        category["breadcrumb"] = category_breadcrumb
+        category["path"] = " / ".join(item["name"] for item in category_breadcrumb)
+        category["child_count"] = len(children.get(category_id, []))
+        ordered.append(category)
+        for child in children.get(category_id, []):
+            append_branch(child, depth + 1, category_breadcrumb)
+
+    for root_category in children.get(None, []):
+        append_branch(root_category, 0, [])
+    # Corrupted legacy data must not make categories disappear from the UI.
+    # A cycle cannot be created through the interface, but any unvisited row
+    # is presented as an additional root so an administrator can recover it.
+    for category in sorted(categories, key=sort_key):
+        if category["id"] not in visited:
+            append_branch(category, 0, [])
+    return ordered
+
+
+def _supply_category_descendant_ids(categories, category_id):
+    descendants = {category_id}
+    changed = True
+    while changed:
+        changed = False
+        for category in categories:
+            if (
+                category.get("parent_id") in descendants
+                and category["id"] not in descendants
+            ):
+                descendants.add(category["id"])
+                changed = True
+    return descendants
 
 
 def _parse_supply_category_id(db, raw_value, errors):
@@ -14171,13 +14241,31 @@ def import_moysklad_catalog():
 @admin_login_required
 def supply_catalog():
     db = get_db()
-    products = db.execute(
+    categories = _supply_categories(db, with_counts=True)
+    categories_by_id = {category["id"]: category for category in categories}
+    selected_category = None
+    raw_category_id = request.args.get("category_id", "").strip()
+    if raw_category_id.isdigit():
+        selected_category = categories_by_id.get(int(raw_category_id))
+
+    product_rows = db.execute(
         "SELECT sp.*, sc.name AS category_name, "
         "(SELECT COALESCE(SUM(quantity), 0) FROM supply_stock WHERE product_id = sp.id) AS total_quantity "
         "FROM supply_products sp "
         "LEFT JOIN supply_categories sc ON sc.id = sp.category_id "
         "ORDER BY sp.created_at DESC, sp.id DESC"
     ).fetchall()
+    allowed_category_ids = (
+        _supply_category_descendant_ids(categories, selected_category["id"])
+        if selected_category else None
+    )
+    products = []
+    for row in product_rows:
+        product = dict(row)
+        category = categories_by_id.get(product.get("category_id"))
+        product["category_breadcrumb"] = category["breadcrumb"] if category else []
+        if allowed_category_ids is None or product.get("category_id") in allowed_category_ids:
+            products.append(product)
     marine_rocket_state = db.execute(
         "SELECT COUNT(*) AS product_count, MAX(external_updated_at) AS updated_at "
         "FROM supply_products WHERE external_source = ?",
@@ -14189,7 +14277,8 @@ def supply_catalog():
     ).fetchone()
     return render_template(
         "supply_catalog.html", active_page="supply", sub_page="catalog",
-        products=products, categories=_supply_categories(db, with_counts=True),
+        products=products, categories=categories,
+        selected_category=selected_category,
         cost_units=SUPPLY_COST_UNITS,
         product_error=session.pop("product_error", None),
         category_error=session.pop("category_error", None),
@@ -14207,19 +14296,26 @@ def supply_catalog():
 def add_supply_category():
     db = get_db()
     name = " ".join(request.form.get("name", "").split())
+    errors = []
+    parent_id = _parse_supply_category_id(
+        db, request.form.get("parent_id"), errors
+    )
     if not name:
-        session["category_error"] = "Укажите название категории."
+        errors.append("Укажите название категории.")
     elif len(name) > 80:
-        session["category_error"] = "Название категории не должно быть длиннее 80 символов."
+        errors.append("Название категории не должно быть длиннее 80 символов.")
     elif db.execute(
         "SELECT id FROM supply_categories WHERE CASEFOLD(name) = ?",
         (name.casefold(),),
     ).fetchone() is not None:
-        session["category_error"] = "Категория с таким названием уже существует."
+        errors.append("Категория с таким названием уже существует.")
+    if errors:
+        session["category_error"] = " ".join(errors)
     else:
         db.execute(
-            "INSERT INTO supply_categories (name, created_at) VALUES (?, ?)",
-            (name, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+            "INSERT INTO supply_categories (name, parent_id, created_at) "
+            "VALUES (?, ?, ?)",
+            (name, parent_id, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
         )
         db.commit()
         session["category_notice"] = {
@@ -14244,7 +14340,16 @@ def delete_supply_category(category_id):
             "SELECT COUNT(*) AS count FROM supply_products WHERE category_id = ?",
             (category_id,),
         ).fetchone()["count"]
-        if product_count:
+        child_count = db.execute(
+            "SELECT COUNT(*) AS count FROM supply_categories WHERE parent_id = ?",
+            (category_id,),
+        ).fetchone()["count"]
+        if child_count:
+            session["category_error"] = (
+                f"Нельзя удалить категорию «{category['name']}»: "
+                f"в ней есть подкатегории ({child_count})."
+            )
+        elif product_count:
             session["category_error"] = (
                 f"Нельзя удалить категорию «{category['name']}»: "
                 f"к ней привязаны товары ({product_count})."
@@ -14470,14 +14575,24 @@ def add_supply_product():
 @admin_login_required
 def supply_product(product_id):
     db = get_db()
-    product = db.execute(
+    product_row = db.execute(
         "SELECT sp.*, sc.name AS category_name FROM supply_products sp "
         "LEFT JOIN supply_categories sc ON sc.id = sp.category_id "
         "WHERE sp.id = ?",
         (product_id,),
     ).fetchone()
-    if product is None:
+    if product_row is None:
         return redirect(url_for("supply_catalog"))
+    product = dict(product_row)
+    categories = _supply_categories(db)
+    category = next(
+        (
+            item for item in categories
+            if item["id"] == product.get("category_id")
+        ),
+        None,
+    )
+    product["category_breadcrumb"] = category["breadcrumb"] if category else []
 
     stock = db.execute(
         "SELECT supply_stock.*, supply_warehouses.name AS warehouse_name "
@@ -14515,7 +14630,7 @@ def supply_product(product_id):
         product=product, stock=stock, total_quantity=total_quantity,
         history=history,
         warehouses=_supply_warehouses(db),
-        categories=_supply_categories(db),
+        categories=categories,
         cost_units=SUPPLY_COST_UNITS, writeoff_reasons=SUPPLY_WRITEOFF_REASONS,
         custom_value=CUSTOM_VALUE,
         receive_error=session.pop("receive_error", None),

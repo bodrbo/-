@@ -149,21 +149,33 @@
           <span>Новая категория</span>
           <input type="text" name="name" maxlength="80" placeholder="Например, лодочные моторы" required>
         </label>
+        <label class="field">
+          <span>Родительская категория</span>
+          <select name="parent_id">
+            <option value="">Главная категория</option>
+            {% for category in categories %}
+            <option value="{{ category.id }}">{{ category.path }}</option>
+            {% endfor %}
+          </select>
+        </label>
         <button type="submit">Создать категорию</button>
       </form>
       {% if categories %}
       <div class="supply-category-list">
         {% for category in categories %}
-        <div class="supply-category-row">
+        <div class="supply-category-row" style="--category-depth: {{ category.depth }};">
           <span>
-            <strong>{{ category.name }}</strong>
-            <small>{{ category.product_count }} товар{{ '' if category.product_count % 10 == 1 and category.product_count % 100 != 11 else 'а' if category.product_count % 10 in [2, 3, 4] and category.product_count % 100 not in [12, 13, 14] else 'ов' }}</small>
+            <strong><a href="{{ url_for('supply_catalog', category_id=category.id) }}">{{ category.name }}</a></strong>
+            <small>
+              {{ category.product_count }} товар{{ '' if category.product_count % 10 == 1 and category.product_count % 100 != 11 else 'а' if category.product_count % 10 in [2, 3, 4] and category.product_count % 100 not in [12, 13, 14] else 'ов' }}
+              {% if category.child_count %} · {{ category.child_count }} подкатегори{{ 'я' if category.child_count % 10 == 1 and category.child_count % 100 != 11 else 'и' if category.child_count % 10 in [2, 3, 4] and category.child_count % 100 not in [12, 13, 14] else 'й' }}{% endif %}
+            </small>
           </span>
           <form action="{{ url_for('delete_supply_category', category_id=category.id) }}" method="post"
                 onsubmit="return confirm('Удалить эту категорию?')">
             <button type="submit" class="icon-btn danger" aria-label="Удалить категорию {{ category.name }}"
-                    {{ 'disabled' if category.product_count }}
-                    title="{{ 'Сначала уберите категорию у товаров' if category.product_count else 'Удалить категорию' }}">
+                    {{ 'disabled' if category.product_count or category.child_count }}
+                    title="{{ 'Сначала удалите или перенесите подкатегории' if category.child_count else 'Сначала уберите категорию у товаров' if category.product_count else 'Удалить категорию' }}">
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h12M8 3h4l1 3H7l1-3zM6 6l.7 11h6.6L14 6M8.5 9v5M11.5 9v5"/></svg>
             </button>
           </form>
@@ -200,7 +212,7 @@
           <select id="product_category" name="category_id">
             <option value="">Без категории</option>
             {% for category in categories %}
-            <option value="{{ category.id }}">{{ category.name }}</option>
+            <option value="{{ category.id }}">{{ category.path }}</option>
             {% endfor %}
           </select>
         </div>
@@ -242,6 +254,16 @@
 
   <section class="panel" id="supply-products">
     <h2>Товары</h2>
+    {% if selected_category %}
+    <div class="supply-category-filter" role="status">
+      <div>
+        <span>Категория</span>
+        <strong>{{ selected_category.path }}</strong>
+        <small>Показаны товары этой категории и всех её подкатегорий.</small>
+      </div>
+      <a href="{{ url_for('supply_catalog') }}#supply-products">Показать весь каталог</a>
+    </div>
+    {% endif %}
     {% if products %}
     <div class="table-search">
       <input type="search" placeholder="Поиск по названию или артикулу…"
@@ -258,7 +280,7 @@
             <option value="" selected disabled>Выберите действие…</option>
             <option value="__none__">Снять категорию</option>
             {% for category in categories %}
-            <option value="{{ category.id }}">{{ category.name }}</option>
+            <option value="{{ category.id }}">{{ category.path }}</option>
             {% endfor %}
           </select>
         </label>
@@ -292,7 +314,17 @@
                 {% endif %}
               </td>
               <td class="term"><a href="{{ url_for('supply_product', product_id=p.id) }}">{{ p.name }}</a></td>
-              <td>{% if p.category_name %}<span class="supply-category-badge">{{ p.category_name }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+              <td>
+                {% if p.category_breadcrumb %}
+                <nav class="supply-category-breadcrumb supply-category-breadcrumb-compact" aria-label="Категория товара">
+                  {% for category in p.category_breadcrumb %}
+                  <a href="{{ url_for('supply_catalog', category_id=category.id) }}" onclick="event.stopPropagation()">{{ category.name }}</a>{% if not loop.last %}<span aria-hidden="true">/</span>{% endif %}
+                  {% endfor %}
+                </nav>
+                {% else %}
+                <span class="muted">—</span>
+                {% endif %}
+              </td>
               <td class="muted">{{ p.sku or '—' }}</td>
               <td class="muted">{{ p.supplier or '—' }}</td>
               <td>{{ p.cost_price|money }} ₽ / {{ cost_units|selectattr('value', 'equalto', p.cost_unit)|map(attribute='label')|first }}</td>
@@ -310,8 +342,8 @@
     {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">В каталоге пока нет товаров</div>
-      <div class="s">Добавьте первый товар через форму выше.</div>
+      <div class="t">{{ 'В этой категории пока нет товаров' if selected_category else 'В каталоге пока нет товаров' }}</div>
+      <div class="s">{{ 'Назначьте категорию товарам или выберите другой раздел.' if selected_category else 'Добавьте первый товар через форму выше.' }}</div>
     </div>
     {% endif %}
   </section>

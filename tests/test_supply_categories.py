@@ -5,6 +5,8 @@ from support import application_module
 
 class SupplyCategoryIntegrationTests(unittest.TestCase):
     CATEGORY_NAME = "Тестовые комплектующие"
+    CHILD_CATEGORY_NAME = "Гребные винты"
+    GRANDCHILD_CATEGORY_NAME = "Стальные винты"
     PRODUCT_NAME = "Тестовый винт категории"
     PRODUCT_SKU = "category-test-propeller"
     SECOND_PRODUCT_SKU = "category-test-propeller-2"
@@ -37,16 +39,23 @@ class SupplyCategoryIntegrationTests(unittest.TestCase):
             db.execute("DELETE FROM supply_writeoffs WHERE product_id = ?", (product_id,))
             db.execute("DELETE FROM supply_products WHERE id = ?", (product_id,))
         db.execute(
-            "DELETE FROM supply_categories WHERE CASEFOLD(name) = ?",
-            (cls.CATEGORY_NAME.casefold(),),
+            "DELETE FROM supply_categories WHERE CASEFOLD(name) IN (?, ?, ?)",
+            (
+                cls.CATEGORY_NAME.casefold(),
+                cls.CHILD_CATEGORY_NAME.casefold(),
+                cls.GRANDCHILD_CATEGORY_NAME.casefold(),
+            ),
         )
         db.commit()
 
-    def _create_category(self, name=None):
+    def _create_category(self, name=None, parent_id=None):
         normalized_name = " ".join((name or self.CATEGORY_NAME).split())
         response = self.client.post(
             "/supply/catalog/categories/add",
-            data={"name": name or self.CATEGORY_NAME},
+            data={
+                "name": name or self.CATEGORY_NAME,
+                "parent_id": str(parent_id) if parent_id is not None else "",
+            },
         )
         self.assertEqual(response.status_code, 302)
         with application_module.app.app_context():
@@ -100,8 +109,14 @@ class SupplyCategoryIntegrationTests(unittest.TestCase):
                 "SELECT name FROM sqlite_master "
                 "WHERE type = 'table' AND name = 'supply_categories'"
             ).fetchone()
+            category_columns = {
+                row["name"] for row in db.execute(
+                    "PRAGMA table_info(supply_categories)"
+                ).fetchall()
+            }
         self.assertIn("category_id", columns)
         self.assertIsNotNone(category_table)
+        self.assertIn("parent_id", category_columns)
 
     def test_admin_creates_unique_category_case_insensitively(self):
         self._create_category("  Тестовые   комплектующие  ")
@@ -138,7 +153,7 @@ class SupplyCategoryIntegrationTests(unittest.TestCase):
 
         catalog_html = self.client.get("/supply/catalog").get_data(as_text=True)
         self.assertIn(self.CATEGORY_NAME, catalog_html)
-        self.assertIn("supply-category-badge", catalog_html)
+        self.assertIn("supply-category-breadcrumb", catalog_html)
         product_html = self.client.get(
             f"/supply/catalog/{product['id']}"
         ).get_data(as_text=True)
@@ -155,6 +170,49 @@ class SupplyCategoryIntegrationTests(unittest.TestCase):
                 (product["id"],),
             ).fetchone()["category_id"]
         self.assertIsNone(category_after)
+
+    def test_nested_categories_build_clickable_path_and_inherited_filter(self):
+        parent_id = self._create_category()
+        child_id = self._create_category(self.CHILD_CATEGORY_NAME, parent_id)
+        grandchild_id = self._create_category(
+            self.GRANDCHILD_CATEGORY_NAME, child_id
+        )
+        self._add_product(grandchild_id)
+        with application_module.app.app_context():
+            product_id = application_module.get_db().execute(
+                "SELECT id FROM supply_products WHERE sku = ?",
+                (self.PRODUCT_SKU,),
+            ).fetchone()["id"]
+
+        product_page = self.client.get(f"/supply/catalog/{product_id}")
+        product_html = product_page.get_data(as_text=True)
+        self.assertEqual(product_page.status_code, 200)
+        self.assertIn("Путь категории товара", product_html)
+        self.assertIn(self.CATEGORY_NAME, product_html)
+        self.assertIn(self.CHILD_CATEGORY_NAME, product_html)
+        self.assertIn(self.GRANDCHILD_CATEGORY_NAME, product_html)
+        self.assertIn(f"category_id={parent_id}", product_html)
+        self.assertIn(f"category_id={child_id}", product_html)
+        self.assertIn(f"category_id={grandchild_id}", product_html)
+
+        inherited_page = self.client.get(
+            f"/supply/catalog?category_id={parent_id}"
+        )
+        inherited_html = inherited_page.get_data(as_text=True)
+        self.assertEqual(inherited_page.status_code, 200)
+        self.assertIn("всех её подкатегорий", inherited_html)
+        self.assertIn(self.PRODUCT_NAME, inherited_html)
+        self.assertIn(
+            f"{self.CATEGORY_NAME} / {self.CHILD_CATEGORY_NAME} / "
+            f"{self.GRANDCHILD_CATEGORY_NAME}",
+            inherited_html,
+        )
+
+        blocked = self.client.post(
+            f"/supply/catalog/categories/{parent_id}/delete",
+            follow_redirects=True,
+        )
+        self.assertIn("в ней есть подкатегории", blocked.get_data(as_text=True))
 
     def test_used_category_cannot_be_deleted_until_product_is_unassigned(self):
         category_id = self._create_category()

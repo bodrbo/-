@@ -83,7 +83,20 @@
     {% endif %}
     <div style="flex:1 1 260px;">
       <table class="gloss">
-        <tr><th>Категория</th><td>{% if product.category_name %}<span class="supply-category-badge">{{ product.category_name }}</span>{% else %}—{% endif %}</td></tr>
+        <tr>
+          <th>Категория</th>
+          <td>
+            {% if product.category_breadcrumb %}
+            <nav class="supply-category-breadcrumb" aria-label="Путь категории товара">
+              <a href="{{ url_for('supply_catalog') }}">Каталог</a>
+              {% for category in product.category_breadcrumb %}
+              <span aria-hidden="true">/</span>
+              <a href="{{ url_for('supply_catalog', category_id=category.id) }}">{{ category.name }}</a>
+              {% endfor %}
+            </nav>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
         <tr><th>Артикул</th><td>{{ product.sku or '—' }}</td></tr>
         <tr><th>Поставщик</th><td>{{ product.supplier or '—' }}</td></tr>
         {% if product.external_url %}
@@ -141,7 +154,7 @@
           <select id="edit_category" name="category_id">
             <option value="">Без категории</option>
             {% for category in categories %}
-            <option value="{{ category.id }}" {{ 'selected' if category.id == product.category_id }}>{{ category.name }}</option>
+            <option value="{{ category.id }}" {{ 'selected' if category.id == product.category_id }}>{{ category.path }}</option>
             {% endfor %}
           </select>
         </div>

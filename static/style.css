@@ -7131,7 +7131,7 @@ table.records td.amount, table.gloss td.amount { font-weight: 700; color: var(--
 .supply-category-manager { display: grid; gap: 16px; }
 .supply-category-create {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto;
   align-items: end;
   gap: 12px;
 }
@@ -7152,8 +7152,15 @@ table.records td.amount, table.gloss td.amount { font-weight: 700; color: var(--
   background: var(--paper);
 }
 .supply-category-row + .supply-category-row { border-top: 1px solid var(--hairline); }
-.supply-category-row > span { display: grid; min-width: 0; gap: 2px; }
+.supply-category-row > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  margin-left: calc(var(--category-depth, 0) * 18px);
+}
 .supply-category-row strong { overflow-wrap: anywhere; font-size: 13px; }
+.supply-category-row strong a { color: var(--ink); text-decoration: none; }
+.supply-category-row strong a:hover { color: var(--brass-strong); text-decoration: underline; }
 .supply-category-row small { color: var(--muted); font-size: 11px; }
 .supply-category-row .icon-btn {
   display: inline-flex;
@@ -7184,6 +7191,42 @@ table.records td.amount, table.gloss td.amount { font-weight: 700; color: var(--
   font-weight: 700;
   line-height: 1.25;
 }
+.supply-category-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: normal;
+}
+.supply-category-breadcrumb a {
+  color: var(--brass-strong);
+  font-weight: 700;
+  text-decoration: none;
+}
+.supply-category-breadcrumb a:hover { text-decoration: underline; }
+.supply-category-breadcrumb-compact {
+  min-width: 140px;
+  max-width: 300px;
+  font-size: 11px;
+}
+.supply-category-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 11px 13px;
+  border: 1px solid #b8d2e4;
+  border-radius: 9px;
+  background: #edf6fc;
+}
+.supply-category-filter > div { display: grid; min-width: 0; gap: 2px; }
+.supply-category-filter span,
+.supply-category-filter small { color: var(--muted); font-size: 11px; }
+.supply-category-filter strong { overflow-wrap: anywhere; font-size: 13px; }
+.supply-category-filter a { flex: 0 0 auto; font-size: 12px; font-weight: 700; }
 .supply-bulk-toolbar {
   display: grid;
   grid-template-columns: auto minmax(240px, 420px) auto;
@@ -7223,6 +7266,7 @@ table.records td.amount, table.gloss td.amount { font-weight: 700; color: var(--
 @media (max-width: 620px) {
   .supply-category-create { grid-template-columns: 1fr; }
   .supply-category-create button { width: 100%; }
+  .supply-category-filter { align-items: flex-start; flex-direction: column; }
   .supply-bulk-toolbar { grid-template-columns: 1fr; align-items: stretch; }
   .supply-bulk-toolbar button { width: 100%; }
 }
