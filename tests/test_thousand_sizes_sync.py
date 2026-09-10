@@ -69,6 +69,7 @@ class ThousandSizesSyncTests(unittest.TestCase):
         self.assertEqual(offers[1]["quantities"], {"Москва": 0, "Владивосток": 0})
         self.assertIn("Оснащение / Якорное оборудование", offers[0]["description"])
         self.assertEqual(offers[0]["cost_price"], 900)
+        self.assertEqual(offers[0]["sale_price"], 1305)
 
     def test_sync_creates_exact_warehouses_and_is_idempotent(self):
         with application_module.app.app_context():
@@ -81,11 +82,14 @@ class ThousandSizesSyncTests(unittest.TestCase):
             ).fetchall()]
             self.assertEqual(names, ["1000 размеров - Владивосток", "1000 размеров - Москва"])
             product = db.execute(
-                "SELECT sp.category_id, sc.name AS category_name FROM supply_products sp "
+                "SELECT sp.category_id, sp.cost_price, sp.sale_price, "
+                "sc.name AS category_name FROM supply_products sp "
                 "LEFT JOIN supply_categories sc ON sc.id = sp.category_id "
                 "WHERE sp.external_ref = 'item-1'"
             ).fetchone()
             self.assertEqual(product["category_name"], "Якорное оборудование")
+            self.assertEqual(product["cost_price"], 900)
+            self.assertEqual(product["sale_price"], 1305)
 
             second = sync_catalog(db, feed(first_moscow="7", first_price="1300", include_second=False))
             self.assertEqual(second["created"], 0)
@@ -95,6 +99,62 @@ class ThousandSizesSyncTests(unittest.TestCase):
             self.assertEqual(db.execute(
                 "SELECT COUNT(*) AS n FROM supply_products"
             ).fetchone()["n"], 2)
+            refreshed = db.execute(
+                "SELECT sale_price FROM supply_products WHERE external_ref = 'item-1'"
+            ).fetchone()
+            self.assertEqual(refreshed["sale_price"], 1305)
+
+    def test_fixed_markup_is_visible_enforced_on_edit_and_backfilled_on_startup(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            sync_catalog(db, feed(include_second=False))
+            product = db.execute(
+                "SELECT * FROM supply_products WHERE external_ref = 'item-1'"
+            ).fetchone()
+            product_id = product["id"]
+            category_id = product["category_id"]
+
+        catalog = self.client.get("/supply/catalog").get_data(as_text=True)
+        card = self.client.get(f"/supply/catalog/{product_id}").get_data(as_text=True)
+        self.assertIn("+45%", catalog)
+        self.assertIn("Наценка 45%", card)
+        self.assertIn("Рассчитывается автоматически", card)
+
+        response = self.client.post(
+            f"/supply/catalog/{product_id}/edit",
+            data={
+                "name": "Рым-болт",
+                "sku": "TS-001",
+                "description": "Проверка",
+                "supplier": "1000 размеров",
+                "category_id": str(category_id),
+                "cost_price": "1000",
+                "cost_unit": "piece",
+                "sale_price": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.assertEqual(
+                db.execute(
+                    "SELECT sale_price FROM supply_products WHERE id = ?", (product_id,)
+                ).fetchone()["sale_price"],
+                1450,
+            )
+            db.execute(
+                "UPDATE supply_products SET sale_price = 1 WHERE id = ?", (product_id,)
+            )
+            db.commit()
+
+        application_module.init_db()
+        with application_module.app.app_context():
+            self.assertEqual(
+                application_module.get_db().execute(
+                    "SELECT sale_price FROM supply_products WHERE id = ?", (product_id,)
+                ).fetchone()["sale_price"],
+                1450,
+            )
 
     def test_manual_card_is_adopted_by_exact_sku(self):
         with application_module.app.app_context():

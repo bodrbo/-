@@ -70,8 +70,10 @@ from integrations.marine_rocket import (
 )
 from integrations.thousand_sizes import (
     DEFAULT_YML_URL as THOUSAND_SIZES_DEFAULT_YML_URL,
+    FIXED_MARKUP_PERCENT as THOUSAND_SIZES_MARKUP_PERCENT,
     SOURCE_KEY as THOUSAND_SIZES_SOURCE_KEY,
     fetch_yml as fetch_thousand_sizes_yml,
+    sale_price_with_markup as thousand_sizes_sale_price,
     sync_catalog as sync_thousand_sizes_catalog,
 )
 from modules.employees import create_employees_blueprint
@@ -2434,6 +2436,15 @@ def init_db():
         "SELECT external_source, external_ref, id, external_url, external_photo_url, external_updated_at "
         "FROM supply_products WHERE external_source IS NOT NULL AND external_source != '' "
         "AND external_ref IS NOT NULL AND external_ref != ''"
+    )
+    # The 1000 размеров catalog has one fixed commercial rule. Apply it on
+    # every startup as a migration/backfill for already-imported cards; the
+    # importer and edit endpoint enforce the same formula afterwards.
+    conn.execute(
+        "UPDATE supply_products SET sale_price = ROUND(cost_price * ?, 2) "
+        "WHERE EXISTS (SELECT 1 FROM supply_product_external_links link "
+        "WHERE link.product_id = supply_products.id AND link.source = ?)",
+        (1 + THOUSAND_SIZES_MARKUP_PERCENT / 100, THOUSAND_SIZES_SOURCE_KEY),
     )
     conn.execute(
         """
@@ -14597,10 +14608,12 @@ def supply_catalog():
     page = min(page, total_pages)
     product_rows = db.execute(
         "SELECT sp.*, sc.name AS category_name, "
+        "EXISTS (SELECT 1 FROM supply_product_external_links link "
+        "WHERE link.product_id = sp.id AND link.source = ?) AS has_thousand_sizes_markup, "
         "(SELECT COALESCE(SUM(quantity), 0) FROM supply_stock WHERE product_id = sp.id) AS total_quantity "
         "FROM supply_products sp LEFT JOIN supply_categories sc ON sc.id = sp.category_id" +
         where_sql + " ORDER BY sp.created_at DESC, sp.id DESC LIMIT ? OFFSET ?",
-        params + [per_page, (page - 1) * per_page],
+        [THOUSAND_SIZES_SOURCE_KEY] + params + [per_page, (page - 1) * per_page],
     ).fetchall()
     products = []
     for row in product_rows:
@@ -14630,6 +14643,7 @@ def supply_catalog():
         "supply_catalog.html", active_page="supply", sub_page="catalog",
         products=products, categories=categories,
         selected_category=selected_category,
+        thousand_sizes_markup_percent=THOUSAND_SIZES_MARKUP_PERCENT,
         cost_units=SUPPLY_COST_UNITS,
         product_error=session.pop("product_error", None),
         category_error=session.pop("category_error", None),
@@ -14969,10 +14983,13 @@ def add_supply_product():
 def supply_product(product_id):
     db = get_db()
     product_row = db.execute(
-        "SELECT sp.*, sc.name AS category_name FROM supply_products sp "
+        "SELECT sp.*, sc.name AS category_name, "
+        "EXISTS (SELECT 1 FROM supply_product_external_links link "
+        "WHERE link.product_id = sp.id AND link.source = ?) AS has_thousand_sizes_markup "
+        "FROM supply_products sp "
         "LEFT JOIN supply_categories sc ON sc.id = sp.category_id "
         "WHERE sp.id = ?",
-        (product_id,),
+        (THOUSAND_SIZES_SOURCE_KEY, product_id),
     ).fetchone()
     if product_row is None:
         return redirect(url_for("supply_catalog"))
@@ -15024,6 +15041,7 @@ def supply_product(product_id):
         history=history,
         warehouses=_supply_warehouses(db),
         categories=categories,
+        thousand_sizes_markup_percent=THOUSAND_SIZES_MARKUP_PERCENT,
         cost_units=SUPPLY_COST_UNITS, writeoff_reasons=SUPPLY_WRITEOFF_REASONS,
         custom_value=CUSTOM_VALUE,
         receive_error=session.pop("receive_error", None),
@@ -15062,7 +15080,12 @@ def set_supply_product_min_stock(product_id):
 @admin_login_required
 def edit_supply_product(product_id):
     db = get_db()
-    product = db.execute("SELECT id FROM supply_products WHERE id = ?", (product_id,)).fetchone()
+    product = db.execute(
+        "SELECT sp.id, EXISTS (SELECT 1 FROM supply_product_external_links link "
+        "WHERE link.product_id = sp.id AND link.source = ?) AS has_thousand_sizes_markup "
+        "FROM supply_products sp WHERE sp.id = ?",
+        (THOUSAND_SIZES_SOURCE_KEY, product_id),
+    ).fetchone()
     if product is None:
         return redirect(url_for("supply_catalog"))
 
@@ -15092,12 +15115,16 @@ def edit_supply_product(product_id):
         errors.append("Себестоимость должна быть числом.")
 
     sale_price = None
-    try:
-        sale_price = float(sale_price_raw)
-        if sale_price < 0:
-            errors.append("Цена продажи не может быть отрицательной.")
-    except ValueError:
-        errors.append("Цена продажи должна быть числом.")
+    if product["has_thousand_sizes_markup"]:
+        if cost_price is not None:
+            sale_price = thousand_sizes_sale_price(cost_price)
+    else:
+        try:
+            sale_price = float(sale_price_raw)
+            if sale_price < 0:
+                errors.append("Цена продажи не может быть отрицательной.")
+        except ValueError:
+            errors.append("Цена продажи должна быть числом.")
 
     if errors:
         session["edit_error"] = " ".join(errors)

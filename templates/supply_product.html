@@ -108,7 +108,15 @@
         <tr><th>Описание</th><td>{{ product.description or '—' }}</td></tr>
         <tr><th>Себестоимость</th>
           <td>{{ product.cost_price|money }} ₽ / {{ cost_units|selectattr('value', 'equalto', product.cost_unit)|map(attribute='label')|first }}</td></tr>
-        <tr><th>Цена продажи</th><td>{{ product.sale_price|money }} ₽</td></tr>
+        <tr>
+          <th>Цена продажи</th>
+          <td>
+            {{ product.sale_price|money }} ₽
+            {% if product.has_thousand_sizes_markup %}
+            <span class="status-badge status-done">Наценка {{ thousand_sizes_markup_percent }}%</span>
+            {% endif %}
+          </td>
+        </tr>
         <tr><th>Остаток, всего</th>
           <td class="amount" style="{{ 'color:var(--danger);' if product.min_stock and total_quantity <= product.min_stock }}">
             {{ total_quantity|float|round(2) }}
@@ -176,9 +184,13 @@
           </select>
         </div>
         <div class="field field-narrow">
-          <label for="edit_sale_price">Цена продажи, ₽</label>
+          <label for="edit_sale_price">Цена продажи, ₽{% if product.has_thousand_sizes_markup %} · наценка {{ thousand_sizes_markup_percent }}%{% endif %}</label>
           <input type="text" inputmode="decimal" id="edit_sale_price" name="sale_price"
-                 value="{{ product.sale_price|float|round(2) }}" required>
+                 value="{{ product.sale_price|float|round(2) }}" required
+                 {% if product.has_thousand_sizes_markup %}readonly aria-describedby="edit_sale_price_hint"{% endif %}>
+          {% if product.has_thousand_sizes_markup %}
+          <small class="hint" id="edit_sale_price_hint">Рассчитывается автоматически: себестоимость + {{ thousand_sizes_markup_percent }}%.</small>
+          {% endif %}
         </div>
         <div class="field">
           <label for="edit_photo">Фотография</label>

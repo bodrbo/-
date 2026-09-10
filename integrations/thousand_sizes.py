@@ -13,6 +13,7 @@ DEFAULT_YML_URL = (
 )
 SOURCE_KEY = "thousand_sizes"
 SUPPLIER_NAME = "1000 размеров"
+FIXED_MARKUP_PERCENT = 45
 WAREHOUSE_NAMES = {
     "Москва": "1000 размеров - Москва",
     "Владивосток": "1000 размеров - Владивосток",
@@ -22,6 +23,11 @@ MAX_YML_BYTES = 64 * 1024 * 1024
 
 class ThousandSizesError(RuntimeError):
     """A recoverable supplier feed or synchronization error."""
+
+
+def sale_price_with_markup(cost_price):
+    """Return the fixed retail price for the 1000 размеров catalog."""
+    return round(float(cost_price) * (1 + FIXED_MARKUP_PERCENT / 100), 2)
 
 
 def fetch_yml(url=DEFAULT_YML_URL, timeout=(10, 180)):
@@ -141,13 +147,17 @@ def parse_offers(content):
                         quantities[location] += _number(
                             quantity.text, "остаток ({})".format(location)
                         )
+            cost_price = _number(_text(element, "dealer_price"), "dealer_price")
             offers.append({
                 "external_ref": external_ref,
                 "name": name,
                 "sku": sku,
                 "description": "; ".join(description)[:8000] or None,
-                "cost_price": _number(_text(element, "dealer_price"), "dealer_price"),
-                "sale_price": _number(_text(element, "price"), "price"),
+                "cost_price": cost_price,
+                # The supplier's public price is deliberately not used here:
+                # Bodry Business applies one commercial rule to every item in
+                # this catalog, including future imports and price refreshes.
+                "sale_price": sale_price_with_markup(cost_price),
                 "external_url": _text(element, "url") or None,
                 "external_photo_url": _text(element, "picture") or None,
                 "category_path": category_path,

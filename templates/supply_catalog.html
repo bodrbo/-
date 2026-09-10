@@ -368,7 +368,12 @@
               <td class="muted">{{ p.sku or '—' }}</td>
               <td class="muted">{{ p.supplier or '—' }}</td>
               <td>{{ p.cost_price|money }} ₽ / {{ cost_units|selectattr('value', 'equalto', p.cost_unit)|map(attribute='label')|first }}</td>
-              <td>{{ p.sale_price|money }} ₽</td>
+              <td>
+                {{ p.sale_price|money }} ₽
+                {% if p.has_thousand_sizes_markup %}
+                <small class="muted" title="Фиксированная наценка на себестоимость">+{{ thousand_sizes_markup_percent }}%</small>
+                {% endif %}
+              </td>
               <td class="amount" style="{{ 'color:var(--danger);' if p.min_stock and p.total_quantity <= p.min_stock }}">
                 {{ p.total_quantity|float|round(2) }}
               </td>
