@@ -7545,13 +7545,12 @@ def update_shop_map_room():
     return redirect(url_for("tuning_shop_map"))
 
 
-@app.route("/tuning/shop-map/elements/add", methods=["POST"])
-@admin_login_required
-def add_shop_map_element():
-    db = get_db()
-    room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
-
-    name = request.form.get("name", "").strip()
+def _parse_shop_map_element_form(form, room):
+    """Shared by add/edit — validates name plus the four dimensions, and
+    that the resulting rectangle fits inside the room (length/width mixed
+    up, or a stale room size after the room was resized, are both easy
+    mistakes to make). Returns (data, None) or (None, error_message)."""
+    name = form.get("name", "").strip()
     errors = []
     if not name:
         errors.append("Укажите название зоны.")
@@ -7578,10 +7577,10 @@ def add_shop_map_element():
             errors.append(f"«{label}» должна быть числом в метрах, не меньше нуля.")
             return None
 
-    x_m = _parse_nonnegative(request.form.get("x_m", ""), "От левой стены")
-    y_m = _parse_nonnegative(request.form.get("y_m", ""), "От верхней стены")
-    width_m = _parse_positive(request.form.get("width_m", ""), "Длина")
-    height_m = _parse_positive(request.form.get("height_m", ""), "Ширина")
+    x_m = _parse_nonnegative(form.get("x_m", ""), "От левой стены")
+    y_m = _parse_nonnegative(form.get("y_m", ""), "От верхней стены")
+    width_m = _parse_positive(form.get("width_m", ""), "Длина")
+    height_m = _parse_positive(form.get("height_m", ""), "Ширина")
 
     if not errors and room is not None:
         if x_m is not None and width_m is not None and x_m + width_m > room["length_m"] + 0.001:
@@ -7590,14 +7589,50 @@ def add_shop_map_element():
             errors.append("Зона выходит за пределы цеха по ширине.")
 
     if errors:
-        session["shop_map_element_error"] = " ".join(errors)
+        return None, " ".join(errors)
+    return {"name": name, "x_m": x_m, "y_m": y_m, "width_m": width_m, "height_m": height_m}, None
+
+
+@app.route("/tuning/shop-map/elements/add", methods=["POST"])
+@admin_login_required
+def add_shop_map_element():
+    db = get_db()
+    room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+    data, error = _parse_shop_map_element_form(request.form, room)
+    if error:
+        session["shop_map_element_error"] = error
         return redirect(url_for("tuning_shop_map"))
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
         "INSERT INTO shop_map_elements (name, x_m, y_m, width_m, height_m, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (name, x_m, y_m, width_m, height_m, now, now),
+        (data["name"], data["x_m"], data["y_m"], data["width_m"], data["height_m"], now, now),
+    )
+    db.commit()
+    return redirect(url_for("tuning_shop_map"))
+
+
+@app.route("/tuning/shop-map/elements/<int:element_id>/edit", methods=["POST"])
+@admin_login_required
+def update_shop_map_element(element_id):
+    db = get_db()
+    element = db.execute(
+        "SELECT id FROM shop_map_elements WHERE id = ?", (element_id,)
+    ).fetchone()
+    if element is None:
+        return redirect(url_for("tuning_shop_map"))
+    room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+    data, error = _parse_shop_map_element_form(request.form, room)
+    if error:
+        session["shop_map_element_error"] = error
+        return redirect(url_for("tuning_shop_map"))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "UPDATE shop_map_elements SET name = ?, x_m = ?, y_m = ?, width_m = ?, height_m = ?, "
+        "updated_at = ? WHERE id = ?",
+        (data["name"], data["x_m"], data["y_m"], data["width_m"], data["height_m"], now, element_id),
     )
     db.commit()
     return redirect(url_for("tuning_shop_map"))

@@ -147,7 +147,7 @@
     <h2>Элементы цеха</h2>
     <p class="hint">Верстаки, стеллажи и другие несдвигаемые зоны — они тоже будут влиять на расположение лодок.</p>
     {% if element_error %}
-    <div class="alert"><strong>Не удалось добавить:</strong> {{ element_error }}</div>
+    <div class="alert"><strong>Не удалось сохранить:</strong> {{ element_error }}</div>
     {% endif %}
     {% if elements %}
     <div class="table-scroll">
@@ -155,20 +155,41 @@
         <thead>
           <tr>
             <th>Название</th>
-            <th>От левой стены</th>
-            <th>От верхней стены</th>
-            <th>Длина × Ширина</th>
+            <th>От левой стены, м</th>
+            <th>От верхней стены, м</th>
+            <th>Длина × Ширина, м</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           {% for el in elements %}
+          {% set form_id = "shopMapElementEdit" ~ el.id %}
           <tr>
-            <td class="term">{{ el.name }}</td>
-            <td class="muted">{{ el.x_m|float|round(2) }} м</td>
-            <td class="muted">{{ el.y_m|float|round(2) }} м</td>
-            <td class="muted">{{ el.width_m|float|round(2) }} × {{ el.height_m|float|round(2) }} м</td>
+            <td>
+              <input type="text" name="name" value="{{ el.name }}" form="{{ form_id }}"
+                     class="shop-map-element-input shop-map-element-input-name" required>
+            </td>
+            <td>
+              <input type="text" inputmode="decimal" name="x_m" value="{{ el.x_m|float|round(2) }}" form="{{ form_id }}"
+                     class="shop-map-element-input shop-map-element-input-narrow" required>
+            </td>
+            <td>
+              <input type="text" inputmode="decimal" name="y_m" value="{{ el.y_m|float|round(2) }}" form="{{ form_id }}"
+                     class="shop-map-element-input shop-map-element-input-narrow" required>
+            </td>
+            <td class="shop-map-element-size-cell">
+              <input type="text" inputmode="decimal" name="width_m" value="{{ el.width_m|float|round(2) }}" form="{{ form_id }}"
+                     class="shop-map-element-input shop-map-element-input-narrow" required>
+              <span aria-hidden="true">×</span>
+              <input type="text" inputmode="decimal" name="height_m" value="{{ el.height_m|float|round(2) }}" form="{{ form_id }}"
+                     class="shop-map-element-input shop-map-element-input-narrow" required>
+            </td>
             <td class="row-actions">
+              <button type="submit" form="{{ form_id }}" class="icon-btn approve" title="Сохранить">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 10.5l4 4 8-9"/>
+                </svg>
+              </button>
               <form action="{{ url_for('delete_shop_map_element', element_id=el.id) }}" method="post"
                     onsubmit="return confirm('Удалить эту зону с карты?');">
                 <button type="submit" class="icon-btn danger" title="Удалить">
@@ -183,6 +204,9 @@
         </tbody>
       </table>
     </div>
+    {% for el in elements %}
+    <form id="shopMapElementEdit{{ el.id }}" action="{{ url_for('update_shop_map_element', element_id=el.id) }}" method="post" class="hidden"></form>
+    {% endfor %}
     {% else %}
     <p class="hint">Пока не добавлено ни одной зоны.</p>
     {% endif %}

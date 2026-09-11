@@ -10277,3 +10277,17 @@ button.partner-open-price-save svg {
   stroke: var(--warning);
   stroke-width: 1.5;
 }
+.shop-map-element-input {
+  width: 100%;
+  min-width: 90px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+}
+.shop-map-element-input-name { min-width: 180px; }
+.shop-map-element-input-narrow { width: 64px; min-width: 64px; }
+.shop-map-element-size-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
