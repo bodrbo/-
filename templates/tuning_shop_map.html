@@ -154,8 +154,95 @@
                 class="shop-map-element-badge-text">{{ loop.index }}</text>
           {% endfor %}
         </g>
+
+        <!-- Real hull, non-uniform scale on purpose — the boat must show
+             its actual length × width relative to the room, not a fixed
+             icon size. Local path spans x 0..180 (length axis, bow at
+             180), y -26..26 (width axis, centred). -->
+        <g class="shop-map-boats">
+          {% for boat in boats_on_map %}
+          <a href="{{ url_for('edit_tuning_order', order_id=boat.order_id) }}">
+            <g transform="translate({{ boat.x_px }}, {{ boat.y_px + boat.box_h_px / 2 }}) scale({{ boat.box_w_px / 180 }}, {{ boat.box_h_px / 52 }})">
+              <path class="shop-map-boat-hull"
+                    d="M 180 0 C 170 22 120 26 85 25 C 45 24 15 18 0 12 L 0 -12 C 15 -18 45 -24 85 -25 C 120 -26 170 -22 180 0 Z">
+                <title>{{ boat.client_name }} — {{ boat.boat_model }} ({{ boat.length_m|float|round(2) }} × {{ boat.width_m|float|round(2) }} м)</title>
+              </path>
+            </g>
+          </a>
+          {% endfor %}
+        </g>
       </svg>
     </div>
+  </section>
+
+  <section class="panel">
+    <h2>Лодки в цеху</h2>
+    <p class="hint">Лодка попадает сюда автоматически, когда статус её заказа меняется на «В работе». Размер на карте — реальные длина и ширина из профиля лодки.</p>
+    {% if boat_error %}
+    <div class="alert"><strong>Не удалось сохранить:</strong> {{ boat_error }}</div>
+    {% endif %}
+    {% if boats_missing_dimensions %}
+    <p class="hint">
+      Без указанных размеров, не показаны на карте:
+      {% for boat in boats_missing_dimensions %}
+      <a href="{{ url_for('edit_tuning_order', order_id=boat.order_id) }}">{{ boat.client_name }} — {{ boat.boat_model }}</a>{% if not loop.last %}, {% endif %}
+      {% endfor %}
+    </p>
+    {% endif %}
+    {% if boats_on_map %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th>Заказ</th>
+            <th>Лодка</th>
+            <th>Длина × Ширина, м</th>
+            <th>От левой стены, м</th>
+            <th>От верхней стены, м</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for boat in boats_on_map %}
+          {% set boat_form_id = "shopMapBoatMove" ~ boat.id %}
+          <tr>
+            <td><a href="{{ url_for('edit_tuning_order', order_id=boat.order_id) }}">{{ boat.client_name }}</a></td>
+            <td class="muted">{{ boat.boat_model }}</td>
+            <td class="muted">{{ boat.length_m|float|round(2) }} × {{ boat.width_m|float|round(2) }}</td>
+            <td>
+              <input type="text" inputmode="decimal" name="x_m" value="{{ boat.x_m|float|round(2) }}" form="{{ boat_form_id }}"
+                     class="shop-map-element-input shop-map-element-input-narrow" required>
+            </td>
+            <td>
+              <input type="text" inputmode="decimal" name="y_m" value="{{ boat.y_m|float|round(2) }}" form="{{ boat_form_id }}"
+                     class="shop-map-element-input shop-map-element-input-narrow" required>
+            </td>
+            <td class="row-actions">
+              <button type="submit" form="{{ boat_form_id }}" class="icon-btn approve" title="Сохранить позицию">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 10.5l4 4 8-9"/>
+                </svg>
+              </button>
+              <form action="{{ url_for('remove_shop_map_boat', boat_id=boat.id) }}" method="post"
+                    onsubmit="return confirm('Убрать эту лодку с карты?');">
+                <button type="submit" class="icon-btn danger" title="Убрать с карты">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 5l10 10M15 5L5 15"/>
+                  </svg>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% for boat in boats_on_map %}
+    <form id="shopMapBoatMove{{ boat.id }}" action="{{ url_for('update_shop_map_boat_position', boat_id=boat.id) }}" method="post" class="hidden"></form>
+    {% endfor %}
+    {% elif not boats_missing_dimensions %}
+    <p class="hint">Пока ни одна лодка не в работе.</p>
+    {% endif %}
   </section>
 
   <section class="panel">

@@ -3041,6 +3041,23 @@ def init_db():
         )
         """
     )
+    # Boats placed on Карта цеха — one row per order, added automatically
+    # when its status enters "В работе" (see _auto_place_boat_on_shop_map).
+    # Only the position lives here; length/width are read live from the
+    # boat's own catalog profile every time the map renders, never copied,
+    # so an edit to the profile's dimensions is reflected immediately.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS shop_map_boats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL UNIQUE,
+            x_m REAL NOT NULL,
+            y_m REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
     # Client relationships are classified only after all legacy tables have
     # received their newer client_id columns above.
     init_client_segments_schema(conn)
@@ -7470,12 +7487,63 @@ SHOP_MAP_SCALE = 24   # px per meter, drawn to scale
 SHOP_MAP_PADDING = 50  # px around the room rect for dimension labels
 
 
+def _shop_map_boats(db):
+    """Boats currently on Карта цеха, one row per order. Position (x_m/y_m)
+    is the only thing stored here — length/width are read live from the
+    boat's own catalog profile via the same model_key lookup the boat
+    catalog itself uses, so an edit to the profile's dimensions shows up
+    on the map immediately without needing to touch this table."""
+    rows = db.execute(
+        "SELECT b.*, o.client_name, o.boat_model, o.status AS order_status "
+        "FROM shop_map_boats b JOIN tuning_orders o ON o.id = b.order_id "
+        "ORDER BY b.id"
+    ).fetchall()
+    boats = []
+    for row in rows:
+        boat = dict(row)
+        profile = db.execute(
+            "SELECT length_m, width_m FROM tuning_boat_profiles "
+            "WHERE equipment_type = 'boat' AND model_key = ?",
+            (_tuning_equipment_profile_key("boat", boat["boat_model"]),),
+        ).fetchone()
+        boat["length_m"] = profile["length_m"] if profile else None
+        boat["width_m"] = profile["width_m"] if profile else None
+        boats.append(boat)
+    return boats
+
+
+def _auto_place_boat_on_shop_map(db, order):
+    """When a boat order enters "В работе", the boat should show up on
+    Карта цеха on its own — this is the hook set_tuning_order_status calls.
+    Best-effort and idempotent: a missing/incomplete profile never blocks
+    the status change (the map just shows it under "нет размеров" until
+    someone fills in length/width there), and calling this again for an
+    order that's already on the map (e.g. status toggled back and forth)
+    does nothing. Position is a simple staggered default — there's no
+    collision-avoidance with zones or other boats yet, so an admin may
+    still need to drag... for now, retype the coordinates afterward."""
+    if order["equipment_type"] != "boat" or not (order["boat_model"] or "").strip():
+        return
+    existing = db.execute(
+        "SELECT id FROM shop_map_boats WHERE order_id = ?", (order["id"],)
+    ).fetchone()
+    if existing is not None:
+        return
+    count = db.execute("SELECT COUNT(*) FROM shop_map_boats").fetchone()[0]
+    x_m = 1.0 + (count % 5) * 3.0
+    y_m = 3.0 + (count // 5) * 3.0
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "INSERT INTO shop_map_boats (order_id, x_m, y_m, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (order["id"], x_m, y_m, now, now),
+    )
+    db.commit()
+
+
 @app.route("/tuning/shop-map")
 @admin_login_required
 def tuning_shop_map():
-    # Base room outline for now — next steps (per the owner): workbenches,
-    # shelving and other fixed elements that affect where boats can go,
-    # then live boat positions on it with a timeline.
     db = get_db()
     room_row = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
     room = dict(room_row)
@@ -7495,13 +7563,30 @@ def tuning_shop_map():
         element["h_px"] = element["height_m"] * SHOP_MAP_SCALE
         elements.append(element)
 
+    # Placed to scale only when the boat's catalog profile actually has
+    # length_m/width_m — a boat missing either is listed separately below
+    # the map instead of being drawn at some made-up size.
+    boats_on_map = []
+    boats_missing_dimensions = []
+    for boat in _shop_map_boats(db):
+        if boat["length_m"] and boat["width_m"]:
+            boat["x_px"] = SHOP_MAP_PADDING + boat["x_m"] * SHOP_MAP_SCALE
+            boat["y_px"] = SHOP_MAP_PADDING + boat["y_m"] * SHOP_MAP_SCALE
+            boat["box_w_px"] = boat["length_m"] * SHOP_MAP_SCALE
+            boat["box_h_px"] = boat["width_m"] * SHOP_MAP_SCALE
+            boats_on_map.append(boat)
+        else:
+            boats_missing_dimensions.append(boat)
+
     return render_template(
         "tuning_shop_map.html", active_page="tuning", sub_page="shop_map",
         room=room, scale=SHOP_MAP_SCALE, padding=SHOP_MAP_PADDING,
         elements=elements,
+        boats_on_map=boats_on_map, boats_missing_dimensions=boats_missing_dimensions,
         room_error=session.pop("shop_map_room_error", None),
         element_error=session.pop("shop_map_element_error", None),
         element_notice=session.pop("shop_map_element_notice", None),
+        boat_error=session.pop("shop_map_boat_error", None),
     )
 
 
@@ -7696,6 +7781,71 @@ def update_shop_map_element(element_id):
 def delete_shop_map_element(element_id):
     db = get_db()
     db.execute("DELETE FROM shop_map_elements WHERE id = ?", (element_id,))
+    db.commit()
+    return redirect(url_for("tuning_shop_map"))
+
+
+@app.route("/tuning/shop-map/boats/<int:boat_id>/move", methods=["POST"])
+@admin_login_required
+def update_shop_map_boat_position(boat_id):
+    db = get_db()
+    boat_row = db.execute(
+        "SELECT b.*, o.boat_model FROM shop_map_boats b "
+        "JOIN tuning_orders o ON o.id = b.order_id WHERE b.id = ?",
+        (boat_id,),
+    ).fetchone()
+    if boat_row is None:
+        return redirect(url_for("tuning_shop_map"))
+    profile = db.execute(
+        "SELECT length_m, width_m FROM tuning_boat_profiles "
+        "WHERE equipment_type = 'boat' AND model_key = ?",
+        (_tuning_equipment_profile_key("boat", boat_row["boat_model"]),),
+    ).fetchone()
+    boat_length_m = profile["length_m"] if profile else None
+    boat_width_m = profile["width_m"] if profile else None
+    room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+
+    errors = []
+
+    def _parse_nonnegative(raw, label):
+        raw = raw.strip().replace(",", ".")
+        try:
+            value = float(raw)
+            if value < 0:
+                raise ValueError
+            return value
+        except ValueError:
+            errors.append(f"«{label}» должна быть числом в метрах, не меньше нуля.")
+            return None
+
+    x_m = _parse_nonnegative(request.form.get("x_m", ""), "От левой стены")
+    y_m = _parse_nonnegative(request.form.get("y_m", ""), "От верхней стены")
+    if not errors and room is not None:
+        length_span = boat_length_m or 0
+        width_span = boat_width_m or 0
+        if x_m is not None and x_m + length_span > room["length_m"] + 0.001:
+            errors.append("Лодка на этой позиции выходит за пределы цеха по длине.")
+        if y_m is not None and y_m + width_span > room["width_m"] + 0.001:
+            errors.append("Лодка на этой позиции выходит за пределы цеха по ширине.")
+
+    if errors:
+        session["shop_map_boat_error"] = " ".join(errors)
+        return redirect(url_for("tuning_shop_map"))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "UPDATE shop_map_boats SET x_m = ?, y_m = ?, updated_at = ? WHERE id = ?",
+        (x_m, y_m, now, boat_id),
+    )
+    db.commit()
+    return redirect(url_for("tuning_shop_map"))
+
+
+@app.route("/tuning/shop-map/boats/<int:boat_id>/remove", methods=["POST"])
+@admin_login_required
+def remove_shop_map_boat(boat_id):
+    db = get_db()
+    db.execute("DELETE FROM shop_map_boats WHERE id = ?", (boat_id,))
     db.commit()
     return redirect(url_for("tuning_shop_map"))
 
@@ -8663,6 +8813,8 @@ def set_tuning_order_status(order_id):
     if status in [s["value"] for s in ORDER_STATUSES]:
         db.execute("UPDATE tuning_orders SET status = ? WHERE id = ?", (status, order_id))
         db.commit()
+        if status == "in_progress":
+            _auto_place_boat_on_shop_map(db, order)
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 

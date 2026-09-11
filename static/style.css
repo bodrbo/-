@@ -10306,3 +10306,8 @@ button.partner-open-price-save svg {
   font-weight: 700;
   text-align: center;
 }
+.shop-map-boat-hull {
+  fill: var(--ink);
+  cursor: pointer;
+}
+.shop-map-boats a:hover .shop-map-boat-hull { fill: var(--brass-strong); }
