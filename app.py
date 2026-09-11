@@ -7501,6 +7501,7 @@ def tuning_shop_map():
         elements=elements,
         room_error=session.pop("shop_map_room_error", None),
         element_error=session.pop("shop_map_element_error", None),
+        element_notice=session.pop("shop_map_element_notice", None),
     )
 
 
@@ -7610,6 +7611,58 @@ def add_shop_map_element():
         (data["name"], data["x_m"], data["y_m"], data["width_m"], data["height_m"], now, now),
     )
     db.commit()
+    return redirect(url_for("tuning_shop_map"))
+
+
+@app.route("/tuning/shop-map/elements/bulk-add", methods=["POST"])
+@admin_login_required
+def bulk_add_shop_map_elements():
+    # Measuring a whole shop by hand and typing each zone into the
+    # one-at-a-time form is slow — this takes a whole pasted list at once
+    # (one zone per line) so a batch of measurements can go in as a single
+    # action instead of N round trips through the form.
+    db = get_db()
+    room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+    raw_text = request.form.get("bulk_text", "")
+
+    rows = []
+    errors = []
+    for line_number, raw_line in enumerate(raw_text.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = [part.strip() for part in line.split(";")]
+        if len(parts) != 5:
+            errors.append(
+                f"Строка {line_number}: нужно ровно 5 значений через «;» "
+                "(название; от левой стены; от верхней стены; длина; ширина)."
+            )
+            continue
+        name, x_raw, y_raw, width_raw, height_raw = parts
+        data, error = _parse_shop_map_element_form(
+            {"name": name, "x_m": x_raw, "y_m": y_raw, "width_m": width_raw, "height_m": height_raw},
+            room,
+        )
+        if error:
+            errors.append(f"Строка {line_number} («{name or '—'}»): {error}")
+            continue
+        rows.append(data)
+
+    if not rows and not errors:
+        errors.append("Вставьте хотя бы одну строку.")
+    if errors:
+        session["shop_map_element_error"] = " ".join(errors)
+        return redirect(url_for("tuning_shop_map"))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    for data in rows:
+        db.execute(
+            "INSERT INTO shop_map_elements (name, x_m, y_m, width_m, height_m, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (data["name"], data["x_m"], data["y_m"], data["width_m"], data["height_m"], now, now),
+        )
+    db.commit()
+    session["shop_map_element_notice"] = f"Добавлено зон: {len(rows)}."
     return redirect(url_for("tuning_shop_map"))
 
 

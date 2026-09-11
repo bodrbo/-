@@ -149,6 +149,9 @@
     {% if element_error %}
     <div class="alert"><strong>Не удалось сохранить:</strong> {{ element_error }}</div>
     {% endif %}
+    {% if element_notice %}
+    <p class="alert alert-success">{{ element_notice }}</p>
+    {% endif %}
     {% if elements %}
     <div class="table-scroll">
       <table class="records">
@@ -236,6 +239,25 @@
       </div>
     </form>
     <p class="hint">Длина — вдоль верхней стены, слева направо. Ширина — вглубь цеха, от верхней стены.</p>
+
+    <details class="collapsible-panel">
+      <summary>
+        <span>Добавить сразу несколько зон</span>
+        <span class="chev" aria-hidden="true"></span>
+      </summary>
+      <div class="collapsible-body">
+        <form action="{{ url_for('bulk_add_shop_map_elements') }}" method="post" class="entry-form">
+          <div class="field field-wide">
+            <label for="bulkElementsText">По одной зоне на строку: «Название; от левой стены; от верхней стены; длина; ширина» (числа в метрах)</label>
+            <textarea id="bulkElementsText" name="bulk_text" rows="6"
+                      placeholder="Стеллаж А; 6.5; 0; 4; 0.6&#10;Стеллаж Б; 11; 0; 4; 0.6"></textarea>
+          </div>
+          <div class="field field-submit">
+            <button type="submit">Добавить все</button>
+          </div>
+        </form>
+      </div>
+    </details>
   </section>
 
 </main>
