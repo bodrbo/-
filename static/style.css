@@ -10291,3 +10291,18 @@ button.partner-open-price-save svg {
   gap: 6px;
   color: var(--muted);
 }
+.shop-map-element-badge {
+  fill: var(--paper);
+  stroke: var(--ink);
+  stroke-width: 1.2;
+}
+.shop-map-element-badge-text {
+  font-size: 10px;
+  font-weight: 700;
+  fill: var(--ink);
+}
+.shop-map-element-index {
+  color: var(--muted);
+  font-weight: 700;
+  text-align: center;
+}

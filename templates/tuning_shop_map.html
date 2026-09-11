@@ -139,6 +139,21 @@
         </g>
         <text x="{{ padding - 28 }}" y="{{ padding + room.room_h_px / 2 }}" text-anchor="middle" class="shop-map-dimension-label"
               transform="rotate(-90 {{ padding - 28 }} {{ padding + room.room_h_px / 2 }})">{{ room.width_m|float|round(2) }} м</text>
+
+        <!-- Numbered markers, not names — many zones are too thin for
+             inline text (some are 0.2 m deep). The number matches the
+             same row's "№" in the table below (same list, same order). -->
+        <g class="shop-map-element-labels">
+          {% for el in elements %}
+          {% set cx = el.x_px + el.w_px / 2 %}
+          {% set cy = el.y_px + el.h_px / 2 %}
+          <circle cx="{{ cx }}" cy="{{ cy }}" r="9" class="shop-map-element-badge">
+            <title>{{ el.name }}</title>
+          </circle>
+          <text x="{{ cx }}" y="{{ cy }}" text-anchor="middle" dominant-baseline="central"
+                class="shop-map-element-badge-text">{{ loop.index }}</text>
+          {% endfor %}
+        </g>
       </svg>
     </div>
   </section>
@@ -157,6 +172,7 @@
       <table class="records">
         <thead>
           <tr>
+            <th>№</th>
             <th>Название</th>
             <th>От левой стены, м</th>
             <th>От верхней стены, м</th>
@@ -168,6 +184,7 @@
           {% for el in elements %}
           {% set form_id = "shopMapElementEdit" ~ el.id %}
           <tr>
+            <td class="shop-map-element-index">{{ loop.index }}</td>
             <td>
               <input type="text" name="name" value="{{ el.name }}" form="{{ form_id }}"
                      class="shop-map-element-input shop-map-element-input-name" required>
