@@ -503,3 +503,32 @@ def boat_specification_for(model_name):
 
 def format_parameters(record):
     return "\n".join(f"{name}: {value}" for name, value in record["parameters"])
+
+
+_METERS_RE = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*м\b")
+
+
+def _parse_meters(value):
+    match = _METERS_RE.match(value)
+    return float(match.group(1).replace(",", ".")) if match else None
+
+
+def boat_dimensions_for(model_name):
+    """Length/width in meters for a known model, in ``(length, width)``.
+
+    Parsed from the same verified ``parameters`` tuples ``format_parameters``
+    turns into free text (first "Длина..." entry — the label varies between
+    records, e.g. "Длина корпуса" vs "Длина с приводом" — and the "Ширина"
+    entry, which is consistent). Either side is ``None`` if the record has no
+    matching parameter or the value isn't a plain "X,XX м" figure.
+    """
+    record = boat_specification_for(model_name)
+    if not record:
+        return None, None
+    length = width = None
+    for name, value in record["parameters"]:
+        if length is None and name.startswith("Длина"):
+            length = _parse_meters(value)
+        elif width is None and name == "Ширина":
+            width = _parse_meters(value)
+    return length, width

@@ -164,7 +164,9 @@ from modules.clients.constants import (
     EXCURSION_SEGMENT,
     TUNING_SEGMENT,
 )
-from modules.tuning_boat_specs import boat_specification_for, format_parameters
+from modules.tuning_boat_specs import (
+    boat_dimensions_for, boat_specification_for, format_parameters,
+)
 
 # reportlab (PDF generation for "Акт выполненных работ") is imported lazily,
 # inside _build_act_pdf() — it's an extra dependency on top of the site's
@@ -415,7 +417,10 @@ def _replace_tuning_order_motors(db, order_id, equipment_type, motors, updated_a
 def _seed_tuning_boat_profile_specifications(db):
     """Fill empty known profiles from the reviewed public catalog.
 
-    Administrator-entered specifications are intentionally never replaced.
+    Administrator-entered specifications/dimensions are intentionally never
+    replaced. The two fills are independent (via COALESCE, "only if still
+    unset") so a profile whose specifications text was already seeded
+    before length_m/width_m existed still gets those backfilled here.
     """
     columns = {
         row[1] for row in db.execute("PRAGMA table_info(tuning_boat_profiles)")
@@ -424,6 +429,7 @@ def _seed_tuning_boat_profile_specifications(db):
         "specifications_source_url", "specifications_source_name"
     }.issubset(columns):
         return 0
+    has_dimension_cols = {"length_m", "width_m"}.issubset(columns)
 
     updated = 0
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -432,21 +438,33 @@ def _seed_tuning_boat_profile_specifications(db):
         "WHERE equipment_type = 'boat'"
     ).fetchall():
         profile_id, model_name, specifications = profile
-        if (specifications or "").strip():
-            continue
         record = boat_specification_for(model_name)
         if not record:
             continue
-        db.execute(
-            "UPDATE tuning_boat_profiles SET specifications = ?, "
-            "specifications_source_url = ?, specifications_source_name = ?, "
-            "updated_at = ? WHERE id = ? AND TRIM(specifications) = ''",
-            (
-                format_parameters(record), record["source_url"],
-                record["source_name"], now, profile_id,
-            ),
-        )
-        updated += 1
+        touched = False
+        if not (specifications or "").strip():
+            db.execute(
+                "UPDATE tuning_boat_profiles SET specifications = ?, "
+                "specifications_source_url = ?, specifications_source_name = ?, "
+                "updated_at = ? WHERE id = ? AND TRIM(specifications) = ''",
+                (
+                    format_parameters(record), record["source_url"],
+                    record["source_name"], now, profile_id,
+                ),
+            )
+            touched = True
+        if has_dimension_cols:
+            length, width = boat_dimensions_for(model_name)
+            if length is not None or width is not None:
+                db.execute(
+                    "UPDATE tuning_boat_profiles SET "
+                    "length_m = COALESCE(length_m, ?), "
+                    "width_m = COALESCE(width_m, ?), updated_at = ? WHERE id = ?",
+                    (length, width, now, profile_id),
+                )
+                touched = True
+        if touched:
+            updated += 1
     return updated
 
 
@@ -2698,6 +2716,15 @@ def init_db():
             "ALTER TABLE tuning_boat_profiles ADD COLUMN "
             "specifications_source_name TEXT NOT NULL DEFAULT ''"
         )
+    if "length_m" not in boat_profile_cols:
+        # Split out of the free-text specifications blob — length/width are
+        # the two parameters other mechanics (fitting, transport, berthing)
+        # will need to read reliably, which a "Name: value" text line can't
+        # guarantee (label spelling varies: "Длина корпуса", "Длина с
+        # приводом", etc. — see modules/tuning_boat_specs.py).
+        conn.execute("ALTER TABLE tuning_boat_profiles ADD COLUMN length_m REAL")
+    if "width_m" not in boat_profile_cols:
+        conn.execute("ALTER TABLE tuning_boat_profiles ADD COLUMN width_m REAL")
     if "equipment_type" not in boat_profile_cols:
         conn.execute(
             "ALTER TABLE tuning_boat_profiles ADD COLUMN "
@@ -7048,6 +7075,29 @@ def update_tuning_boat_profile(profile_id):
         )
         return redirect(url_for(profile_endpoint, profile_id=profile_id))
 
+    # Motors don't have these — only ever parsed/stored for boats, even if a
+    # crafted request includes them.
+    length_m = profile["length_m"]
+    width_m = profile["width_m"]
+    if profile["equipment_type"] == "boat":
+        parsed_dimensions = {}
+        for field_name in ("length_m", "width_m"):
+            raw_value = request.form.get(field_name, "").strip().replace(",", ".")
+            if not raw_value:
+                parsed_dimensions[field_name] = None
+                continue
+            try:
+                parsed_dimensions[field_name] = float(raw_value)
+                if parsed_dimensions[field_name] <= 0:
+                    raise ValueError
+            except ValueError:
+                session["boat_profile_error"] = (
+                    "Длина и ширина должны быть положительным числом в метрах."
+                )
+                return redirect(url_for(profile_endpoint, profile_id=profile_id))
+        length_m = parsed_dimensions["length_m"]
+        width_m = parsed_dimensions["width_m"]
+
     photo_filename = profile["photo_filename"]
     photo = request.files.get("photo")
     if photo and photo.filename:
@@ -7069,9 +7119,13 @@ def update_tuning_boat_profile(profile_id):
     db.execute(
         "UPDATE tuning_boat_profiles "
         "SET specifications = ?, specifications_source_url = ?, "
-        "specifications_source_name = ?, photo_filename = ?, updated_at = ? "
+        "specifications_source_name = ?, photo_filename = ?, "
+        "length_m = ?, width_m = ?, updated_at = ? "
         "WHERE id = ?",
-        (specifications, source_url, source_name, photo_filename, now, profile_id),
+        (
+            specifications, source_url, source_name, photo_filename,
+            length_m, width_m, now, profile_id,
+        ),
     )
     db.commit()
     session["boat_profile_notice"] = (
@@ -7186,10 +7240,20 @@ def update_tuning_equipment_profile_type(profile_id):
             )
 
     if target_profile is not None:
+        # Dimensions only ever mean anything for a boat profile — carry them
+        # over on a motor→boat merge, but never let a boat's length/width
+        # leak onto the motor profile it's merging into the other way.
+        merged_length_m = target_profile["length_m"]
+        merged_width_m = target_profile["width_m"]
+        if target_type == "boat":
+            if merged_length_m is None:
+                merged_length_m = profile["length_m"]
+            if merged_width_m is None:
+                merged_width_m = profile["width_m"]
         db.execute(
             "UPDATE tuning_boat_profiles SET photo_filename = ?, specifications = ?, "
             "specifications_source_url = ?, specifications_source_name = ?, "
-            "updated_at = ? WHERE id = ?",
+            "length_m = ?, width_m = ?, updated_at = ? WHERE id = ?",
             (
                 target_profile["photo_filename"] or profile["photo_filename"],
                 target_profile["specifications"] or profile["specifications"],
@@ -7197,6 +7261,8 @@ def update_tuning_equipment_profile_type(profile_id):
                 or profile["specifications_source_url"],
                 target_profile["specifications_source_name"]
                 or profile["specifications_source_name"],
+                merged_length_m,
+                merged_width_m,
                 now,
                 target_profile["id"],
             ),

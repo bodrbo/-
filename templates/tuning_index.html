@@ -536,6 +536,24 @@
           <div><strong>{{ profile_orders[0].order_date|ru_date if profile_orders else '—' }}</strong><span>Последняя работа</span></div>
         </div>
 
+        {% if not is_motor_catalog %}
+        <div class="entry-form boat-profile-dimensions">
+          <div class="field field-narrow">
+            <label for="boatLengthM">Длина, м</label>
+            <input id="boatLengthM" type="text" inputmode="decimal" name="length_m"
+                   value="{{ boat_profile.length_m or '' }}" placeholder="Например, 5,85">
+          </div>
+          <div class="field field-narrow">
+            <label for="boatWidthM">Ширина, м</label>
+            <input id="boatWidthM" type="text" inputmode="decimal" name="width_m"
+                   value="{{ boat_profile.width_m or '' }}" placeholder="Например, 2,15">
+          </div>
+          <div class="field field-submit">
+            <button type="submit">Сохранить</button>
+          </div>
+        </div>
+        {% endif %}
+
         <div class="boat-profile-specifications">
           <h3>Характеристики {{ 'мотора' if is_motor_catalog else 'лодки' }}</h3>
           {% if boat_profile.specification_items %}
