@@ -7428,6 +7428,17 @@ app.register_blueprint(
 )
 
 
+@app.route("/tuning/shop-map")
+@admin_login_required
+def tuning_shop_map():
+    # Placeholder screen — next steps (per the owner): a drawn floor plan
+    # of the shop, then live boat positions on it with a timeline. No data
+    # model yet, deliberately, until the floor plan itself exists.
+    return render_template(
+        "tuning_shop_map.html", active_page="tuning", sub_page="shop_map",
+    )
+
+
 @app.route("/tuning/diagnostics/hull")
 @admin_login_required
 def tuning_diagnostics():
