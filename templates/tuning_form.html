@@ -579,6 +579,17 @@
       {% if remaining <= 0 %}
       <p class="hint" style="margin-top:10px;">По текущим данным заказ уже полностью оплачен — новый счёт всё равно можно выставить вручную, если нужно.</p>
       {% endif %}
+
+      {% if goods %}
+      <form action="{{ url_for('create_yookassa_goods_payment', order_id=edit_order.id) }}" method="post"
+            style="margin-top:16px; padding-top:16px; border-top:1px solid var(--hairline);">
+        <p class="hint" style="margin:0 0 10px;">
+          Отдельный счёт только на товары заказа — в чек попадёт каждый товар отдельной строкой
+          (название, количество, цена), а не общая «оплата заказа».
+        </p>
+        <button type="submit" class="btn-secondary">Выставить счёт на товары — {{ goods_subtotal|money }} ₽</button>
+      </form>
+      {% endif %}
     {% endif %}
 
     {% if yookassa_payments %}

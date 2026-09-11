@@ -10405,6 +10405,50 @@ def _sync_yookassa_payment(db, record, remote=None):
     return status
 
 
+# Our own product unit codes -> ЮKassa's receipt `measure` enum (54-ФЗ
+# units of measurement). Extend this if SUPPLY_COST_UNITS grows.
+YOOKASSA_UNIT_MEASURE = {"piece": "piece", "sqm": "square_meter", "linear_m": "meter"}
+
+
+def _send_yookassa_payment(db, order_id, order, amount, description, receipt_items, extra_metadata=None):
+    """Shared by the general invoice and the goods-only invoice below — both
+    just build a different `receipt_items`/description/amount and hand off
+    here for the actual API call and bookkeeping."""
+    client = db.execute("SELECT * FROM clients WHERE id = ?", (order["client_id"],)).fetchone()
+    return_url = (
+        url_for("client_dashboard", token=client["token"], _external=True)
+        if client else url_for("home", _external=True)
+    )
+    metadata = {"tuning_order_id": str(order_id)}
+    if extra_metadata:
+        metadata.update(extra_metadata)
+    body = {
+        "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
+        "capture": True,
+        "description": description[:128],
+        "confirmation": {"type": "redirect", "return_url": return_url},
+        "metadata": metadata,
+        "receipt": {
+            "customer": {"phone": _normalize_ru_phone(order["phone"])},
+            "items": receipt_items,
+        },
+    }
+    try:
+        remote = _yookassa_request(
+            "POST", "/payments", json_body=body, idempotence_key=secrets.token_hex(16)
+        )
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        db.execute(
+            "INSERT INTO tuning_yookassa_payments (order_id, yookassa_payment_id, amount, status, "
+            "confirmation_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (order_id, remote["id"], amount, remote.get("status", "pending"),
+             remote["confirmation"]["confirmation_url"], now, now),
+        )
+        db.commit()
+    except Exception as e:
+        session["yookassa_error"] = str(e)
+
+
 @app.route("/tuning/<int:order_id>/yookassa/create", methods=["POST"])
 @admin_login_required
 def create_yookassa_payment(order_id):
@@ -10422,47 +10466,69 @@ def create_yookassa_payment(order_id):
         session["yookassa_error"] = "Укажите сумму счёта — больше нуля."
         return redirect(url_for("edit_tuning_order", order_id=order_id))
 
-    client = db.execute("SELECT * FROM clients WHERE id = ?", (order["client_id"],)).fetchone()
-    return_url = (
-        url_for("client_dashboard", token=client["token"], _external=True)
-        if client else url_for("home", _external=True)
+    _send_yookassa_payment(
+        db, order_id, order, amount,
+        description=f"Заказ №{order_id} — {order['client_name']}",
+        receipt_items=[
+            {
+                "description": f"Оплата заказа №{order_id} в тюнинг-центре"[:128],
+                "quantity": 1,
+                "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
+                "vat_code": _current_yookassa_vat_code(db),
+                "measure": "piece",
+                "payment_subject": "service",
+                "payment_mode": "full_payment",
+            }
+        ],
     )
+    return redirect(url_for("edit_tuning_order", order_id=order_id))
 
-    body = {
-        "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
-        "capture": True,
-        "description": f"Заказ №{order_id} — {order['client_name']}"[:128],
-        "confirmation": {"type": "redirect", "return_url": return_url},
-        "metadata": {"tuning_order_id": str(order_id)},
-        "receipt": {
-            "customer": {"phone": _normalize_ru_phone(order["phone"])},
-            "items": [
-                {
-                    "description": f"Оплата заказа №{order_id} в тюнинг-центре"[:128],
-                    "quantity": 1,
-                    "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
-                    "vat_code": _current_yookassa_vat_code(db),
-                    "measure": "piece",
-                    "payment_subject": "service",
-                    "payment_mode": "full_payment",
-                }
-            ],
-        },
-    }
-    try:
-        remote = _yookassa_request(
-            "POST", "/payments", json_body=body, idempotence_key=secrets.token_hex(16)
-        )
-        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-        db.execute(
-            "INSERT INTO tuning_yookassa_payments (order_id, yookassa_payment_id, amount, status, "
-            "confirmation_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (order_id, remote["id"], amount, remote.get("status", "pending"),
-             remote["confirmation"]["confirmation_url"], now, now),
-        )
-        db.commit()
-    except Exception as e:
-        session["yookassa_error"] = str(e)
+
+@app.route("/tuning/<int:order_id>/yookassa/create-goods", methods=["POST"])
+@admin_login_required
+def create_yookassa_goods_payment(order_id):
+    """Same as create_yookassa_payment, but scoped to just the order's
+    "Товары" — the amount isn't typed in, it's the exact sum of the goods
+    already on the order, and the receipt lists each product by name and
+    quantity instead of one generic "оплата заказа" line."""
+    db = get_db()
+    order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None or not yookassa_configured():
+        return redirect(url_for("tuning_index"))
+
+    goods = db.execute(
+        "SELECT * FROM tuning_order_products WHERE order_id = ? ORDER BY id", (order_id,)
+    ).fetchall()
+    if not goods:
+        session["yookassa_error"] = "В заказе нет товаров — нечего включить в счёт."
+        return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+    vat_code = _current_yookassa_vat_code(db)
+    receipt_items = []
+    total = 0.0
+    for g in goods:
+        line_total = round(g["quantity"] * g["unit_price"], 2)
+        total += line_total
+        receipt_items.append({
+            "description": g["product_name"][:128],
+            "quantity": g["quantity"],
+            "amount": {"value": f"{line_total:.2f}", "currency": "RUB"},
+            "vat_code": vat_code,
+            "measure": YOOKASSA_UNIT_MEASURE.get(g["unit"], "piece"),
+            "payment_subject": "commodity",
+            "payment_mode": "full_payment",
+        })
+    total = round(total, 2)
+    if total <= 0:
+        session["yookassa_error"] = "Сумма товаров по заказу — ноль, счёт не выставлен."
+        return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+    _send_yookassa_payment(
+        db, order_id, order, total,
+        description=f"Товары по заказу №{order_id} — {order['client_name']}",
+        receipt_items=receipt_items,
+        extra_metadata={"tuning_order_scope": "goods"},
+    )
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
