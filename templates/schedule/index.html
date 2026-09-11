@@ -495,6 +495,15 @@
     <button type="button" class="icon-btn danger" onclick="removeScheduleParticipant(this)" aria-label="Убрать клиента">
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h12M8 3h4l1 3H7l1-3zM6 6l.7 11h6.6L14 6M8.5 9v5M11.5 9v5"/></svg>
     </button>
+    <label class="field schedule-participant-channel">
+      <span>Канал продаж</span>
+      <select name="participant_sales_partner_id[]">
+        <option value="">Не указан</option>
+        {% for partner in excursion_partners %}
+        <option value="{{ partner.id }}">{{ partner.client_name }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <div class="schedule-tripster-payment" data-payment-breakdown hidden>
       <div><span>Общая сумма заказа</span><strong data-payment-total>0 ₽</strong></div>
       <div><span>Предоплата на Tripster</span><strong data-payment-prepayment>0 ₽</strong></div>
@@ -708,7 +717,7 @@
         participant.client_id, participant.client_name, participant.client_phone,
         participant.guests_count || 1, false, participant.price ?? 0,
         participant.source_ref || '', participant.prepayment || 0,
-        participant.payment_due || 0
+        participant.payment_due || 0, participant.sales_partner_id || ''
       ));
     }
     const legacyParticipants = document.getElementById('scheduleLegacyParticipants');
@@ -1370,7 +1379,7 @@
       picker.querySelector('[data-client-id]').value = '';
     }
   }
-  function addScheduleParticipant(clientId, clientName, clientPhone, guestsCount, focusNew, price, sourceRef, prepayment, paymentDue) {
+  function addScheduleParticipant(clientId, clientName, clientPhone, guestsCount, focusNew, price, sourceRef, prepayment, paymentDue, salesPartnerId) {
     const fragment = document.getElementById('scheduleParticipantTemplate').content.cloneNode(true);
     const row = fragment.querySelector('.schedule-participant-row');
     const picker = row.querySelector('[data-client-picker]');
@@ -1380,6 +1389,7 @@
     row.querySelector('[data-participant-search]').setAttribute('aria-controls', results.id);
     row.querySelector('[name="participant_phone[]"]').value = clientPhone || '';
     row.querySelector('[name="participant_guests[]"]').value = guestsCount || 1;
+    row.querySelector('[name="participant_sales_partner_id[]"]').value = salesPartnerId || '';
     row.querySelector('[data-participant-source-ref]').value = sourceRef || '';
     row.querySelector('[data-participant-prepayment]').value = prepayment || 0;
     row.querySelector('[data-participant-payment-due]').value = paymentDue || 0;

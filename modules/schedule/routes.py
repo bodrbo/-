@@ -73,6 +73,7 @@ def create_schedule_blueprint(
             boats=boats,
             trip_services=service_repository.list_services(db),
             addon_products=service_repository.list_addon_products(db),
+            excursion_partners=repository.list_excursion_partners(db),
             item_kinds=ITEM_KINDS,
             crew_roles=CREW_ROLES,
             notice=session.pop("schedule_notice", None),

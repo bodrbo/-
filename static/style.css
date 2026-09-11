@@ -5118,6 +5118,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 }
 .schedule-tripster-payment > div:nth-child(2) strong { color: #176589; }
 .schedule-tripster-payment > div:nth-child(3) strong { color: var(--brass-strong); }
+.schedule-participant-channel { grid-column: 1 / -1; }
 .schedule-participant-guests { flex-basis: 82px; }
 .schedule-participant-guests input { text-align: center; font-variant-numeric: tabular-nums; }
 .schedule-participant-price input,

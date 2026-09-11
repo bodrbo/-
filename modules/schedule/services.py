@@ -142,11 +142,15 @@ def _validate_participants(db, form, capacity, errors):
     raw_source_refs = form.getlist("participant_source_ref[]")
     raw_prepayments = form.getlist("participant_prepayment[]")
     raw_payment_dues = form.getlist("participant_payment_due[]")
+    raw_sales_partner_ids = form.getlist("participant_sales_partner_id[]")
     row_count = max(
         len(raw_client_ids), len(raw_names), len(raw_phones), len(raw_guests),
         len(raw_prices), len(raw_source_refs), len(raw_prepayments),
-        len(raw_payment_dues),
+        len(raw_payment_dues), len(raw_sales_partner_ids),
     )
+    valid_partner_ids = {
+        partner["id"] for partner in repository.list_excursion_partners(db)
+    }
     # Search every identity by phone so a tuning client taking an excursion
     # is reused, while only excursion clients appear in the picker itself.
     clients = repository.list_all_clients(db)
@@ -237,6 +241,18 @@ def _validate_participants(db, form, capacity, errors):
             else None
         )
         is_tripster = source_ref is not None
+        raw_sales_partner_id = (
+            raw_sales_partner_ids[index] if index < len(raw_sales_partner_ids) else ""
+        ).strip()
+        sales_partner_id = None
+        if raw_sales_partner_id:
+            try:
+                sales_partner_id = int(raw_sales_partner_id)
+            except ValueError:
+                sales_partner_id = None
+            if sales_partner_id not in valid_partner_ids:
+                errors.append(f"{row_label}: неизвестный канал продаж.")
+                sales_partner_id = None
         participants.append({
             "client_id": client["id"] if client is not None else None,
             "client_name": name,
@@ -256,6 +272,7 @@ def _validate_participants(db, form, capacity, errors):
             "client_token": secrets.token_urlsafe(16) if client is None else None,
             "source": "tripster" if is_tripster else "internal",
             "source_ref": source_ref,
+            "sales_partner_id": sales_partner_id,
         })
         if client is not None:
             seen_client_ids.add(client["id"])

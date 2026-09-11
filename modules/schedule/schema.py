@@ -119,6 +119,10 @@ def init_schema(conn):
         conn.execute(
             "UPDATE schedule_participants SET payment_due = price"
         )
+    if "sales_partner_id" not in participant_columns:
+        conn.execute(
+            "ALTER TABLE schedule_participants ADD COLUMN sales_partner_id INTEGER"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS schedule_participant_addons (

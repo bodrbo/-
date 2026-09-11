@@ -2,9 +2,22 @@
 
 from modules.clients.constants import (
     CLIENT_RELATIONSHIP_CLIENT,
+    CLIENT_RELATIONSHIP_PARTNER,
     EXCURSION_SEGMENT,
 )
 from modules.clients.services import ensure_segment
+
+
+def list_excursion_partners(db):
+    """Clients in «Клиенты и Партнёры» -> «Партнёры экскурсий» — the choices
+    for a participant's «Канал продаж» in the trip form."""
+    return db.execute(
+        "SELECT clients.id, clients.client_name FROM clients "
+        "JOIN client_segments ON client_segments.client_id = clients.id "
+        "AND client_segments.segment = ? AND client_segments.relationship_type = ? "
+        "ORDER BY clients.client_name COLLATE NOCASE",
+        (EXCURSION_SEGMENT, CLIENT_RELATIONSHIP_PARTNER),
+    ).fetchall()
 
 
 def list_crew_employees(db):
@@ -314,7 +327,8 @@ def save_item(db, item_id, data, assignments, participants, timestamp):
                 "INSERT INTO schedule_participants "
                 "(schedule_item_id, client_id, client_name, client_phone, "
                 "guests_count, price, prepayment, payment_due, created_at, "
-                "source, source_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "source, source_ref, sales_partner_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     item_id, client_id, participant["client_name"],
                     participant["client_phone"], participant["guests_count"],
@@ -322,6 +336,7 @@ def save_item(db, item_id, data, assignments, participants, timestamp):
                     participant.get("payment_due", participant["price"]), timestamp,
                     participant.get("source", "internal"),
                     participant.get("source_ref"),
+                    participant.get("sales_partner_id"),
                 ),
             )
             if auto_add_products and client_id not in existing_client_ids:
