@@ -180,7 +180,7 @@ from modules.tuning_boat_specs import (
 # whole app down. If it's unavailable, only that one route fails.
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 15 * 1024 * 1024  # cap uploaded photos at 15 MB
+app.config["MAX_CONTENT_LENGTH"] = 60 * 1024 * 1024  # 3D models (.glb, textures baked in) run larger than photos
 
 
 @app.url_defaults
@@ -494,6 +494,33 @@ def _tuning_boat_photo_url(profile):
         return None
     return url_for(
         "static", filename=f"tuning_boats/{profile['photo_filename']}"
+    )
+
+
+def _tuning_boat_model_3d_url(profile):
+    if not profile.get("model_3d_filename"):
+        return None
+    return url_for(
+        "static", filename=f"tuning_boats_3d/{profile['model_3d_filename']}"
+    )
+
+
+def _seed_boat_profile_model_3d(conn, model_name, seed_filename):
+    """One-time attach of a .glb bundled with the app (static/tuning_boats_3d/)
+    to an existing catalog entry, matched by exact model name. Never
+    overwrites a model an admin already uploaded, and does nothing if no
+    profile with this exact name exists yet — a name mismatch should show up
+    as "nothing happened", not a duplicate catalog entry."""
+    model_key = _tuning_equipment_profile_key("boat", model_name)
+    row = conn.execute(
+        "SELECT id, model_3d_filename FROM tuning_boat_profiles WHERE model_key = ?",
+        (model_key,),
+    ).fetchone()
+    if row is None or row[1]:
+        return
+    conn.execute(
+        "UPDATE tuning_boat_profiles SET model_3d_filename = ? WHERE id = ?",
+        (seed_filename, row[0]),
     )
 
 
@@ -2775,6 +2802,10 @@ def init_db():
             "ALTER TABLE tuning_boat_profiles ADD COLUMN "
             "equipment_type TEXT NOT NULL DEFAULT 'boat'"
         )
+    if "model_3d_filename" not in boat_profile_cols:
+        conn.execute(
+            "ALTER TABLE tuning_boat_profiles ADD COLUMN model_3d_filename TEXT"
+        )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_tuning_equipment_profiles_type_name "
         "ON tuning_boat_profiles (equipment_type, model_name)"
@@ -2794,6 +2825,7 @@ def init_db():
         "AND NOT EXISTS (SELECT 1 FROM tuning_order_motors m WHERE m.order_id = o.id)"
     )
     _sync_tuning_boat_profiles(conn)
+    _seed_boat_profile_model_3d(conn, "BRP Utopia 205", "seed-brp-utopia-205.glb")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tilda_webhook_log (
@@ -7150,6 +7182,7 @@ def _render_tuning_equipment_profile(profile_id, expected_type):
 
     profile = dict(profile_row)
     profile["photo_url"] = _tuning_boat_photo_url(profile)
+    profile["model_3d_url"] = _tuning_boat_model_3d_url(profile)
     profile["specification_items"] = _parse_boat_specifications(
         profile["specifications"]
     )
@@ -7357,6 +7390,20 @@ def update_tuning_boat_profile(profile_id):
         photo_filename = f"{profile_id}-{secrets.token_hex(6)}{extension}"
         photo.save(os.path.join(photos_dir, photo_filename))
 
+    model_3d_filename = profile["model_3d_filename"]
+    model_3d = request.files.get("model_3d")
+    if model_3d and model_3d.filename:
+        extension = os.path.splitext(model_3d.filename)[1].lower()
+        if extension != ".glb":
+            session["boat_profile_error"] = (
+                "3D-модель должна быть в формате .glb, с текстурами внутри файла."
+            )
+            return redirect(url_for(profile_endpoint, profile_id=profile_id))
+        models_3d_dir = os.path.join(app.static_folder, "tuning_boats_3d")
+        os.makedirs(models_3d_dir, exist_ok=True)
+        model_3d_filename = f"{profile_id}-{secrets.token_hex(6)}{extension}"
+        model_3d.save(os.path.join(models_3d_dir, model_3d_filename))
+
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     renamed = model_key != profile["model_key"] or model_name != profile["model_name"]
     if renamed:
@@ -7364,11 +7411,11 @@ def update_tuning_boat_profile(profile_id):
     db.execute(
         "UPDATE tuning_boat_profiles "
         "SET specifications = ?, specifications_source_url = ?, "
-        "specifications_source_name = ?, photo_filename = ?, "
+        "specifications_source_name = ?, photo_filename = ?, model_3d_filename = ?, "
         "length_m = ?, width_m = ?, brand = ?, power_hp = ?, updated_at = ? "
         "WHERE id = ?",
         (
-            specifications, source_url, source_name, photo_filename,
+            specifications, source_url, source_name, photo_filename, model_3d_filename,
             length_m, width_m, brand, power_hp, now, profile_id,
         ),
     )

@@ -488,6 +488,11 @@
           <span>{{ 'Заменить фотографию' if boat_profile.photo_url else 'Добавить фотографию' }}</span>
           <input type="file" name="photo" accept="image/jpeg,image/png,image/webp">
         </label>
+        <label class="boat-photo-control boat-3d-model-control">
+          <span>{{ 'Заменить 3D-модель' if boat_profile.model_3d_url else 'Добавить 3D-модель' }}</span>
+          <input type="file" name="model_3d" accept=".glb,model/gltf-binary">
+        </label>
+        <p class="hint">Формат .glb, с текстурами внутри файла, до 60 МБ.</p>
       </div>
 
       <div class="boat-profile-identity">
@@ -621,6 +626,23 @@
       </div>
     </form>
 
+    {% if boat_profile.model_3d_url %}
+    <section class="panel boat-profile-3d-viewer" aria-labelledby="boat-3d-heading">
+      <h2 id="boat-3d-heading">3D-модель</h2>
+      <p class="hint">Крутите зажатой левой кнопкой мыши, приближайте колесом.</p>
+      <model-viewer
+        src="{{ boat_profile.model_3d_url }}"
+        alt="3D-модель {{ boat_profile.model_name }}"
+        camera-controls
+        touch-action="pan-y"
+        interaction-prompt="none"
+        shadow-intensity="1"
+        exposure="1"
+        class="boat-3d-model-viewer">
+      </model-viewer>
+    </section>
+    {% endif %}
+
     {% if is_motor_catalog %}
     <section class="panel" aria-labelledby="compatible-products-heading">
       <h2 id="compatible-products-heading">Совместимые расходники</h2>
@@ -691,6 +713,9 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+{% if boat_profile is defined and boat_profile.model_3d_url %}
+<script type="module" src="{{ url_for('static', filename='vendor/model-viewer.min.js') }}"></script>
+{% endif %}
 {% if sub_page == 'orders' and orders %}
 <script>
 (function initTuningBulkActions() {

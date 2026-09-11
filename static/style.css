@@ -6195,6 +6195,19 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   font-weight: 700;
   cursor: pointer;
 }
+.boat-profile-photo-column > .hint { margin: 8px 0 0; font-size: 10.5px; }
+.boat-profile-3d-viewer h2 { margin-bottom: 4px; }
+.boat-3d-model-viewer {
+  display: block;
+  width: 100%;
+  height: 480px;
+  margin-top: 12px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #eef4fa, #dfe9f2);
+}
+@media (max-width: 720px) {
+  .boat-3d-model-viewer { height: 320px; }
+}
 .boat-profile-identity { min-width: 0; padding: 27px 28px 25px; }
 .boat-profile-identity h2 { font-size: clamp(29px, 4vw, 44px); }
 .boat-profile-kicker-line {
