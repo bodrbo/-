@@ -7488,6 +7488,7 @@ app.register_blueprint(
 
 SHOP_MAP_SCALE = 24   # px per meter, drawn to scale
 SHOP_MAP_PADDING = 50  # px around the room rect for dimension labels
+SHOP_MAP_BOAT_GAP_M = 0.5  # minimum clearance required between two boats' hulls
 
 
 def _shop_map_boats(db):
@@ -7524,18 +7525,21 @@ def _shop_map_boat_footprint(length_m, width_m, rotation_deg):
     return length_m, width_m
 
 
-def _shop_map_rects_overlap(ax, ay, aw, ah, bx, by, bw, bh):
+def _shop_map_rects_overlap(ax, ay, aw, ah, bx, by, bw, bh, margin=0):
+    """True if rect A and rect B overlap, or (with margin > 0) come closer
+    than margin metres to each other — equivalent to inflating A by margin
+    on every side and testing that against B unchanged."""
     eps = 0.001
     return (
-        ax < bx + bw - eps and ax + aw > bx + eps
-        and ay < by + bh - eps and ay + ah > by + eps
+        ax < bx + bw + margin - eps and ax + aw + margin > bx + eps
+        and ay < by + bh + margin - eps and ay + ah + margin > by + eps
     )
 
 
-def _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, rotation_deg):
+def _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, rotation_deg, exclude_boat_id=None):
     """Shared by the manual position form, drag, and rotate routes — a
-    boat may not stick out of the room or overlap any fixed zone/element.
-    Boat-vs-boat overlap isn't checked yet, only zones/objects."""
+    boat may not stick out of the room, overlap any fixed zone/element, or
+    come within SHOP_MAP_BOAT_GAP_M of another boat already on the map."""
     footprint_w, footprint_h = _shop_map_boat_footprint(length_m, width_m, rotation_deg)
     if room is not None:
         if x_m + footprint_w > room["length_m"] + 0.001:
@@ -7549,6 +7553,20 @@ def _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, rotati
             x_m, y_m, footprint_w, footprint_h, el["x_m"], el["y_m"], el["width_m"], el["height_m"]
         ):
             return f"Лодка пересекается с зоной «{el['name']}»."
+    for boat in _shop_map_boats(db):
+        if boat["id"] == exclude_boat_id:
+            continue
+        if not boat["length_m"] or not boat["width_m"]:
+            continue
+        other_w, other_h = _shop_map_boat_footprint(boat["length_m"], boat["width_m"], boat["rotation_deg"])
+        if _shop_map_rects_overlap(
+            x_m, y_m, footprint_w, footprint_h, boat["x_m"], boat["y_m"], other_w, other_h,
+            margin=SHOP_MAP_BOAT_GAP_M,
+        ):
+            return (
+                f"Лодка окажется ближе {SHOP_MAP_BOAT_GAP_M:g} м к лодке "
+                f"«{boat['client_name']} — {boat['boat_model']}»."
+            )
     return None
 
 
@@ -7894,7 +7912,8 @@ def update_shop_map_boat_position(boat_id):
     y_m = _parse_nonnegative(request.form.get("y_m", ""), "От верхней стены")
     if not errors and x_m is not None and y_m is not None:
         error = _shop_map_boat_placement_error(
-            db, room, x_m, y_m, boat_length_m or 0, boat_width_m or 0, boat_row["rotation_deg"]
+            db, room, x_m, y_m, boat_length_m or 0, boat_width_m or 0, boat_row["rotation_deg"],
+            exclude_boat_id=boat_id,
         )
         if error:
             errors.append(error)
@@ -7935,7 +7954,9 @@ def drag_shop_map_boat(boat_id):
         return jsonify({"error": "Лодка не может выйти за пределы цеха."}), 400
 
     room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
-    error = _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, boat_row["rotation_deg"])
+    error = _shop_map_boat_placement_error(
+        db, room, x_m, y_m, length_m, width_m, boat_row["rotation_deg"], exclude_boat_id=boat_id
+    )
     if error:
         return jsonify({"error": error}), 400
 
@@ -7961,7 +7982,8 @@ def rotate_shop_map_boat(boat_id):
     new_rotation = 90 if boat_row["rotation_deg"] == 0 else 0
     room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
     error = _shop_map_boat_placement_error(
-        db, room, boat_row["x_m"], boat_row["y_m"], length_m, width_m, new_rotation
+        db, room, boat_row["x_m"], boat_row["y_m"], length_m, width_m, new_rotation,
+        exclude_boat_id=boat_id,
     )
     if error:
         return jsonify({"error": "Не помещается развёрнутой: " + error}), 400
