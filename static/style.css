@@ -7015,6 +7015,34 @@ button.btn-reject:hover { background: #932f20; }
   .captain-defect-row { align-items: flex-start; }
 }
 
+/* --- order summary: client/equipment/date/number at a glance --- */
+.order-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 18px;
+}
+.order-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.order-summary-item .k {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 700;
+}
+.order-summary-item .v {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.order-summary-item .d {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
 /* --- hero dashboard: grand total + per-boat investor split --- */
 .hero-grid {
   display: grid;

@@ -115,7 +115,7 @@
     </div>
     {% include '_admin_main_nav.html' %}
     <div class="title-block">
-      <h1>{{ 'Редактировать субподряд' if edit_order and edit_order.source == 'subcontract_request' else 'Редактировать заказ' if edit_order else 'Новый заказ' }}</h1>
+      <h1>{{ 'Редактировать субподряд' if edit_order and edit_order.source == 'subcontract_request' else 'Редактировать заказ' if edit_order else 'Новый заказ' }}{% if edit_order %} №{{ edit_order.id }}{% endif %}</h1>
     </div>
     <div class="topbar-actions">
       <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
@@ -174,6 +174,53 @@
         {% endfor %}
       </select>
     </form>
+  </div>
+
+  <div class="panel order-summary-grid">
+    <div class="order-summary-item">
+      <span class="k">№ заказа</span>
+      <span class="v">№{{ edit_order.id }}</span>
+    </div>
+    <div class="order-summary-item">
+      <span class="k">Дата заказа</span>
+      <span class="v">{{ edit_order.order_date|ru_date }}</span>
+    </div>
+    <div class="order-summary-item">
+      <span class="k">Клиент</span>
+      <span class="v">
+        {% if edit_order.client_id %}
+        <a href="{{ url_for('admin_client_dashboard', client_id=edit_order.client_id) }}">{{ edit_order.client_name }}</a>
+        {% else %}
+        {{ edit_order.client_name }}
+        {% endif %}
+      </span>
+      {% if edit_order.phone %}<span class="d">{{ edit_order.phone }}</span>{% endif %}
+    </div>
+    <div class="order-summary-item">
+      <span class="k">Техника</span>
+      <span class="v">
+        {% if edit_order.equipment_type == 'boat' and boat_profile_id %}
+        <a href="{{ url_for('tuning_boat_profile', profile_id=boat_profile_id) }}">{{ edit_order.boat_model }}</a>
+        {% elif edit_order.equipment_type == 'motor' and motor_profile_id %}
+        <a href="{{ url_for('tuning_motor_profile', profile_id=motor_profile_id) }}">{{ edit_order.motor_model }}</a>
+        {% elif edit_order.equipment_type == 'motor' %}
+        {{ edit_order.motor_model }}
+        {% else %}
+        {{ edit_order.boat_model }}
+        {% endif %}
+      </span>
+      <span class="d">
+        {{ 'Мотор' if edit_order.equipment_type == 'motor' else 'Лодка' }}
+        {%- if edit_order.equipment_type == 'boat' and edit_order.boat_registration_number %} · Бортовой № {{ edit_order.boat_registration_number }}{% endif -%}
+        {%- if edit_order.equipment_type == 'motor' and edit_order.motor_serial_number %} · Серийный № {{ edit_order.motor_serial_number }}{% endif -%}
+      </span>
+      {% if edit_order.equipment_type == 'boat' and boat_motors_prefill %}
+      <span class="d">
+        {{ 'Мотор' if boat_motors_prefill|length == 1 else 'Моторы' }}:
+        {% for motor in boat_motors_prefill %}{{ motor.motor_model }}{% if motor.motor_serial_number %} (№ {{ motor.motor_serial_number }}){% endif %}{{ ', ' if not loop.last }}{% endfor %}
+      </span>
+      {% endif %}
+    </div>
   </div>
 
   <div class="hero-grid">
