@@ -554,6 +554,25 @@
         </div>
         {% endif %}
 
+        {% if is_motor_catalog %}
+        <div class="entry-form boat-profile-dimensions">
+          <div class="field field-narrow">
+            <label for="motorBrand">Марка</label>
+            <input id="motorBrand" type="text" name="brand"
+                   value="{{ boat_profile.brand or '' }}" placeholder="Например, Yamaha">
+          </div>
+          <div class="field field-narrow">
+            <label for="motorPowerHp">Мощность, л.с.</label>
+            <input id="motorPowerHp" type="text" inputmode="decimal" name="power_hp"
+                   value="{{ boat_profile.power_hp or '' }}" placeholder="Например, 30">
+          </div>
+          <div class="field field-submit">
+            <button type="submit">Сохранить</button>
+          </div>
+        </div>
+        <p class="hint">Марка и мощность используются, чтобы подобрать совместимые расходники из каталога снабжения (см. ниже).</p>
+        {% endif %}
+
         <div class="boat-profile-specifications">
           <h3>Характеристики {{ 'мотора' if is_motor_catalog else 'лодки' }}</h3>
           {% if boat_profile.specification_items %}
@@ -601,6 +620,39 @@
         </div>
       </div>
     </form>
+
+    {% if is_motor_catalog %}
+    <section class="panel" aria-labelledby="compatible-products-heading">
+      <h2 id="compatible-products-heading">Совместимые расходники</h2>
+      {% if not boat_profile.brand or not boat_profile.power_hp %}
+      <p class="hint">Укажите марку и мощность мотора выше, чтобы здесь показались подходящие товары из каталога снабжения.</p>
+      {% elif compatible_products %}
+      <div class="table-scroll">
+        <table class="records">
+          <thead><tr><th>Товар</th><th>Категория</th><th>Остаток</th><th></th></tr></thead>
+          <tbody>
+            {% for item in compatible_products %}
+            <tr>
+              <td class="term">{{ item.name }}</td>
+              <td class="muted">{{ item.category_name or '—' }}</td>
+              <td class="amount">{{ item.total_quantity|float|round(2) if item.total_quantity is not none else '—' }}</td>
+              <td class="row-actions">
+                <a href="{{ url_for('supply_product', product_id=item.id) }}" class="icon-btn" title="Открыть товар">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M8 4H4v12h12v-4M11 3h6v6M17 3l-8 8"/>
+                  </svg>
+                </a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="hint">Для марки «{{ boat_profile.brand }}» ({{ boat_profile.power_hp|float|round(1) }} л.с.) пока не найдено совместимых товаров в каталоге снабжения.</p>
+      {% endif %}
+    </section>
+    {% endif %}
 
     <section class="panel boat-profile-orders" aria-labelledby="boat-profile-orders-heading">
       <div class="boat-profile-orders-heading">

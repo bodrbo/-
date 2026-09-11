@@ -2419,6 +2419,32 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_supply_products_category "
         "ON supply_products (category_id, name)"
     )
+    # Compatibility rules ("fits <brand>, <power_min>–<power_max> л.с.")
+    # rather than links to individual motor profiles — one rule covers a
+    # whole product line (e.g. every Yamaha 15–40 л.с.) instead of the
+    # admin re-linking each motor model by hand. Matched against
+    # tuning_boat_profiles.brand/power_hp — see
+    # _supply_products_compatible_with_motor/_motor_profiles_matching_rule.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS supply_product_motor_compatibility (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL,
+            motor_brand TEXT NOT NULL,
+            power_min REAL,
+            power_max REAL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_supply_product_motor_compatibility_product "
+        "ON supply_product_motor_compatibility (product_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_supply_product_motor_compatibility_brand "
+        "ON supply_product_motor_compatibility (motor_brand)"
+    )
     # External catalog links are deliberately optional: ordinary products
     # remain fully manual, while integrations get a stable idempotency key and
     # may display the supplier's current card/photo without downloading files.
@@ -2730,6 +2756,14 @@ def init_db():
         conn.execute("ALTER TABLE tuning_boat_profiles ADD COLUMN length_m REAL")
     if "width_m" not in boat_profile_cols:
         conn.execute("ALTER TABLE tuning_boat_profiles ADD COLUMN width_m REAL")
+    if "brand" not in boat_profile_cols:
+        # Motor-only, mirrors length_m/width_m being boat-only — lets a
+        # supply product declare "compatible with <brand>, <power> л.с."
+        # once instead of linking every individual motor model by hand
+        # (see supply_product_motor_compatibility below).
+        conn.execute("ALTER TABLE tuning_boat_profiles ADD COLUMN brand TEXT")
+    if "power_hp" not in boat_profile_cols:
+        conn.execute("ALTER TABLE tuning_boat_profiles ADD COLUMN power_hp REAL")
     if "equipment_type" not in boat_profile_cols:
         conn.execute(
             "ALTER TABLE tuning_boat_profiles ADD COLUMN "
@@ -7035,6 +7069,11 @@ def _render_tuning_equipment_profile(profile_id, expected_type):
                     )
             orders.append(order)
 
+    compatible_products = (
+        _supply_products_compatible_with_motor(db, profile["brand"], profile["power_hp"])
+        if expected_type == "motor" else []
+    )
+
     return render_template(
         "tuning_index.html",
         active_page="tuning",
@@ -7044,6 +7083,7 @@ def _render_tuning_equipment_profile(profile_id, expected_type):
         boat_profile=profile,
         profile_orders=orders,
         profile_orders_total=sum(order["total"] for order in orders),
+        compatible_products=compatible_products,
         profile_notice=session.pop("boat_profile_notice", None),
         profile_error=session.pop("boat_profile_error", None),
         profile_name_editor_open=session.pop(
@@ -7150,6 +7190,27 @@ def update_tuning_boat_profile(profile_id):
         length_m = parsed_dimensions["length_m"]
         width_m = parsed_dimensions["width_m"]
 
+    # Boats don't have these — only ever parsed/stored for motors, so a
+    # supply product's "compatible with <brand>, X–Y л.с." rule (see
+    # supply_product_motor_compatibility) has something to match against.
+    brand = profile["brand"]
+    power_hp = profile["power_hp"]
+    if profile["equipment_type"] == "motor":
+        brand = request.form.get("brand", "").strip() or None
+        power_hp_raw = request.form.get("power_hp", "").strip().replace(",", ".")
+        if not power_hp_raw:
+            power_hp = None
+        else:
+            try:
+                power_hp = float(power_hp_raw)
+                if power_hp <= 0:
+                    raise ValueError
+            except ValueError:
+                session["boat_profile_error"] = (
+                    "Мощность должна быть положительным числом в лошадиных силах."
+                )
+                return redirect(url_for(profile_endpoint, profile_id=profile_id))
+
     photo_filename = profile["photo_filename"]
     photo = request.files.get("photo")
     if photo and photo.filename:
@@ -7172,11 +7233,11 @@ def update_tuning_boat_profile(profile_id):
         "UPDATE tuning_boat_profiles "
         "SET specifications = ?, specifications_source_url = ?, "
         "specifications_source_name = ?, photo_filename = ?, "
-        "length_m = ?, width_m = ?, updated_at = ? "
+        "length_m = ?, width_m = ?, brand = ?, power_hp = ?, updated_at = ? "
         "WHERE id = ?",
         (
             specifications, source_url, source_name, photo_filename,
-            length_m, width_m, now, profile_id,
+            length_m, width_m, brand, power_hp, now, profile_id,
         ),
     )
     db.commit()
@@ -7302,10 +7363,19 @@ def update_tuning_equipment_profile_type(profile_id):
                 merged_length_m = profile["length_m"]
             if merged_width_m is None:
                 merged_width_m = profile["width_m"]
+        # brand/power_hp are the motor-side mirror of length_m/width_m —
+        # same carry-over-only-toward-the-matching-type rule.
+        merged_brand = target_profile["brand"]
+        merged_power_hp = target_profile["power_hp"]
+        if target_type == "motor":
+            if merged_brand is None:
+                merged_brand = profile["brand"]
+            if merged_power_hp is None:
+                merged_power_hp = profile["power_hp"]
         db.execute(
             "UPDATE tuning_boat_profiles SET photo_filename = ?, specifications = ?, "
             "specifications_source_url = ?, specifications_source_name = ?, "
-            "length_m = ?, width_m = ?, updated_at = ? WHERE id = ?",
+            "length_m = ?, width_m = ?, brand = ?, power_hp = ?, updated_at = ? WHERE id = ?",
             (
                 target_profile["photo_filename"] or profile["photo_filename"],
                 target_profile["specifications"] or profile["specifications"],
@@ -7315,6 +7385,8 @@ def update_tuning_equipment_profile_type(profile_id):
                 or profile["specifications_source_name"],
                 merged_length_m,
                 merged_width_m,
+                merged_brand,
+                merged_power_hp,
                 now,
                 target_profile["id"],
             ),
@@ -14232,6 +14304,77 @@ def _supply_categories(db, with_counts=False):
     return ordered
 
 
+def _supply_product_motor_compatibility(db, product_id):
+    return db.execute(
+        "SELECT * FROM supply_product_motor_compatibility "
+        "WHERE product_id = ? ORDER BY motor_brand, power_min, id",
+        (product_id,),
+    ).fetchall()
+
+
+def _motor_profiles_matching_rule(db, motor_brand, power_min, power_max):
+    """Which of our own motor profiles (tuning_boat_profiles) a compatibility
+    rule currently covers — shown on the product page so an admin can catch
+    a brand typo immediately instead of only finding out on the motor page."""
+    motor_brand = (motor_brand or "").strip()
+    if not motor_brand:
+        return []
+    conditions = [
+        "equipment_type = 'motor'",
+        "brand IS NOT NULL", "TRIM(brand) != ''",
+        "CASEFOLD(brand) = CASEFOLD(?)",
+    ]
+    params = [motor_brand]
+    if power_min is not None or power_max is not None:
+        conditions.append("power_hp IS NOT NULL")
+        if power_min is not None:
+            conditions.append("power_hp >= ?")
+            params.append(power_min)
+        if power_max is not None:
+            conditions.append("power_hp <= ?")
+            params.append(power_max)
+    return db.execute(
+        f"SELECT * FROM tuning_boat_profiles WHERE {' AND '.join(conditions)} "
+        "ORDER BY model_name",
+        params,
+    ).fetchall()
+
+
+def _supply_products_compatible_with_motor(db, brand, power_hp):
+    """The reverse direction, shown on a motor's own profile page — every
+    supply product whose compatibility rule covers this brand/power. If the
+    motor has no power_hp set, only brand-only rules (no power bounds at
+    all) can be evaluated — a ranged rule can't be judged without it."""
+    brand = (brand or "").strip()
+    if not brand:
+        return []
+    select_cols = (
+        "SELECT DISTINCT sp.*, sc.name AS category_name, "
+        "(SELECT COALESCE(SUM(quantity), 0) FROM supply_stock WHERE product_id = sp.id) AS total_quantity "
+        "FROM supply_products sp "
+        "LEFT JOIN supply_categories sc ON sc.id = sp.category_id "
+        "JOIN supply_product_motor_compatibility c ON c.product_id = sp.id "
+    )
+    if power_hp is None:
+        query = (
+            select_cols
+            + "WHERE CASEFOLD(c.motor_brand) = CASEFOLD(?) "
+            "AND c.power_min IS NULL AND c.power_max IS NULL "
+            "ORDER BY sp.name"
+        )
+        params = [brand]
+    else:
+        query = (
+            select_cols
+            + "WHERE CASEFOLD(c.motor_brand) = CASEFOLD(?) "
+            "AND (c.power_min IS NULL OR ? >= c.power_min) "
+            "AND (c.power_max IS NULL OR ? <= c.power_max) "
+            "ORDER BY sp.name"
+        )
+        params = [brand, power_hp, power_hp]
+    return db.execute(query, params).fetchall()
+
+
 def _supply_category_descendant_ids(categories, category_id):
     descendants = {category_id}
     changed = True
@@ -15153,6 +15296,16 @@ def supply_product(product_id):
         reverse=True,
     )[:20]
 
+    motor_compatibility = [
+        {
+            "rule": dict(rule),
+            "matching_motors": _motor_profiles_matching_rule(
+                db, rule["motor_brand"], rule["power_min"], rule["power_max"]
+            ),
+        }
+        for rule in _supply_product_motor_compatibility(db, product_id)
+    ]
+
     return render_template(
         "supply_product.html", active_page="supply", sub_page="catalog",
         product=product, stock=stock, total_quantity=total_quantity,
@@ -15162,9 +15315,11 @@ def supply_product(product_id):
         thousand_sizes_markup_percent=THOUSAND_SIZES_MARKUP_PERCENT,
         cost_units=SUPPLY_COST_UNITS, writeoff_reasons=SUPPLY_WRITEOFF_REASONS,
         custom_value=CUSTOM_VALUE,
+        motor_compatibility=motor_compatibility,
         receive_error=session.pop("receive_error", None),
         writeoff_error=session.pop("writeoff_error", None),
         edit_error=session.pop("edit_error", None),
+        motor_compatibility_error=session.pop("motor_compatibility_error", None),
     )
 
 
@@ -15268,6 +15423,71 @@ def edit_supply_product(product_id):
                 (filename, product_id),
             )
 
+    db.commit()
+    return redirect(url_for("supply_product", product_id=product_id))
+
+
+@app.route("/supply/catalog/<int:product_id>/motor-compatibility/add", methods=["POST"])
+@admin_login_required
+def add_supply_product_motor_compatibility(product_id):
+    db = get_db()
+    product = db.execute("SELECT id FROM supply_products WHERE id = ?", (product_id,)).fetchone()
+    if product is None:
+        return redirect(url_for("supply_catalog"))
+
+    motor_brand = request.form.get("motor_brand", "").strip()
+    power_min_raw = request.form.get("power_min", "").strip().replace(",", ".")
+    power_max_raw = request.form.get("power_max", "").strip().replace(",", ".")
+
+    errors = []
+    if not motor_brand:
+        errors.append("Укажите марку мотора.")
+
+    def _parse_optional_power(raw, label):
+        if not raw:
+            return None
+        try:
+            value = float(raw)
+        except ValueError:
+            errors.append(f"{label} должна быть числом.")
+            return None
+        if value <= 0:
+            errors.append(f"{label} должна быть больше нуля.")
+            return None
+        return value
+
+    power_min = _parse_optional_power(power_min_raw, "Минимальная мощность")
+    power_max = _parse_optional_power(power_max_raw, "Максимальная мощность")
+    if power_min is not None and power_max is not None and power_min > power_max:
+        errors.append("Минимальная мощность не может быть больше максимальной.")
+
+    if errors:
+        session["motor_compatibility_error"] = " ".join(errors)
+        return redirect(url_for("supply_product", product_id=product_id))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "INSERT INTO supply_product_motor_compatibility "
+        "(product_id, motor_brand, power_min, power_max, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (product_id, motor_brand, power_min, power_max, now),
+    )
+    db.commit()
+    return redirect(url_for("supply_product", product_id=product_id))
+
+
+@app.route(
+    "/supply/catalog/<int:product_id>/motor-compatibility/<int:rule_id>/delete",
+    methods=["POST"],
+)
+@admin_login_required
+def delete_supply_product_motor_compatibility(product_id, rule_id):
+    db = get_db()
+    db.execute(
+        "DELETE FROM supply_product_motor_compatibility "
+        "WHERE id = ? AND product_id = ?",
+        (rule_id, product_id),
+    )
     db.commit()
     return redirect(url_for("supply_product", product_id=product_id))
 

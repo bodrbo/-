@@ -231,6 +231,78 @@
     {% endif %}
   </section>
 
+  <section class="panel">
+    <h2>Совместимые моторы</h2>
+    <p class="hint">Марка и диапазон мощности — правило действует сразу на все моторы этой марки в указанном диапазоне, без привязки к конкретной модели по отдельности. Отображается в карточке подходящего мотора в разделе «Тюнинг-центр» как «Совместимые расходники».</p>
+    {% if motor_compatibility_error %}
+    <div class="alert"><strong>Не удалось добавить:</strong> {{ motor_compatibility_error }}</div>
+    {% endif %}
+    {% if motor_compatibility %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead><tr><th>Марка</th><th>Мощность, л.с.</th><th>Подходящие модели в каталоге</th><th></th></tr></thead>
+        <tbody>
+          {% for entry in motor_compatibility %}
+          {% set rule = entry.rule %}
+          <tr>
+            <td class="term">{{ rule.motor_brand }}</td>
+            <td class="muted">
+              {%- if rule.power_min and rule.power_max -%}
+              {{ rule.power_min|float|round(1) }}–{{ rule.power_max|float|round(1) }}
+              {%- elif rule.power_min -%}
+              от {{ rule.power_min|float|round(1) }}
+              {%- elif rule.power_max -%}
+              до {{ rule.power_max|float|round(1) }}
+              {%- else -%}
+              любая
+              {%- endif %}
+            </td>
+            <td class="muted">
+              {% if entry.matching_motors %}
+              {% for motor in entry.matching_motors %}
+              <a href="{{ url_for('tuning_motor_profile', profile_id=motor.id) }}">{{ motor.model_name }}</a>{% if not loop.last %}, {% endif %}
+              {% endfor %}
+              {% else %}
+              пока нет в каталоге
+              {% endif %}
+            </td>
+            <td class="row-actions">
+              <form action="{{ url_for('delete_supply_product_motor_compatibility', product_id=product.id, rule_id=rule.id) }}" method="post"
+                    onsubmit="return confirm('Удалить это правило совместимости?');">
+                <button type="submit" class="icon-btn danger" title="Удалить">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 5l10 10M15 5L5 15"/>
+                  </svg>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint">Пока не указано ни одного совместимого мотора.</p>
+    {% endif %}
+    <form action="{{ url_for('add_supply_product_motor_compatibility', product_id=product.id) }}" method="post" class="entry-form">
+      <div class="field field-narrow">
+        <label for="motor_brand">Марка мотора</label>
+        <input type="text" id="motor_brand" name="motor_brand" placeholder="Например, Yamaha" required>
+      </div>
+      <div class="field field-narrow">
+        <label for="power_min">Мощность от, л.с.</label>
+        <input type="text" inputmode="decimal" id="power_min" name="power_min" placeholder="Необязательно">
+      </div>
+      <div class="field field-narrow">
+        <label for="power_max">Мощность до, л.с.</label>
+        <input type="text" inputmode="decimal" id="power_max" name="power_max" placeholder="Необязательно">
+      </div>
+      <div class="field field-submit">
+        <button type="submit">Добавить</button>
+      </div>
+    </form>
+  </section>
+
   <div class="hero-grid" style="grid-template-columns: 1fr 1fr;">
     <section class="panel">
       <h2>Оприходовать</h2>
