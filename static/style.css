@@ -7137,6 +7137,15 @@ button.btn-reject:hover { background: #932f20; }
   vertical-align: middle;
 }
 
+.investor-payout-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.investor-payout-cell input[type="date"] { width: 142px; }
+.investor-payout-cell input[type="text"] { width: 92px; }
+
 /* --- form grouping (used on the trip form) --- */
 .form-group {
   flex: 1 1 100%;

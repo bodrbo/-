@@ -585,14 +585,21 @@
 
       <div>
         <h3>Сводка по катерам за период</h3>
+        {% if investor_payout_error %}
+        <div class="alert">{{ investor_payout_error }}</div>
+        {% endif %}
+        {% if investor_payout_message %}
+        <p class="alert alert-success">{{ investor_payout_message }}</p>
+        {% endif %}
         {% if by_boat %}
         <div class="table-scroll">
           <table class="gloss">
             <tr>
               <th>Катер</th><th>Рейсов</th><th>Доход</th><th>Комиссия</th><th>Прямые расходы</th>
-              <th>Остаток</th><th>Инвестору</th><th>Судовладельцу</th>
+              <th>Остаток</th><th>Инвестору</th><th>Судовладельцу</th><th>Записать выплату инвестору</th>
             </tr>
             {% for boat_name, t in by_boat.items() %}
+            {% set payout_form_id = "investorPayoutForm" ~ loop.index %}
             <tr>
               <td class="term">{{ boat_name }}</td>
               <td>{{ t.count }}</td>
@@ -602,10 +609,21 @@
               <td>{{ t.remainder|money }}</td>
               <td class="amount">{{ t.investor_payout|money }}</td>
               <td class="amount">{{ t.my_share|money }}</td>
+              <td class="investor-payout-cell">
+                <input type="date" name="payout_date" value="{{ today }}" form="{{ payout_form_id }}" required>
+                <input type="text" inputmode="decimal" name="amount"
+                       value="{{ '%.2f'|format(t.investor_payout) }}" form="{{ payout_form_id }}" required>
+                <button type="submit" form="{{ payout_form_id }}" class="btn-secondary">Записать</button>
+              </td>
             </tr>
             {% endfor %}
           </table>
         </div>
+        {% for boat_name, t in by_boat.items() %}
+        <form id="investorPayoutForm{{ loop.index }}" action="{{ url_for('add_investor_payout') }}" method="post" class="hidden">
+          <input type="hidden" name="boat" value="{{ boat_name }}">
+        </form>
+        {% endfor %}
         {% else %}
         <div class="empty-state">
           <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
@@ -681,6 +699,52 @@
         </div>
         {% endif %}
       </div>
+    </div>
+  </details>
+
+  <details class="panel collapsible-panel">
+    <summary>
+      <span>Выплаты инвесторам ({{ investor_payouts|length }})</span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
+      <p class="hint" style="margin-top:0;">
+        Записанные выплаты — из формы «Записать выплату инвестору» в сводке по катерам выше, и из
+        импорта истории. Каждая появляется в личном кабинете соответствующего инвестора.
+      </p>
+      {% if investor_payouts %}
+      <div class="table-scroll">
+        <table class="records">
+          <thead><tr><th>Дата выплаты</th><th>Катер</th><th>Инвестор</th><th>Сумма</th><th></th></tr></thead>
+          <tbody>
+            {% for p in investor_payouts %}
+            <tr>
+              <td class="muted">{{ p.payout_date|ru_date }}</td>
+              <td>{{ p.boat }}</td>
+              <td>{{ p.investor_name }}</td>
+              <td class="amount">{{ p.amount|money }} ₽</td>
+              <td class="row-actions">
+                <form action="{{ url_for('delete_investor_payout', payout_id=p.id) }}" method="post"
+                      onsubmit="return confirm('Удалить эту выплату? Она пропадёт и из личного кабинета инвестора.');">
+                  <button type="submit" class="icon-btn danger" title="Удалить">
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M5 5l10 10M15 5L5 15"/>
+                    </svg>
+                  </button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        <div class="t">Выплат пока не записано</div>
+        <div class="s">Используйте форму «Записать выплату инвестору» в сводке по катерам выше.</div>
+      </div>
+      {% endif %}
     </div>
   </details>
 

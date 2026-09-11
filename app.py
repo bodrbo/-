@@ -3936,6 +3936,14 @@ def _trips_list_context(db, selected_month=None, selected_boat="all"):
         "SELECT * FROM trip_contracts ORDER BY id DESC"
     ).fetchall()
 
+    # Not filtered by the month/boat selector above — a payout recorded for
+    # September might get paid out in October, so tying this list to the
+    # trips filter would hide it right after it's added. Shown in full,
+    # newest first, same as the contracts list above it.
+    investor_payouts = db.execute(
+        "SELECT * FROM investor_distributions ORDER BY payout_date DESC, id DESC"
+    ).fetchall()
+
     return dict(
         trips=trips_list,
         months=months,
@@ -3952,6 +3960,7 @@ def _trips_list_context(db, selected_month=None, selected_boat="all"):
         import_default_end=today.isoformat(),
         contracts=contracts,
         contract_number_suggestion=_suggest_contract_number(db, today),
+        investor_payouts=investor_payouts,
     )
 
 
@@ -4135,6 +4144,8 @@ def trips_index():
         trip_contract_error=session.pop("trip_contract_error", None),
         investor_history_import_message=session.pop("investor_history_import_message", None),
         investor_history_import_error=session.pop("investor_history_import_error", None),
+        investor_payout_error=session.pop("investor_payout_error", None),
+        investor_payout_message=session.pop("investor_payout_message", None),
     )
 
 
@@ -4409,6 +4420,63 @@ def add_trip_expense():
             "INSERT INTO trip_labor (trip_id, entry_id) VALUES (?, ?)",
             (cur2.lastrowid, entry_id),
         )
+    db.commit()
+    return redirect(url_for("trips_index"))
+
+
+@app.route("/trips/investor-payout/add", methods=["POST"])
+@admin_login_required
+def add_investor_payout():
+    """Record an actual payout to an investor. This is separate from the
+    live investor_payout split shown per trip/boat above — that's just the
+    running calculation of what's owed; nothing shows up for the investor
+    in their own dashboard (investor_dashboard route) until a payout is
+    recorded here, into investor_distributions."""
+    db = get_db()
+    boat = request.form.get("boat", "").strip()
+    boat_entry = next((b for b in BOATS if b["name"] == boat), None)
+    if boat_entry is None:
+        session["investor_payout_error"] = "Выберите катер."
+        return redirect(url_for("trips_index"))
+
+    payout_date = request.form.get("payout_date", "").strip()
+    try:
+        if not payout_date:
+            raise ValueError
+        dt.date.fromisoformat(payout_date)
+    except ValueError:
+        session["investor_payout_error"] = "Укажите корректную дату выплаты."
+        return redirect(url_for("trips_index"))
+
+    amount_raw = request.form.get("amount", "").strip().replace(",", ".")
+    try:
+        amount = round(float(amount_raw), 2)
+    except ValueError:
+        amount = None
+    if amount is None or amount <= 0:
+        session["investor_payout_error"] = "Сумма выплаты должна быть больше нуля."
+        return redirect(url_for("trips_index"))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "INSERT INTO investor_distributions "
+        "(boat, investor_name, payout_date, amount, source_type, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (boat, boat_entry["investor"], payout_date, amount, "manual", now),
+    )
+    db.commit()
+    session["investor_payout_message"] = (
+        f"Выплата {format_money(amount)} ₽ инвестору «{boat_entry['investor']}» "
+        f"по катеру «{boat}» записана."
+    )
+    return redirect(url_for("trips_index"))
+
+
+@app.route("/trips/investor-payout/<int:payout_id>/delete", methods=["POST"])
+@admin_login_required
+def delete_investor_payout(payout_id):
+    db = get_db()
+    db.execute("DELETE FROM investor_distributions WHERE id = ?", (payout_id,))
     db.commit()
     return redirect(url_for("trips_index"))
 
