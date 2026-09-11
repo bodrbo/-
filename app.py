@@ -3058,6 +3058,9 @@ def init_db():
         )
         """
     )
+    shop_map_boats_cols = [row[1] for row in conn.execute("PRAGMA table_info(shop_map_boats)").fetchall()]
+    if "rotation_deg" not in shop_map_boats_cols:
+        conn.execute("ALTER TABLE shop_map_boats ADD COLUMN rotation_deg INTEGER NOT NULL DEFAULT 0")
     # Client relationships are classified only after all legacy tables have
     # received their newer client_id columns above.
     init_client_segments_schema(conn)
@@ -7512,6 +7515,59 @@ def _shop_map_boats(db):
     return boats
 
 
+def _shop_map_boat_footprint(length_m, width_m, rotation_deg):
+    """A boat rotated 90° occupies width_m along x and length_m along y —
+    everything that checks bounds/overlap needs the footprint, not the
+    boat's own intrinsic length/width."""
+    if rotation_deg == 90:
+        return width_m, length_m
+    return length_m, width_m
+
+
+def _shop_map_rects_overlap(ax, ay, aw, ah, bx, by, bw, bh):
+    eps = 0.001
+    return (
+        ax < bx + bw - eps and ax + aw > bx + eps
+        and ay < by + bh - eps and ay + ah > by + eps
+    )
+
+
+def _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, rotation_deg):
+    """Shared by the manual position form, drag, and rotate routes — a
+    boat may not stick out of the room or overlap any fixed zone/element.
+    Boat-vs-boat overlap isn't checked yet, only zones/objects."""
+    footprint_w, footprint_h = _shop_map_boat_footprint(length_m, width_m, rotation_deg)
+    if room is not None:
+        if x_m + footprint_w > room["length_m"] + 0.001:
+            return "Лодка на этой позиции выходит за пределы цеха по длине."
+        if y_m + footprint_h > room["width_m"] + 0.001:
+            return "Лодка на этой позиции выходит за пределы цеха по ширине."
+    for el in db.execute(
+        "SELECT name, x_m, y_m, width_m, height_m FROM shop_map_elements"
+    ).fetchall():
+        if _shop_map_rects_overlap(
+            x_m, y_m, footprint_w, footprint_h, el["x_m"], el["y_m"], el["width_m"], el["height_m"]
+        ):
+            return f"Лодка пересекается с зоной «{el['name']}»."
+    return None
+
+
+def _shop_map_boat_with_profile(db, boat_id):
+    boat_row = db.execute(
+        "SELECT b.*, o.boat_model FROM shop_map_boats b "
+        "JOIN tuning_orders o ON o.id = b.order_id WHERE b.id = ?",
+        (boat_id,),
+    ).fetchone()
+    if boat_row is None:
+        return None, None, None
+    profile = db.execute(
+        "SELECT length_m, width_m FROM tuning_boat_profiles "
+        "WHERE equipment_type = 'boat' AND model_key = ?",
+        (_tuning_equipment_profile_key("boat", boat_row["boat_model"]),),
+    ).fetchone()
+    return boat_row, (profile["length_m"] if profile else None), (profile["width_m"] if profile else None)
+
+
 def _auto_place_boat_on_shop_map(db, order):
     """When a boat order enters "В работе", the boat should show up on
     Карта цеха on its own — this is the hook set_tuning_order_status calls.
@@ -7572,8 +7628,24 @@ def tuning_shop_map():
         if boat["length_m"] and boat["width_m"]:
             boat["x_px"] = SHOP_MAP_PADDING + boat["x_m"] * SHOP_MAP_SCALE
             boat["y_px"] = SHOP_MAP_PADDING + boat["y_m"] * SHOP_MAP_SCALE
+            # box_w_px/box_h_px are the hull's own intrinsic length/width in
+            # px — always the same regardless of rotation, since rotation is
+            # applied as an SVG rotate() around the translate point, not by
+            # swapping which dimension scales which local axis.
             boat["box_w_px"] = boat["length_m"] * SHOP_MAP_SCALE
             boat["box_h_px"] = boat["width_m"] * SHOP_MAP_SCALE
+            if boat["rotation_deg"] == 90:
+                boat["tx_px"] = boat["x_px"] + boat["box_h_px"] / 2
+                boat["ty_px"] = boat["y_px"]
+                boat["footprint_w_px"] = boat["box_h_px"]
+                boat["footprint_h_px"] = boat["box_w_px"]
+            else:
+                boat["tx_px"] = boat["x_px"]
+                boat["ty_px"] = boat["y_px"] + boat["box_h_px"] / 2
+                boat["footprint_w_px"] = boat["box_w_px"]
+                boat["footprint_h_px"] = boat["box_h_px"]
+            boat["rotate_btn_x"] = boat["x_px"] + boat["footprint_w_px"] + 13
+            boat["rotate_btn_y"] = boat["y_px"] + 2
             boats_on_map.append(boat)
         else:
             boats_missing_dimensions.append(boat)
@@ -7820,13 +7892,12 @@ def update_shop_map_boat_position(boat_id):
 
     x_m = _parse_nonnegative(request.form.get("x_m", ""), "От левой стены")
     y_m = _parse_nonnegative(request.form.get("y_m", ""), "От верхней стены")
-    if not errors and room is not None:
-        length_span = boat_length_m or 0
-        width_span = boat_width_m or 0
-        if x_m is not None and x_m + length_span > room["length_m"] + 0.001:
-            errors.append("Лодка на этой позиции выходит за пределы цеха по длине.")
-        if y_m is not None and y_m + width_span > room["width_m"] + 0.001:
-            errors.append("Лодка на этой позиции выходит за пределы цеха по ширине.")
+    if not errors and x_m is not None and y_m is not None:
+        error = _shop_map_boat_placement_error(
+            db, room, x_m, y_m, boat_length_m or 0, boat_width_m or 0, boat_row["rotation_deg"]
+        )
+        if error:
+            errors.append(error)
 
     if errors:
         session["shop_map_boat_error"] = " ".join(errors)
@@ -7839,6 +7910,69 @@ def update_shop_map_boat_position(boat_id):
     )
     db.commit()
     return redirect(url_for("tuning_shop_map"))
+
+
+@app.route("/tuning/shop-map/boats/<int:boat_id>/drag", methods=["POST"])
+@admin_login_required
+def drag_shop_map_boat(boat_id):
+    """AJAX counterpart of update_shop_map_boat_position, used by dragging
+    a boat directly on the map — same validation, JSON in/out instead of a
+    redirect so the page doesn't have to fully reload just to reject a
+    drop and the caller can decide what to show."""
+    db = get_db()
+    boat_row, length_m, width_m = _shop_map_boat_with_profile(db, boat_id)
+    if boat_row is None:
+        return jsonify({"error": "Лодка не найдена."}), 404
+    if not length_m or not width_m:
+        return jsonify({"error": "У лодки не указаны размеры в профиле."}), 400
+
+    try:
+        x_m = float(request.form.get("x_m", "").replace(",", "."))
+        y_m = float(request.form.get("y_m", "").replace(",", "."))
+    except ValueError:
+        return jsonify({"error": "Некорректные координаты."}), 400
+    if x_m < 0 or y_m < 0:
+        return jsonify({"error": "Лодка не может выйти за пределы цеха."}), 400
+
+    room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+    error = _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, boat_row["rotation_deg"])
+    if error:
+        return jsonify({"error": error}), 400
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "UPDATE shop_map_boats SET x_m = ?, y_m = ?, updated_at = ? WHERE id = ?",
+        (x_m, y_m, now, boat_id),
+    )
+    db.commit()
+    return jsonify({"x_m": x_m, "y_m": y_m})
+
+
+@app.route("/tuning/shop-map/boats/<int:boat_id>/rotate", methods=["POST"])
+@admin_login_required
+def rotate_shop_map_boat(boat_id):
+    db = get_db()
+    boat_row, length_m, width_m = _shop_map_boat_with_profile(db, boat_id)
+    if boat_row is None:
+        return jsonify({"error": "Лодка не найдена."}), 404
+    if not length_m or not width_m:
+        return jsonify({"error": "У лодки не указаны размеры в профиле."}), 400
+
+    new_rotation = 90 if boat_row["rotation_deg"] == 0 else 0
+    room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+    error = _shop_map_boat_placement_error(
+        db, room, boat_row["x_m"], boat_row["y_m"], length_m, width_m, new_rotation
+    )
+    if error:
+        return jsonify({"error": "Не помещается развёрнутой: " + error}), 400
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "UPDATE shop_map_boats SET rotation_deg = ?, updated_at = ? WHERE id = ?",
+        (new_rotation, now, boat_id),
+    )
+    db.commit()
+    return jsonify({"rotation_deg": new_rotation})
 
 
 @app.route("/tuning/shop-map/boats/<int:boat_id>/remove", methods=["POST"])

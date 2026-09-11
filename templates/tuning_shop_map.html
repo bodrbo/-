@@ -162,13 +162,24 @@
         <g class="shop-map-boats">
           {% for boat in boats_on_map %}
           <a href="{{ url_for('edit_tuning_order', order_id=boat.order_id) }}">
-            <g transform="translate({{ boat.x_px }}, {{ boat.y_px + boat.box_h_px / 2 }}) scale({{ boat.box_w_px / 180 }}, {{ boat.box_h_px / 52 }})">
+            <g class="shop-map-boat-drag" data-boat-id="{{ boat.id }}"
+               data-drag-url="{{ url_for('drag_shop_map_boat', boat_id=boat.id) }}"
+               data-box-w-px="{{ boat.box_w_px }}" data-box-h-px="{{ boat.box_h_px }}"
+               data-rotation="{{ boat.rotation_deg }}"
+               transform="translate({{ boat.tx_px }}, {{ boat.ty_px }}) rotate({{ boat.rotation_deg }}) scale({{ boat.box_w_px / 180 }}, {{ boat.box_h_px / 52 }})">
               <path class="shop-map-boat-hull"
                     d="M 180 0 C 170 22 120 26 85 25 C 45 24 15 18 0 12 L 0 -12 C 15 -18 45 -24 85 -25 C 120 -26 170 -22 180 0 Z">
-                <title>{{ boat.client_name }} — {{ boat.boat_model }} ({{ boat.length_m|float|round(2) }} × {{ boat.width_m|float|round(2) }} м)</title>
+                <title>{{ boat.client_name }} — {{ boat.boat_model }} ({{ boat.length_m|float|round(2) }} × {{ boat.width_m|float|round(2) }} м) — перетащите, чтобы передвинуть</title>
               </path>
             </g>
           </a>
+          <g class="shop-map-boat-rotate-btn" data-rotate-url="{{ url_for('rotate_shop_map_boat', boat_id=boat.id) }}"
+             transform="translate({{ boat.rotate_btn_x }}, {{ boat.rotate_btn_y }})">
+            <circle r="9"/>
+            <path d="M-3.5 -1a3.7 3.7 0 116.3 2.3M2.6 -3v3.1h-3.1" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <title>Повернуть на 90°</title>
+            </path>
+          </g>
           {% endfor %}
         </g>
       </svg>
@@ -177,6 +188,7 @@
 
   <section class="panel">
     <h2>Лодки в цеху</h2>
+    <p class="hint">Лодку можно перетащить на карте, чтобы переместить, и повернуть на 90° кружком рядом с ней — зоны и другие объекты цеха непроходимы, лодка на них не встанет.</p>
     <p class="hint">Лодка попадает сюда автоматически, когда статус её заказа меняется на «В работе». Размер на карте — реальные длина и ширина из профиля лодки.</p>
     {% if boat_error %}
     <div class="alert"><strong>Не удалось сохранить:</strong> {{ boat_error }}</div>
@@ -367,6 +379,122 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+(function () {
+  var SCALE = {{ scale }};
+  var PADDING = {{ padding }};
+  var svg = document.querySelector(".shop-map-svg");
+  if (!svg) { return; }
+
+  function svgPointFromClient(clientX, clientY) {
+    var rect = svg.getBoundingClientRect();
+    var viewBox = svg.viewBox.baseVal;
+    return {
+      x: (clientX - rect.left) * (viewBox.width / rect.width),
+      y: (clientY - rect.top) * (viewBox.height / rect.height),
+    };
+  }
+
+  function boatTransform(tx, ty, rotation, boxW, boxH) {
+    return "translate(" + tx + "," + ty + ") rotate(" + rotation + ") scale(" + (boxW / 180) + "," + (boxH / 52) + ")";
+  }
+
+  document.querySelectorAll(".shop-map-boat-drag").forEach(function (group) {
+    var link = group.closest("a");
+    var boxW = parseFloat(group.dataset.boxWPx);
+    var boxH = parseFloat(group.dataset.boxHPx);
+    var rotation = parseInt(group.dataset.rotation, 10);
+    var dragging = false;
+    var moved = false;
+    var startPoint = null;
+    var startTx = 0;
+    var startTy = 0;
+
+    if (link) {
+      link.addEventListener("dragstart", function (e) { e.preventDefault(); });
+      link.addEventListener("click", function (e) {
+        if (moved) { e.preventDefault(); }
+      });
+    }
+
+    group.addEventListener("pointerdown", function (e) {
+      dragging = true;
+      moved = false;
+      startPoint = svgPointFromClient(e.clientX, e.clientY);
+      var m = /translate\(([-\d.]+),\s*([-\d.]+)\)/.exec(group.getAttribute("transform"));
+      startTx = parseFloat(m[1]);
+      startTy = parseFloat(m[2]);
+      group.setPointerCapture(e.pointerId);
+    });
+
+    group.addEventListener("pointermove", function (e) {
+      if (!dragging) { return; }
+      var p = svgPointFromClient(e.clientX, e.clientY);
+      var dx = p.x - startPoint.x;
+      var dy = p.y - startPoint.y;
+      if (!moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+        moved = true;
+        group.classList.add("dragging");
+      }
+      if (!moved) { return; }
+      e.preventDefault();
+      group.setAttribute("transform", boatTransform(startTx + dx, startTy + dy, rotation, boxW, boxH));
+    });
+
+    function endDrag(e) {
+      if (!dragging) { return; }
+      dragging = false;
+      group.classList.remove("dragging");
+      if (!moved) { return; }
+
+      var m = /translate\(([-\d.]+),\s*([-\d.]+)\)/.exec(group.getAttribute("transform"));
+      var tx = parseFloat(m[1]);
+      var ty = parseFloat(m[2]);
+      var xM, yM;
+      if (rotation === 90) {
+        xM = (tx - boxH / 2 - PADDING) / SCALE;
+        yM = (ty - PADDING) / SCALE;
+      } else {
+        xM = (tx - PADDING) / SCALE;
+        yM = (ty - boxH / 2 - PADDING) / SCALE;
+      }
+
+      var formData = new FormData();
+      formData.append("x_m", xM);
+      formData.append("y_m", yM);
+      fetch(group.dataset.dragUrl, { method: "POST", body: formData })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.error) { alert(data.error); }
+          window.location.reload();
+        })
+        .catch(function () {
+          alert("Не удалось сохранить позицию. Попробуйте ещё раз.");
+          window.location.reload();
+        });
+    }
+
+    group.addEventListener("pointerup", endDrag);
+    group.addEventListener("pointercancel", endDrag);
+  });
+
+  document.querySelectorAll(".shop-map-boat-rotate-btn").forEach(function (btn) {
+    btn.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      fetch(btn.dataset.rotateUrl, { method: "POST" })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.error) { alert(data.error); return; }
+          window.location.reload();
+        })
+        .catch(function () {
+          alert("Не удалось повернуть лодку. Попробуйте ещё раз.");
+        });
+    });
+  });
+})();
+</script>
 
 </body>
 </html>

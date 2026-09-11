@@ -10311,3 +10311,31 @@ button.partner-open-price-save svg {
   cursor: pointer;
 }
 .shop-map-boats a:hover .shop-map-boat-hull { fill: var(--brass-strong); }
+.shop-map-boat-drag {
+  cursor: grab;
+  touch-action: none;
+}
+.shop-map-boat-drag.dragging {
+  cursor: grabbing;
+}
+.shop-map-boat-drag.dragging .shop-map-boat-hull {
+  fill: var(--brass-strong);
+}
+.shop-map-boat-rotate-btn {
+  cursor: pointer;
+}
+.shop-map-boat-rotate-btn circle {
+  fill: var(--paper);
+  stroke: var(--ink);
+  stroke-width: 1.2;
+}
+.shop-map-boat-rotate-btn path {
+  stroke: var(--ink);
+}
+.shop-map-boat-rotate-btn:hover circle {
+  fill: var(--brass-strong);
+  stroke: var(--brass-strong);
+}
+.shop-map-boat-rotate-btn:hover path {
+  stroke: var(--paper);
+}
