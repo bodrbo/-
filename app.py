@@ -128,6 +128,11 @@ from modules.software_requests import (
     create_blueprint as create_software_requests_blueprint,
     init_schema as init_software_requests_schema,
 )
+from modules.settings import (
+    create_blueprint as create_settings_blueprint,
+    init_schema as init_settings_schema,
+)
+from modules.settings import repository as settings_repository
 from modules.ai_assistant import (
     create_blueprint as create_ai_assistant_blueprint,
     init_schema as init_ai_assistant_schema,
@@ -2963,6 +2968,7 @@ def init_db():
         )
     init_offline_schema(conn)
     init_software_requests_schema(conn)
+    init_settings_schema(conn)
     # Client relationships are classified only after all legacy tables have
     # received their newer client_id columns above.
     init_client_segments_schema(conn)
@@ -4564,6 +4570,12 @@ app.register_blueprint(
         active_admin_account=_active_admin_account,
     )
 )
+app.register_blueprint(
+    create_settings_blueprint(
+        get_db=get_db,
+        admin_login_required=admin_login_required,
+    )
+)
 
 
 # =======================================================================
@@ -5012,6 +5024,46 @@ def _modulkassa_configured():
     return bool(MODULKASSA_USERNAME and MODULKASSA_PASSWORD)
 
 
+def _current_modulkassa_vat_tag(db):
+    """VAT tag for ModulKassa fiscal receipts — Настройки → Общие настройки
+    if an admin has set it there, otherwise the value that used to be
+    hardcoded (so an unmigrated database behaves exactly as before)."""
+    raw = settings_repository.get_value(db, "modulkassa_vat_tag", "")
+    try:
+        return int(raw) if raw else MODULKASSA_VAT_TAG
+    except ValueError:
+        return MODULKASSA_VAT_TAG
+
+
+def _current_yookassa_vat_code(db):
+    """VAT code for the tuning-center's own ЮKassa payments — same
+    Настройки-first, hardcoded-default-otherwise pattern."""
+    raw = settings_repository.get_value(db, "yookassa_vat_code", "")
+    try:
+        return int(raw) if raw else YOOKASSA_RECEIPT_VAT_CODE
+    except ValueError:
+        return YOOKASSA_RECEIPT_VAT_CODE
+
+
+def _current_yookassa_excursion_vat_code(db):
+    """VAT code for excursion-refund receipts. Falls back to the
+    tuning-center rate (Настройки "Как для тюнинг-центра") if not set
+    separately, then to the pre-Настройки env-var/hardcoded default."""
+    raw = settings_repository.get_value(db, "yookassa_excursion_vat_code", "")
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+        return YOOKASSA_EXCURSION_VAT_CODE
+    return _current_yookassa_vat_code(db)
+
+
+def _current_yookassa_excursion_payment_mode(db):
+    raw = settings_repository.get_value(db, "yookassa_excursion_payment_mode", "")
+    return raw or YOOKASSA_EXCURSION_PAYMENT_MODE
+
+
 def _modulkassa_contact_from_phone(phone):
     """ModulKassa's "email" field also accepts a phone number, required in
     the shape +7<10 digits> or 8<10 digits> — reformat whatever we have on
@@ -5051,7 +5103,7 @@ def _modulkassa_fiscalize_payment(db, order, payment_id, amount, payment_type):
             "name": f"Оплата по заказу №{order['id']}",
             "price": amount,
             "quantity": 1,
-            "vatTag": MODULKASSA_VAT_TAG,
+            "vatTag": _current_modulkassa_vat_tag(db),
             "paymentObject": "service",
             "paymentMethod": "full_payment",
         }],
@@ -9725,7 +9777,7 @@ def create_yookassa_payment(order_id):
                     "description": f"Оплата заказа №{order_id} в тюнинг-центре"[:128],
                     "quantity": 1,
                     "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
-                    "vat_code": YOOKASSA_RECEIPT_VAT_CODE,
+                    "vat_code": _current_yookassa_vat_code(db),
                     "measure": "piece",
                     "payment_subject": "service",
                     "payment_mode": "full_payment",
@@ -16054,8 +16106,8 @@ app.register_blueprint(
         yclients_configured=yclients_configured,
         yookassa_request=_yookassa_request,
         yookassa_configured=yookassa_configured,
-        receipt_vat_code=YOOKASSA_EXCURSION_VAT_CODE,
-        receipt_payment_mode=YOOKASSA_EXCURSION_PAYMENT_MODE,
+        receipt_vat_code=lambda: _current_yookassa_excursion_vat_code(get_db()),
+        receipt_payment_mode=lambda: _current_yookassa_excursion_payment_mode(get_db()),
     )
 )
 

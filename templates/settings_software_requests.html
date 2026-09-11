@@ -37,6 +37,7 @@
 
 <main class="wrap software-requests-page">
   <nav class="sub-tabs software-settings-tabs" aria-label="Разделы настроек">
+    <a href="{{ url_for('settings.index') }}">Общие настройки</a>
     <a href="{{ url_for('software_requests.index') }}" class="active">Заявки на доработку софта</a>
   </nav>
 

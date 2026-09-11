@@ -16,6 +16,10 @@ def create_refunds_blueprint(
     yookassa_configured,
     receipt_vat_code,
     receipt_payment_mode,
+    # receipt_vat_code/receipt_payment_mode are zero-arg callables, not
+    # plain values — they read Настройки → Общие настройки on each call,
+    # so a rate change there applies to the very next refund without an
+    # app restart.
 ):
     blueprint = Blueprint("refunds", __name__)
 
@@ -165,8 +169,8 @@ def create_refunds_blueprint(
                 request.form.get("confirmed") == "1",
                 session.get("admin_name") or "Администратор",
                 yookassa_request,
-                receipt_vat_code,
-                receipt_payment_mode,
+                receipt_vat_code(),
+                receipt_payment_mode(),
             )
         except Exception as error:
             success, message = False, f"Возврат не выполнен: {error}"
