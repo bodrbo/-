@@ -7664,6 +7664,18 @@ def tuning_shop_map():
                 boat["footprint_h_px"] = boat["box_h_px"]
             boat["rotate_btn_x"] = boat["x_px"] + boat["footprint_w_px"] + 13
             boat["rotate_btn_y"] = boat["y_px"] + 2
+            # Rough estimate of how many characters of the 10px bold label
+            # fit across the footprint — end-truncated with an ellipsis so
+            # the model's start (the identifying part) survives; a
+            # clip-path in the template is the hard backstop if this
+            # estimate runs a little long.
+            avg_char_px = 6.4
+            max_chars = max(3, int((boat["footprint_w_px"] - 6) / avg_char_px))
+            model_text = boat["boat_model"]
+            if len(model_text) > max_chars:
+                boat["label_text"] = model_text[:max_chars - 1].rstrip() + "…"
+            else:
+                boat["label_text"] = model_text
             boats_on_map.append(boat)
         else:
             boats_missing_dimensions.append(boat)

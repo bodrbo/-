@@ -10321,6 +10321,12 @@ button.partner-open-price-save svg {
 .shop-map-boat-drag.dragging .shop-map-boat-hull {
   fill: var(--brass-strong);
 }
+.shop-map-boat-label {
+  fill: var(--paper);
+  font-size: 10px;
+  font-weight: 700;
+  pointer-events: none;
+}
 .shop-map-boat-rotate-btn {
   cursor: pointer;
 }

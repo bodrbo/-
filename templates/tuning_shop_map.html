@@ -173,6 +173,12 @@
               </path>
             </g>
           </a>
+          <clipPath id="shopMapBoatLabelClip{{ boat.id }}">
+            <rect x="{{ boat.x_px }}" y="{{ boat.y_px }}" width="{{ boat.footprint_w_px }}" height="{{ boat.footprint_h_px }}"/>
+          </clipPath>
+          <text x="{{ boat.x_px + boat.footprint_w_px / 2 }}" y="{{ boat.y_px + boat.footprint_h_px / 2 }}"
+                text-anchor="middle" dominant-baseline="central" class="shop-map-boat-label"
+                clip-path="url(#shopMapBoatLabelClip{{ boat.id }})">{{ boat.label_text }}</text>
           <g class="shop-map-boat-rotate-btn" data-rotate-url="{{ url_for('rotate_shop_map_boat', boat_id=boat.id) }}"
              transform="translate({{ boat.rotate_btn_x }}, {{ boat.rotate_btn_y }})">
             <circle r="9"/>
