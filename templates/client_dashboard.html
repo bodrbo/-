@@ -96,6 +96,20 @@
           </form>
         </dd>
       </div>
+      <div class="client-contact-method">
+        <dt>Способ связи</dt>
+        <dd>
+          <form method="post" action="{{ url_for('update_client_contact_method', client_id=client.id) }}">
+            <select name="preferred_contact_method" aria-label="Желаемый способ связи с клиентом {{ client.client_name }}" onchange="this.form.submit()">
+              <option value="" {{ 'selected' if not client.preferred_contact_method }}>Не указан</option>
+              {% for method in client_contact_methods %}
+              <option value="{{ method.value }}" {{ 'selected' if client.preferred_contact_method == method.value }}>{{ method.label }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="sr-only">Сохранить способ связи</button>
+          </form>
+        </dd>
+      </div>
       {% endif %}
     </dl>
   </section>

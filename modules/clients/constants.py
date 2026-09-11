@@ -21,3 +21,10 @@ CLIENT_ACQUISITION_CHANNELS = (
     {"value": "sputnik", "label": "Спутник"},
     {"value": "bodrbo_fort", "label": "Сайт bodrbo-fort.ru"},
 )
+
+CLIENT_CONTACT_METHODS = (
+    {"value": "telegram", "label": "Telegram"},
+    {"value": "whatsapp", "label": "WhatsApp"},
+    {"value": "max", "label": "MAX"},
+    {"value": "email", "label": "Почта"},
+)

@@ -8884,7 +8884,18 @@ button.captain-command-alert:hover {
 .client-admin-profile dl,
 .client-admin-order-facts { display: grid; margin: 0; }
 .client-admin-profile dl { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.client-admin-profile dl.has-acquisition-channel { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+/* Two excursion-only fields (acquisition channel + contact method) always
+   appear together, so this is 4 base fields + those 2 — 6 total. Six
+   columns need more room per column than the plain 4-column dl did, so
+   it drops to the 2-column stacked layout at a wider point (see the
+   960px query below) rather than sharing the plain dl's 780px one. */
+.client-admin-profile dl.has-acquisition-channel { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 960px) {
+  .client-admin-profile dl.has-acquisition-channel { grid-template-columns: 1fr 1fr; }
+  .client-admin-profile dl.has-acquisition-channel > div { padding: 9px 10px; border-bottom: 1px solid var(--hairline-soft); }
+  .client-admin-profile dl.has-acquisition-channel > div:nth-child(2n) { border-right: 0; }
+  .client-admin-profile dl.has-acquisition-channel > div:nth-last-child(-n+2) { border-bottom: 0; }
+}
 .client-admin-profile dl > div { min-width: 0; padding: 3px 14px; border-right: 1px solid var(--hairline-soft); }
 .client-admin-profile dl > div:first-child { padding-left: 0; }
 .client-admin-profile dl > div:last-child { padding-right: 0; border-right: 0; }
@@ -8898,7 +8909,8 @@ button.captain-command-alert:hover {
 }
 .client-admin-profile dd,
 .client-admin-order-facts dd { margin: 4px 0 0; color: var(--ink); font-size: 12px; font-weight: 700; }
-.client-acquisition-channel select {
+.client-acquisition-channel select,
+.client-contact-method select {
   width: 100%;
   min-height: 36px;
   padding: 7px 30px 7px 10px;
@@ -8995,8 +9007,6 @@ button.captain-command-alert:hover {
   .client-admin-profile dl > div { padding: 9px 10px; border-bottom: 1px solid var(--hairline-soft); }
   .client-admin-profile dl > div:nth-child(2n) { border-right: 0; }
   .client-admin-profile dl > div:nth-last-child(-n+2) { border-bottom: 0; }
-  .client-admin-profile dl.has-acquisition-channel > div:nth-last-child(-n+2) { border-bottom: 1px solid var(--hairline-soft); }
-  .client-admin-profile dl.has-acquisition-channel > div:last-child { grid-column: 1 / -1; border-right: 0; border-bottom: 0; }
   .client-admin-order-facts { grid-template-columns: 1fr 1fr; }
   .client-admin-order-facts > div:nth-child(3n) { border-right: 1px solid var(--hairline-soft); }
   .client-admin-order-facts > div:nth-child(2n) { border-right: 0; }

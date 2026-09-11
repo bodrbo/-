@@ -162,6 +162,7 @@ from modules.clients import (
 from modules.clients.partner_quote_pdf import build_partner_quote_pdf
 from modules.clients.constants import (
     CLIENT_ACQUISITION_CHANNELS,
+    CLIENT_CONTACT_METHODS,
     CLIENT_RELATIONSHIP_CLIENT,
     CLIENT_RELATIONSHIP_OPTIONS,
     CLIENT_RELATIONSHIP_PARTNER,
@@ -2230,6 +2231,11 @@ def init_db():
         conn.execute(
             "ALTER TABLE clients "
             "ADD COLUMN acquisition_channel TEXT NOT NULL DEFAULT ''"
+        )
+    if "preferred_contact_method" not in client_cols:
+        conn.execute(
+            "ALTER TABLE clients "
+            "ADD COLUMN preferred_contact_method TEXT NOT NULL DEFAULT ''"
         )
     conn.execute(
         """
@@ -9705,6 +9711,7 @@ def _render_client_dashboard(
         ),
         work_photos_by_item=work_photos_by_item, cost_units=SUPPLY_COST_UNITS,
         client_acquisition_channels=CLIENT_ACQUISITION_CHANNELS,
+        client_contact_methods=CLIENT_CONTACT_METHODS,
         viewer_role=viewer_role,
         client_section=client_section,
         client_relationship=client_relationship,
@@ -10329,6 +10336,30 @@ def update_client_acquisition_channel(client_id):
         db.execute(
             "UPDATE clients SET acquisition_channel = ? WHERE id = ?",
             (channel, client_id),
+        )
+        db.commit()
+    return redirect(url_for(
+        "admin_client_dashboard", client_id=client_id,
+        section=EXCURSION_SEGMENT,
+    ))
+
+
+@app.route(
+    "/admin/clients/<int:client_id>/contact-method", methods=["POST"]
+)
+@excursion_manager_or_admin_required
+def update_client_contact_method(client_id):
+    db = get_db()
+    method = request.form.get("preferred_contact_method", "").strip()
+    allowed_methods = {item["value"] for item in CLIENT_CONTACT_METHODS}
+    is_excursion_client = db.execute(
+        "SELECT 1 FROM client_segments WHERE client_id = ? AND segment = ?",
+        (client_id, EXCURSION_SEGMENT),
+    ).fetchone() is not None
+    if is_excursion_client and (not method or method in allowed_methods):
+        db.execute(
+            "UPDATE clients SET preferred_contact_method = ? WHERE id = ?",
+            (method, client_id),
         )
         db.commit()
     return redirect(url_for(
