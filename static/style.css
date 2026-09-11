@@ -10216,3 +10216,59 @@ button.partner-open-price-save svg {
 @media (prefers-reduced-motion: reduce) {
   .partner-request-cta { transition: none; }
 }
+
+/* Карта цеха */
+.shop-map-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.shop-map-heading h2 { margin: 4px 0 0; }
+.shop-map-room-editor { position: relative; }
+.shop-map-room-editor summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--paper-alt);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+  list-style: none;
+  cursor: pointer;
+}
+.shop-map-room-editor summary::-webkit-details-marker { display: none; }
+.shop-map-room-editor summary:hover,
+.shop-map-room-editor[open] summary { border-color: var(--brass); color: var(--brass-strong); }
+.shop-map-room-popover {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 7px);
+  right: 0;
+  width: min(340px, 90vw);
+  padding: 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 12px 28px rgba(15,42,53,.16);
+}
+.shop-map-canvas-wrap {
+  overflow-x: auto;
+  padding: 10px 0;
+}
+.shop-map-svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  font-family: inherit;
+}
+.shop-map-dimension-label {
+  font-size: 11px;
+  font-weight: 700;
+  fill: var(--ink-soft);
+}

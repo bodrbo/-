@@ -3003,6 +3003,25 @@ def init_db():
     init_offline_schema(conn)
     init_software_requests_schema(conn)
     init_settings_schema(conn)
+    # Карта цеха — a single-row room outline for now (width/length of the
+    # shop floor, drawn to scale as an SVG). Elements inside it (workbenches,
+    # shelving, eventually boats with a timeline) are a later step; this is
+    # just the base rectangle everything else will be positioned against.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS shop_map_room (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            width_m REAL NOT NULL,
+            length_m REAL NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    if conn.execute("SELECT COUNT(*) FROM shop_map_room").fetchone()[0] == 0:
+        conn.execute(
+            "INSERT INTO shop_map_room (width_m, length_m, updated_at) VALUES (?, ?, ?)",
+            (12.3, 18.0, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+        )
     # Client relationships are classified only after all legacy tables have
     # received their newer client_id columns above.
     init_client_segments_schema(conn)
@@ -7428,15 +7447,69 @@ app.register_blueprint(
 )
 
 
+SHOP_MAP_SCALE = 24   # px per meter, drawn to scale
+SHOP_MAP_PADDING = 50  # px around the room rect for dimension labels
+
+
 @app.route("/tuning/shop-map")
 @admin_login_required
 def tuning_shop_map():
-    # Placeholder screen — next steps (per the owner): a drawn floor plan
-    # of the shop, then live boat positions on it with a timeline. No data
-    # model yet, deliberately, until the floor plan itself exists.
+    # Base room outline for now — next steps (per the owner): workbenches,
+    # shelving and other fixed elements that affect where boats can go,
+    # then live boat positions on it with a timeline.
+    db = get_db()
+    room_row = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+    room = dict(room_row)
+    room["room_w_px"] = room["length_m"] * SHOP_MAP_SCALE
+    room["room_h_px"] = room["width_m"] * SHOP_MAP_SCALE
+    room["svg_w"] = room["room_w_px"] + SHOP_MAP_PADDING * 2
+    room["svg_h"] = room["room_h_px"] + SHOP_MAP_PADDING * 2
     return render_template(
         "tuning_shop_map.html", active_page="tuning", sub_page="shop_map",
+        room=room, scale=SHOP_MAP_SCALE, padding=SHOP_MAP_PADDING,
+        room_error=session.pop("shop_map_room_error", None),
     )
+
+
+@app.route("/tuning/shop-map/room", methods=["POST"])
+@admin_login_required
+def update_shop_map_room():
+    db = get_db()
+    width_raw = request.form.get("width_m", "").strip().replace(",", ".")
+    length_raw = request.form.get("length_m", "").strip().replace(",", ".")
+
+    errors = []
+
+    def _parse_positive(raw, label):
+        try:
+            value = float(raw)
+            if value <= 0:
+                raise ValueError
+            return value
+        except ValueError:
+            errors.append(f"{label} должна быть положительным числом в метрах.")
+            return None
+
+    width_m = _parse_positive(width_raw, "Ширина")
+    length_m = _parse_positive(length_raw, "Длина")
+    if errors:
+        session["shop_map_room_error"] = " ".join(errors)
+        return redirect(url_for("tuning_shop_map"))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    room = db.execute("SELECT id FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+    if room is not None:
+        db.execute(
+            "UPDATE shop_map_room SET width_m = ?, length_m = ?, updated_at = ? WHERE id = ?",
+            (width_m, length_m, now, room["id"]),
+        )
+    else:
+        db.execute(
+            "INSERT INTO shop_map_room (width_m, length_m, updated_at) VALUES (?, ?, ?)",
+            (width_m, length_m, now),
+        )
+    db.commit()
+    return redirect(url_for("tuning_shop_map"))
 
 
 @app.route("/tuning/diagnostics/hull")
