@@ -116,6 +116,15 @@
         <rect x="{{ padding }}" y="{{ padding }}" width="{{ room.room_w_px }}" height="{{ room.room_h_px }}"
               fill="var(--paper-alt)" stroke="var(--ink)" stroke-width="4"/>
 
+        <g class="shop-map-elements">
+          {% for el in elements %}
+          <rect x="{{ el.x_px }}" y="{{ el.y_px }}" width="{{ el.w_px }}" height="{{ el.h_px }}"
+                class="shop-map-element-rect">
+            <title>{{ el.name }} — {{ el.width_m|float|round(2) }} × {{ el.height_m|float|round(2) }} м</title>
+          </rect>
+          {% endfor %}
+        </g>
+
         <g class="shop-map-dimension" stroke="var(--muted)" stroke-width="1">
           <line x1="{{ padding }}" y1="{{ padding - 24 }}" x2="{{ padding }}" y2="{{ padding - 16 }}"/>
           <line x1="{{ padding + room.room_w_px }}" y1="{{ padding - 24 }}" x2="{{ padding + room.room_w_px }}" y2="{{ padding - 16 }}"/>
@@ -132,7 +141,77 @@
               transform="rotate(-90 {{ padding - 28 }} {{ padding + room.room_h_px / 2 }})">{{ room.width_m|float|round(2) }} м</text>
       </svg>
     </div>
-    <p class="hint">Следующим шагом — верстаки, стеллажи и другие элементы, которые тоже будут влиять на расположение лодок.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Элементы цеха</h2>
+    <p class="hint">Верстаки, стеллажи и другие несдвигаемые зоны — они тоже будут влиять на расположение лодок.</p>
+    {% if element_error %}
+    <div class="alert"><strong>Не удалось добавить:</strong> {{ element_error }}</div>
+    {% endif %}
+    {% if elements %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th>Название</th>
+            <th>От левой стены</th>
+            <th>От верхней стены</th>
+            <th>Длина × Ширина</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for el in elements %}
+          <tr>
+            <td class="term">{{ el.name }}</td>
+            <td class="muted">{{ el.x_m|float|round(2) }} м</td>
+            <td class="muted">{{ el.y_m|float|round(2) }} м</td>
+            <td class="muted">{{ el.width_m|float|round(2) }} × {{ el.height_m|float|round(2) }} м</td>
+            <td class="row-actions">
+              <form action="{{ url_for('delete_shop_map_element', element_id=el.id) }}" method="post"
+                    onsubmit="return confirm('Удалить эту зону с карты?');">
+                <button type="submit" class="icon-btn danger" title="Удалить">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 5l10 10M15 5L5 15"/>
+                  </svg>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint">Пока не добавлено ни одной зоны.</p>
+    {% endif %}
+    <form action="{{ url_for('add_shop_map_element') }}" method="post" class="entry-form">
+      <div class="field">
+        <label for="elementName">Название</label>
+        <input type="text" id="elementName" name="name" placeholder="Например, Инструментально-верстачная зона" required>
+      </div>
+      <div class="field field-narrow">
+        <label for="elementX">От левой стены, м</label>
+        <input type="text" inputmode="decimal" id="elementX" name="x_m" placeholder="0" required>
+      </div>
+      <div class="field field-narrow">
+        <label for="elementY">От верхней стены, м</label>
+        <input type="text" inputmode="decimal" id="elementY" name="y_m" placeholder="0" required>
+      </div>
+      <div class="field field-narrow">
+        <label for="elementWidth">Длина, м</label>
+        <input type="text" inputmode="decimal" id="elementWidth" name="width_m" required>
+      </div>
+      <div class="field field-narrow">
+        <label for="elementHeight">Ширина, м</label>
+        <input type="text" inputmode="decimal" id="elementHeight" name="height_m" required>
+      </div>
+      <div class="field field-submit">
+        <button type="submit">Добавить</button>
+      </div>
+    </form>
+    <p class="hint">Длина — вдоль верхней стены, слева направо. Ширина — вглубь цеха, от верхней стены.</p>
   </section>
 
 </main>

@@ -3022,6 +3022,25 @@ def init_db():
             "INSERT INTO shop_map_room (width_m, length_m, updated_at) VALUES (?, ?, ?)",
             (12.3, 18.0, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
         )
+    # Fixed elements on the map (workbenches, shelving, ...) — rectangular
+    # zones positioned from the room's own top-left corner (x along its
+    # length, y along its width), the same axes the room SVG already draws
+    # in. Not linked to a "kind" enum yet — only one category exists so
+    # far, add one if/when the owner needs to tell zone types apart.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS shop_map_elements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            x_m REAL NOT NULL,
+            y_m REAL NOT NULL,
+            width_m REAL NOT NULL,
+            height_m REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
     # Client relationships are classified only after all legacy tables have
     # received their newer client_id columns above.
     init_client_segments_schema(conn)
@@ -7464,10 +7483,24 @@ def tuning_shop_map():
     room["room_h_px"] = room["width_m"] * SHOP_MAP_SCALE
     room["svg_w"] = room["room_w_px"] + SHOP_MAP_PADDING * 2
     room["svg_h"] = room["room_h_px"] + SHOP_MAP_PADDING * 2
+
+    elements = []
+    for row in db.execute(
+        "SELECT * FROM shop_map_elements ORDER BY y_m, x_m, id"
+    ).fetchall():
+        element = dict(row)
+        element["x_px"] = SHOP_MAP_PADDING + element["x_m"] * SHOP_MAP_SCALE
+        element["y_px"] = SHOP_MAP_PADDING + element["y_m"] * SHOP_MAP_SCALE
+        element["w_px"] = element["width_m"] * SHOP_MAP_SCALE
+        element["h_px"] = element["height_m"] * SHOP_MAP_SCALE
+        elements.append(element)
+
     return render_template(
         "tuning_shop_map.html", active_page="tuning", sub_page="shop_map",
         room=room, scale=SHOP_MAP_SCALE, padding=SHOP_MAP_PADDING,
+        elements=elements,
         room_error=session.pop("shop_map_room_error", None),
+        element_error=session.pop("shop_map_element_error", None),
     )
 
 
@@ -7508,6 +7541,73 @@ def update_shop_map_room():
             "INSERT INTO shop_map_room (width_m, length_m, updated_at) VALUES (?, ?, ?)",
             (width_m, length_m, now),
         )
+    db.commit()
+    return redirect(url_for("tuning_shop_map"))
+
+
+@app.route("/tuning/shop-map/elements/add", methods=["POST"])
+@admin_login_required
+def add_shop_map_element():
+    db = get_db()
+    room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+
+    name = request.form.get("name", "").strip()
+    errors = []
+    if not name:
+        errors.append("Укажите название зоны.")
+
+    def _parse_positive(raw, label):
+        raw = raw.strip().replace(",", ".")
+        try:
+            value = float(raw)
+            if value <= 0:
+                raise ValueError
+            return value
+        except ValueError:
+            errors.append(f"«{label}» должна быть положительным числом в метрах.")
+            return None
+
+    def _parse_nonnegative(raw, label):
+        raw = raw.strip().replace(",", ".")
+        try:
+            value = float(raw)
+            if value < 0:
+                raise ValueError
+            return value
+        except ValueError:
+            errors.append(f"«{label}» должна быть числом в метрах, не меньше нуля.")
+            return None
+
+    x_m = _parse_nonnegative(request.form.get("x_m", ""), "От левой стены")
+    y_m = _parse_nonnegative(request.form.get("y_m", ""), "От верхней стены")
+    width_m = _parse_positive(request.form.get("width_m", ""), "Длина")
+    height_m = _parse_positive(request.form.get("height_m", ""), "Ширина")
+
+    if not errors and room is not None:
+        if x_m is not None and width_m is not None and x_m + width_m > room["length_m"] + 0.001:
+            errors.append("Зона выходит за пределы цеха по длине.")
+        if y_m is not None and height_m is not None and y_m + height_m > room["width_m"] + 0.001:
+            errors.append("Зона выходит за пределы цеха по ширине.")
+
+    if errors:
+        session["shop_map_element_error"] = " ".join(errors)
+        return redirect(url_for("tuning_shop_map"))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "INSERT INTO shop_map_elements (name, x_m, y_m, width_m, height_m, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (name, x_m, y_m, width_m, height_m, now, now),
+    )
+    db.commit()
+    return redirect(url_for("tuning_shop_map"))
+
+
+@app.route("/tuning/shop-map/elements/<int:element_id>/delete", methods=["POST"])
+@admin_login_required
+def delete_shop_map_element(element_id):
+    db = get_db()
+    db.execute("DELETE FROM shop_map_elements WHERE id = ?", (element_id,))
     db.commit()
     return redirect(url_for("tuning_shop_map"))
 

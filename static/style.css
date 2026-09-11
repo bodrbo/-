@@ -10272,3 +10272,8 @@ button.partner-open-price-save svg {
   font-weight: 700;
   fill: var(--ink-soft);
 }
+.shop-map-element-rect {
+  fill: rgba(212, 141, 74, 0.35);
+  stroke: var(--warning);
+  stroke-width: 1.5;
+}
