@@ -100,6 +100,66 @@ def validate_form(db, form, boats, service_id=None):
     }
 
 
+def validate_addon_product_form(db, form, product_id=None):
+    errors = []
+    name = _normalise_name(form.get("name"))
+    if len(name) < 2:
+        errors.append("Укажите название товара.")
+    cost_price = _parse_number(
+        form.get("cost_price"), "Себестоимость", 0, 10_000_000, errors
+    )
+    sale_price = _parse_number(
+        form.get("sale_price"), "Цена продажи", 0, 10_000_000, errors
+    )
+    raw_auto_add = str(form.get("auto_add_service_id") or "").strip()
+    auto_add_service_id = None
+    if raw_auto_add:
+        try:
+            auto_add_service_id = int(raw_auto_add)
+        except ValueError:
+            errors.append("Некорректная услуга для автодобавления.")
+        else:
+            if repository.get_service(db, auto_add_service_id) is None:
+                errors.append("Услуга для автодобавления не найдена.")
+    existing = repository.get_addon_product_by_name(db, name) if name else None
+    if existing is not None and existing["id"] != product_id:
+        errors.append("Товар с таким названием уже есть в каталоге.")
+    return errors, {
+        "name": name,
+        "cost_price": cost_price,
+        "sale_price": sale_price,
+        "auto_add_service_id": auto_add_service_id,
+    }
+
+
+def create_addon_product(db, form):
+    errors, data = validate_addon_product_form(db, form)
+    if errors:
+        return False, " ".join(errors), data
+    try:
+        product_id = repository.create_addon_product(db, data, current_timestamp())
+    except sqlite3.IntegrityError:
+        return False, "Название уже используется.", data
+    return True, f"Товар «{data['name']}» добавлен.", product_id
+
+
+def update_addon_product(db, product_id, form):
+    if repository.get_addon_product(db, product_id) is None:
+        return False, "Товар не найден.", None
+    errors, data = validate_addon_product_form(db, form, product_id=product_id)
+    if errors:
+        return False, " ".join(errors), data
+    try:
+        updated = repository.update_addon_product(
+            db, product_id, data, current_timestamp()
+        )
+    except sqlite3.IntegrityError:
+        return False, "Название уже используется.", data
+    if not updated:
+        return False, "Товар не найден.", data
+    return True, f"Товар «{data['name']}» обновлён.", data
+
+
 def create_service(db, form, boats):
     errors, data = validate_form(db, form, boats)
     if errors:

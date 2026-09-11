@@ -46,8 +46,94 @@
       <span>{{ label }}</span><b>{{ service_counts[value] }}</b>
     </a>
     {% endfor %}
+    <a href="{{ url_for('excursion_services.index', section='goods') }}" class="{{ 'active' if section == 'goods' }}">
+      <span>Сопутствующие товары</span><b>{{ addon_products|length }}</b>
+    </a>
   </nav>
 
+  {% if section == 'goods' %}
+  <section class="panel excursion-service-create" id="new-product">
+    <div class="excursion-service-create-heading">
+      <div>
+        <p class="excursion-service-eyebrow">Новый товар</p>
+        <h2>Добавить сопутствующий товар</h2>
+      </div>
+      <p>Виртуальные товары, которые клиент экскурсии может купить дополнительно — билеты и похожее.</p>
+    </div>
+    <form action="{{ url_for('excursion_services.create_addon_product') }}" method="post" class="excursion-service-form">
+      <label class="excursion-service-name">
+        <span>Название</span>
+        <input name="name" maxlength="180" value="{{ addon_create_values.get('name', '') }}" placeholder="Например, Билет на форт Граф Милютин" required>
+      </label>
+      <label>
+        <span>Себестоимость, ₽</span>
+        <input type="number" name="cost_price" min="0" max="10000000" step="1" value="{{ addon_create_values.get('cost_price', '0') }}" required>
+      </label>
+      <label>
+        <span>Цена продажи, ₽</span>
+        <input type="number" name="sale_price" min="0" max="10000000" step="1" value="{{ addon_create_values.get('sale_price', '0') }}" required>
+      </label>
+      <label class="excursion-service-name">
+        <span>Автодобавление по услуге</span>
+        <select name="auto_add_service_id">
+          <option value="">Не добавлять автоматически</option>
+          {% for svc in addon_services %}
+          <option value="{{ svc.id }}" {{ 'selected' if addon_create_values.get('auto_add_service_id')|string == svc.id|string }}>{{ svc.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit">Добавить товар</button>
+    </form>
+  </section>
+
+  <div class="excursion-services-heading">
+    <div>
+      <p class="excursion-service-eyebrow">Действующий прайс</p>
+      <h2>Сопутствующие товары · {{ addon_products|length }}</h2>
+    </div>
+    <p>Товар с указанной услугой автодобавления попадает в рейс сам, по числу гостей у нового участника — можно удалить или добавить вручную в карточке рейса. По остальным услугам товар добавляется только вручную.</p>
+  </div>
+
+  <section class="excursion-service-list" aria-label="Каталог сопутствующих товаров">
+    {% for product in addon_products %}
+    <article class="panel excursion-service-row" id="product-{{ product.id }}">
+      <div class="excursion-service-index" aria-hidden="true">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6.5l7-3.5 7 3.5-7 3.5-7-3.5z"/><path d="M3 6.5V14l7 3.5 7-3.5V6.5"/><path d="M10 10v7.5"/></svg>
+      </div>
+      <form action="{{ url_for('excursion_services.update_addon_product', product_id=product.id) }}" method="post" class="excursion-service-form">
+        <label class="excursion-service-name">
+          <span>Название</span>
+          <input name="name" maxlength="180" value="{{ product.name }}" required>
+        </label>
+        <label>
+          <span>Себестоимость, ₽</span>
+          <span class="excursion-service-price-input"><input type="number" name="cost_price" min="0" max="10000000" step="1" value="{{ product.cost_price|round(2) }}" required><b>₽</b></span>
+        </label>
+        <label>
+          <span>Цена продажи, ₽</span>
+          <span class="excursion-service-price-input"><input type="number" name="sale_price" min="0" max="10000000" step="1" value="{{ product.sale_price|round(2) }}" required><b>₽</b></span>
+        </label>
+        <label class="excursion-service-name">
+          <span>Автодобавление по услуге</span>
+          <select name="auto_add_service_id">
+            <option value="">Не добавлять автоматически</option>
+            {% for svc in addon_services %}
+            <option value="{{ svc.id }}" {{ 'selected' if product.auto_add_service_id == svc.id }}>{{ svc.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit" class="btn-secondary excursion-service-save">Сохранить</button>
+      </form>
+    </article>
+    {% else %}
+    <div class="panel empty-state">
+      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      <div class="t">В каталоге пока нет сопутствующих товаров</div>
+      <div class="s">Добавьте первый товар выше.</div>
+    </div>
+    {% endfor %}
+  </section>
+  {% else %}
   <section class="panel excursion-service-create" id="new-service">
     <div class="excursion-service-create-heading">
       <div>
@@ -159,6 +245,7 @@
     </div>
     {% endfor %}
   </section>
+  {% endif %}
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>

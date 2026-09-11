@@ -4,6 +4,8 @@ import datetime as dt
 import math
 import secrets
 
+from modules.excursion_services import repository as service_repository
+
 from . import repository
 from .constants import (
     CREW_ROLES,
@@ -605,6 +607,32 @@ def delete_item(db, item_id):
         )
     deleted = repository.soft_delete_item(db, item_id, current_timestamp())
     return (True, "Рейс удалён из расписания.") if deleted else (False, "Рейс не найден.")
+
+
+def add_participant_addon(db, item_id, client_id, product_id, raw_quantity):
+    if repository.get_item(db, item_id) is None:
+        return False, "Рейс не найден.", None
+    if not repository.is_participant_of_item(db, item_id, client_id):
+        return False, "Этот клиент не участвует в рейсе.", None
+    product = service_repository.get_addon_product(db, product_id)
+    if product is None:
+        return False, "Товар не найден.", None
+    try:
+        quantity = int(raw_quantity)
+    except (TypeError, ValueError):
+        quantity = 0
+    if quantity <= 0:
+        return False, "Количество должно быть больше нуля.", None
+    repository.add_participant_addon(
+        db, item_id, client_id, product_id, quantity, current_timestamp()
+    )
+    return True, f"«{product['name']}» добавлен.", product
+
+
+def remove_participant_addon(db, item_id, addon_id):
+    if not repository.remove_participant_addon(db, addon_id, item_id):
+        return False, "Товар не найден."
+    return True, "Товар удалён."
 
 
 def add_day_crew_member(db, day, employee_id):

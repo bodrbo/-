@@ -76,3 +76,47 @@ def init_schema(conn):
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_excursion_services_tripster_id "
         "ON excursion_services(tripster_id)"
     )
+
+    # "Сопутствующие товары" — virtual add-on products a guest can buy
+    # alongside an excursion (tickets, etc.), separate from the services
+    # above since they're priced/costed rather than duration/boat-priced.
+    # auto_add_service_id, when set, is the trigger this session's schedule
+    # module watches: adding a participant to a trip on that service
+    # auto-attaches this product at quantity = guests_count (see
+    # modules/schedule/repository.py, save_item).
+    addon_products_is_new = conn.execute(
+        "SELECT 1 FROM sqlite_master "
+        "WHERE type = 'table' AND name = 'excursion_addon_products'"
+    ).fetchone() is None
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS excursion_addon_products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+            cost_price REAL NOT NULL DEFAULT 0,
+            sale_price REAL NOT NULL DEFAULT 0,
+            auto_add_service_id INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    if addon_products_is_new:
+        timestamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        big_tour = conn.execute(
+            "SELECT id FROM excursion_services WHERE name = ? COLLATE NOCASE",
+            ("Большой тур",),
+        ).fetchone()
+        conn.execute(
+            "INSERT INTO excursion_addon_products "
+            "(name, cost_price, sale_price, auto_add_service_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                "Билет на форт Граф Милютин", 350, 450,
+                big_tour[0] if big_tour else None, timestamp, timestamp,
+            ),
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_excursion_addon_products_auto_add "
+        "ON excursion_addon_products(auto_add_service_id)"
+    )

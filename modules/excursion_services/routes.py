@@ -23,9 +23,10 @@ def create_blueprint(get_db, access_required, is_manager_view, boats):
     @access_required
     def index():
         section = request.args.get("section", "group")
-        if section not in SERVICE_TYPES:
+        if section not in SERVICE_TYPES and section != "goods":
             section = "group"
-        catalog = repository.list_services(get_db())
+        db = get_db()
+        catalog = repository.list_services(db)
         return render_template(
             "excursion_services/index.html",
             services=[
@@ -46,6 +47,9 @@ def create_blueprint(get_db, access_required, is_manager_view, boats):
             create_values=session.pop("excursion_services_create_values", {}),
             active_page="services",
             manager_view=is_manager_view(),
+            addon_products=repository.list_addon_products(db),
+            addon_services=catalog,
+            addon_create_values=session.pop("excursion_addon_create_values", {}),
         )
 
     @blueprint.route("/services", methods=["POST"])
@@ -76,6 +80,29 @@ def create_blueprint(get_db, access_required, is_manager_view, boats):
             section = data["service_type"]
         return redirect_with_notice(
             message, success, section, f"service-{service_id}"
+        )
+
+    @blueprint.route("/services/goods", methods=["POST"])
+    @access_required
+    def create_addon_product():
+        success, message, result = services.create_addon_product(
+            get_db(), request.form
+        )
+        if not success:
+            session["excursion_addon_create_values"] = result or {}
+        return redirect_with_notice(
+            message, success, "goods",
+            f"product-{result}" if success else "new-product",
+        )
+
+    @blueprint.route("/services/goods/<int:product_id>", methods=["POST"])
+    @access_required
+    def update_addon_product(product_id):
+        success, message, _data = services.update_addon_product(
+            get_db(), product_id, request.form
+        )
+        return redirect_with_notice(
+            message, success, "goods", f"product-{product_id}"
         )
 
     return blueprint

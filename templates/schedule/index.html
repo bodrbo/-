@@ -349,6 +349,17 @@
       </footer>
     </form>
 
+    <div class="schedule-addons-section schedule-form-section" id="scheduleAddonsSection" hidden>
+      <div class="schedule-form-section-heading">
+        <span>Сопутствующие товары</span>
+        <small>Билеты и другие товары, купленные участниками рейса</small>
+      </div>
+      <div id="scheduleAddonsList" class="schedule-addons-list"></div>
+    </div>
+    <p class="hint schedule-addons-new-hint" id="scheduleAddonsNewHint" hidden>
+      Сопутствующие товары можно будет добавить после первого сохранения рейса.
+    </p>
+
     <form method="post" id="scheduleDeleteForm" class="schedule-delete-form" hidden onsubmit="return confirm('Удалить рейс из расписания?');">
       <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
       <input type="hidden" name="return_employee" value="{{ selected_employee }}">
@@ -534,6 +545,7 @@
   const scheduleBaseUrl = {{ url_for('schedule.index')|tojson }};
   const scheduleCreateUrl = {{ url_for('schedule.create_item')|tojson }};
   const scheduleClientSearchUrl = {{ url_for('schedule.search_clients')|tojson }};
+  const scheduleAddonProducts = {{ addon_products|tojson }};
   const scheduleClientTimers = new WeakMap();
   const scheduleClientRequests = new WeakMap();
   let scheduleParticipantSerial = 0;
@@ -614,6 +626,9 @@
     document.getElementById('scheduleParticipantRows').innerHTML = '';
     document.getElementById('scheduleLegacyParticipants').hidden = true;
     document.getElementById('scheduleDeleteForm').hidden = true;
+    document.getElementById('scheduleAddonsSection').hidden = true;
+    document.getElementById('scheduleAddonsNewHint').hidden = true;
+    document.getElementById('scheduleAddonsList').innerHTML = '';
     document.querySelectorAll('[data-client-picker]').forEach(picker => {
       picker.dataset.selectedPhone = '';
       picker.querySelector('[data-client-id]').value = '';
@@ -634,6 +649,7 @@
       );
     }
     addScheduleAssignment(employeeId || '');
+    document.getElementById('scheduleAddonsNewHint').hidden = false;
     setScheduleModalOpen(true);
   }
   function openScheduleEdit(itemId) {
@@ -708,8 +724,125 @@
     const deleteForm = document.getElementById('scheduleDeleteForm');
     deleteForm.action = scheduleCreateUrl + '/' + item.id + '/delete';
     deleteForm.hidden = false;
+    document.getElementById('scheduleAddonsSection').hidden = false;
+    renderScheduleAddons(item);
     syncScheduleKind();
     setScheduleModalOpen(true);
+  }
+  function scheduleAddonProductOptions(selectedId) {
+    return scheduleAddonProducts.map(product => {
+      const selected = String(product.id) === String(selectedId) ? ' selected' : '';
+      return `<option value="${product.id}"${selected}>${scheduleEscapeHtml(product.name)} — ${scheduleEscapeHtml(String(product.sale_price))} ₽</option>`;
+    }).join('');
+  }
+  function scheduleEscapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = String(value == null ? '' : value);
+    return div.innerHTML;
+  }
+  function renderScheduleAddons(item) {
+    const list = document.getElementById('scheduleAddonsList');
+    list.innerHTML = '';
+    const participants = item.participants || [];
+    if (!participants.length) {
+      const empty = document.createElement('p');
+      empty.className = 'hint';
+      empty.textContent = 'Сначала добавьте клиента в рейс и сохраните его.';
+      list.appendChild(empty);
+      return;
+    }
+    if (!scheduleAddonProducts.length) {
+      const empty = document.createElement('p');
+      empty.className = 'hint';
+      empty.textContent = 'В каталоге пока нет сопутствующих товаров — добавьте их в разделе «Услуги».';
+      list.appendChild(empty);
+      return;
+    }
+    participants.forEach(participant => {
+      const card = document.createElement('div');
+      card.className = 'schedule-addon-participant';
+
+      const heading = document.createElement('div');
+      heading.className = 'schedule-addon-participant-name';
+      heading.textContent = participant.client_name || 'Без имени';
+      card.appendChild(heading);
+
+      const purchases = document.createElement('ul');
+      purchases.className = 'schedule-addon-purchases';
+      (participant.addons || []).forEach(addon => {
+        const li = document.createElement('li');
+        const label = document.createElement('span');
+        label.textContent = `${addon.product_name} × ${addon.quantity} = ${(addon.quantity * addon.unit_price).toFixed(0)} ₽`;
+        li.appendChild(label);
+        if (addon.auto_added) {
+          const badge = document.createElement('b');
+          badge.className = 'schedule-addon-auto-badge';
+          badge.textContent = 'авто';
+          li.appendChild(badge);
+        }
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'icon-btn danger';
+        removeBtn.title = 'Убрать товар';
+        removeBtn.setAttribute('aria-label', `Убрать ${addon.product_name} у ${participant.client_name}`);
+        removeBtn.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 5l10 10M15 5L5 15"/></svg>';
+        removeBtn.addEventListener('click', () => deleteScheduleAddon(item.id, addon.id));
+        li.appendChild(removeBtn);
+        purchases.appendChild(li);
+      });
+      if (!(participant.addons || []).length) {
+        const li = document.createElement('li');
+        li.className = 'schedule-addon-empty';
+        li.textContent = 'Товаров пока нет';
+        purchases.appendChild(li);
+      }
+      card.appendChild(purchases);
+
+      const form = document.createElement('form');
+      form.className = 'schedule-addon-add-form';
+      form.innerHTML = `
+        <select aria-label="Товар для ${scheduleEscapeHtml(participant.client_name)}">${scheduleAddonProductOptions()}</select>
+        <input type="number" min="1" value="1" aria-label="Количество">
+        <button type="submit" class="btn-secondary">Добавить</button>
+      `;
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const productId = form.querySelector('select').value;
+        const quantity = form.querySelector('input').value;
+        addScheduleAddon(item.id, participant.client_id, productId, quantity);
+      });
+      card.appendChild(form);
+
+      list.appendChild(card);
+    });
+  }
+  function scheduleUpdateItemParticipants(itemId, participants) {
+    const item = scheduleItems.find(candidate => candidate.id === itemId);
+    if (!item) return;
+    item.participants = participants;
+    renderScheduleAddons(item);
+  }
+  function addScheduleAddon(itemId, clientId, productId, quantity) {
+    fetch(`${scheduleCreateUrl}/${itemId}/addons`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({client_id: clientId, product_id: productId, quantity}),
+    })
+      .then(response => response.json())
+      .then(data => {
+        if (!data.ok) { alert(data.message || 'Не удалось добавить товар.'); return; }
+        scheduleUpdateItemParticipants(itemId, data.participants);
+      })
+      .catch(() => alert('Не удалось добавить товар. Попробуйте ещё раз.'));
+  }
+  function deleteScheduleAddon(itemId, addonId) {
+    fetch(`${scheduleCreateUrl}/${itemId}/addons/${addonId}/delete`, {method: 'POST'})
+      .then(response => response.json())
+      .then(data => {
+        if (!data.ok) { alert(data.message || 'Не удалось убрать товар.'); return; }
+        scheduleUpdateItemParticipants(itemId, data.participants);
+      })
+      .catch(() => alert('Не удалось убрать товар. Попробуйте ещё раз.'));
   }
   function handleScheduleCardClick(event, itemId) {
     event.stopPropagation();

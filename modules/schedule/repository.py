@@ -156,11 +156,29 @@ def list_day_items(db, day):
         "ORDER BY schedule_item_id, id",
         tuple(item_ids),
     ).fetchall()
+    addons_by_item_and_client = {}
+    for row in db.execute(
+        "SELECT schedule_participant_addons.*, "
+        "excursion_addon_products.name AS product_name, "
+        "excursion_addon_products.sale_price AS unit_price "
+        "FROM schedule_participant_addons "
+        "JOIN excursion_addon_products "
+        "ON excursion_addon_products.id = schedule_participant_addons.product_id "
+        f"WHERE schedule_participant_addons.schedule_item_id IN ({placeholders}) "
+        "ORDER BY schedule_participant_addons.id",
+        tuple(item_ids),
+    ).fetchall():
+        key = (row["schedule_item_id"], row["client_id"])
+        addons_by_item_and_client.setdefault(key, []).append(dict(row))
     participants_by_item = {}
     for participant in participants:
+        participant = dict(participant)
+        participant["addons"] = addons_by_item_and_client.get(
+            (participant["schedule_item_id"], participant["client_id"]), []
+        )
         participants_by_item.setdefault(
             participant["schedule_item_id"], []
-        ).append(dict(participant))
+        ).append(participant)
     result = []
     for item in items:
         row = dict(item)
@@ -205,6 +223,21 @@ def find_boat_conflicts(db, boat, starts_at, ends_at, exclude_id=None):
 
 def save_item(db, item_id, data, assignments, participants, timestamp):
     try:
+        # A participant already on this item before this save (survives an
+        # edit that re-submits the same client) is never treated as "new"
+        # again below, even though the whole schedule_participants table for
+        # this item gets deleted and reinserted on every save — that's what
+        # keeps a manually removed auto-added product from reappearing the
+        # next time someone re-saves the trip for an unrelated reason.
+        existing_client_ids = set()
+        if item_id is not None:
+            existing_client_ids = {
+                row["client_id"] for row in db.execute(
+                    "SELECT client_id FROM schedule_participants "
+                    "WHERE schedule_item_id = ?",
+                    (item_id,),
+                ).fetchall()
+            }
         if item_id is None:
             cursor = db.execute(
                 "INSERT INTO schedule_items "
@@ -259,6 +292,10 @@ def save_item(db, item_id, data, assignments, participants, timestamp):
                 "(work_date, employee_id, created_at) VALUES (?, ?, ?)",
                 (data["starts_at"][:10], assignment["employee_id"], timestamp),
             )
+        auto_add_products = db.execute(
+            "SELECT id FROM excursion_addon_products WHERE auto_add_service_id = ?",
+            (data["service_id"],),
+        ).fetchall() if data.get("service_id") is not None else []
         for participant in participants:
             client_id = participant["client_id"]
             if client_id is None:
@@ -287,6 +324,17 @@ def save_item(db, item_id, data, assignments, participants, timestamp):
                     participant.get("source_ref"),
                 ),
             )
+            if auto_add_products and client_id not in existing_client_ids:
+                for product in auto_add_products:
+                    db.execute(
+                        "INSERT OR IGNORE INTO schedule_participant_addons "
+                        "(schedule_item_id, client_id, product_id, quantity, "
+                        "auto_added, created_at) VALUES (?, ?, ?, ?, 1, ?)",
+                        (
+                            item_id, client_id, product["id"],
+                            participant["guests_count"], timestamp,
+                        ),
+                    )
         db.commit()
         return item_id
     except Exception:
@@ -356,6 +404,75 @@ def soft_delete_item(db, item_id, timestamp):
         "UPDATE schedule_items SET deleted_at = ?, updated_at = ? "
         "WHERE id = ? AND deleted_at IS NULL",
         (timestamp, timestamp, item_id),
+    )
+    db.commit()
+    return cursor.rowcount > 0
+
+
+def list_item_participants_with_addons(db, item_id):
+    """Participants of one item, each carrying its addon purchases — what
+    the schedule modal re-fetches after a manual add/remove so it can
+    refresh in place without reloading the whole day."""
+    participants = db.execute(
+        "SELECT * FROM schedule_participants WHERE schedule_item_id = ? ORDER BY id",
+        (item_id,),
+    ).fetchall()
+    addons_by_client = {}
+    for row in db.execute(
+        "SELECT schedule_participant_addons.*, "
+        "excursion_addon_products.name AS product_name, "
+        "excursion_addon_products.sale_price AS unit_price "
+        "FROM schedule_participant_addons "
+        "JOIN excursion_addon_products "
+        "ON excursion_addon_products.id = schedule_participant_addons.product_id "
+        "WHERE schedule_participant_addons.schedule_item_id = ? "
+        "ORDER BY schedule_participant_addons.id",
+        (item_id,),
+    ).fetchall():
+        addons_by_client.setdefault(row["client_id"], []).append(dict(row))
+    result = []
+    for participant in participants:
+        participant = dict(participant)
+        participant["addons"] = addons_by_client.get(participant["client_id"], [])
+        result.append(participant)
+    return result
+
+
+def is_participant_of_item(db, item_id, client_id):
+    return db.execute(
+        "SELECT 1 FROM schedule_participants "
+        "WHERE schedule_item_id = ? AND client_id = ?",
+        (item_id, client_id),
+    ).fetchone() is not None
+
+
+def add_participant_addon(db, item_id, client_id, product_id, quantity, timestamp):
+    """Manual add — increases quantity if this product is already attached
+    to this participant rather than erroring on the UNIQUE constraint."""
+    existing = db.execute(
+        "SELECT id, quantity FROM schedule_participant_addons "
+        "WHERE schedule_item_id = ? AND client_id = ? AND product_id = ?",
+        (item_id, client_id, product_id),
+    ).fetchone()
+    if existing is not None:
+        db.execute(
+            "UPDATE schedule_participant_addons SET quantity = ? WHERE id = ?",
+            (existing["quantity"] + quantity, existing["id"]),
+        )
+    else:
+        db.execute(
+            "INSERT INTO schedule_participant_addons "
+            "(schedule_item_id, client_id, product_id, quantity, auto_added, created_at) "
+            "VALUES (?, ?, ?, ?, 0, ?)",
+            (item_id, client_id, product_id, quantity, timestamp),
+        )
+    db.commit()
+
+
+def remove_participant_addon(db, addon_id, item_id):
+    cursor = db.execute(
+        "DELETE FROM schedule_participant_addons WHERE id = ? AND schedule_item_id = ?",
+        (addon_id, item_id),
     )
     db.commit()
     return cursor.rowcount > 0

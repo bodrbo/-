@@ -121,6 +121,24 @@ def init_schema(conn):
         )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS schedule_participant_addons (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            schedule_item_id INTEGER NOT NULL,
+            client_id INTEGER NOT NULL,
+            product_id INTEGER NOT NULL,
+            quantity INTEGER NOT NULL DEFAULT 1,
+            auto_added INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            UNIQUE(schedule_item_id, client_id, product_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schedule_participant_addons_item "
+        "ON schedule_participant_addons(schedule_item_id, client_id)"
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS schedule_day_crew (
             work_date TEXT NOT NULL,
             employee_id INTEGER NOT NULL,

@@ -72,6 +72,7 @@ def create_schedule_blueprint(
             today=dt.date.today().isoformat(),
             boats=boats,
             trip_services=service_repository.list_services(db),
+            addon_products=service_repository.list_addon_products(db),
             item_kinds=ITEM_KINDS,
             crew_roles=CREW_ROLES,
             notice=session.pop("schedule_notice", None),
@@ -194,6 +195,43 @@ def create_schedule_blueprint(
             notify_item_changes(before, None)
         set_notice(message, success)
         return redirect_to_day(day, request.form.get("return_employee", "all"))
+
+    @blueprint.route("/schedule/items/<int:item_id>/addons", methods=["POST"])
+    @manage_required
+    def add_item_addon(item_id):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"ok": False, "message": "Некорректный запрос."}), 400
+        try:
+            client_id = int(payload.get("client_id"))
+            product_id = int(payload.get("product_id"))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "message": "Некорректные данные."}), 400
+        success, message, product = services.add_participant_addon(
+            get_db(), item_id, client_id, product_id, payload.get("quantity")
+        )
+        if not success:
+            return jsonify({"ok": False, "message": message}), 400
+        return jsonify({
+            "ok": True, "message": message,
+            "participants": repository.list_item_participants_with_addons(get_db(), item_id),
+        })
+
+    @blueprint.route(
+        "/schedule/items/<int:item_id>/addons/<int:addon_id>/delete",
+        methods=["POST"],
+    )
+    @manage_required
+    def remove_item_addon(item_id, addon_id):
+        success, message = services.remove_participant_addon(
+            get_db(), item_id, addon_id
+        )
+        if not success:
+            return jsonify({"ok": False, "message": message}), 400
+        return jsonify({
+            "ok": True, "message": message,
+            "participants": repository.list_item_participants_with_addons(get_db(), item_id),
+        })
 
     @blueprint.route("/schedule/tripster/sync", methods=["POST"])
     @manage_required
