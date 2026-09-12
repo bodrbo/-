@@ -5231,6 +5231,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-detail-client-actions .icon-btn:hover,
 .schedule-detail-client-actions .icon-btn.danger:hover { background: var(--danger); color: #fff8f4; border-color: var(--danger); }
 .schedule-detail-client-edit { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
+.schedule-detail-client-edit .field { margin: 0; flex: 0 0 auto; }
 .schedule-detail-client-edit-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .schedule-detail-quickadd h3 { margin: 0; font-size: 13px; }
 .schedule-detail-quickadd form { display: flex; flex-direction: column; gap: 10px; }
