@@ -5043,8 +5043,23 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-addon-purchases { display: flex; flex-direction: column; gap: 3px; margin: 0 0 6px; padding: 0; list-style: none; }
 .schedule-addon-purchases li { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-soft); }
 .schedule-addon-purchases li span { flex: 1; }
-.schedule-addon-purchases li .icon-btn { width: 22px; height: 22px; }
+.schedule-addon-purchases li .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
 .schedule-addon-purchases li .icon-btn svg { width: 11px; height: 11px; }
+.schedule-addon-purchases li .icon-btn:hover,
+.schedule-addon-purchases li .icon-btn.danger:hover { background: var(--danger); color: #fff8f4; border-color: var(--danger); }
 .schedule-addon-empty { color: var(--muted) !important; font-style: italic; }
 .schedule-addon-auto-badge {
   padding: 1px 6px;
@@ -5140,6 +5155,23 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-detail-client-addons { margin: 10px 0; padding: 10px; border: 1px solid var(--hairline); border-radius: 8px; background: #f8fafc; }
 .schedule-detail-client-addons p { margin: 0 0 6px; }
 .schedule-detail-client-actions { display: flex; align-items: center; gap: 8px; }
+.schedule-detail-client-actions .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 39px;
+  height: 39px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1.5px dashed var(--hairline);
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.schedule-detail-client-actions .icon-btn svg { width: 14px; height: 14px; }
+.schedule-detail-client-actions .icon-btn:hover,
+.schedule-detail-client-actions .icon-btn.danger:hover { background: var(--danger); color: #fff8f4; border-color: var(--danger); }
 .schedule-detail-client-edit { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
 .schedule-detail-client-edit-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .schedule-detail-quickadd h3 { margin: 0; font-size: 13px; }
