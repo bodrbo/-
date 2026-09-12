@@ -231,6 +231,7 @@
       <button type="button" class="schedule-modal-close" onclick="closeScheduleModal()" aria-label="Закрыть">×</button>
     </header>
 
+    <div class="schedule-modal-scroll">
     <form method="post" action="{{ url_for('schedule.create_item') }}" id="scheduleItemForm" class="schedule-form">
       <input type="hidden" name="return_employee" value="{{ selected_employee }}">
       <div class="schedule-kind-switch" role="group" aria-label="Тип рейса">
@@ -368,6 +369,7 @@
       </button>
       <span>Удалить рейс</span>
     </form>
+    </div>
   </section>
 </div>
 
