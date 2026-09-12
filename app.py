@@ -2826,6 +2826,7 @@ def init_db():
     )
     _sync_tuning_boat_profiles(conn)
     _seed_boat_profile_model_3d(conn, "BRP Utopia 205", "seed-brp-utopia-205.glb")
+    _seed_boat_profile_model_3d(conn, "Bayliner 192", "seed-bayliner-192.glb")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tilda_webhook_log (
