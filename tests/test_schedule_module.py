@@ -617,6 +617,17 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn('class="propeller"', html)
         self.assertIn('onsubmit="showScheduleTripsterLoader(this)"', html)
         self.assertIn("Переимпорт рейсов…", html)
+
+    def test_client_card_offers_whatsapp_and_telegram_links_by_phone(self):
+        self.login()
+        html = self.client.get(
+            "/schedule?date=2026-09-05"
+        ).get_data(as_text=True)
+
+        self.assertIn("function scheduleNormalizePhone", html)
+        self.assertIn("function buildScheduleDetailClientMessengers", html)
+        self.assertIn("https://wa.me/${digits}", html)
+        self.assertIn("https://t.me/+${digits}", html)
         self.assertIn("button.disabled = true", html)
 
     def test_price_migration_preserves_historical_trip_total(self):
