@@ -1247,13 +1247,28 @@
       form.addEventListener('submit', event => {
         event.preventDefault();
         const amount = amountInput.value;
-        createScheduleParticipantPayment(item.id, participant.id, amount);
+        const submitBtn = form.querySelector('button[type="submit"]');
+        createScheduleParticipantPayment(item.id, participant.id, amount, submitBtn);
       });
       block.appendChild(form);
     }
     return block;
   }
-  function createScheduleParticipantPayment(itemId, participantId, amount) {
+  function scheduleCopyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try { document.execCommand('copy'); } catch (error) { /* best effort */ }
+    document.body.removeChild(textarea);
+    return Promise.resolve();
+  }
+  function createScheduleParticipantPayment(itemId, participantId, amount, submitBtn) {
     fetch(`${scheduleCreateUrl}/${itemId}/participants/${participantId}/yookassa`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -1262,7 +1277,18 @@
       .then(r => r.json())
       .then(data => {
         if (!data.ok) { alert(data.message || 'Не удалось создать ссылку на оплату.'); return; }
-        scheduleDetailApplyUpdate(data);
+        const participant = (data.participants || []).find(p => p.id === participantId);
+        const payment = participant && participant.payments && participant.payments[0];
+        const finish = () => scheduleDetailApplyUpdate(data);
+        if (!payment || !payment.confirmation_url) { finish(); return; }
+        scheduleCopyToClipboard(payment.confirmation_url).then(() => {
+          if (submitBtn) {
+            submitBtn.textContent = 'Ссылка скопирована!';
+            setTimeout(finish, 900);
+          } else {
+            finish();
+          }
+        }).catch(finish);
       })
       .catch(() => alert('Не удалось создать ссылку на оплату. Попробуйте ещё раз.'));
   }
