@@ -481,7 +481,7 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
     return errors, data, assignments, participants
 
 
-def save_item(db, form, boats, services, item_id=None):
+def save_item(db, form, boats, services, item_id=None, keep_participants=False):
     if item_id is not None and repository.get_item(db, item_id) is None:
         return False, "Рейс не найден.", None
     errors, data, assignments, participants = validate_item_form(
@@ -490,7 +490,8 @@ def save_item(db, form, boats, services, item_id=None):
     if errors:
         return False, " ".join(errors), data
     saved_id = repository.save_item(
-        db, item_id, data, assignments, participants, current_timestamp()
+        db, item_id, data, assignments, participants, current_timestamp(),
+        keep_participants=keep_participants,
     )
     action = "обновлён" if item_id is not None else "создан"
     return True, f"Рейс {action}.", saved_id
@@ -650,6 +651,124 @@ def remove_participant_addon(db, item_id, addon_id):
     if not repository.remove_participant_addon(db, addon_id, item_id):
         return False, "Товар не найден."
     return True, "Товар удалён."
+
+
+def _resolve_client_for_participant(db, raw_client_id, phone, errors):
+    """Same matching rules as the whole-trip form's participant rows
+    (_validate_participants) — reuse by id when the picker matched one,
+    else by an unambiguous phone — just kept separate since this is a
+    single client, not an array of rows."""
+    identity = _normalise_phone_identity(phone)
+    if raw_client_id:
+        try:
+            candidate_id = int(raw_client_id)
+        except (TypeError, ValueError):
+            candidate_id = None
+        client = next(
+            (c for c in repository.list_all_clients(db) if c["id"] == candidate_id),
+            None,
+        )
+        if client is None:
+            errors.append("Выбранный клиент больше недоступен.")
+        return client
+    if identity:
+        matches = [
+            c for c in repository.list_all_clients(db)
+            if _normalise_phone_identity(c["phone"]) == identity
+        ]
+        if len(matches) > 1:
+            errors.append("В базе найдено несколько клиентов с этим телефоном.")
+            return None
+        return matches[0] if matches else None
+    return None
+
+
+def _validate_sales_partner_id(db, form, errors):
+    raw_value = str(form.get("sales_partner_id") or "").strip()
+    if not raw_value:
+        return None
+    try:
+        partner_id = int(raw_value)
+    except ValueError:
+        errors.append("Некорректный канал продаж.")
+        return None
+    valid_ids = {partner["id"] for partner in repository.list_excursion_partners(db)}
+    if partner_id not in valid_ids:
+        errors.append("Неизвестный канал продаж.")
+        return None
+    return partner_id
+
+
+def add_participant_quick(db, item_id, form):
+    """Quick-add form on an already-saved event — just name/phone/guests;
+    price is computed from the trip's own service rate, same as the
+    whole-trip form does automatically when nothing's been typed in."""
+    item = repository.get_item(db, item_id)
+    if item is None:
+        return False, "Рейс не найден.", None
+    errors = []
+    name = _normalise_text(form.get("client_name"), 180)
+    phone = _normalise_text(form.get("client_phone"), 40)
+    raw_client_id = str(form.get("client_id") or "").strip()
+    if not name:
+        errors.append("Укажите имя клиента.")
+    try:
+        guests_count = int(str(form.get("guests_count") or "1").strip())
+    except (TypeError, ValueError):
+        guests_count = 0
+    if not 1 <= guests_count <= 100:
+        errors.append("Количество гостей должно быть от 1 до 100.")
+    client = _resolve_client_for_participant(db, raw_client_id, phone, errors)
+    if errors:
+        return False, " ".join(errors), None
+    if client is not None:
+        name = client["client_name"]
+        phone = client["phone"]
+    price = 0.0
+    if item["service_id"] is not None:
+        service = service_repository.get_service(db, item["service_id"])
+        if service is not None:
+            price = round((service["price"] or 0) * guests_count, 2)
+    participant_id = repository.add_participant(
+        db, item_id, client["id"] if client is not None else None,
+        name, phone, guests_count, price, current_timestamp(),
+    )
+    return True, f"«{name}» добавлен в рейс.", participant_id
+
+
+def edit_participant(db, item_id, participant_id, form):
+    errors = []
+    name = _normalise_text(form.get("client_name"), 180)
+    phone = _normalise_text(form.get("client_phone"), 40)
+    if not name:
+        errors.append("Укажите имя клиента.")
+    try:
+        guests_count = int(str(form.get("guests_count") or "1").strip())
+    except (TypeError, ValueError):
+        guests_count = 0
+    if not 1 <= guests_count <= 100:
+        errors.append("Количество гостей должно быть от 1 до 100.")
+    price = _parse_money(form.get("price"), errors, "Стоимость")
+    sales_partner_id = _validate_sales_partner_id(db, form, errors)
+    if errors:
+        return False, " ".join(errors)
+    updated = repository.update_participant(
+        db, participant_id, item_id,
+        {
+            "client_name": name, "client_phone": phone, "guests_count": guests_count,
+            "price": price, "sales_partner_id": sales_partner_id,
+        },
+        current_timestamp(),
+    )
+    if not updated:
+        return False, "Клиент не найден в этом рейсе."
+    return True, "Изменения сохранены."
+
+
+def remove_participant(db, item_id, participant_id):
+    if not repository.delete_participant(db, participant_id, item_id, current_timestamp()):
+        return False, "Клиент не найден в этом рейсе."
+    return True, "Клиент удалён из рейса."
 
 
 def add_day_crew_member(db, day, employee_id):

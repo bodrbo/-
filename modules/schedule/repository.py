@@ -1,5 +1,7 @@
 """SQL access for the internal trip schedule."""
 
+import secrets
+
 from modules.clients.constants import (
     CLIENT_RELATIONSHIP_CLIENT,
     CLIENT_RELATIONSHIP_PARTNER,
@@ -164,9 +166,12 @@ def list_day_items(db, day):
             dict(assignment)
         )
     participants = db.execute(
-        "SELECT * FROM schedule_participants "
-        f"WHERE schedule_item_id IN ({placeholders}) "
-        "ORDER BY schedule_item_id, id",
+        "SELECT schedule_participants.*, sales_partner.client_name AS sales_partner_name "
+        "FROM schedule_participants "
+        "LEFT JOIN clients AS sales_partner "
+        "ON sales_partner.id = schedule_participants.sales_partner_id "
+        f"WHERE schedule_participants.schedule_item_id IN ({placeholders}) "
+        "ORDER BY schedule_participants.schedule_item_id, schedule_participants.id",
         tuple(item_ids),
     ).fetchall()
     addons_by_item_and_client = {}
@@ -234,7 +239,13 @@ def find_boat_conflicts(db, boat, starts_at, ends_at, exclude_id=None):
     return db.execute(query, tuple(params)).fetchall()
 
 
-def save_item(db, item_id, data, assignments, participants, timestamp):
+def save_item(db, item_id, data, assignments, participants, timestamp, keep_participants=False):
+    """keep_participants is for the trip-info-only edit screen: it edits
+    boat/service/date/time/crew for an item whose participants are managed
+    separately (add_participant/update_participant/delete_participant), so
+    this must leave schedule_participants — and the participants_count/
+    revenue rollup on the item itself — exactly as they already are,
+    instead of replacing them with an empty submitted list."""
     try:
         # A participant already on this item before this save (survives an
         # edit that re-submits the same client) is never treated as "new"
@@ -269,6 +280,16 @@ def save_item(db, item_id, data, assignments, participants, timestamp):
             )
             item_id = cursor.lastrowid
         else:
+            participants_count = data["participants_count"]
+            revenue = data["revenue"]
+            if keep_participants:
+                current = db.execute(
+                    "SELECT participants_count, revenue FROM schedule_items WHERE id = ?",
+                    (item_id,),
+                ).fetchone()
+                if current is not None:
+                    participants_count = current["participants_count"]
+                    revenue = current["revenue"]
             db.execute(
                 "UPDATE schedule_items SET kind = ?, boat = ?, service_id = ?, service_name = ?, "
                 "starts_at = ?, ends_at = ?, capacity = ?, participants_count = ?, "
@@ -277,8 +298,8 @@ def save_item(db, item_id, data, assignments, participants, timestamp):
                 (
                     data["kind"], data["boat"], data["service_id"], data["service_name"],
                     data["starts_at"], data["ends_at"], data["capacity"],
-                    data["participants_count"], data["customer_name"],
-                    data["customer_phone"], data["revenue"], data["note"],
+                    participants_count, data["customer_name"],
+                    data["customer_phone"], revenue, data["note"],
                     timestamp, item_id,
                 ),
             )
@@ -286,10 +307,11 @@ def save_item(db, item_id, data, assignments, participants, timestamp):
                 "DELETE FROM schedule_assignments WHERE schedule_item_id = ?",
                 (item_id,),
             )
-            db.execute(
-                "DELETE FROM schedule_participants WHERE schedule_item_id = ?",
-                (item_id,),
-            )
+            if not keep_participants:
+                db.execute(
+                    "DELETE FROM schedule_participants WHERE schedule_item_id = ?",
+                    (item_id,),
+                )
         for assignment in assignments:
             db.execute(
                 "INSERT INTO schedule_assignments "
@@ -308,8 +330,8 @@ def save_item(db, item_id, data, assignments, participants, timestamp):
         auto_add_products = db.execute(
             "SELECT id FROM excursion_addon_products WHERE auto_add_service_id = ?",
             (data["service_id"],),
-        ).fetchall() if data.get("service_id") is not None else []
-        for participant in participants:
+        ).fetchall() if data.get("service_id") is not None and not keep_participants else []
+        for participant in ([] if keep_participants else participants):
             client_id = participant["client_id"]
             if client_id is None:
                 cursor = db.execute(
@@ -429,7 +451,12 @@ def list_item_participants_with_addons(db, item_id):
     the schedule modal re-fetches after a manual add/remove so it can
     refresh in place without reloading the whole day."""
     participants = db.execute(
-        "SELECT * FROM schedule_participants WHERE schedule_item_id = ? ORDER BY id",
+        "SELECT schedule_participants.*, sales_partner.client_name AS sales_partner_name "
+        "FROM schedule_participants "
+        "LEFT JOIN clients AS sales_partner "
+        "ON sales_partner.id = schedule_participants.sales_partner_id "
+        "WHERE schedule_participants.schedule_item_id = ? "
+        "ORDER BY schedule_participants.id",
         (item_id,),
     ).fetchall()
     addons_by_client = {}
@@ -491,3 +518,112 @@ def remove_participant_addon(db, addon_id, item_id):
     )
     db.commit()
     return cursor.rowcount > 0
+
+
+def _recompute_item_totals(db, item_id, timestamp):
+    """participants_count/revenue on schedule_items are a cached rollup of
+    the participant rows — every direct add/edit/remove of a participant
+    (outside the whole-trip save_item path, which computes and writes
+    these itself) has to refresh them or the day view's totals go stale."""
+    row = db.execute(
+        "SELECT COALESCE(SUM(guests_count), 0) AS guests, "
+        "COALESCE(SUM(price), 0) AS revenue "
+        "FROM schedule_participants WHERE schedule_item_id = ?",
+        (item_id,),
+    ).fetchone()
+    db.execute(
+        "UPDATE schedule_items SET participants_count = ?, revenue = ?, updated_at = ? "
+        "WHERE id = ?",
+        (row["guests"], row["revenue"], timestamp, item_id),
+    )
+
+
+def _auto_add_addons_for_participant(db, item_id, service_id, client_id, guests_count, timestamp):
+    """Same rule save_item applies to a newly-added participant, but for
+    the one-participant-at-a-time quick-add path."""
+    if service_id is None:
+        return
+    for product in db.execute(
+        "SELECT id FROM excursion_addon_products WHERE auto_add_service_id = ?",
+        (service_id,),
+    ).fetchall():
+        db.execute(
+            "INSERT OR IGNORE INTO schedule_participant_addons "
+            "(schedule_item_id, client_id, product_id, quantity, auto_added, created_at) "
+            "VALUES (?, ?, ?, ?, 1, ?)",
+            (item_id, client_id, product["id"], guests_count, timestamp),
+        )
+
+
+def add_participant(db, item_id, client_id, name, phone, guests_count, price, timestamp):
+    """Quick-add: one participant, attached to an already-saved item. Client
+    is reused by id when the picker matched one, else created fresh —
+    mirrors the client-resolution save_item does for the whole-trip form."""
+    resolved_client_id = client_id
+    if resolved_client_id is None:
+        cursor = db.execute(
+            "INSERT INTO clients (client_name, boat_model, phone, token, created_at) "
+            "VALUES (?, '', ?, ?, ?)",
+            (name, phone, secrets.token_urlsafe(16), timestamp),
+        )
+        resolved_client_id = cursor.lastrowid
+    ensure_segment(db, resolved_client_id, EXCURSION_SEGMENT, timestamp)
+    cursor = db.execute(
+        "INSERT INTO schedule_participants "
+        "(schedule_item_id, client_id, client_name, client_phone, guests_count, price, "
+        "prepayment, payment_due, created_at, source, source_ref, sales_partner_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'internal', NULL, NULL)",
+        (item_id, resolved_client_id, name, phone, guests_count, price, price, timestamp),
+    )
+    participant_id = cursor.lastrowid
+    item = db.execute(
+        "SELECT service_id FROM schedule_items WHERE id = ?", (item_id,)
+    ).fetchone()
+    if item is not None:
+        _auto_add_addons_for_participant(
+            db, item_id, item["service_id"], resolved_client_id, guests_count, timestamp
+        )
+    _recompute_item_totals(db, item_id, timestamp)
+    db.commit()
+    return participant_id
+
+
+def update_participant(db, participant_id, item_id, data, timestamp):
+    row = db.execute(
+        "SELECT * FROM schedule_participants WHERE id = ? AND schedule_item_id = ?",
+        (participant_id, item_id),
+    ).fetchone()
+    if row is None:
+        return False
+    # A Tripster booking's payment_due tracks a real external payment
+    # state — editing the guest/price fields here shouldn't silently
+    # overwrite it the way it's reset for a plain internal record.
+    payment_due = data["price"] if row["source"] != "tripster" else row["payment_due"]
+    db.execute(
+        "UPDATE schedule_participants SET client_name = ?, client_phone = ?, "
+        "guests_count = ?, price = ?, payment_due = ?, sales_partner_id = ? WHERE id = ?",
+        (
+            data["client_name"], data["client_phone"], data["guests_count"],
+            data["price"], payment_due, data["sales_partner_id"], participant_id,
+        ),
+    )
+    _recompute_item_totals(db, item_id, timestamp)
+    db.commit()
+    return True
+
+
+def delete_participant(db, participant_id, item_id, timestamp):
+    row = db.execute(
+        "SELECT client_id FROM schedule_participants WHERE id = ? AND schedule_item_id = ?",
+        (participant_id, item_id),
+    ).fetchone()
+    if row is None:
+        return False
+    db.execute(
+        "DELETE FROM schedule_participant_addons WHERE schedule_item_id = ? AND client_id = ?",
+        (item_id, row["client_id"]),
+    )
+    db.execute("DELETE FROM schedule_participants WHERE id = ?", (participant_id,))
+    _recompute_item_totals(db, item_id, timestamp)
+    db.commit()
+    return True

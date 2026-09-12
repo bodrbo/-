@@ -323,13 +323,19 @@
           </label>
           <span class="schedule-participant-counter" id="scheduleParticipantCounter">0 из 10 мест</span>
         </div>
-        <div class="schedule-form-section-heading">
-          <span>Клиенты в рейсе</span>
-          <small>Количество гостей включает самого клиента</small>
+        <div id="scheduleParticipantSection">
+          <div class="schedule-form-section-heading">
+            <span>Клиенты в рейсе</span>
+            <small>Количество гостей включает самого клиента</small>
+          </div>
+          <div class="schedule-legacy-participants" id="scheduleLegacyParticipants" hidden></div>
+          <div id="scheduleParticipantRows" class="schedule-participant-rows"></div>
+          <button type="button" class="schedule-add-assignment" onclick="addScheduleParticipant('', '', '', 1, true)">+ Добавить клиента</button>
         </div>
-        <div class="schedule-legacy-participants" id="scheduleLegacyParticipants" hidden></div>
-        <div id="scheduleParticipantRows" class="schedule-participant-rows"></div>
-        <button type="button" class="schedule-add-assignment" onclick="addScheduleParticipant('', '', '', 1, true)">+ Добавить клиента</button>
+        <p class="hint" id="scheduleParticipantSectionHint" hidden>
+          Клиентами этого рейса теперь управляют из карточки рейса — «Клиенты X/Y» на карточке в расписании.
+        </p>
+        <input type="hidden" name="keep_participants" id="scheduleKeepParticipants" value="0">
       </div>
 
       <input type="hidden" name="revenue" id="scheduleRevenue" value="0">
@@ -369,6 +375,77 @@
       </button>
       <span>Удалить рейс</span>
     </form>
+    </div>
+  </section>
+</div>
+
+<div class="schedule-modal" id="scheduleDetailModal" hidden>
+  <div class="schedule-modal-backdrop" onclick="closeScheduleDetailModal()"></div>
+  <section class="schedule-modal-card schedule-detail-card" role="dialog" aria-modal="true" aria-labelledby="scheduleDetailTitle">
+    <header class="schedule-modal-header">
+      <div>
+        <span id="scheduleDetailEyebrow">Групповая экскурсия</span>
+        <h2 id="scheduleDetailTitle">—</h2>
+      </div>
+      <button type="button" class="schedule-modal-close" onclick="closeScheduleDetailModal()" aria-label="Закрыть">×</button>
+    </header>
+    <div class="schedule-detail-body">
+      <aside class="schedule-detail-summary">
+        <dl class="schedule-detail-summary-list">
+          <div><dt>Катер</dt><dd id="scheduleDetailBoat"></dd></div>
+          <div><dt>Экипаж</dt><dd id="scheduleDetailCrew"></dd></div>
+          <div><dt>Дата и время</dt><dd id="scheduleDetailWhen"></dd></div>
+          <div><dt>Вид рейса</dt><dd id="scheduleDetailService"></dd></div>
+        </dl>
+        <button type="button" class="btn-secondary schedule-detail-edit-trip" onclick="openScheduleEditFromDetail()">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M13.5 3.5l3 3L7 16H4v-3L13.5 3.5z"/>
+            <path d="M11.5 5.5l3 3"/>
+          </svg>
+          Редактировать рейс
+        </button>
+        <form method="post" id="scheduleDetailDeleteForm" class="schedule-delete-form" onsubmit="return confirm('Удалить рейс из расписания?');">
+          <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
+          <input type="hidden" name="return_employee" value="{{ selected_employee }}">
+          <button type="submit" class="icon-btn danger" title="Удалить рейс" aria-label="Удалить рейс">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h12M8 3h4l1 3H7l1-3zM6 6l.7 11h6.6L14 6M8.5 9v5M11.5 9v5"/></svg>
+          </button>
+          <span>Удалить рейс</span>
+        </form>
+      </aside>
+
+      <div class="schedule-detail-clients">
+        <div class="schedule-detail-clients-heading">
+          <h3 id="scheduleDetailClientsCount">Клиенты 0/0</h3>
+        </div>
+        <div id="scheduleDetailClientsList" class="schedule-detail-clients-list"></div>
+      </div>
+
+      <aside class="schedule-detail-quickadd">
+        <h3>Быстрое добавление</h3>
+        <form id="scheduleQuickAddForm" onsubmit="return submitScheduleQuickAdd(event)">
+          <label class="field">
+            <span>Имя</span>
+            <span class="schedule-client-picker" data-client-picker data-picker-kind="quickadd">
+              <input type="hidden" data-client-id>
+              <input type="text" data-participant-search maxlength="180" autocomplete="off"
+                     role="combobox" aria-autocomplete="list" aria-expanded="false"
+                     placeholder="Начните вводить имя"
+                     oninput="scheduleClientInput(this)" onkeydown="scheduleClientKeydown(event, this)">
+              <span class="schedule-client-results" role="listbox" hidden></span>
+            </span>
+          </label>
+          <label class="field">
+            <span>Телефон</span>
+            <input type="tel" id="scheduleQuickAddPhone" maxlength="40" placeholder="+7 999 000-00-00">
+          </label>
+          <label class="field schedule-quickadd-guests">
+            <span>Гостей</span>
+            <input type="number" id="scheduleQuickAddGuests" min="1" max="100" value="1">
+          </label>
+          <button type="submit" id="scheduleQuickAddSubmit">+ Добавить</button>
+        </form>
+      </aside>
     </div>
   </section>
 </div>
@@ -557,6 +634,9 @@
   const scheduleCreateUrl = {{ url_for('schedule.create_item')|tojson }};
   const scheduleClientSearchUrl = {{ url_for('schedule.search_clients')|tojson }};
   const scheduleAddonProducts = {{ addon_products|tojson }};
+  const scheduleExcursionPartners = {{ excursion_partners|tojson }};
+  let scheduleDetailItemId = null;
+  const scheduleDetailExpandedIds = new Set();
   const scheduleClientTimers = new WeakMap();
   const scheduleClientRequests = new WeakMap();
   let scheduleParticipantSerial = 0;
@@ -640,6 +720,9 @@
     document.getElementById('scheduleAddonsSection').hidden = true;
     document.getElementById('scheduleAddonsNewHint').hidden = true;
     document.getElementById('scheduleAddonsList').innerHTML = '';
+    document.getElementById('scheduleParticipantSection').hidden = false;
+    document.getElementById('scheduleParticipantSectionHint').hidden = true;
+    document.getElementById('scheduleKeepParticipants').value = '0';
     document.querySelectorAll('[data-client-picker]').forEach(picker => {
       picker.dataset.selectedPhone = '';
       picker.querySelector('[data-client-id]').value = '';
@@ -663,11 +746,16 @@
     document.getElementById('scheduleAddonsNewHint').hidden = false;
     setScheduleModalOpen(true);
   }
-  function openScheduleEdit(itemId) {
+  function openScheduleEdit(itemId, tripInfoOnly) {
     if (!scheduleCanManage) return;
     resetScheduleForm();
     const item = scheduleItems.find(candidate => candidate.id === itemId);
     if (!item) return;
+    if (tripInfoOnly) {
+      document.getElementById('scheduleParticipantSection').hidden = true;
+      document.getElementById('scheduleParticipantSectionHint').hidden = false;
+      document.getElementById('scheduleKeepParticipants').value = '1';
+    }
     const form = document.getElementById('scheduleItemForm');
     form.action = scheduleCreateUrl + '/' + item.id;
     form.dataset.editing = 'true';
@@ -714,7 +802,7 @@
       );
     }
     document.getElementById('scheduleCapacity').value = item.capacity || 10;
-    if (item.kind === 'event') {
+    if (item.kind === 'event' && !tripInfoOnly) {
       (item.participants || []).forEach(participant => addScheduleParticipant(
         participant.client_id, participant.client_name, participant.client_phone,
         participant.guests_count || 1, false, participant.price ?? 0,
@@ -723,20 +811,22 @@
       ));
     }
     const legacyParticipants = document.getElementById('scheduleLegacyParticipants');
-    if (item.kind === 'event' && item.participants_count > 0 && !(item.participants || []).length) {
+    if (item.kind === 'event' && !tripInfoOnly && item.participants_count > 0 && !(item.participants || []).length) {
       legacyParticipants.textContent = `Раньше для этого рейса было указано ${item.participants_count} чел. без имён. Добавьте клиентов перед сохранением.`;
       legacyParticipants.hidden = false;
     }
     document.getElementById('scheduleNote').value = item.note || '';
     item.assignment_ids.forEach((employeeId, index) => addScheduleAssignment(employeeId, item.assignment_roles[index]));
     document.getElementById('scheduleModalEyebrow').textContent = item.kind_label;
-    document.getElementById('scheduleModalTitle').textContent = item.service_name;
+    document.getElementById('scheduleModalTitle').textContent = tripInfoOnly ? `${item.service_name} — данные рейса` : item.service_name;
     document.getElementById('scheduleSubmit').textContent = 'Сохранить изменения';
     const deleteForm = document.getElementById('scheduleDeleteForm');
     deleteForm.action = scheduleCreateUrl + '/' + item.id + '/delete';
     deleteForm.hidden = false;
-    document.getElementById('scheduleAddonsSection').hidden = false;
-    renderScheduleAddons(item);
+    if (!tripInfoOnly) {
+      document.getElementById('scheduleAddonsSection').hidden = false;
+      renderScheduleAddons(item);
+    }
     syncScheduleKind();
     setScheduleModalOpen(true);
   }
@@ -858,7 +948,308 @@
   function handleScheduleCardClick(event, itemId) {
     event.stopPropagation();
     if (scheduleDraggedCards.has(event.currentTarget)) return;
-    openScheduleEdit(itemId);
+    const item = scheduleItems.find(candidate => candidate.id === itemId);
+    if (item && item.kind === 'event') {
+      openScheduleDetail(itemId);
+    } else {
+      openScheduleEdit(itemId);
+    }
+  }
+
+  // --- Trip detail view: read-only summary + collapsible client list +
+  // quick-add, replacing the old all-fields-at-once form for viewing and
+  // managing an already-saved group excursion (see openScheduleEdit for
+  // creating one, and openScheduleEditFromDetail for changing boat/date/
+  // time/service/crew afterward). ---
+  function setScheduleDetailModalOpen(open) {
+    const modal = document.getElementById('scheduleDetailModal');
+    const header = document.querySelector('.schedule-topbar');
+    const shell = document.querySelector('.schedule-shell');
+    if (open) scheduleModalTrigger = document.activeElement;
+    modal.hidden = !open;
+    document.body.classList.toggle('schedule-modal-open', open);
+    if (header) header.inert = open;
+    if (shell) shell.inert = open;
+    if (!open) {
+      closeAllScheduleClientResults();
+      scheduleDetailItemId = null;
+      if (scheduleModalTrigger && scheduleModalTrigger !== document.body) {
+        scheduleModalTrigger.focus();
+      }
+      scheduleModalTrigger = null;
+    }
+  }
+  function closeScheduleDetailModal() { setScheduleDetailModalOpen(false); }
+  function scheduleDetailGuestLabel(count) {
+    const lastTwo = count % 100;
+    const last = count % 10;
+    const word = lastTwo >= 11 && lastTwo <= 14
+      ? 'гостей'
+      : last === 1 ? 'гость' : last >= 2 && last <= 4 ? 'гостя' : 'гостей';
+    return `${count} ${word}`;
+  }
+  function scheduleParticipantAmountDue(participant) {
+    const addonsTotal = (participant.addons || []).reduce(
+      (sum, addon) => sum + addon.quantity * addon.unit_price, 0
+    );
+    return (participant.payment_due || 0) + addonsTotal;
+  }
+  function openScheduleDetail(itemId) {
+    if (!scheduleCanManage) return;
+    const item = scheduleItems.find(candidate => candidate.id === itemId);
+    if (!item) return;
+    scheduleDetailItemId = itemId;
+    scheduleDetailExpandedIds.clear();
+    document.getElementById('scheduleDetailEyebrow').textContent = item.kind_label;
+    document.getElementById('scheduleDetailTitle').textContent = item.service_name;
+    document.getElementById('scheduleDetailBoat').textContent = item.boat;
+    const crewNames = (item.assignments || []).map(a => a.employee_name);
+    document.getElementById('scheduleDetailCrew').textContent =
+      crewNames.length ? crewNames.join(', ') : 'Не назначен';
+    document.getElementById('scheduleDetailWhen').textContent =
+      `${scheduleViewDate(item)}, ${item.start_time}–${item.end_time}`;
+    document.getElementById('scheduleDetailService').textContent = item.service_name;
+    const deleteForm = document.getElementById('scheduleDetailDeleteForm');
+    deleteForm.action = scheduleCreateUrl + '/' + item.id + '/delete';
+    const quickAddForm = document.getElementById('scheduleQuickAddForm');
+    quickAddForm.reset();
+    const quickAddPicker = quickAddForm.querySelector('[data-client-picker]');
+    quickAddPicker.querySelector('[data-client-id]').value = '';
+    quickAddPicker.dataset.selectedPhone = '';
+    renderScheduleDetailClients(item);
+    setScheduleDetailModalOpen(true);
+  }
+  function renderScheduleDetailClients(item) {
+    const participants = item.participants || [];
+    document.getElementById('scheduleDetailClientsCount').textContent =
+      `Клиенты ${item.participants_count || 0}/${item.capacity || 0}`;
+    const list = document.getElementById('scheduleDetailClientsList');
+    list.replaceChildren();
+    if (!participants.length) {
+      const empty = document.createElement('div');
+      empty.className = 'hint schedule-detail-clients-empty';
+      empty.textContent = 'В рейсе пока никого нет — добавьте первого клиента справа.';
+      list.appendChild(empty);
+      return;
+    }
+    participants.forEach(participant => list.appendChild(buildScheduleDetailClientRow(item, participant)));
+  }
+  function buildScheduleDetailClientRow(item, participant) {
+    const row = document.createElement('div');
+    row.className = 'schedule-detail-client';
+
+    const summary = document.createElement('button');
+    summary.type = 'button';
+    summary.className = 'schedule-detail-client-summary';
+    summary.innerHTML = `
+      <span class="schedule-detail-client-id">
+        <strong>${scheduleEscapeHtml(participant.client_name)}</strong>
+        <small>${scheduleEscapeHtml(participant.client_phone || 'Телефон не указан')}</small>
+      </span>
+      <span class="schedule-detail-client-guests">×${participant.guests_count}</span>
+      <span class="schedule-detail-client-due">${scheduleParticipantAmountDue(participant).toFixed(0)} ₽<small>к доплате</small></span>
+      <svg class="schedule-detail-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8l4 4 4-4"/></svg>
+    `;
+    const expanded = document.createElement('div');
+    expanded.className = 'schedule-detail-client-expanded';
+    // Re-rendered after every add/edit/remove (participant or addon) —
+    // restoring whichever rows were open before keeps the list from
+    // snapping shut on the client someone's actively working with.
+    const wasOpen = scheduleDetailExpandedIds.has(participant.id);
+    expanded.hidden = !wasOpen;
+    row.classList.toggle('is-open', wasOpen);
+    summary.addEventListener('click', () => {
+      expanded.hidden = !expanded.hidden;
+      row.classList.toggle('is-open', !expanded.hidden);
+      if (expanded.hidden) {
+        scheduleDetailExpandedIds.delete(participant.id);
+      } else {
+        scheduleDetailExpandedIds.add(participant.id);
+      }
+    });
+
+    const view = buildScheduleDetailClientView(item, participant, expanded);
+    expanded.appendChild(view);
+    row.append(summary, expanded);
+    return row;
+  }
+  function buildScheduleDetailClientView(item, participant, expandedRoot) {
+    const view = document.createElement('div');
+    view.className = 'schedule-detail-client-view';
+    const payLine = document.createElement('p');
+    payLine.innerHTML = `<b>Оплата.</b> Стоимость программы: ${Number(participant.price).toFixed(0)} ₽ · К доплате: ${scheduleParticipantAmountDue(participant).toFixed(0)} ₽`;
+    const channelLine = document.createElement('p');
+    channelLine.innerHTML = `<b>Канал продаж.</b> ${participant.sales_partner_name ? scheduleEscapeHtml(participant.sales_partner_name) : 'Не указан'}`;
+    view.append(payLine, channelLine);
+
+    const addonsBlock = document.createElement('div');
+    addonsBlock.className = 'schedule-detail-client-addons';
+    const addonsTitle = document.createElement('p');
+    addonsTitle.innerHTML = '<b>Сопутствующие товары</b>';
+    addonsBlock.appendChild(addonsTitle);
+    const purchases = document.createElement('ul');
+    purchases.className = 'schedule-addon-purchases';
+    (participant.addons || []).forEach(addon => {
+      const li = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = `${addon.product_name} × ${addon.quantity} = ${(addon.quantity * addon.unit_price).toFixed(0)} ₽`;
+      li.appendChild(label);
+      if (addon.auto_added) {
+        const badge = document.createElement('b');
+        badge.className = 'schedule-addon-auto-badge';
+        badge.textContent = 'авто';
+        li.appendChild(badge);
+      }
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'icon-btn danger';
+      removeBtn.title = 'Убрать товар';
+      removeBtn.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 5l10 10M15 5L5 15"/></svg>';
+      removeBtn.addEventListener('click', () => deleteScheduleAddon(item.id, addon.id));
+      li.appendChild(removeBtn);
+      purchases.appendChild(li);
+    });
+    if (!(participant.addons || []).length) {
+      const li = document.createElement('li');
+      li.className = 'schedule-addon-empty';
+      li.textContent = 'Товаров пока нет';
+      purchases.appendChild(li);
+    }
+    addonsBlock.appendChild(purchases);
+    if (scheduleAddonProducts.length) {
+      const addonForm = document.createElement('form');
+      addonForm.className = 'schedule-addon-add-form';
+      addonForm.innerHTML = `
+        <select aria-label="Товар для ${scheduleEscapeHtml(participant.client_name)}">${scheduleAddonProductOptions()}</select>
+        <input type="number" min="1" value="1" aria-label="Количество">
+        <button type="submit" class="btn-secondary">Добавить</button>
+      `;
+      addonForm.addEventListener('submit', event => {
+        event.preventDefault();
+        const productId = addonForm.querySelector('select').value;
+        const quantity = addonForm.querySelector('input').value;
+        addScheduleAddon(item.id, participant.client_id, productId, quantity);
+      });
+      addonsBlock.appendChild(addonForm);
+    }
+    view.appendChild(addonsBlock);
+
+    const actions = document.createElement('div');
+    actions.className = 'schedule-detail-client-actions';
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'btn-secondary';
+    editBtn.textContent = 'Редактировать';
+    editBtn.addEventListener('click', () => {
+      view.hidden = true;
+      expandedRoot.appendChild(buildScheduleDetailClientEditForm(item, participant, view));
+    });
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'icon-btn danger';
+    removeBtn.title = 'Убрать из рейса';
+    removeBtn.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h12M8 3h4l1 3H7l1-3zM6 6l.7 11h6.6L14 6M8.5 9v5M11.5 9v5"/></svg>';
+    removeBtn.addEventListener('click', () => {
+      if (!confirm(`Убрать «${participant.client_name}» из рейса?`)) return;
+      fetch(`${scheduleCreateUrl}/${item.id}/participants/${participant.id}/delete`, {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+          if (!data.ok) { alert(data.message || 'Не удалось убрать клиента.'); return; }
+          scheduleDetailApplyUpdate(data);
+        })
+        .catch(() => alert('Не удалось убрать клиента. Попробуйте ещё раз.'));
+    });
+    actions.append(editBtn, removeBtn);
+    view.appendChild(actions);
+    return view;
+  }
+  function buildScheduleDetailClientEditForm(item, participant, viewToRestore) {
+    const form = document.createElement('form');
+    form.className = 'schedule-detail-client-edit';
+    const partnerOptions = scheduleExcursionPartners.map(partner => {
+      const selected = partner.id === participant.sales_partner_id ? ' selected' : '';
+      return `<option value="${partner.id}"${selected}>${scheduleEscapeHtml(partner.client_name)}</option>`;
+    }).join('');
+    form.innerHTML = `
+      <label class="field"><span>Имя</span><input name="client_name" value="${scheduleEscapeHtml(participant.client_name)}" required></label>
+      <label class="field"><span>Телефон</span><input name="client_phone" type="tel" value="${scheduleEscapeHtml(participant.client_phone || '')}"></label>
+      <label class="field"><span>Гостей</span><input name="guests_count" type="number" min="1" max="100" value="${participant.guests_count}"></label>
+      <label class="field"><span>Стоимость, ₽</span><input name="price" type="text" inputmode="decimal" value="${participant.price}"></label>
+      <label class="field"><span>Канал продаж</span><select name="sales_partner_id"><option value="">Не указан</option>${partnerOptions}</select></label>
+      <div class="schedule-detail-client-edit-actions">
+        <button type="button" class="btn-secondary">Отмена</button>
+        <button type="submit">Сохранить</button>
+      </div>
+    `;
+    form.querySelector('.btn-secondary').addEventListener('click', () => {
+      form.remove();
+      viewToRestore.hidden = false;
+    });
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      const payload = {
+        client_name: form.client_name.value,
+        client_phone: form.client_phone.value,
+        guests_count: form.guests_count.value,
+        price: form.price.value,
+        sales_partner_id: form.sales_partner_id.value,
+      };
+      fetch(`${scheduleCreateUrl}/${item.id}/participants/${participant.id}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (!data.ok) { alert(data.message || 'Не удалось сохранить изменения.'); return; }
+          scheduleDetailApplyUpdate(data);
+        })
+        .catch(() => alert('Не удалось сохранить изменения. Попробуйте ещё раз.'));
+    });
+    return form;
+  }
+  function scheduleDetailApplyUpdate(data) {
+    const item = scheduleItems.find(candidate => candidate.id === scheduleDetailItemId);
+    if (!item) return;
+    item.participants = data.participants;
+    item.participants_count = data.participants_count;
+    if (data.capacity != null) item.capacity = data.capacity;
+    renderScheduleDetailClients(item);
+  }
+  function submitScheduleQuickAdd(event) {
+    event.preventDefault();
+    const form = event.target;
+    const picker = form.querySelector('[data-client-picker]');
+    const payload = {
+      client_id: picker.querySelector('[data-client-id]').value || null,
+      client_name: picker.querySelector('[data-participant-search]').value,
+      client_phone: document.getElementById('scheduleQuickAddPhone').value,
+      guests_count: document.getElementById('scheduleQuickAddGuests').value,
+    };
+    const submitBtn = document.getElementById('scheduleQuickAddSubmit');
+    submitBtn.disabled = true;
+    fetch(`${scheduleCreateUrl}/${scheduleDetailItemId}/participants`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (!data.ok) { alert(data.message || 'Не удалось добавить клиента.'); return; }
+        scheduleDetailApplyUpdate(data);
+        form.reset();
+        picker.querySelector('[data-client-id]').value = '';
+        picker.dataset.selectedPhone = '';
+        document.getElementById('scheduleQuickAddGuests').value = 1;
+      })
+      .catch(() => alert('Не удалось добавить клиента. Попробуйте ещё раз.'))
+      .finally(() => { submitBtn.disabled = false; });
+    return false;
+  }
+  function openScheduleEditFromDetail() {
+    const itemId = scheduleDetailItemId;
+    closeScheduleDetailModal();
+    openScheduleEdit(itemId, true);
   }
   function scheduleItemMinutes(item, field) {
     const value = String(item[field] || '');
@@ -1339,6 +1730,8 @@
       picker.querySelector('[data-client-name]').value = client.client_name || '';
       picker.closest('.schedule-participant-row').querySelector('[name="participant_phone[]"]').value = client.phone || '';
       syncScheduleParticipantCount();
+    } else if (picker.dataset.pickerKind === 'quickadd') {
+      document.getElementById('scheduleQuickAddPhone').value = client.phone || '';
     } else {
       document.getElementById('schedulePhone').value = client.phone || '';
     }

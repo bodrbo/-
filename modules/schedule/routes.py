@@ -152,6 +152,7 @@ def create_schedule_blueprint(
         success, message, _saved_id = services.save_item(
             db, request.form, boats, service_repository.list_services(db),
             item_id=item_id,
+            keep_participants=request.form.get("keep_participants") == "1",
         )
         if success:
             notify_item_changes(
@@ -232,6 +233,67 @@ def create_schedule_blueprint(
         return jsonify({
             "ok": True, "message": message,
             "participants": repository.list_item_participants_with_addons(get_db(), item_id),
+        })
+
+    @blueprint.route("/schedule/items/<int:item_id>/participants", methods=["POST"])
+    @manage_required
+    def add_item_participant(item_id):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"ok": False, "message": "Некорректный запрос."}), 400
+        db = get_db()
+        success, message, _participant_id = services.add_participant_quick(
+            db, item_id, payload
+        )
+        if not success:
+            return jsonify({"ok": False, "message": message}), 400
+        item = repository.get_item(db, item_id)
+        return jsonify({
+            "ok": True, "message": message,
+            "participants": repository.list_item_participants_with_addons(db, item_id),
+            "participants_count": item["participants_count"] if item else 0,
+            "capacity": item["capacity"] if item else None,
+        })
+
+    @blueprint.route(
+        "/schedule/items/<int:item_id>/participants/<int:participant_id>",
+        methods=["POST"],
+    )
+    @manage_required
+    def update_item_participant(item_id, participant_id):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"ok": False, "message": "Некорректный запрос."}), 400
+        db = get_db()
+        success, message = services.edit_participant(
+            db, item_id, participant_id, payload
+        )
+        if not success:
+            return jsonify({"ok": False, "message": message}), 400
+        item = repository.get_item(db, item_id)
+        return jsonify({
+            "ok": True, "message": message,
+            "participants": repository.list_item_participants_with_addons(db, item_id),
+            "participants_count": item["participants_count"] if item else 0,
+            "capacity": item["capacity"] if item else None,
+        })
+
+    @blueprint.route(
+        "/schedule/items/<int:item_id>/participants/<int:participant_id>/delete",
+        methods=["POST"],
+    )
+    @manage_required
+    def delete_item_participant(item_id, participant_id):
+        db = get_db()
+        success, message = services.remove_participant(db, item_id, participant_id)
+        if not success:
+            return jsonify({"ok": False, "message": message}), 400
+        item = repository.get_item(db, item_id)
+        return jsonify({
+            "ok": True, "message": message,
+            "participants": repository.list_item_participants_with_addons(db, item_id),
+            "participants_count": item["participants_count"] if item else 0,
+            "capacity": item["capacity"] if item else None,
         })
 
     @blueprint.route("/schedule/tripster/sync", methods=["POST"])
