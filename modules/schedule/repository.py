@@ -472,10 +472,18 @@ def list_item_participants_with_addons(db, item_id):
         (item_id,),
     ).fetchall():
         addons_by_client.setdefault(row["client_id"], []).append(dict(row))
+    payments_by_participant = {}
+    for row in db.execute(
+        "SELECT * FROM schedule_yookassa_payments "
+        "WHERE schedule_item_id = ? ORDER BY id DESC",
+        (item_id,),
+    ).fetchall():
+        payments_by_participant.setdefault(row["participant_id"], []).append(dict(row))
     result = []
     for participant in participants:
         participant = dict(participant)
         participant["addons"] = addons_by_client.get(participant["client_id"], [])
+        participant["payments"] = payments_by_participant.get(participant["id"], [])
         result.append(participant)
     return result
 
@@ -515,6 +523,65 @@ def remove_participant_addon(db, addon_id, item_id):
     cursor = db.execute(
         "DELETE FROM schedule_participant_addons WHERE id = ? AND schedule_item_id = ?",
         (addon_id, item_id),
+    )
+    db.commit()
+    return cursor.rowcount > 0
+
+
+def create_yookassa_payment_row(
+    db, item_id, participant_id, yookassa_payment_id, amount, status,
+    confirmation_url, timestamp,
+):
+    cursor = db.execute(
+        "INSERT INTO schedule_yookassa_payments "
+        "(schedule_item_id, participant_id, yookassa_payment_id, amount, status, "
+        "confirmation_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (item_id, participant_id, yookassa_payment_id, amount, status,
+         confirmation_url, timestamp, timestamp),
+    )
+    db.commit()
+    return cursor.lastrowid
+
+
+def get_yookassa_payment(db, payment_id, participant_id):
+    return db.execute(
+        "SELECT * FROM schedule_yookassa_payments WHERE id = ? AND participant_id = ?",
+        (payment_id, participant_id),
+    ).fetchone()
+
+
+def get_yookassa_payment_by_remote_id(db, yookassa_payment_id):
+    return db.execute(
+        "SELECT * FROM schedule_yookassa_payments WHERE yookassa_payment_id = ?",
+        (yookassa_payment_id,),
+    ).fetchone()
+
+
+def update_yookassa_payment_status(db, payment_id, status, timestamp):
+    db.execute(
+        "UPDATE schedule_yookassa_payments SET status = ?, updated_at = ? WHERE id = ?",
+        (status, timestamp, payment_id),
+    )
+
+
+def apply_yookassa_payment(db, payment_id, participant_id, amount):
+    """First-time-succeeded side effect — reduces the participant's
+    remaining balance and flags the payment as applied so a later webhook
+    call or manual "Проверить" click can't double-count it."""
+    db.execute(
+        "UPDATE schedule_participants SET paid_online = paid_online + ? WHERE id = ?",
+        (amount, participant_id),
+    )
+    db.execute(
+        "UPDATE schedule_yookassa_payments SET applied = 1 WHERE id = ?",
+        (payment_id,),
+    )
+
+
+def delete_yookassa_payment_row(db, payment_id, participant_id):
+    cursor = db.execute(
+        "DELETE FROM schedule_yookassa_payments WHERE id = ? AND participant_id = ?",
+        (payment_id, participant_id),
     )
     db.commit()
     return cursor.rowcount > 0
@@ -586,6 +653,13 @@ def add_participant(db, item_id, client_id, name, phone, guests_count, price, ti
     _recompute_item_totals(db, item_id, timestamp)
     db.commit()
     return participant_id
+
+
+def get_participant(db, participant_id, item_id):
+    return db.execute(
+        "SELECT * FROM schedule_participants WHERE id = ? AND schedule_item_id = ?",
+        (participant_id, item_id),
+    ).fetchone()
 
 
 def update_participant(db, participant_id, item_id, data, timestamp):

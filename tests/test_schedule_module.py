@@ -663,6 +663,44 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertEqual(prices, [9000, 6000])
         self.assertEqual(payment_dues, [9000, 6000])
 
+    def test_paid_online_migration_backfills_zero_and_creates_payments_table(self):
+        connection = sqlite3.connect(":memory:")
+        connection.execute(
+            "CREATE TABLE excursion_services (id INTEGER PRIMARY KEY, name TEXT)"
+        )
+        init_schema(connection)
+        connection.execute(
+            "ALTER TABLE schedule_participants RENAME TO schedule_participants_old"
+        )
+        connection.execute(
+            "CREATE TABLE schedule_participants ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, schedule_item_id INTEGER NOT NULL, "
+            "client_id INTEGER NOT NULL, client_name TEXT NOT NULL, "
+            "client_phone TEXT NOT NULL, guests_count INTEGER NOT NULL DEFAULT 1, "
+            "price REAL NOT NULL DEFAULT 0, prepayment REAL NOT NULL DEFAULT 0, "
+            "payment_due REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL, "
+            "UNIQUE(schedule_item_id, client_id))"
+        )
+        connection.execute(
+            "INSERT INTO schedule_participants "
+            "(schedule_item_id, client_id, client_name, client_phone, guests_count, "
+            "price, prepayment, payment_due, created_at) "
+            "VALUES (1, 1, 'Алия', '', 2, 9000, 0, 9000, '')"
+        )
+        connection.execute("DROP TABLE schedule_participants_old")
+        connection.execute("DROP TABLE schedule_yookassa_payments")
+        init_schema(connection)
+        row = connection.execute(
+            "SELECT paid_online FROM schedule_participants"
+        ).fetchone()
+        table_exists = connection.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'schedule_yookassa_payments'"
+        ).fetchone()
+        connection.close()
+        self.assertEqual(row[0], 0)
+        self.assertIsNotNone(table_exists)
+
     def test_group_event_reuses_existing_client_by_verified_phone(self):
         self.login()
         with application_module.app.app_context():

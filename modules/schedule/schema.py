@@ -123,6 +123,11 @@ def init_schema(conn):
         conn.execute(
             "ALTER TABLE schedule_participants ADD COLUMN sales_partner_id INTEGER"
         )
+    if "paid_online" not in participant_columns:
+        conn.execute(
+            "ALTER TABLE schedule_participants "
+            "ADD COLUMN paid_online REAL NOT NULL DEFAULT 0"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS schedule_participant_addons (
@@ -140,6 +145,26 @@ def init_schema(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_schedule_participant_addons_item "
         "ON schedule_participant_addons(schedule_item_id, client_id)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schedule_yookassa_payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            schedule_item_id INTEGER NOT NULL,
+            participant_id INTEGER NOT NULL,
+            yookassa_payment_id TEXT NOT NULL UNIQUE,
+            amount REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            confirmation_url TEXT NOT NULL,
+            applied INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schedule_yookassa_payments_participant "
+        "ON schedule_yookassa_payments(participant_id)"
     )
     conn.execute(
         """

@@ -25,6 +25,10 @@ def create_schedule_blueprint(
     tripster_fetcher=None,
     tripster_configured=lambda: False,
     cron_secret=None,
+    yookassa_configured=lambda: False,
+    yookassa_request=None,
+    receipt_vat_code=lambda: 1,
+    phone_normalizer=lambda phone: phone,
 ):
     blueprint = Blueprint("schedule", __name__)
 
@@ -88,6 +92,7 @@ def create_schedule_blueprint(
                 else context["items"]
             ),
             tripster_configured=tripster_configured(),
+            yookassa_configured=yookassa_configured(),
         )
 
     @blueprint.route("/schedule/clients/search")
@@ -295,6 +300,75 @@ def create_schedule_blueprint(
             "participants_count": item["participants_count"] if item else 0,
             "capacity": item["capacity"] if item else None,
         })
+
+    def _participants_response(db, item_id, message):
+        item = repository.get_item(db, item_id)
+        return jsonify({
+            "ok": True, "message": message,
+            "participants": repository.list_item_participants_with_addons(db, item_id),
+            "participants_count": item["participants_count"] if item else 0,
+            "capacity": item["capacity"] if item else None,
+        })
+
+    @blueprint.route(
+        "/schedule/items/<int:item_id>/participants/<int:participant_id>/yookassa",
+        methods=["POST"],
+    )
+    @manage_required
+    def create_participant_payment(item_id, participant_id):
+        if not yookassa_configured() or yookassa_request is None:
+            return jsonify({"ok": False, "message": "ЮKassa не настроена на сервере."}), 400
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"ok": False, "message": "Некорректный запрос."}), 400
+        db = get_db()
+        return_url = url_for("home", _external=True)
+        success, message, _payment_id = services.create_participant_payment(
+            db, item_id, participant_id, payload.get("amount"),
+            yookassa_request, receipt_vat_code(), phone_normalizer, return_url,
+        )
+        if not success:
+            return jsonify({"ok": False, "message": message}), 400
+        return _participants_response(db, item_id, message)
+
+    @blueprint.route(
+        "/schedule/items/<int:item_id>/participants/<int:participant_id>"
+        "/yookassa/<int:payment_id>/check",
+        methods=["POST"],
+    )
+    @manage_required
+    def check_participant_payment(item_id, participant_id, payment_id):
+        if not yookassa_configured() or yookassa_request is None:
+            return jsonify({"ok": False, "message": "ЮKassa не настроена на сервере."}), 400
+        db = get_db()
+        record = repository.get_yookassa_payment(db, payment_id, participant_id)
+        if record is None:
+            return jsonify({"ok": False, "message": "Ссылка на оплату не найдена."}), 404
+        try:
+            services.sync_participant_payment(db, record, yookassa_request)
+        except Exception as error:
+            return jsonify({"ok": False, "message": f"Не удалось проверить оплату: {error}"}), 400
+        return _participants_response(db, item_id, "Статус оплаты обновлён.")
+
+    @blueprint.route(
+        "/schedule/items/<int:item_id>/participants/<int:participant_id>"
+        "/yookassa/<int:payment_id>/delete",
+        methods=["POST"],
+    )
+    @manage_required
+    def delete_participant_payment(item_id, participant_id, payment_id):
+        db = get_db()
+        record = repository.get_yookassa_payment(db, payment_id, participant_id)
+        if record is None:
+            return jsonify({"ok": False, "message": "Ссылка на оплату не найдена."}), 404
+        if record["status"] == "waiting_for_capture" and not yookassa_configured():
+            return jsonify({"ok": False, "message": "ЮKassa не настроена на сервере."}), 400
+        success, message = services.delete_participant_payment(
+            db, record, yookassa_request
+        )
+        if not success:
+            return jsonify({"ok": False, "message": message}), 400
+        return _participants_response(db, item_id, message)
 
     @blueprint.route("/schedule/tripster/sync", methods=["POST"])
     @manage_required

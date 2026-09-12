@@ -120,6 +120,7 @@ from modules.schedule import (
     create_schedule_blueprint,
     init_schema as init_schedule_schema,
 )
+from modules.schedule import services as schedule_services
 from modules.excursion_services import (
     create_blueprint as create_excursion_services_blueprint,
     init_schema as init_excursion_services_schema,
@@ -4754,6 +4755,10 @@ app.register_blueprint(
         ),
         tripster_configured=lambda: bool(TRIPSTER_API_TOKEN),
         cron_secret=CRON_SECRET,
+        yookassa_configured=lambda: yookassa_configured(),
+        yookassa_request=lambda *args, **kwargs: _yookassa_request(*args, **kwargs),
+        receipt_vat_code=lambda: _current_yookassa_excursion_vat_code(get_db()),
+        phone_normalizer=lambda phone: _normalize_ru_phone(phone),
     )
 )
 
@@ -10752,6 +10757,9 @@ def yookassa_webhook():
                 ).fetchone()
                 if record is not None:
                     _sync_yookassa_payment(db, record)
+                schedule_services.sync_participant_payment_by_remote_id(
+                    db, object_id, _yookassa_request
+                )
                 excursion_payment = db.execute(
                     "SELECT 1 FROM excursion_yookassa_payments "
                     "WHERE yookassa_payment_id = ?",

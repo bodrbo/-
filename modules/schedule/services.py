@@ -653,6 +653,108 @@ def remove_participant_addon(db, item_id, addon_id):
     return True, "Товар удалён."
 
 
+def create_participant_payment(
+    db, item_id, participant_id, raw_amount, yookassa_request, vat_code,
+    phone_normalizer, return_url,
+):
+    """Create a ЮKassa payment link covering some amount owed by one
+    participant (full remaining balance, a percentage of it, or a manual
+    figure — all resolved client-side into one final `raw_amount`)."""
+    item = repository.get_item(db, item_id)
+    if item is None:
+        return False, "Рейс не найден.", None
+    participant = repository.get_participant(db, participant_id, item_id)
+    if participant is None:
+        return False, "Клиент не найден в этом рейсе.", None
+    errors = []
+    amount = _parse_money(raw_amount, errors, "Сумма")
+    if not errors and amount <= 0:
+        errors.append("Сумма должна быть больше нуля.")
+    if errors:
+        return False, " ".join(errors), None
+
+    description = f"{item['service_name']} — {participant['client_name']}"[:128]
+    receipt = {
+        "items": [
+            {
+                "description": description,
+                "quantity": 1,
+                "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
+                "vat_code": vat_code,
+                "measure": "piece",
+                "payment_subject": "service",
+                "payment_mode": "full_payment",
+            }
+        ],
+    }
+    phone = phone_normalizer(participant["client_phone"]) if participant["client_phone"] else ""
+    if phone:
+        receipt["customer"] = {"phone": phone}
+    body = {
+        "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
+        "capture": True,
+        "description": description,
+        "confirmation": {"type": "redirect", "return_url": return_url},
+        "metadata": {
+            "schedule_item_id": str(item_id),
+            "schedule_participant_id": str(participant_id),
+        },
+        "receipt": receipt,
+    }
+    try:
+        remote = yookassa_request(
+            "POST", "/payments", json_body=body, idempotence_key=secrets.token_hex(16)
+        )
+    except Exception as error:
+        return False, f"Не удалось создать ссылку на оплату: {error}", None
+    timestamp = current_timestamp()
+    payment_id = repository.create_yookassa_payment_row(
+        db, item_id, participant_id, remote["id"], amount,
+        remote.get("status", "pending"), remote["confirmation"]["confirmation_url"],
+        timestamp,
+    )
+    return True, "Ссылка на оплату создана.", payment_id
+
+
+def sync_participant_payment(db, record, yookassa_request):
+    """Refresh a stored payment's status from the API and, the first time
+    it turns succeeded, reduce the participant's remaining balance — the
+    guard on `applied` keeps a webhook and a manual "Проверить" click (or
+    a redelivered webhook) from double-counting the same payment."""
+    remote = yookassa_request("GET", f"/payments/{record['yookassa_payment_id']}")
+    status = remote.get("status", record["status"])
+    timestamp = current_timestamp()
+    repository.update_yookassa_payment_status(db, record["id"], status, timestamp)
+    if status == "succeeded" and not record["applied"]:
+        repository.apply_yookassa_payment(
+            db, record["id"], record["participant_id"], record["amount"]
+        )
+    db.commit()
+    return status
+
+
+def sync_participant_payment_by_remote_id(db, yookassa_payment_id, yookassa_request):
+    record = repository.get_yookassa_payment_by_remote_id(db, yookassa_payment_id)
+    if record is None:
+        return None
+    return sync_participant_payment(db, record, yookassa_request)
+
+
+def delete_participant_payment(db, record, yookassa_request):
+    if record["status"] == "succeeded":
+        return False, "Нельзя удалить ссылку с успешной оплатой."
+    if record["status"] == "waiting_for_capture":
+        try:
+            yookassa_request(
+                "POST", f"/payments/{record['yookassa_payment_id']}/cancel",
+                json_body={}, idempotence_key=secrets.token_hex(16),
+            )
+        except Exception as error:
+            return False, f"Не удалось отменить оплату в ЮKassa: {error}"
+    repository.delete_yookassa_payment_row(db, record["id"], record["participant_id"])
+    return True, "Ссылка на оплату удалена."
+
+
 def _resolve_client_for_participant(db, raw_client_id, phone, errors):
     """Same matching rules as the whole-trip form's participant rows
     (_validate_participants) — reuse by id when the picker matched one,
