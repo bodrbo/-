@@ -26,5 +26,6 @@ CLIENT_CONTACT_METHODS = (
     {"value": "telegram", "label": "Telegram"},
     {"value": "whatsapp", "label": "WhatsApp"},
     {"value": "max", "label": "MAX"},
+    {"value": "sms", "label": "СМС"},
     {"value": "email", "label": "Почта"},
 )

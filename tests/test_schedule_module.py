@@ -630,6 +630,17 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn("https://t.me/+${digits}", html)
         self.assertIn("button.disabled = true", html)
 
+    def test_client_card_offers_preferred_contact_method_field(self):
+        self.login()
+        html = self.client.get(
+            "/schedule?date=2026-09-05"
+        ).get_data(as_text=True)
+
+        self.assertIn("scheduleContactMethods", html)
+        self.assertIn("Канал связи", html)
+        self.assertIn("is-preferred", html)
+        self.assertIn('{"label": "\\u0421\\u041c\\u0421", "value": "sms"}', html)
+
     def test_price_migration_preserves_historical_trip_total(self):
         connection = sqlite3.connect(":memory:")
         connection.execute(
@@ -955,6 +966,85 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             [participant["client_name"] for participant in participants], ["Мария"]
         )
         self.assertEqual(participants[0]["guests_count"], 4)
+
+    def test_edit_participant_updates_preferred_contact_method(self):
+        self.login()
+        self.client.post(
+            "/schedule/items",
+            data=self.booking_data(
+                kind="event",
+                capacity="10",
+                customer_name="",
+                **{
+                    "participant_client_id[]": [""],
+                    "participant_name[]": ["Алия"],
+                    "participant_phone[]": ["+79998880001"],
+                    "participant_guests[]": ["2"],
+                },
+            ),
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = db.execute("SELECT id FROM schedule_items").fetchone()["id"]
+            participant = db.execute(
+                "SELECT id, client_id FROM schedule_participants WHERE schedule_item_id = ?",
+                (item_id,),
+            ).fetchone()
+
+        response = self.client.post(
+            f"/schedule/items/{item_id}/participants/{participant['id']}",
+            json={
+                "client_name": "Алия", "client_phone": "+79998880001",
+                "guests_count": 2, "price": 5000, "sales_partner_id": "",
+                "preferred_contact_method": "whatsapp",
+            },
+        )
+        data = response.get_json()
+        self.assertTrue(data["ok"], data.get("message"))
+        self.assertEqual(data["participants"][0]["preferred_contact_method"], "whatsapp")
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            client = db.execute(
+                "SELECT preferred_contact_method FROM clients WHERE id = ?",
+                (participant["client_id"],),
+            ).fetchone()
+        self.assertEqual(client["preferred_contact_method"], "whatsapp")
+
+    def test_edit_participant_rejects_invalid_contact_method(self):
+        self.login()
+        self.client.post(
+            "/schedule/items",
+            data=self.booking_data(
+                kind="event",
+                capacity="10",
+                customer_name="",
+                **{
+                    "participant_client_id[]": [""],
+                    "participant_name[]": ["Алия"],
+                    "participant_phone[]": ["+79998880001"],
+                    "participant_guests[]": ["2"],
+                },
+            ),
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = db.execute("SELECT id FROM schedule_items").fetchone()["id"]
+            participant = db.execute(
+                "SELECT id FROM schedule_participants WHERE schedule_item_id = ?",
+                (item_id,),
+            ).fetchone()
+
+        response = self.client.post(
+            f"/schedule/items/{item_id}/participants/{participant['id']}",
+            json={
+                "client_name": "Алия", "client_phone": "+79998880001",
+                "guests_count": 2, "price": 5000, "sales_partner_id": "",
+                "preferred_contact_method": "carrier-pigeon",
+            },
+        )
+        data = response.get_json()
+        self.assertFalse(data["ok"])
+        self.assertIn("канал связи", data["message"])
 
     def test_group_event_rejects_invalid_guest_count(self):
         self.login()

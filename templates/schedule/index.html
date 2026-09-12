@@ -635,6 +635,7 @@
   const scheduleClientSearchUrl = {{ url_for('schedule.search_clients')|tojson }};
   const scheduleAddonProducts = {{ addon_products|tojson }};
   const scheduleExcursionPartners = {{ excursion_partners|tojson }};
+  const scheduleContactMethods = {{ client_contact_methods|tojson }};
   const scheduleYookassaConfigured = {{ yookassa_configured|tojson }};
   const scheduleYookassaStatusLabels = {
     pending: 'Ожидает оплаты',
@@ -1113,6 +1114,8 @@
     telegram.title = 'Написать в Telegram';
     telegram.setAttribute('aria-label', 'Написать в Telegram');
     telegram.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.7 3.6c.3-.9-.6-1.7-1.5-1.4L2.7 9.4c-.9.4-.9 1.7 0 2l4.5 1.5 1.7 5.4c.2.7 1.1.9 1.6.4l2.4-2.3 4.5 3.3c.7.5 1.7.1 1.9-.7l3.4-15.4zM8.6 13l9.6-6-7.7 7.2-.4 3-1.5-4.2z"/></svg>';
+    if (participant.preferred_contact_method === 'whatsapp') whatsapp.classList.add('is-preferred');
+    if (participant.preferred_contact_method === 'telegram') telegram.classList.add('is-preferred');
 
     row.append(whatsapp, telegram);
     return row;
@@ -1126,7 +1129,10 @@
     payLine.innerHTML = `<b>Оплата.</b> Стоимость программы: ${Number(participant.price).toFixed(0)} ₽ · К доплате: ${scheduleParticipantAmountDue(participant).toFixed(0)} ₽`;
     const channelLine = document.createElement('p');
     channelLine.innerHTML = `<b>Канал продаж.</b> ${participant.sales_partner_name ? scheduleEscapeHtml(participant.sales_partner_name) : 'Не указан'}`;
-    view.append(payLine, channelLine);
+    const contactMethodInfo = scheduleContactMethods.find(method => method.value === participant.preferred_contact_method);
+    const contactMethodLine = document.createElement('p');
+    contactMethodLine.innerHTML = `<b>Канал связи.</b> ${contactMethodInfo ? scheduleEscapeHtml(contactMethodInfo.label) : 'Не указан'}`;
+    view.append(payLine, channelLine, contactMethodLine);
 
     const addonsBlock = document.createElement('div');
     addonsBlock.className = 'schedule-detail-client-addons';
@@ -1356,12 +1362,17 @@
       const selected = partner.id === participant.sales_partner_id ? ' selected' : '';
       return `<option value="${partner.id}"${selected}>${scheduleEscapeHtml(partner.client_name)}</option>`;
     }).join('');
+    const contactMethodOptions = scheduleContactMethods.map(method => {
+      const selected = method.value === participant.preferred_contact_method ? ' selected' : '';
+      return `<option value="${method.value}"${selected}>${scheduleEscapeHtml(method.label)}</option>`;
+    }).join('');
     form.innerHTML = `
       <label class="field"><span>Имя</span><input name="client_name" value="${scheduleEscapeHtml(participant.client_name)}" required></label>
       <label class="field"><span>Телефон</span><input name="client_phone" type="tel" value="${scheduleEscapeHtml(participant.client_phone || '')}"></label>
       <label class="field"><span>Гостей</span><input name="guests_count" type="number" min="1" max="100" value="${participant.guests_count}"></label>
       <label class="field"><span>Стоимость, ₽</span><input name="price" type="text" inputmode="decimal" value="${participant.price}"></label>
       <label class="field"><span>Канал продаж</span><select name="sales_partner_id"><option value="">Не указан</option>${partnerOptions}</select></label>
+      <label class="field"><span>Канал связи</span><select name="preferred_contact_method"><option value="">Не указан</option>${contactMethodOptions}</select></label>
       <div class="schedule-detail-client-edit-actions">
         <button type="button" class="btn-secondary">Отмена</button>
         <button type="submit">Сохранить</button>
@@ -1379,6 +1390,7 @@
         guests_count: form.guests_count.value,
         price: form.price.value,
         sales_partner_id: form.sales_partner_id.value,
+        preferred_contact_method: form.preferred_contact_method.value,
       };
       fetch(`${scheduleCreateUrl}/${item.id}/participants/${participant.id}`, {
         method: 'POST',

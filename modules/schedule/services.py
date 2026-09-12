@@ -4,6 +4,7 @@ import datetime as dt
 import math
 import secrets
 
+from modules.clients.constants import CLIENT_CONTACT_METHODS
 from modules.excursion_services import repository as service_repository
 
 from . import repository
@@ -852,6 +853,10 @@ def edit_participant(db, item_id, participant_id, form):
         errors.append("Количество гостей должно быть от 1 до 100.")
     price = _parse_money(form.get("price"), errors, "Стоимость")
     sales_partner_id = _validate_sales_partner_id(db, form, errors)
+    contact_method = str(form.get("preferred_contact_method") or "").strip()
+    allowed_contact_methods = {item["value"] for item in CLIENT_CONTACT_METHODS}
+    if contact_method and contact_method not in allowed_contact_methods:
+        errors.append("Некорректный канал связи.")
     if errors:
         return False, " ".join(errors)
     updated = repository.update_participant(
@@ -859,6 +864,7 @@ def edit_participant(db, item_id, participant_id, form):
         {
             "client_name": name, "client_phone": phone, "guests_count": guests_count,
             "price": price, "sales_partner_id": sales_partner_id,
+            "preferred_contact_method": contact_method,
         },
         current_timestamp(),
     )

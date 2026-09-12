@@ -166,10 +166,13 @@ def list_day_items(db, day):
             dict(assignment)
         )
     participants = db.execute(
-        "SELECT schedule_participants.*, sales_partner.client_name AS sales_partner_name "
+        "SELECT schedule_participants.*, sales_partner.client_name AS sales_partner_name, "
+        "own_client.preferred_contact_method AS preferred_contact_method "
         "FROM schedule_participants "
         "LEFT JOIN clients AS sales_partner "
         "ON sales_partner.id = schedule_participants.sales_partner_id "
+        "LEFT JOIN clients AS own_client "
+        "ON own_client.id = schedule_participants.client_id "
         f"WHERE schedule_participants.schedule_item_id IN ({placeholders}) "
         "ORDER BY schedule_participants.schedule_item_id, schedule_participants.id",
         tuple(item_ids),
@@ -188,12 +191,20 @@ def list_day_items(db, day):
     ).fetchall():
         key = (row["schedule_item_id"], row["client_id"])
         addons_by_item_and_client.setdefault(key, []).append(dict(row))
+    payments_by_participant = {}
+    for row in db.execute(
+        "SELECT * FROM schedule_yookassa_payments "
+        f"WHERE schedule_item_id IN ({placeholders}) ORDER BY id DESC",
+        tuple(item_ids),
+    ).fetchall():
+        payments_by_participant.setdefault(row["participant_id"], []).append(dict(row))
     participants_by_item = {}
     for participant in participants:
         participant = dict(participant)
         participant["addons"] = addons_by_item_and_client.get(
             (participant["schedule_item_id"], participant["client_id"]), []
         )
+        participant["payments"] = payments_by_participant.get(participant["id"], [])
         participants_by_item.setdefault(
             participant["schedule_item_id"], []
         ).append(participant)
@@ -451,10 +462,13 @@ def list_item_participants_with_addons(db, item_id):
     the schedule modal re-fetches after a manual add/remove so it can
     refresh in place without reloading the whole day."""
     participants = db.execute(
-        "SELECT schedule_participants.*, sales_partner.client_name AS sales_partner_name "
+        "SELECT schedule_participants.*, sales_partner.client_name AS sales_partner_name, "
+        "own_client.preferred_contact_method AS preferred_contact_method "
         "FROM schedule_participants "
         "LEFT JOIN clients AS sales_partner "
         "ON sales_partner.id = schedule_participants.sales_partner_id "
+        "LEFT JOIN clients AS own_client "
+        "ON own_client.id = schedule_participants.client_id "
         "WHERE schedule_participants.schedule_item_id = ? "
         "ORDER BY schedule_participants.id",
         (item_id,),
@@ -680,6 +694,10 @@ def update_participant(db, participant_id, item_id, data, timestamp):
             data["client_name"], data["client_phone"], data["guests_count"],
             data["price"], payment_due, data["sales_partner_id"], participant_id,
         ),
+    )
+    db.execute(
+        "UPDATE clients SET preferred_contact_method = ? WHERE id = ?",
+        (data["preferred_contact_method"], row["client_id"]),
     )
     _recompute_item_totals(db, item_id, timestamp)
     db.commit()

@@ -5171,6 +5171,11 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-detail-client-messengers .icon-btn svg { width: 16px; height: 16px; }
 .schedule-detail-client-messengers .icon-btn.whatsapp:hover { background: #25d366; border-color: #25d366; color: #fff; }
 .schedule-detail-client-messengers .icon-btn.telegram:hover { background: #29a9eb; border-color: #29a9eb; color: #fff; }
+/* Persistent highlight for the client's chosen "канал связи" — same
+   colors as the hover state, but staying on so staff can tell the
+   preferred channel apart at a glance, not just on mouseover. */
+.schedule-detail-client-messengers .icon-btn.whatsapp.is-preferred { background: #25d366; border-color: #25d366; border-style: solid; color: #fff; }
+.schedule-detail-client-messengers .icon-btn.telegram.is-preferred { background: #29a9eb; border-color: #29a9eb; border-style: solid; color: #fff; }
 .schedule-detail-client-addons { margin: 10px 0; padding: 10px; border: 1px solid var(--hairline); border-radius: 8px; background: #f8fafc; }
 .schedule-detail-client-addons p { margin: 0 0 6px; }
 .schedule-detail-client-payments { margin: 10px 0; padding: 10px; border: 1px solid var(--hairline); border-radius: 8px; background: #f8fafc; }

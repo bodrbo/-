@@ -4,6 +4,7 @@ import datetime as dt
 
 from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
+from modules.clients.constants import CLIENT_CONTACT_METHODS
 from modules.excursion_services import repository as service_repository
 
 from . import notifications as schedule_notifications
@@ -78,6 +79,7 @@ def create_schedule_blueprint(
             trip_services=service_repository.list_services(db),
             addon_products=service_repository.list_addon_products(db),
             excursion_partners=repository.list_excursion_partners(db),
+            client_contact_methods=CLIENT_CONTACT_METHODS,
             item_kinds=ITEM_KINDS,
             crew_roles=CREW_ROLES,
             notice=session.pop("schedule_notice", None),
