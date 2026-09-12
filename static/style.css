@@ -4192,6 +4192,17 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
   white-space: nowrap;
 }
 .btn-secondary:hover { background: var(--paper-alt); border-color: var(--brass); }
+.btn-secondary.danger {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 9px 16px;
+  background: transparent;
+  color: var(--danger);
+  border: 1.5px dashed var(--danger);
+  border-radius: 8px;
+}
+.btn-secondary.danger:hover { background: var(--danger); color: #fff8f4; border-color: var(--danger); }
 /* "Задача" column buttons (fleet_boat.html defects table, tuning_form.html
    work-items table) sit next to a .status-select-form select in the row
    above/beside — match its compact size and drop the standalone margin so
@@ -4901,7 +4912,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-event-fields[hidden] { display: none; }
 .schedule-modal {
   position: fixed;
-  z-index: 1000;
+  z-index: 3000;
   inset: 0;
   display: grid;
   place-items: center;
@@ -5084,7 +5095,6 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-detail-summary-list dd { margin: 2px 0 0; color: var(--ink); font-size: 12.5px; font-weight: 600; }
 .schedule-detail-edit-trip { display: flex; align-items: center; justify-content: center; gap: 6px; }
 .schedule-detail-edit-trip svg { width: 14px; height: 14px; flex: none; }
-.schedule-detail-summary .schedule-delete-form { position: static; margin: 0; padding-top: 10px; border-top: 1px dashed var(--hairline); background: transparent; }
 .schedule-detail-clients { min-width: 0; }
 .schedule-detail-clients-heading { margin-bottom: 10px; }
 .schedule-detail-clients-heading h3 { margin: 0; font-size: 15px; }
@@ -5134,7 +5144,24 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-detail-client-edit-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .schedule-detail-quickadd h3 { margin: 0; font-size: 13px; }
 .schedule-detail-quickadd form { display: flex; flex-direction: column; gap: 10px; }
-.schedule-detail-quickadd .field { margin: 0; }
+.schedule-detail-quickadd .field { margin: 0; flex: 0 0 auto; }
+/* ".schedule-detail-quickadd .btn-add" so this out-specifies the generic
+   button[type="submit"] rule for this form's submit button. */
+.schedule-detail-quickadd .btn-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  padding: 9px 16px;
+  background: transparent;
+  color: var(--brass-strong);
+  border: 1.5px dashed var(--hairline);
+  border-radius: 8px;
+}
+.schedule-detail-quickadd .btn-add:hover { background: var(--paper-alt); border-color: var(--brass); }
 @media (max-width: 860px) {
   .schedule-detail-body { grid-template-columns: 1fr; }
   .schedule-detail-summary, .schedule-detail-quickadd { align-self: stretch; }

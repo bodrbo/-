@@ -404,13 +404,13 @@
           </svg>
           Редактировать рейс
         </button>
-        <form method="post" id="scheduleDetailDeleteForm" class="schedule-delete-form" onsubmit="return confirm('Удалить рейс из расписания?');">
+        <form method="post" id="scheduleDetailDeleteForm" onsubmit="return confirm('Удалить рейс из расписания?');">
           <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
           <input type="hidden" name="return_employee" value="{{ selected_employee }}">
-          <button type="submit" class="icon-btn danger" title="Удалить рейс" aria-label="Удалить рейс">
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h12M8 3h4l1 3H7l1-3zM6 6l.7 11h6.6L14 6M8.5 9v5M11.5 9v5"/></svg>
+          <button type="submit" class="btn-secondary danger schedule-detail-edit-trip">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 6h12M8 3h4l1 3H7l1-3zM6 6l.7 11h6.6L14 6M8.5 9v5M11.5 9v5"/></svg>
+            Удалить рейс
           </button>
-          <span>Удалить рейс</span>
         </form>
       </aside>
 
@@ -443,7 +443,7 @@
             <span>Гостей</span>
             <input type="number" id="scheduleQuickAddGuests" min="1" max="100" value="1">
           </label>
-          <button type="submit" id="scheduleQuickAddSubmit">+ Добавить</button>
+          <button type="submit" id="scheduleQuickAddSubmit" class="btn-add">Добавить</button>
         </form>
       </aside>
     </div>
