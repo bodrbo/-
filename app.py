@@ -1245,6 +1245,7 @@ ORDER_STATUSES = [
     {"value": "in_progress", "label": "В работе"},
     {"value": "qc", "label": "Проходит независимый контроль качества"},
     {"value": "done", "label": "Выполнен"},
+    {"value": "handed_over", "label": "Выполнен, передан"},
     {"value": "cancelled", "label": "Отменён"},
 ]
 TUNING_ACTIVE_TOTAL_STATUSES = frozenset((
@@ -3082,8 +3083,10 @@ def init_db():
         """
     )
     # Boats placed on Карта цеха — one row per order, added automatically
-    # when its status enters "В работе" (see _auto_place_boat_on_shop_map).
-    # Only the position lives here; length/width are read live from the
+    # when its status enters "В работе" (see _auto_place_boat_on_shop_map)
+    # and removed automatically once it reaches "Выполнен, передан"
+    # (see _auto_remove_boat_from_shop_map). Only the position lives here;
+    # length/width are read live from the
     # boat's own catalog profile every time the map renders, never copied,
     # so an edit to the profile's dimensions is reflected immediately.
     conn.execute(
@@ -7742,6 +7745,16 @@ def _auto_place_boat_on_shop_map(db, order):
     db.commit()
 
 
+def _auto_remove_boat_from_shop_map(db, order):
+    """Mirror of _auto_place_boat_on_shop_map: once an order is marked
+    "Выполнен, передан", the boat has left the shop, so it should stop
+    occupying space on Карта цеха without staff having to remember to
+    drag it off manually. No-op if it was never placed (or already
+    removed) — status can be toggled back and forth freely."""
+    db.execute("DELETE FROM shop_map_boats WHERE order_id = ?", (order["id"],))
+    db.commit()
+
+
 @app.route("/tuning/shop-map")
 @admin_login_required
 def tuning_shop_map():
@@ -9110,6 +9123,8 @@ def set_tuning_order_status(order_id):
         db.commit()
         if status == "in_progress":
             _auto_place_boat_on_shop_map(db, order)
+        elif status == "handed_over":
+            _auto_remove_boat_from_shop_map(db, order)
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 

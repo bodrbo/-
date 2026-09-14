@@ -3729,6 +3729,10 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .status-badge.status-succeeded::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232f6b4f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5'/%3E%3C/svg%3E");
 }
+.status-badge.status-handed_over { background: rgba(47, 107, 79, 0.16); color: var(--success); }
+.status-badge.status-handed_over::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232f6b4f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 8.5l3 3 3-3M8 8.5l3 3 3-3'/%3E%3C/svg%3E");
+}
 .status-badge.status-cancelled,
 .status-badge.status-canceled,
 .status-badge.status-removed { background: rgba(179, 64, 44, 0.14); color: var(--danger); }
