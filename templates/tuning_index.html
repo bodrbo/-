@@ -198,9 +198,7 @@
             <th>Дата</th>
             <th>Клиент</th>
             <th>Техника</th>
-            <th>Канал</th>
             <th>Телефон</th>
-            <th>Скидка</th>
             <th>Итог</th>
             <th>Статус</th>
             <th></th>
@@ -250,9 +248,7 @@
               <span class="equipment-number">Серийный №: {{ o.motor_serial_number }}</span>
               {% endif %}
             </td>
-            <td class="muted">{{ 'Напрямую' if o.sale_channel == 'direct' else ('Агрегатор' if o.sale_channel == 'aggregator' else 'Смешанно') }}</td>
             <td class="muted">{{ o.phone }}</td>
-            <td>{{ (o.discount_value|float|round(1)|string ~ '%') if o.discount_type != 'amount' else (o.discount_value|money ~ ' ₽') }}</td>
             <td class="amount tuning-order-amount-breakdown">
               <strong>{{ o.total|money }} ₽</strong>
               <small>Работы: {{ o.work_total|money }} ₽{% if o.discount_value %} · до скидки{% endif %}</small>

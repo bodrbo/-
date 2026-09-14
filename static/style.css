@@ -5888,7 +5888,7 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   accent-color: var(--brass);
   cursor: pointer;
 }
-#orders-table { min-width: 1120px; }
+#orders-table { min-width: 960px; }
 .tuning-orders-filter {
   padding: 0;
   margin-bottom: 14px;
