@@ -231,6 +231,57 @@ class TuningBoatCatalogTests(unittest.TestCase):
             ).fetchone()["model_3d_filename"]
         self.assertEqual(saved_filename, "custom.glb")
 
+    def test_stringer_510_bundled_3d_model_is_attached_without_overwriting_uploads(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.create_order(
+                db,
+                "Стрингер 510",
+                "Клиент",
+                100000,
+                "2026-09-14 10:00",
+            )
+            application_module._sync_tuning_boat_profiles(db)
+            db.commit()
+
+        # Production startup follows this same path after synchronizing
+        # profiles created from historical tuning orders.
+        application_module.init_db()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            profile = db.execute(
+                "SELECT * FROM tuning_boat_profiles WHERE model_key = 'стрингер 510'"
+            ).fetchone()
+            profile_id = profile["id"]
+            self.assertEqual(
+                profile["model_3d_filename"], "seed-stringer-510.glb"
+            )
+
+        self.login()
+        page = self.client.get(f"/tuning/boats/{profile_id}")
+        html = page.get_data(as_text=True)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(
+            'src="/static/tuning_boats_3d/seed-stringer-510.glb', html
+        )
+        self.assertIn("3D-модель Стрингер 510", html)
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "UPDATE tuning_boat_profiles SET model_3d_filename = 'custom.glb' "
+                "WHERE id = ?",
+                (profile_id,),
+            )
+            db.commit()
+        application_module.init_db()
+        with application_module.app.app_context():
+            saved_filename = application_module.get_db().execute(
+                "SELECT model_3d_filename FROM tuning_boat_profiles WHERE id = ?",
+                (profile_id,),
+            ).fetchone()["model_3d_filename"]
+        self.assertEqual(saved_filename, "custom.glb")
+
     def test_known_models_are_seeded_without_overwriting_manual_data(self):
         with application_module.app.app_context():
             db = application_module.get_db()
