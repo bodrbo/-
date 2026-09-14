@@ -236,7 +236,7 @@ class TuningBoatCatalogTests(unittest.TestCase):
             db = application_module.get_db()
             self.create_order(
                 db,
-                "Стрингер 510",
+                "Стрингер-510",
                 "Клиент",
                 100000,
                 "2026-09-14 10:00",
@@ -250,7 +250,7 @@ class TuningBoatCatalogTests(unittest.TestCase):
         with application_module.app.app_context():
             db = application_module.get_db()
             profile = db.execute(
-                "SELECT * FROM tuning_boat_profiles WHERE model_key = 'стрингер 510'"
+                "SELECT * FROM tuning_boat_profiles WHERE model_key = 'стрингер-510'"
             ).fetchone()
             profile_id = profile["id"]
             self.assertEqual(
@@ -264,7 +264,7 @@ class TuningBoatCatalogTests(unittest.TestCase):
         self.assertIn(
             'src="/static/tuning_boats_3d/seed-stringer-510.glb', html
         )
-        self.assertIn("3D-модель Стрингер 510", html)
+        self.assertIn("3D-модель Стрингер-510", html)
 
         with application_module.app.app_context():
             db = application_module.get_db()
