@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Кандидаты</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<meta name="theme-color" content="#3498db">
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Боцман">
+</head>
+<body>
+
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100">
+      <g fill="var(--brass)">
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/>
+      </g>
+      <circle cx="50" cy="50" r="15" fill="none" stroke="var(--ink)" stroke-width="4"/>
+      <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
+    </svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="topbar-top-row">
+      <div class="brand">
+        <a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a>
+      </div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>
+      </button>
+    </div>
+    {% include '_admin_main_nav.html' %}
+    <div class="title-block">
+      <span class="kicker">Команда и связь</span>
+      <h1>Кандидаты</h1>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
+        <svg class="push-toggle-off" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8zM8.3 16a1.7 1.7 0 003.4 0"/></svg>
+        <svg class="push-toggle-on" viewBox="0 0 20 20" fill="currentColor"><path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8z"/></svg>
+      </button>
+      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="wrap employees-page">
+  {% include '_employees_subnav.html' %}
+
+  {% if notice %}
+  <div class="employees-notice employees-notice-{{ notice.type }}" role="alert">{{ notice.message }}</div>
+  {% endif %}
+
+  <section class="panel employee-create-panel" id="new-candidate">
+    <div class="employee-create-heading">
+      <div>
+        <p class="employee-eyebrow">Пока не в штате</p>
+        <h2>Добавить кандидата</h2>
+      </div>
+      <p>Заведите карточку сразу после собеседования или отклика — должность назначите при переводе в сотрудники.</p>
+    </div>
+    <form action="{{ url_for('employees.create_candidate') }}" method="post" class="employee-create-form candidate-create-form">
+      <label>
+        <span>Имя</span>
+        <input name="name" value="{{ create_values.get('name', '') }}" maxlength="120" placeholder="Например, Иван Петров" autocomplete="off" required>
+      </label>
+      <label>
+        <span>Телефон</span>
+        <input name="phone" value="{{ create_values.get('phone', '') }}" maxlength="40" placeholder="+7 999 000-00-00" autocomplete="off">
+      </label>
+      <label class="candidate-note-field">
+        <span>Заметка</span>
+        <textarea name="note" maxlength="2000" placeholder="Откуда, на что претендует, впечатление от разговора…">{{ create_values.get('note', '') }}</textarea>
+      </label>
+      <button type="submit" class="employee-primary-btn employee-create-submit">Добавить кандидата</button>
+    </form>
+  </section>
+
+  <div class="employee-roster-heading">
+    <div>
+      <p class="employee-eyebrow">Список кандидатов</p>
+      <h2>{{ candidates|length }} кандидатов</h2>
+    </div>
+    <p>Когда решение принято — выберите должность и переведите кандидата в сотрудники, личный кабинет создастся автоматически.</p>
+  </div>
+
+  <datalist id="knownPositions">
+    {% for position in known_positions %}<option value="{{ position }}">{% endfor %}
+  </datalist>
+
+  <section class="employee-roster" aria-label="Список кандидатов">
+    {% for candidate in candidates %}
+    <article class="employee-card" id="candidate-{{ candidate.id }}">
+      <header class="employee-card-header">
+        <span class="employee-roster-avatar" aria-hidden="true">{{ candidate.initials }}</span>
+        <div class="employee-identity">
+          <h3>{{ candidate.name }}</h3>
+          {% if candidate.phone %}<span><a href="tel:{{ candidate.phone }}">{{ candidate.phone }}</a></span>{% else %}<span>Телефон не указан</span>{% endif %}
+        </div>
+        <div class="employee-card-actions">
+          <form action="{{ url_for('employees.delete_candidate', candidate_id=candidate.id) }}" method="post" class="row-actions"
+                onsubmit='return confirm({{ ("Удалить " ~ candidate.name ~ " из кандидатов?")|tojson }});'>
+            <button type="submit" class="icon-btn danger" title="Удалить кандидата" aria-label="Удалить кандидата {{ candidate.name }}">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
+              </svg>
+            </button>
+          </form>
+        </div>
+      </header>
+
+      <div class="candidate-card-body">
+        {% if candidate.note %}
+        <p class="candidate-note">{{ candidate.note }}</p>
+        {% else %}
+        <p class="employee-empty-copy">Заметки нет.</p>
+        {% endif %}
+
+        <form action="{{ url_for('employees.convert_candidate', candidate_id=candidate.id) }}" method="post" class="candidate-convert-form"
+              onsubmit='return confirm({{ ("Перевести " ~ candidate.name ~ " в сотрудники? Кандидат будет удалён из этого списка, появится в разделе «Сотрудники».")|tojson }});'>
+          <label class="sr-only" for="candidate-position-{{ candidate.id }}">Должность для {{ candidate.name }}</label>
+          <select id="candidate-position-{{ candidate.id }}" name="positions">
+            <option value="">Выберите должность</option>
+            {% for position in known_positions %}
+            <option value="{{ position }}">{{ position }}</option>
+            {% endfor %}
+          </select>
+          <label class="sr-only" for="candidate-custom-position-{{ candidate.id }}">Другая должность для {{ candidate.name }}</label>
+          <input id="candidate-custom-position-{{ candidate.id }}" name="custom_position" maxlength="80" placeholder="Или другая должность">
+          <button type="submit" class="employee-primary-btn">Перенести в сотрудники</button>
+        </form>
+      </div>
+    </article>
+    {% else %}
+    <div class="employee-roster-empty">Кандидатов пока нет.</div>
+    {% endfor %}
+  </section>
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+<nav class="sub-tabs">
+  <a href="{{ url_for('employees.index') }}" class="{{ 'active' if sub_page == 'employees' }}">Сотрудники</a>
+  <a href="{{ url_for('employees.candidates') }}" class="{{ 'active' if sub_page == 'candidates' }}">Кандидаты</a>
+</nav>

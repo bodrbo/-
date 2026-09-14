@@ -1540,6 +1540,24 @@ def init_db():
                     (employee_row[0], position, now_str),
                 )
 
+    # Pre-hire leads — kept separate from employees so an unfinished
+    # candidate never shows up in crew lists, payroll, or schedule
+    # assignment; "Перенести в сотрудники" creates a real employee record
+    # (see modules/employees/services.convert_candidate) and removes the
+    # candidate row once that succeeds.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            phone TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS captain_shifts (

@@ -17,12 +17,12 @@ def create_employees_blueprint(
 ):
     blueprint = Blueprint("employees", __name__)
 
-    def redirect_with_notice(message, success, anchor=None):
+    def redirect_with_notice(message, success, anchor=None, endpoint="employees.index"):
         session["employees_notice"] = {
             "message": message,
             "type": "success" if success else "error",
         }
-        location = url_for("employees.index")
+        location = url_for(endpoint)
         if anchor:
             location += f"#{anchor}"
         return redirect(location)
@@ -46,6 +46,7 @@ def create_employees_blueprint(
             credentials=session.pop("employee_credentials", None),
             create_values=session.pop("employee_create_values", {}),
             active_page="employees",
+            sub_page="employees",
         )
 
     @blueprint.route("/employees", methods=["POST"])
@@ -152,5 +153,68 @@ def create_employees_blueprint(
             get_db(), employee_id, telegram_sender
         )
         return redirect_with_notice(message, success)
+
+    @blueprint.route("/employees/candidates")
+    @admin_login_required
+    def candidates():
+        db = get_db()
+        return render_template(
+            "employees/candidates.html",
+            candidates=services.list_candidates(db),
+            known_positions=services.known_positions(db),
+            notice=session.pop("employees_notice", None),
+            credentials=session.pop("employee_credentials", None),
+            create_values=session.pop("candidate_create_values", {}),
+            active_page="employees",
+            sub_page="candidates",
+        )
+
+    @blueprint.route("/employees/candidates", methods=["POST"])
+    @admin_login_required
+    def create_candidate():
+        success, message, _candidate_id = services.create_candidate(
+            get_db(),
+            request.form.get("name", ""),
+            request.form.get("phone", ""),
+            request.form.get("note", ""),
+        )
+        if not success:
+            session["candidate_create_values"] = {
+                "name": request.form.get("name", ""),
+                "phone": request.form.get("phone", ""),
+                "note": request.form.get("note", ""),
+            }
+        return redirect_with_notice(
+            message, success,
+            None if success else "new-candidate",
+            endpoint="employees.candidates",
+        )
+
+    @blueprint.route("/employees/candidates/<int:candidate_id>/delete", methods=["POST"])
+    @admin_login_required
+    def delete_candidate(candidate_id):
+        success, message = services.delete_candidate(get_db(), candidate_id)
+        return redirect_with_notice(message, success, endpoint="employees.candidates")
+
+    @blueprint.route(
+        "/employees/candidates/<int:candidate_id>/convert", methods=["POST"]
+    )
+    @admin_login_required
+    def convert_candidate(candidate_id):
+        success, message, credentials = services.convert_candidate(
+            get_db(),
+            candidate_id,
+            request.form.getlist("positions"),
+            request.form.get("custom_position", ""),
+        )
+        if success:
+            session["employee_credentials"] = credentials
+            return redirect_with_notice(
+                message, True, "employee-credentials", endpoint="employees.index"
+            )
+        return redirect_with_notice(
+            message, False, f"candidate-{candidate_id}",
+            endpoint="employees.candidates",
+        )
 
     return blueprint

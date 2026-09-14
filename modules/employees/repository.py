@@ -377,3 +377,31 @@ def unlink_telegram_account(db, employee):
         (employee["id"], employee["name"]),
     )
     db.commit()
+
+
+def list_candidates(db):
+    return db.execute(
+        "SELECT * FROM candidates ORDER BY created_at DESC, id DESC"
+    ).fetchall()
+
+
+def get_candidate(db, candidate_id):
+    return db.execute(
+        "SELECT * FROM candidates WHERE id = ?", (candidate_id,)
+    ).fetchone()
+
+
+def create_candidate(db, name, phone, note, timestamp):
+    cursor = db.execute(
+        "INSERT INTO candidates (name, phone, note, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (name, phone, note, timestamp, timestamp),
+    )
+    db.commit()
+    return cursor.lastrowid
+
+
+def delete_candidate(db, candidate_id):
+    cursor = db.execute("DELETE FROM candidates WHERE id = ?", (candidate_id,))
+    db.commit()
+    return cursor.rowcount > 0

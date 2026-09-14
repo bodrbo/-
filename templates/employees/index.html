@@ -57,6 +57,8 @@
 </header>
 
 <main class="wrap employees-page">
+  {% include '_employees_subnav.html' %}
+
   {% if notice %}
   <div class="employees-notice employees-notice-{{ notice.type }}" role="alert">{{ notice.message }}</div>
   {% endif %}

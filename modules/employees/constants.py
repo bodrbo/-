@@ -41,6 +41,9 @@ POSITION_MAX_LENGTH = 80
 EMPLOYEE_NAME_MAX_LENGTH = 120
 EMPLOYEE_LOGIN_MAX_LENGTH = 50
 GENERATED_PASSWORD_LENGTH = 14
+CANDIDATE_NAME_MAX_LENGTH = 120
+CANDIDATE_PHONE_MAX_LENGTH = 40
+CANDIDATE_NOTE_MAX_LENGTH = 2000
 
 # The directory keeps runtime positions in the database, but these core
 # positions must always remain available when an administrator creates a new

@@ -9,6 +9,9 @@ from werkzeug.security import generate_password_hash
 
 from . import repository
 from .constants import (
+    CANDIDATE_NAME_MAX_LENGTH,
+    CANDIDATE_NOTE_MAX_LENGTH,
+    CANDIDATE_PHONE_MAX_LENGTH,
     KNOWN_POSITIONS,
     EMPLOYEE_LOGIN_MAX_LENGTH,
     EMPLOYEE_NAME_MAX_LENGTH,
@@ -346,3 +349,63 @@ def send_test_notification(db, employee_id, telegram_sender):
 
 def telegram_chat_id_for_employee(db, employee_name):
     return repository.get_telegram_chat_id_by_employee_name(db, employee_name)
+
+
+def list_candidates(db):
+    candidates = []
+    for row in repository.list_candidates(db):
+        candidate = dict(row)
+        candidate["initials"] = _initials(candidate["name"])
+        candidates.append(candidate)
+    return candidates
+
+
+def create_candidate(db, raw_name, raw_phone, raw_note):
+    name = " ".join((raw_name or "").strip().split())
+    if not name:
+        return False, "Укажите имя кандидата.", None
+    if len(name) > CANDIDATE_NAME_MAX_LENGTH:
+        return False, f"Имя должно быть короче {CANDIDATE_NAME_MAX_LENGTH + 1} символов.", None
+    phone = " ".join((raw_phone or "").strip().split())
+    if len(phone) > CANDIDATE_PHONE_MAX_LENGTH:
+        return False, f"Телефон должен быть короче {CANDIDATE_PHONE_MAX_LENGTH + 1} символов.", None
+    note = (raw_note or "").strip()
+    if len(note) > CANDIDATE_NOTE_MAX_LENGTH:
+        return False, f"Заметка должна быть короче {CANDIDATE_NOTE_MAX_LENGTH + 1} символов.", None
+
+    candidate_id = repository.create_candidate(
+        db, name, phone, note, current_timestamp()
+    )
+    return True, f"Кандидат {name} добавлен.", candidate_id
+
+
+def delete_candidate(db, candidate_id):
+    candidate = repository.get_candidate(db, candidate_id)
+    if candidate is None:
+        return False, "Кандидат не найден."
+    repository.delete_candidate(db, candidate_id)
+    return True, f"{candidate['name']} удалён(а) из кандидатов."
+
+
+def convert_candidate(db, candidate_id, raw_positions, raw_custom_position):
+    """Hand a candidate off to create_employee unchanged — same name/position
+    validation and automatic login creation as adding an employee directly —
+    then remove the candidate row once that succeeds. Leaves the candidate
+    in place on failure (e.g. the name needs a surname first) so nothing is
+    silently lost."""
+    candidate = repository.get_candidate(db, candidate_id)
+    if candidate is None:
+        return False, "Кандидат не найден.", None
+
+    success, message, credentials = create_employee(
+        db, candidate["name"], raw_positions, raw_custom_position, ""
+    )
+    if not success:
+        return False, message, None
+
+    repository.delete_candidate(db, candidate_id)
+    return (
+        True,
+        f"{candidate['name']} переведён(а) в сотрудники. Личный кабинет создан.",
+        credentials,
+    )

@@ -17,11 +17,12 @@ class EmployeesModuleIntegrationTests(unittest.TestCase):
 
     def employee(self, name):
         with application_module.app.app_context():
-            return dict(
+            row = (
                 application_module.get_db()
                 .execute("SELECT * FROM employees WHERE name = ?", (name,))
                 .fetchone()
             )
+            return dict(row) if row is not None else None
 
     def create_employee(self, name, positions=None, chat_id=""):
         self.log_in_as_admin()
@@ -514,6 +515,121 @@ class EmployeesModuleIntegrationTests(unittest.TestCase):
                 (employee["name"],),
             )
             db.commit()
+
+
+    def candidate(self, name):
+        with application_module.app.app_context():
+            row = (
+                application_module.get_db()
+                .execute("SELECT * FROM candidates WHERE name = ?", (name,))
+                .fetchone()
+            )
+            return dict(row) if row is not None else None
+
+    def create_candidate(self, name, phone="+7 900 000-00-00", note="С собеседования"):
+        self.log_in_as_admin()
+        response = self.client.post(
+            "/employees/candidates",
+            data={"name": name, "phone": phone, "note": note},
+        )
+        self.assertEqual(response.status_code, 302)
+        return self.candidate(name)
+
+    def test_candidates_page_requires_admin_and_renders(self):
+        response = self.client.get("/employees/candidates")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/admin/login"))
+
+        self.log_in_as_admin()
+        response = self.client.get("/employees/candidates")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Кандидаты".encode(), response.data)
+
+    def test_admin_creates_and_deletes_candidate(self):
+        candidate = self.create_candidate(
+            "Светлана Кандидатова", phone="+7 911 222-33-44", note="Хочет гидом"
+        )
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate["phone"], "+7 911 222-33-44")
+        self.assertEqual(candidate["note"], "Хочет гидом")
+
+        response = self.client.get("/employees/candidates")
+        self.assertIn("Светлана Кандидатова".encode(), response.data)
+        self.assertIn("Хочет гидом".encode(), response.data)
+
+        response = self.client.post(
+            f"/employees/candidates/{candidate['id']}/delete"
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNone(self.candidate("Светлана Кандидатова"))
+
+    def test_candidate_name_is_required(self):
+        self.log_in_as_admin()
+        response = self.client.post(
+            "/employees/candidates", data={"name": "   ", "phone": "", "note": ""}
+        )
+        self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as session:
+            notice = session["employees_notice"]
+        self.assertEqual(notice["type"], "error")
+
+    def test_admin_converts_candidate_to_employee(self):
+        candidate = self.create_candidate("Фёдор Переходов")
+
+        response = self.client.post(
+            f"/employees/candidates/{candidate['id']}/convert",
+            data={"positions": ["Гид"], "custom_position": ""},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("#employee-credentials"))
+
+        self.assertIsNone(self.candidate("Фёдор Переходов"))
+        employee = self.employee("Фёдор Переходов")
+        self.assertIsNotNone(employee)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            positions = {
+                row["position"]
+                for row in db.execute(
+                    "SELECT position FROM employee_positions WHERE employee_id = ?",
+                    (employee["id"],),
+                ).fetchall()
+            }
+            account = db.execute(
+                "SELECT * FROM team_accounts WHERE employee_id = ?", (employee["id"],)
+            ).fetchone()
+        self.assertIn("Гид", positions)
+        self.assertIsNotNone(account)
+        with self.client.session_transaction() as session:
+            credentials = session["employee_credentials"]
+        self.assertEqual(credentials["employee_name"], "Фёдор Переходов")
+
+    def test_convert_without_position_keeps_candidate(self):
+        candidate = self.create_candidate("Григорий Ожидаев")
+
+        response = self.client.post(
+            f"/employees/candidates/{candidate['id']}/convert",
+            data={"positions": [], "custom_position": ""},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response.headers["Location"].endswith(f"#candidate-{candidate['id']}")
+        )
+        self.assertIsNotNone(self.candidate("Григорий Ожидаев"))
+        self.assertIsNone(self.employee("Григорий Ожидаев"))
+
+    def test_convert_rejects_single_word_name_and_keeps_candidate(self):
+        candidate = self.create_candidate("Пельмень")
+
+        response = self.client.post(
+            f"/employees/candidates/{candidate['id']}/convert",
+            data={"positions": ["Гид"], "custom_position": ""},
+        )
+        self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as session:
+            notice = session["employees_notice"]
+        self.assertEqual(notice["type"], "error")
+        self.assertIsNotNone(self.candidate("Пельмень"))
 
 
 if __name__ == "__main__":
