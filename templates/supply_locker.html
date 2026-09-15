@@ -134,6 +134,48 @@
     </form>
   </section>
 
+  <section class="panel form-panel">
+    <h2>Передать сотруднику</h2>
+    <p class="hint">Положить что-то в этот постамат для сотрудника напрямую, без заявки на снабжение.</p>
+    <form id="locker-drop-form" method="post"
+          action="{{ url_for('add_supply_locker_drop', locker_id=locker.id) }}" class="entry-form">
+      <div class="field field-wide">
+        <label for="drop_employee_name">Сотрудник</label>
+        <select id="drop_employee_name" name="employee_name" required>
+          <option value="" selected disabled>Выберите сотрудника…</option>
+          {% for name in team_employees %}
+          <option value="{{ name }}">{{ name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field field-wide">
+        <label>Позиции</label>
+        <div id="locker-drop-items">
+          <div class="supply-request-row">
+            <input type="text" name="item_name[]" placeholder="Наименование" class="supply-request-item">
+            <input type="text" inputmode="decimal" name="quantity[]" placeholder="Количество" class="supply-request-quantity">
+            <button type="button" class="btn-delete" onclick="removeLockerDropRow(this)" title="Убрать позицию">✕</button>
+          </div>
+        </div>
+        <template id="locker-drop-row-template">
+          <div class="supply-request-row">
+            <input type="text" name="item_name[]" placeholder="Наименование" class="supply-request-item">
+            <input type="text" inputmode="decimal" name="quantity[]" placeholder="Количество" class="supply-request-quantity">
+            <button type="button" class="btn-delete" onclick="removeLockerDropRow(this)" title="Убрать позицию">✕</button>
+          </div>
+        </template>
+        <button type="button" class="btn-add" onclick="addLockerDropRow()">Добавить позицию</button>
+      </div>
+      <div class="field field-wide">
+        <label for="drop_comment">Комментарий</label>
+        <textarea id="drop_comment" name="comment" class="photo-comment-input" placeholder="Необязательно"></textarea>
+      </div>
+      <div class="field field-submit">
+        <button type="submit">Передать в постамат</button>
+      </div>
+    </form>
+  </section>
+
   <section class="panel">
     <h2>Содержимое постамата</h2>
     {% if returns %}
@@ -218,6 +260,46 @@
     </div>
     {% endif %}
   </section>
+
+  <section class="panel">
+    <h2>Передано вручную</h2>
+    {% if drops %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr><th>Дата</th><th>Сотрудник</th><th>Позиции</th><th>Комментарий</th><th>Статус</th></tr>
+        </thead>
+        <tbody>
+          {% for d in drops %}
+          <tr>
+            <td class="muted">{{ d.delivered_at[:10]|ru_date }}</td>
+            <td>{{ d.employee_name }}</td>
+            <td>
+              {% for it in d.lines %}
+              {{ it.item_name }} — {{ it.quantity|float|round(2) }}{% if not loop.last %}<br>{% endif %}
+              {% endfor %}
+            </td>
+            <td class="muted">{{ d.comment or '—' }}</td>
+            <td>
+              {% if d.picked_up_at %}
+              <span class="status-badge status-supplyreq-delivered">Забрано {{ d.picked_up_at[:10]|ru_date }}</span>
+              {% else %}
+              <span class="status-badge status-supplyreq-new">Ожидает получения</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      <div class="t">Пока пусто</div>
+      <div class="s">Здесь появится всё, что вы передали сотрудникам через этот постамат напрямую.</div>
+    </div>
+    {% endif %}
+  </section>
   {% else %}
   <section class="panel">
     <table class="gloss">
@@ -231,6 +313,19 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+{% if viewer_role == 'admin' %}
+<script>
+function addLockerDropRow() {
+  var container = document.getElementById('locker-drop-items');
+  var template = document.getElementById('locker-drop-row-template');
+  container.appendChild(template.content.cloneNode(true));
+}
+function removeLockerDropRow(btn) {
+  var rows = document.querySelectorAll('#locker-drop-items .supply-request-row');
+  if (rows.length > 1) btn.closest('.supply-request-row').remove();
+}
+</script>
+{% endif %}
 
 </body>
 </html>

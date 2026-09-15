@@ -2731,6 +2731,35 @@ def init_db():
         )
         """
     )
+    # Ad-hoc counterpart to supply_request_deliveries: an admin can put
+    # something in a locker for an employee directly, with no supply
+    # request behind it (e.g. handing out a tool nobody asked for yet).
+    # Same delivered_at/picked_up_at lifecycle, picked up by the employee
+    # from the team dashboard exactly like a request-backed delivery.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS supply_locker_drops (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            locker_id INTEGER NOT NULL,
+            employee_name TEXT NOT NULL,
+            comment TEXT,
+            created_by_admin_id INTEGER,
+            delivered_at TEXT NOT NULL,
+            picked_up_at TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS supply_locker_drop_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            drop_id INTEGER NOT NULL,
+            item_name TEXT NOT NULL,
+            quantity REAL NOT NULL
+        )
+        """
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS supply_request_items (
@@ -13255,6 +13284,29 @@ def team_dashboard():
             ).fetchone()
             my_supply_requests.append(req)
 
+    # "Что вам передали" — ad-hoc admin drops into a locker, with no
+    # supply request behind them. Shown regardless of can_request_supply:
+    # an admin can hand anything to any employee with a team account, not
+    # just the positions eligible to raise supply requests themselves.
+    my_locker_drops = []
+    for row in db.execute(
+        "SELECT supply_locker_drops.*, supply_lockers.name AS locker_name, "
+        "supply_lockers.address AS locker_address "
+        "FROM supply_locker_drops "
+        "JOIN supply_lockers ON supply_lockers.id = supply_locker_drops.locker_id "
+        "WHERE supply_locker_drops.employee_name = ? "
+        "ORDER BY (supply_locker_drops.picked_up_at IS NOT NULL), "
+        "supply_locker_drops.delivered_at DESC",
+        (employee_name,),
+    ).fetchall():
+        drop = dict(row)
+        drop["lines"] = db.execute(
+            "SELECT item_name, quantity FROM supply_locker_drop_items "
+            "WHERE drop_id = ? ORDER BY id",
+            (drop["id"],),
+        ).fetchall()
+        my_locker_drops.append(drop)
+
     return render_template(
         "team_dashboard.html",
         employee_name=employee_name,
@@ -13289,6 +13341,7 @@ def team_dashboard():
         team_writeoff_error=session.pop("team_writeoff_error", None),
         my_supply_requests=my_supply_requests, supply_request_statuses=SUPPLY_REQUEST_STATUSES,
         supply_lockers_for_return=supply_lockers_for_return,
+        my_locker_drops=my_locker_drops,
     )
 
 
@@ -13798,6 +13851,24 @@ def team_pickup_supply_request(request_id):
         db.execute(
             "UPDATE supply_request_deliveries SET picked_up_at = ? WHERE id = ?",
             (dt.datetime.now().strftime("%Y-%m-%d %H:%M"), delivery["id"]),
+        )
+        db.commit()
+    return _team_dashboard_section_redirect("supply")
+
+
+@app.route("/team/locker-drops/<int:drop_id>/pickup", methods=["POST"])
+@team_login_required
+def team_pickup_locker_drop(drop_id):
+    db = get_db()
+    employee_name = session.get("team_employee_name")
+    drop = db.execute(
+        "SELECT * FROM supply_locker_drops WHERE id = ? AND employee_name = ?",
+        (drop_id, employee_name),
+    ).fetchone()
+    if drop is not None and drop["picked_up_at"] is None:
+        db.execute(
+            "UPDATE supply_locker_drops SET picked_up_at = ? WHERE id = ?",
+            (dt.datetime.now().strftime("%Y-%m-%d %H:%M"), drop_id),
         )
         db.commit()
     return _team_dashboard_section_redirect("supply")
@@ -15848,6 +15919,7 @@ def bulk_delete_supply_lockers():
         ("supply_request_returns", "locker_id"),
         ("supply_request_deliveries", "locker_id"),
         ("supply_requests", "delivery_locker_id"),
+        ("supply_locker_drops", "locker_id"),
     ):
         rows = db.execute(
             f"SELECT DISTINCT {column} FROM {table} WHERE {column} IN ({placeholders})",
@@ -15969,11 +16041,99 @@ def supply_locker(locker_id):
             (delivery["request_id"],),
         ).fetchall()
         deliveries.append(delivery)
+    drops = []
+    for row in db.execute(
+        "SELECT * FROM supply_locker_drops WHERE locker_id = ? "
+        "ORDER BY (picked_up_at IS NOT NULL), delivered_at DESC",
+        (locker_id,),
+    ).fetchall():
+        drop = dict(row)
+        drop["lines"] = db.execute(
+            "SELECT item_name, quantity FROM supply_locker_drop_items "
+            "WHERE drop_id = ? ORDER BY id",
+            (drop["id"],),
+        ).fetchall()
+        drops.append(drop)
+    team_employees = [
+        r["employee_name"] for r in db.execute(
+            "SELECT DISTINCT team_accounts.employee_name FROM team_accounts "
+            "JOIN employees ON employees.name = team_accounts.employee_name "
+            "WHERE employees.deleted_at IS NULL ORDER BY team_accounts.employee_name"
+        ).fetchall()
+    ]
     return render_template(
         "supply_locker.html", locker=locker, viewer_role="admin",
         locker_error=session.pop("locker_error", None), returns=returns,
-        deliveries=deliveries,
+        deliveries=deliveries, drops=drops, team_employees=team_employees,
     )
+
+
+@app.route("/supply/lockers/<int:locker_id>/drop", methods=["POST"])
+@admin_login_required
+def add_supply_locker_drop(locker_id):
+    db = get_db()
+    locker = db.execute("SELECT * FROM supply_lockers WHERE id = ?", (locker_id,)).fetchone()
+    if locker is None:
+        return redirect(url_for("supply_lockers"))
+    employee_name = request.form.get("employee_name", "").strip()
+    valid_employee = employee_name and db.execute(
+        "SELECT 1 FROM team_accounts WHERE employee_name = ?", (employee_name,)
+    ).fetchone() is not None
+    comment = request.form.get("comment", "").strip()
+
+    item_names = request.form.getlist("item_name[]")
+    quantities = request.form.getlist("quantity[]")
+    items = []
+    for i in range(max(len(item_names), len(quantities))):
+        name = item_names[i].strip() if i < len(item_names) else ""
+        qty_raw = quantities[i].strip().replace(",", ".") if i < len(quantities) else ""
+        if not name:
+            continue
+        try:
+            qty = float(qty_raw)
+        except ValueError:
+            continue
+        if qty <= 0:
+            continue
+        items.append((name, qty))
+
+    if not valid_employee or not items:
+        session["locker_error"] = (
+            "Укажите сотрудника и хотя бы одну позицию." if items
+            else "Добавьте хотя бы одну позицию."
+        )
+        return redirect(url_for("supply_locker", locker_id=locker_id))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    cur = db.execute(
+        "INSERT INTO supply_locker_drops "
+        "(locker_id, employee_name, comment, created_by_admin_id, delivered_at, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (locker_id, employee_name, comment or None, session.get("admin_id"), now, now),
+    )
+    drop_id = cur.lastrowid
+    for name, qty in items:
+        db.execute(
+            "INSERT INTO supply_locker_drop_items (drop_id, item_name, quantity) VALUES (?, ?, ?)",
+            (drop_id, name, qty),
+        )
+    db.commit()
+
+    items_text = "\n".join(f"— {html.escape(name)} × {qty:g}" for name, qty in items)
+    text = (
+        f"📦 Вам передали снабжение через постамат «{html.escape(locker['name'])}»"
+        + (f" ({html.escape(locker['address'])})" if locker["address"] else "")
+        + f"\n{items_text}"
+    )
+    if comment:
+        text += f"\n\nКомментарий: {html.escape(comment)}"
+    send_telegram_notification_to_employee(db, employee_name, text)
+    chat_id = telegram_chat_id_for_employee(db, employee_name)
+    if chat_id is not None:
+        photo_path = os.path.join(app.static_folder, "telegram", "supply-delivered.jpg")
+        if os.path.exists(photo_path):
+            send_telegram_photo(photo_path, chat_id=chat_id)
+    return redirect(url_for("supply_locker", locker_id=locker_id))
 
 
 @app.route(

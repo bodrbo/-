@@ -648,6 +648,36 @@
   </div>
   {% endif %}
 
+  {% if my_locker_drops %}
+  <details id="team-locker-drops" class="panel collapsible-panel" open>
+    <summary>
+      <span>Посылки в постамате</span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <div class="collapsible-body">
+      {% for d in my_locker_drops %}
+      <div class="task-card">
+        <div>
+          {% for it in d.lines %}{{ it.item_name }} — {{ it.quantity|float|round(2) }}{% if not loop.last %}, {% endif %}{% endfor %}
+        </div>
+        <div class="hint" style="margin:0;">{{ d.delivered_at[:10]|ru_date }}</div>
+        {% if d.picked_up_at %}
+        <div class="hint" style="margin:4px 0 0;">Забрано из постамата «{{ d.locker_name }}»</div>
+        {% else %}
+        <div class="hint" style="margin:4px 0 0;">
+          Ждёт вас в постамате «{{ d.locker_name }}»{% if d.locker_address %} — {{ d.locker_address }}{% endif %}
+        </div>
+        {% if d.comment %}<div class="hint" style="margin:4px 0 0;">{{ d.comment }}</div>{% endif %}
+        <form action="{{ url_for('team_pickup_locker_drop', drop_id=d.id) }}" method="post">
+          <button type="submit" class="btn-secondary" style="margin-top:6px;">Забрать</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+
   {% if can_access_fleet or can_access_documents %}
   <div id="photo-modal" class="photo-modal hidden" onclick="if (event.target === this) closePhotoModal();">
     <div class="photo-modal-inner">
