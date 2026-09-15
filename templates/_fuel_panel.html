@@ -84,7 +84,8 @@
         </label>
         <label data-fuel-destination hidden>
           <span>Катер-получатель</span>
-          <select name="destination_boat" disabled>
+          <select name="destination_boat" disabled required>
+            <option value="" selected disabled>Выберите катер…</option>
             {% for destination in boats if destination.name != fuel.boat %}
             <option value="{{ destination.name }}">{{ destination.name }}</option>
             {% endfor %}

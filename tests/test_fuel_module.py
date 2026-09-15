@@ -462,6 +462,23 @@ class FuelModuleIntegrationTests(unittest.TestCase):
                 7,
             )
 
+    def test_destination_boat_select_has_no_misleading_default(self):
+        """Regression: the destination select had no blank placeholder, so
+        it silently defaulted to whichever boat happened to be first in
+        the filtered list (Ларус, unless Ларус itself was current) — easy
+        to mistake for the system defaulting transfers to that boat."""
+        with self.client.session_transaction() as session:
+            session["team_id"] = 1
+            session["team_employee_name"] = "Дмитрий Тарусов"
+            session["team_username"] = "captain-test"
+        response = self.client.get("/team/?boat_index=2")
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn(
+            '<option value="" selected disabled>Выберите катер…</option>', html
+        )
+        self.assertNotIn('<option value="Ларус" selected', html)
+
     def test_untouched_operation_time_sees_reserve_received_after_page_load(self):
         with application_module.app.app_context():
             db = application_module.get_db()
