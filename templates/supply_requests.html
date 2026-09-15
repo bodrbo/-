@@ -89,6 +89,7 @@
             <th>Сотрудник</th>
             <th>Позиции</th>
             <th>Тип</th>
+            <th>Постомат доставки</th>
             <th>Статус</th>
             <th>Комментарий</th>
             <th></th>
@@ -118,6 +119,16 @@
                 {% if r.return_row and r.return_row.collected_at %}Возврат получен{% elif r.return_row %}Возврат ожидает получения{% else %}Ожидает возврата{% endif %}
               </div>
               {% endif %}
+            </td>
+            <td>
+              <form action="{{ url_for('set_supply_request_locker', request_id=r.id) }}" method="post" class="status-select-form">
+                <select name="delivery_locker_id" onchange="this.form.submit()">
+                  <option value="" {{ 'selected' if not r.delivery_locker_id }}>Не выбран</option>
+                  {% for locker in lockers %}
+                  <option value="{{ locker.id }}" {{ 'selected' if r.delivery_locker_id == locker.id }}>{{ locker.name }}</option>
+                  {% endfor %}
+                </select>
+              </form>
             </td>
             <td>
               <span class="status-badge status-supplyreq-{{ r.status }}">

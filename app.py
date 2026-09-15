@@ -2696,6 +2696,12 @@ def init_db():
         conn.execute(
             "ALTER TABLE supply_requests ADD COLUMN type_assigned_by_admin_id INTEGER"
         )
+    # delivery_locker_id: admin picks which locker a request will be
+    # delivered to. Set independently from status, so it can be chosen
+    # while the request is still "В доставке" and is simply read when the
+    # status later flips to "delivered".
+    if "delivery_locker_id" not in supply_request_cols:
+        conn.execute("ALTER TABLE supply_requests ADD COLUMN delivery_locker_id INTEGER")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS supply_request_returns (
@@ -2705,6 +2711,22 @@ def init_db():
             returned_at TEXT NOT NULL,
             collected_at TEXT,
             collected_by_admin_id INTEGER,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    # Mirror of supply_request_returns for the outbound direction: created
+    # when a request's status first becomes "delivered" (see
+    # set_supply_request_status), cleared (picked_up_at set) by the
+    # employee themselves from the team dashboard.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS supply_request_deliveries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id INTEGER NOT NULL UNIQUE,
+            locker_id INTEGER NOT NULL,
+            delivered_at TEXT NOT NULL,
+            picked_up_at TEXT,
             created_at TEXT NOT NULL
         )
         """
@@ -13223,6 +13245,14 @@ def team_dashboard():
                 "WHERE request_id = ?",
                 (r["id"],),
             ).fetchone()
+            req["delivery"] = db.execute(
+                "SELECT supply_request_deliveries.*, supply_lockers.name AS locker_name, "
+                "supply_lockers.address AS locker_address "
+                "FROM supply_request_deliveries "
+                "JOIN supply_lockers ON supply_lockers.id = supply_request_deliveries.locker_id "
+                "WHERE request_id = ?",
+                (r["id"],),
+            ).fetchone()
             my_supply_requests.append(req)
 
     return render_template(
@@ -13747,6 +13777,29 @@ def team_return_supply_request(request_id):
     )
     if req["type_assigned_by_admin_id"]:
         send_telegram_notification_to_admin(db, req["type_assigned_by_admin_id"], text)
+    return _team_dashboard_section_redirect("supply")
+
+
+@app.route("/team/supply-requests/<int:request_id>/pickup", methods=["POST"])
+@team_login_required
+def team_pickup_supply_request(request_id):
+    db = get_db()
+    employee_name = session.get("team_employee_name")
+    req = db.execute(
+        "SELECT * FROM supply_requests WHERE id = ? AND employee_name = ?",
+        (request_id, employee_name),
+    ).fetchone()
+    if req is None:
+        return _team_dashboard_section_redirect("supply")
+    delivery = db.execute(
+        "SELECT * FROM supply_request_deliveries WHERE request_id = ?", (request_id,)
+    ).fetchone()
+    if delivery is not None and delivery["picked_up_at"] is None:
+        db.execute(
+            "UPDATE supply_request_deliveries SET picked_up_at = ? WHERE id = ?",
+            (dt.datetime.now().strftime("%Y-%m-%d %H:%M"), delivery["id"]),
+        )
+        db.commit()
     return _team_dashboard_section_redirect("supply")
 
 
@@ -15822,9 +15875,27 @@ def supply_locker(locker_id):
             (ret["request_id"],),
         ).fetchall()
         returns.append(ret)
+    deliveries = []
+    for row in db.execute(
+        "SELECT supply_request_deliveries.*, supply_requests.employee_name "
+        "FROM supply_request_deliveries "
+        "JOIN supply_requests ON supply_requests.id = supply_request_deliveries.request_id "
+        "WHERE supply_request_deliveries.locker_id = ? "
+        "ORDER BY (supply_request_deliveries.picked_up_at IS NOT NULL), "
+        "supply_request_deliveries.delivered_at DESC",
+        (locker_id,),
+    ).fetchall():
+        delivery = dict(row)
+        delivery["lines"] = db.execute(
+            "SELECT item_name, quantity FROM supply_request_items "
+            "WHERE request_id = ? ORDER BY id",
+            (delivery["request_id"],),
+        ).fetchall()
+        deliveries.append(delivery)
     return render_template(
         "supply_locker.html", locker=locker, viewer_role="admin",
         locker_error=session.pop("locker_error", None), returns=returns,
+        deliveries=deliveries,
     )
 
 
@@ -16763,10 +16834,11 @@ def supply_requests():
         req["lines"] = items_by_request.get(r["id"], [])
         req["return_row"] = returns_by_request.get(r["id"])
         requests.append(req)
+    lockers = db.execute("SELECT * FROM supply_lockers ORDER BY name").fetchall()
     return render_template(
         "supply_requests.html", active_page="supply", sub_page="requests",
         requests=requests, request_statuses=SUPPLY_REQUEST_STATUSES,
-        request_types=SUPPLY_REQUEST_TYPES,
+        request_types=SUPPLY_REQUEST_TYPES, lockers=lockers,
     )
 
 
@@ -16784,6 +16856,31 @@ def set_supply_request_type(request_id):
             (request_type, session.get("admin_id"), request_id),
         )
         db.commit()
+    return redirect(url_for("supply_requests"))
+
+
+@app.route("/supply/requests/<int:request_id>/locker", methods=["POST"])
+@admin_login_required
+def set_supply_request_locker(request_id):
+    db = get_db()
+    req = db.execute("SELECT * FROM supply_requests WHERE id = ?", (request_id,)).fetchone()
+    if req is None:
+        return redirect(url_for("supply_requests"))
+    raw_locker_id = request.form.get("delivery_locker_id", "").strip()
+    locker_id = None
+    if raw_locker_id:
+        try:
+            locker_id = int(raw_locker_id)
+        except ValueError:
+            locker_id = None
+        else:
+            if db.execute("SELECT 1 FROM supply_lockers WHERE id = ?", (locker_id,)).fetchone() is None:
+                locker_id = None
+    db.execute(
+        "UPDATE supply_requests SET delivery_locker_id = ? WHERE id = ?",
+        (locker_id, request_id),
+    )
+    db.commit()
     return redirect(url_for("supply_requests"))
 
 
@@ -16812,7 +16909,34 @@ def set_supply_request_status(request_id):
         text = f"📦 Заявка на снабжение: <b>{html.escape(label)}</b>\n{items_text}"
         if comment:
             text += f"\n\nКомментарий: {html.escape(comment)}"
+        delivery_locker = None
+        if status == "delivered" and req["delivery_locker_id"]:
+            delivery_locker = db.execute(
+                "SELECT * FROM supply_lockers WHERE id = ?", (req["delivery_locker_id"],)
+            ).fetchone()
+        if delivery_locker is not None:
+            already_delivered = db.execute(
+                "SELECT 1 FROM supply_request_deliveries WHERE request_id = ?", (request_id,)
+            ).fetchone()
+            if already_delivered is None:
+                db.execute(
+                    "INSERT INTO supply_request_deliveries "
+                    "(request_id, locker_id, delivered_at, created_at) VALUES (?, ?, ?, ?)",
+                    (request_id, delivery_locker["id"], now, now),
+                )
+                db.commit()
+            text += f"\n\nПостомат: {html.escape(delivery_locker['name'])}"
+            if delivery_locker["address"]:
+                text += f" ({html.escape(delivery_locker['address'])})"
+            if delivery_locker["access_code"]:
+                text += f"\nКод-пароль: {html.escape(delivery_locker['access_code'])}"
         send_telegram_notification_to_employee(db, req["employee_name"], text)
+        if delivery_locker is not None:
+            chat_id = telegram_chat_id_for_employee(db, req["employee_name"])
+            if chat_id is not None:
+                photo_path = os.path.join(app.static_folder, "telegram", "supply-delivered.jpg")
+                if os.path.exists(photo_path):
+                    send_telegram_photo(photo_path, chat_id=chat_id)
     return redirect(url_for("supply_requests"))
 
 

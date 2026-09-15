@@ -568,6 +568,18 @@
           </button>
           {% endif %}
         {% endif %}
+        {% if r['delivery'] %}
+          {% if r['delivery'].picked_up_at %}
+          <div class="hint" style="margin:4px 0 0;">Забрано из постомата «{{ r['delivery'].locker_name }}»</div>
+          {% else %}
+          <div class="hint" style="margin:4px 0 0;">
+            Ждёт вас в постомате «{{ r['delivery'].locker_name }}»{% if r['delivery'].locker_address %} — {{ r['delivery'].locker_address }}{% endif %}
+          </div>
+          <form action="{{ url_for('team_pickup_supply_request', request_id=r.id) }}" method="post">
+            <button type="submit" class="btn-secondary" style="margin-top:6px;">Забрать</button>
+          </form>
+          {% endif %}
+        {% endif %}
       </div>
       {% endfor %}
       {% else %}

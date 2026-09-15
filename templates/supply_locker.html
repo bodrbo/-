@@ -179,6 +179,45 @@
     </div>
     {% endif %}
   </section>
+
+  <section class="panel">
+    <h2>Доставленные заявки</h2>
+    {% if deliveries %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr><th>Дата доставки</th><th>Сотрудник</th><th>Позиции</th><th>Статус</th></tr>
+        </thead>
+        <tbody>
+          {% for d in deliveries %}
+          <tr>
+            <td class="muted">{{ d.delivered_at[:10]|ru_date }}</td>
+            <td>{{ d.employee_name }}</td>
+            <td>
+              {% for it in d.lines %}
+              {{ it.item_name }} — {{ it.quantity|float|round(2) }}{% if not loop.last %}<br>{% endif %}
+              {% endfor %}
+            </td>
+            <td>
+              {% if d.picked_up_at %}
+              <span class="status-badge status-supplyreq-delivered">Забрано {{ d.picked_up_at[:10]|ru_date }}</span>
+              {% else %}
+              <span class="status-badge status-supplyreq-new">Ожидает получения</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      <div class="t">Пока пусто</div>
+      <div class="s">Здесь появятся заявки на снабжение, доставленные в этот постомат.</div>
+    </div>
+    {% endif %}
+  </section>
   {% else %}
   <section class="panel">
     <table class="gloss">
