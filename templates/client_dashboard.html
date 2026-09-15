@@ -148,17 +148,18 @@
   <div class="investor-bar"><span class="investor-name">{{ client.client_name }}</span></div>
   {% endif %}
 
-  {% if is_staff_view and is_partner_contact %}
+  {% if is_staff_view %}
   {% set profile_values = partner_profile_form or {} %}
   <details class="panel partner-profile-editor" {{ 'open' if partner_profile_error }}>
-    <summary>{{ 'Данные и оформление партнёра' if is_tuning_partner else 'Данные партнёра' }}</summary>
+    <summary>{{ 'Данные и оформление партнёра' if is_tuning_partner else 'Данные партнёра' if is_partner_contact else 'Данные клиента' }}</summary>
     <form method="post" enctype="multipart/form-data" action="{{ url_for('update_tuning_partner_profile', client_id=client.id) }}">
       <input type="hidden" name="section" value="{{ client_section }}">
       <p class="partner-profile-hint">Изменения применятся к профилю и всем связанным заказам, рейсам и документам.</p>
       <div class="partner-profile-fields">
         <label class="partner-profile-field">
-          <span>Название или имя партнёра</span>
-          <input name="client_name" type="text" maxlength="160" required autocomplete="organization"
+          <span>{{ 'Название или имя партнёра' if is_partner_contact else 'Имя клиента' }}</span>
+          <input name="client_name" type="text" maxlength="160" required
+                 autocomplete="{{ 'organization' if is_partner_contact else 'name' }}"
                  value="{{ profile_values.get('client_name', client.client_name) }}">
         </label>
         <label class="partner-profile-field">

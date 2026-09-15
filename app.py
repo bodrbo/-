@@ -10003,6 +10003,9 @@ def admin_client_dashboard(client_id):
 @app.route("/admin/clients/<int:client_id>/partner-profile", methods=["POST"])
 @excursion_manager_or_admin_required
 def update_tuning_partner_profile(client_id):
+    """Despite the name/URL (kept as-is to avoid churn), this now edits the
+    directory contact fields for any relationship type — client or partner.
+    Only partner_title/partner_logo, further down, are partner-specific."""
     db = get_db()
     manager_view = _is_customer_manager(db)
     section = (
@@ -10018,13 +10021,13 @@ def update_tuning_partner_profile(client_id):
         "SELECT id, client_name, phone, email, comment FROM clients WHERE id = ?",
         (client_id,),
     ).fetchone()
-    if (
-        client is None
-        or membership is None
-        or membership["relationship_type"] != CLIENT_RELATIONSHIP_PARTNER
-    ):
-        redirect_args = {"section": section, "relationship": CLIENT_RELATIONSHIP_PARTNER}
-        return redirect(url_for("tuning_clients", **redirect_args))
+    if client is None or membership is None:
+        return redirect(url_for("tuning_clients", section=section))
+    is_tuning_partner = (
+        section == TUNING_SEGMENT
+        and membership["relationship_type"] == CLIENT_RELATIONSHIP_PARTNER
+    )
+    is_partner = membership["relationship_type"] == CLIENT_RELATIONSHIP_PARTNER
 
     values = {
         "client_name": " ".join(
@@ -10036,7 +10039,9 @@ def update_tuning_partner_profile(client_id):
     }
     errors = []
     if not values["client_name"]:
-        errors.append("Укажите название или имя партнёра.")
+        errors.append(
+            "Укажите название или имя партнёра." if is_partner else "Укажите имя клиента."
+        )
     elif len(values["client_name"]) > CLIENT_DIRECTORY_NAME_LIMIT:
         errors.append(
             f"Название или имя — не более {CLIENT_DIRECTORY_NAME_LIMIT} символов."
@@ -10065,7 +10070,6 @@ def update_tuning_partner_profile(client_id):
             f"Комментарий — не более {CLIENT_DIRECTORY_COMMENT_LIMIT} символов."
         )
 
-    is_tuning_partner = section == TUNING_SEGMENT
     partner_title = membership["partner_title"]
     if is_tuning_partner:
         partner_title = " ".join(
@@ -10140,7 +10144,9 @@ def update_tuning_partner_profile(client_id):
             ),
         )
     db.commit()
-    session["partner_profile_notice"] = "Данные партнёра обновлены."
+    session["partner_profile_notice"] = (
+        "Данные партнёра обновлены." if is_partner else "Данные клиента обновлены."
+    )
     return redirect(url_for(
         "admin_client_dashboard", client_id=client_id, section=section
     ))
