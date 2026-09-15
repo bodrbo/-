@@ -133,6 +133,52 @@
       </div>
     </form>
   </section>
+
+  <section class="panel">
+    <h2>Содержимое постомата</h2>
+    {% if returns %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr><th>Дата возврата</th><th>Сотрудник</th><th>Позиции</th><th>Статус</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for ret in returns %}
+          <tr>
+            <td class="muted">{{ ret.returned_at[:10]|ru_date }}</td>
+            <td>{{ ret.employee_name }}</td>
+            <td>
+              {% for it in ret.lines %}
+              {{ it.item_name }} — {{ it.quantity|float|round(2) }}{% if not loop.last %}<br>{% endif %}
+              {% endfor %}
+            </td>
+            <td>
+              {% if ret.collected_at %}
+              <span class="status-badge status-supplyreq-delivered">Забрано {{ ret.collected_at[:10]|ru_date }}</span>
+              {% else %}
+              <span class="status-badge status-supplyreq-new">Ожидает получения</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if not ret.collected_at %}
+              <form action="{{ url_for('collect_supply_return', locker_id=locker.id, return_id=ret.id) }}" method="post">
+                <button type="submit" class="btn-secondary">Отметить как забрано</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      <div class="t">Пока пусто</div>
+      <div class="s">Здесь появятся возвраты снабжения, переданные сотрудниками через этот постомат.</div>
+    </div>
+    {% endif %}
+  </section>
   {% else %}
   <section class="panel">
     <table class="gloss">

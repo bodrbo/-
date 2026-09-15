@@ -1317,6 +1317,10 @@ SUPPLY_REQUEST_STATUSES = [
     {"value": "delivered", "label": "Доставлено"},
 ]
 DEFAULT_SUPPLY_REQUEST_STATUS = "new"
+SUPPLY_REQUEST_TYPES = [
+    {"value": "non_returnable", "label": "Невозвратная"},
+    {"value": "returnable", "label": "Возвратная"},
+]
 # supply_requests.employee_name used for requests raised automatically by
 # _maybe_create_low_stock_request rather than by a person — distinguishes
 # them in the admin table, and deliberately never matches a real
@@ -2681,6 +2685,30 @@ def init_db():
     supply_request_cols = [row[1] for row in conn.execute("PRAGMA table_info(supply_requests)").fetchall()]
     if "product_id" not in supply_request_cols:
         conn.execute("ALTER TABLE supply_requests ADD COLUMN product_id INTEGER")
+    # request_type: NULL until an admin classifies the request (see
+    # SUPPLY_REQUEST_TYPES) — 'returnable' unlocks the "Вернуть" flow for
+    # whoever raised the request. type_assigned_by_admin_id records which
+    # admin made that call, so the return notification reaches them
+    # personally rather than a shared channel.
+    if "request_type" not in supply_request_cols:
+        conn.execute("ALTER TABLE supply_requests ADD COLUMN request_type TEXT")
+    if "type_assigned_by_admin_id" not in supply_request_cols:
+        conn.execute(
+            "ALTER TABLE supply_requests ADD COLUMN type_assigned_by_admin_id INTEGER"
+        )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS supply_request_returns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id INTEGER NOT NULL UNIQUE,
+            locker_id INTEGER NOT NULL,
+            returned_at TEXT NOT NULL,
+            collected_at TEXT,
+            collected_by_admin_id INTEGER,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS supply_request_items (
@@ -13170,8 +13198,12 @@ def team_dashboard():
     # admin in /supply/requests show up here on next load, since both sides
     # read the same supply_requests row.
     my_supply_requests = []
+    supply_lockers_for_return = []
     if can_request_supply:
         my_supply_requests = []
+        supply_lockers_for_return = db.execute(
+            "SELECT * FROM supply_lockers ORDER BY name"
+        ).fetchall()
         for r in db.execute(
             "SELECT * FROM supply_requests WHERE employee_name = ? ORDER BY created_at DESC, id DESC",
             (employee_name,),
@@ -13184,6 +13216,13 @@ def team_dashboard():
                 "SELECT * FROM supply_request_items WHERE request_id = ? ORDER BY id",
                 (r["id"],),
             ).fetchall()
+            req["return"] = db.execute(
+                "SELECT supply_request_returns.*, supply_lockers.name AS locker_name "
+                "FROM supply_request_returns "
+                "JOIN supply_lockers ON supply_lockers.id = supply_request_returns.locker_id "
+                "WHERE request_id = ?",
+                (r["id"],),
+            ).fetchone()
             my_supply_requests.append(req)
 
     return render_template(
@@ -13219,6 +13258,7 @@ def team_dashboard():
         work_statuses=WORK_STATUSES, materials=materials,
         team_writeoff_error=session.pop("team_writeoff_error", None),
         my_supply_requests=my_supply_requests, supply_request_statuses=SUPPLY_REQUEST_STATUSES,
+        supply_lockers_for_return=supply_lockers_for_return,
     )
 
 
@@ -13656,6 +13696,57 @@ def team_create_supply_request():
             (request_id, name, qty),
         )
     db.commit()
+    return _team_dashboard_section_redirect("supply")
+
+
+@app.route("/team/supply-requests/<int:request_id>/return", methods=["POST"])
+@team_login_required
+def team_return_supply_request(request_id):
+    db = get_db()
+    employee_name = session.get("team_employee_name")
+    req = db.execute(
+        "SELECT * FROM supply_requests WHERE id = ? AND employee_name = ?",
+        (request_id, employee_name),
+    ).fetchone()
+    if req is None or req["request_type"] != "returnable":
+        return _team_dashboard_section_redirect("supply")
+    already_returned = db.execute(
+        "SELECT 1 FROM supply_request_returns WHERE request_id = ?", (request_id,)
+    ).fetchone()
+    if already_returned is not None:
+        return _team_dashboard_section_redirect("supply")
+    try:
+        locker_id = int(request.form.get("locker_id", ""))
+    except (TypeError, ValueError):
+        return _team_dashboard_section_redirect("supply")
+    locker = db.execute(
+        "SELECT * FROM supply_lockers WHERE id = ?", (locker_id,)
+    ).fetchone()
+    if locker is None:
+        return _team_dashboard_section_redirect("supply")
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "INSERT INTO supply_request_returns "
+        "(request_id, locker_id, returned_at, created_at) VALUES (?, ?, ?, ?)",
+        (request_id, locker_id, now, now),
+    )
+    db.commit()
+
+    items = db.execute(
+        "SELECT item_name, quantity FROM supply_request_items WHERE request_id = ? ORDER BY id",
+        (request_id,),
+    ).fetchall()
+    items_text = "\n".join(f"— {html.escape(it['item_name'])} × {it['quantity']:g}" for it in items)
+    text = (
+        f"🔁 Возврат по заявке на снабжение\n"
+        f"Сотрудник: {html.escape(employee_name)}\n"
+        f"{items_text}\n"
+        f"Постомат: {html.escape(locker['name'])}"
+        + (f" ({html.escape(locker['address'])})" if locker["address"] else "")
+    )
+    if req["type_assigned_by_admin_id"]:
+        send_telegram_notification_to_admin(db, req["type_assigned_by_admin_id"], text)
     return _team_dashboard_section_redirect("supply")
 
 
@@ -15714,10 +15805,51 @@ def supply_locker(locker_id):
         return redirect(url_for("supply_locker", locker_id=locker_id))
     locker = dict(locker)
     locker["photo_url"] = _supply_locker_photo_url(locker)
+    returns = []
+    for row in db.execute(
+        "SELECT supply_request_returns.*, supply_requests.employee_name "
+        "FROM supply_request_returns "
+        "JOIN supply_requests ON supply_requests.id = supply_request_returns.request_id "
+        "WHERE supply_request_returns.locker_id = ? "
+        "ORDER BY (supply_request_returns.collected_at IS NOT NULL), "
+        "supply_request_returns.returned_at DESC",
+        (locker_id,),
+    ).fetchall():
+        ret = dict(row)
+        ret["lines"] = db.execute(
+            "SELECT item_name, quantity FROM supply_request_items "
+            "WHERE request_id = ? ORDER BY id",
+            (ret["request_id"],),
+        ).fetchall()
+        returns.append(ret)
     return render_template(
         "supply_locker.html", locker=locker, viewer_role="admin",
-        locker_error=session.pop("locker_error", None),
+        locker_error=session.pop("locker_error", None), returns=returns,
     )
+
+
+@app.route(
+    "/supply/lockers/<int:locker_id>/returns/<int:return_id>/collect",
+    methods=["POST"],
+)
+@admin_login_required
+def collect_supply_return(locker_id, return_id):
+    db = get_db()
+    ret = db.execute(
+        "SELECT * FROM supply_request_returns WHERE id = ? AND locker_id = ?",
+        (return_id, locker_id),
+    ).fetchone()
+    if ret is not None and ret["collected_at"] is None:
+        db.execute(
+            "UPDATE supply_request_returns SET collected_at = ?, collected_by_admin_id = ? "
+            "WHERE id = ?",
+            (
+                dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                session.get("admin_id"), return_id,
+            ),
+        )
+        db.commit()
+    return redirect(url_for("supply_locker", locker_id=locker_id))
 
 
 @app.route("/team/lockers")
@@ -16621,15 +16753,38 @@ def supply_requests():
     items_by_request = {}
     for row in db.execute("SELECT * FROM supply_request_items ORDER BY id").fetchall():
         items_by_request.setdefault(row["request_id"], []).append(row)
+    returns_by_request = {
+        row["request_id"]: dict(row)
+        for row in db.execute("SELECT * FROM supply_request_returns").fetchall()
+    }
     requests = []
     for r in db.execute("SELECT * FROM supply_requests ORDER BY created_at DESC, id DESC").fetchall():
         req = dict(r)
         req["lines"] = items_by_request.get(r["id"], [])
+        req["return_row"] = returns_by_request.get(r["id"])
         requests.append(req)
     return render_template(
         "supply_requests.html", active_page="supply", sub_page="requests",
         requests=requests, request_statuses=SUPPLY_REQUEST_STATUSES,
+        request_types=SUPPLY_REQUEST_TYPES,
     )
+
+
+@app.route("/supply/requests/<int:request_id>/type", methods=["POST"])
+@admin_login_required
+def set_supply_request_type(request_id):
+    db = get_db()
+    req = db.execute("SELECT * FROM supply_requests WHERE id = ?", (request_id,)).fetchone()
+    if req is None:
+        return redirect(url_for("supply_requests"))
+    request_type = request.form.get("request_type", "").strip()
+    if request_type in [t["value"] for t in SUPPLY_REQUEST_TYPES]:
+        db.execute(
+            "UPDATE supply_requests SET request_type = ?, type_assigned_by_admin_id = ? WHERE id = ?",
+            (request_type, session.get("admin_id"), request_id),
+        )
+        db.commit()
+    return redirect(url_for("supply_requests"))
 
 
 @app.route("/supply/requests/<int:request_id>/status", methods=["POST"])

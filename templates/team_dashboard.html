@@ -556,6 +556,18 @@
                 onclick='openRequestCommentModal({{ (supply_request_statuses|selectattr("value", "equalto", r.status)|map(attribute="label")|first)|tojson }}, {{ (r.status_comment or "Комментарий пока не оставлен.")|tojson }})'>
           {{ supply_request_statuses|selectattr('value', 'equalto', r.status)|map(attribute='label')|first }}
         </button>
+        {% if r.request_type == 'returnable' %}
+          {% if r['return'] %}
+          <div class="hint" style="margin:4px 0 0;">
+            {% if r['return'].collected_at %}Возврат получен администратором{% else %}Возврат передан в постомат «{{ r['return'].locker_name }}», ожидает получения{% endif %}
+          </div>
+          {% else %}
+          <button type="button" class="btn-secondary" style="margin-top:6px;"
+                  onclick='openSupplyReturnModal({{ url_for("team_return_supply_request", request_id=r.id)|tojson }})'>
+            Вернуть
+          </button>
+          {% endif %}
+        {% endif %}
       </div>
       {% endfor %}
       {% else %}
@@ -597,6 +609,29 @@
       </button>
       <h3 id="request-comment-status"></h3>
       <p id="request-comment-text" class="hint"></p>
+    </div>
+  </div>
+
+  <div id="supply-return-modal" class="photo-modal hidden" onclick="if (event.target === this) closeSupplyReturnModal();">
+    <div class="photo-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closeSupplyReturnModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <form id="supply-return-form" method="post" class="assign-modal-card">
+        <h3>Вернуть снабжение</h3>
+        <p class="hint">Выберите постомат, через который вы возвращаете снабжение.</p>
+        <div class="field">
+          <label for="supply-return-locker">Постомат</label>
+          <select id="supply-return-locker" name="locker_id" required>
+            {% for locker in supply_lockers_for_return %}
+            <option value="{{ locker.id }}">{{ locker.name }}{% if locker.address %} — {{ locker.address }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit" class="btn-primary" style="margin-top:14px;">Подтвердить возврат</button>
+      </form>
     </div>
   </div>
   {% endif %}
@@ -729,11 +764,21 @@ function closeRequestCommentModal() {
   document.getElementById('request-comment-modal').classList.add('hidden');
 }
 
+function openSupplyReturnModal(actionUrl) {
+  document.getElementById('supply-return-form').action = actionUrl;
+  document.getElementById('supply-return-modal').classList.remove('hidden');
+}
+
+function closeSupplyReturnModal() {
+  document.getElementById('supply-return-modal').classList.add('hidden');
+}
+
 document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') {
     closeMaterialModal();
     closeSupplyRequestModal();
     closeRequestCommentModal();
+    closeSupplyReturnModal();
   }
 });
 </script>

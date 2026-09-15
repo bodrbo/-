@@ -88,6 +88,7 @@
             <th>Дата</th>
             <th>Сотрудник</th>
             <th>Позиции</th>
+            <th>Тип</th>
             <th>Статус</th>
             <th>Комментарий</th>
             <th></th>
@@ -102,6 +103,21 @@
               {% for it in r.lines %}
               {{ it.item_name }} — {{ it.quantity|float|round(2) }}{% if not loop.last %}<br>{% endif %}
               {% endfor %}
+            </td>
+            <td>
+              <form action="{{ url_for('set_supply_request_type', request_id=r.id) }}" method="post" class="status-select-form">
+                <select name="request_type" onchange="this.form.submit()">
+                  <option value="" {{ 'selected' if not r.request_type }}>Не назначен</option>
+                  {% for t in request_types %}
+                  <option value="{{ t.value }}" {{ 'selected' if r.request_type == t.value }}>{{ t.label }}</option>
+                  {% endfor %}
+                </select>
+              </form>
+              {% if r.request_type == 'returnable' %}
+              <div class="hint" style="margin-top:4px;">
+                {% if r.return_row and r.return_row.collected_at %}Возврат получен{% elif r.return_row %}Возврат ожидает получения{% else %}Ожидает возврата{% endif %}
+              </div>
+              {% endif %}
             </td>
             <td>
               <span class="status-badge status-supplyreq-{{ r.status }}">
