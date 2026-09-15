@@ -3193,6 +3193,7 @@ body.modal-open { overflow: hidden; }
   margin-top: 14px;
 }
 .fuel-refill-form label:not(.fuel-full-toggle) { display: flex; flex-direction: column; gap: 5px; }
+.fuel-refill-form label[hidden] { display: none; }
 .fuel-refill-form label > span { color: var(--muted); font-size: 11px; font-weight: 700; }
 .fuel-panel .fuel-refill-form input[type="text"],
 .fuel-panel .fuel-refill-form input[type="datetime-local"],
