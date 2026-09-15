@@ -6294,10 +6294,17 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   height: 100%;
   object-fit: cover;
 }
-/* Motor photos are typically tall and narrow — cover-cropping them in a
-   wide boat-shaped box chopped off the top (cowling) or bottom
-   (propeller). Motors get their own taller box and object-fit: contain
-   so the whole motor stays in frame instead. */
+/* Both the tuning catalog (boats, motors) and the unrelated supply-locker
+   photo share these two base classes with no distinguishing class of
+   their own, so cover stays the default here — switching it globally
+   would also change locker photos, which nobody asked for. Boats and
+   motors instead get their own -boat/-motor variant below. */
+.boat-model-visual-boat > img,
+.boat-profile-photo-boat > img {
+  object-fit: contain;
+}
+.boat-model-visual-boat > img { padding: 10px; }
+.boat-profile-photo-boat > img { padding: 14px; }
 .boat-model-visual-motor { aspect-ratio: 4 / 5; }
 .boat-model-visual-motor > img {
   object-fit: contain;
