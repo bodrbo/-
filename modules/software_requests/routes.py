@@ -1,6 +1,7 @@
 """Staff submission widget and administrator request journal."""
 
 import datetime as dt
+import html
 
 from flask import Blueprint, jsonify, make_response, redirect, render_template, request, session, url_for
 
@@ -9,7 +10,12 @@ from .constants import DESCRIPTION_MAX_LENGTH, PAGE_PATH_MAX_LENGTH, REQUEST_STA
 
 
 def create_blueprint(
-    get_db, admin_login_required, active_team_account, active_admin_account
+    get_db,
+    admin_login_required,
+    active_team_account,
+    active_admin_account,
+    notify_employee,
+    notify_admin,
 ):
     blueprint = Blueprint("software_requests", __name__)
 
@@ -100,10 +106,25 @@ def create_blueprint(
     def set_status(request_id):
         status = request.form.get("status", "")
         if status in REQUEST_STATUSES:
+            db = get_db()
+            item = repository.get_request(db, request_id)
             repository.update_status(
-                get_db(), request_id, status,
+                db, request_id, status,
                 dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
             )
+            if item is not None:
+                snippet = item["description"].strip()
+                if len(snippet) > 80:
+                    snippet = snippet[:80].rstrip() + "…"
+                text = (
+                    f"🛠 Статус вашей заявки на доработку изменён: "
+                    f"<b>{html.escape(REQUEST_STATUSES[status])}</b>\n"
+                    f"«{html.escape(snippet)}»"
+                )
+                if item["author_type"] == "admin" and item["author_admin_id"]:
+                    notify_admin(db, item["author_admin_id"], text)
+                elif item["author_type"] == "employee":
+                    notify_employee(db, item["author_name"], text)
         return redirect(url_for("software_requests.index"))
 
     return blueprint

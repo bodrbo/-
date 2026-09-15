@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 from support import application_module
 
@@ -162,6 +163,58 @@ class SoftwareRequestTests(unittest.TestCase):
                 (created["request_id"],),
             ).fetchone()["status"]
         self.assertEqual(status, "in_progress")
+
+    def test_status_change_notifies_employee_author(self):
+        self.login_team()
+        description = f"{self.DESCRIPTION_PREFIX} Добавить фильтр по статусу"
+        created = self.client.post(
+            "/software-requests", json={"description": description}
+        ).get_json()
+
+        self.login_admin()
+        with mock.patch.object(
+            application_module, "send_telegram_notification_to_employee"
+        ) as notify_employee, mock.patch.object(
+            application_module, "send_telegram_notification_to_admin"
+        ) as notify_admin:
+            response = self.client.post(
+                f"/settings/software-requests/{created['request_id']}/status",
+                data={"status": "in_progress"},
+            )
+        self.assertEqual(response.status_code, 302)
+        notify_admin.assert_not_called()
+        notify_employee.assert_called_once()
+        called_employee_name, called_text = (
+            notify_employee.call_args[0][1], notify_employee.call_args[0][2]
+        )
+        self.assertEqual(called_employee_name, self.EMPLOYEE_NAME)
+        self.assertIn("В работе", called_text)
+        self.assertIn("Добавить фильтр по статусу", called_text)
+
+    def test_status_change_notifies_admin_author(self):
+        self.login_admin()
+        description = f"{self.DESCRIPTION_PREFIX} Поправить экспорт отчёта"
+        created = self.client.post(
+            "/software-requests", json={"description": description}
+        ).get_json()
+
+        with mock.patch.object(
+            application_module, "send_telegram_notification_to_employee"
+        ) as notify_employee, mock.patch.object(
+            application_module, "send_telegram_notification_to_admin"
+        ) as notify_admin:
+            response = self.client.post(
+                f"/settings/software-requests/{created['request_id']}/status",
+                data={"status": "done"},
+            )
+        self.assertEqual(response.status_code, 302)
+        notify_employee.assert_not_called()
+        notify_admin.assert_called_once()
+        called_admin_id, called_text = (
+            notify_admin.call_args[0][1], notify_admin.call_args[0][2]
+        )
+        self.assertEqual(called_admin_id, self.admin_id)
+        self.assertIn("Выполнена", called_text)
 
     def test_settings_journal_is_admin_only(self):
         response = self.client.get("/settings/software-requests")

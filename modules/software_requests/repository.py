@@ -32,6 +32,12 @@ def create_request(
     return cursor.lastrowid
 
 
+def get_request(db, request_id):
+    return db.execute(
+        "SELECT * FROM software_requests WHERE id = ?", (request_id,)
+    ).fetchone()
+
+
 def list_requests(db, status=None):
     query = "SELECT * FROM software_requests"
     params = []

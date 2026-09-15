@@ -4911,6 +4911,8 @@ app.register_blueprint(
         admin_login_required=admin_login_required,
         active_team_account=_active_team_account,
         active_admin_account=_active_admin_account,
+        notify_employee=lambda *args, **kwargs: send_telegram_notification_to_employee(*args, **kwargs),
+        notify_admin=lambda *args, **kwargs: send_telegram_notification_to_admin(*args, **kwargs),
     )
 )
 app.register_blueprint(
