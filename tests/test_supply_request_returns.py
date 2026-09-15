@@ -247,7 +247,12 @@ class SupplyRequestReturnTests(unittest.TestCase):
         self.assertEqual(ret["collected_by_admin_id"], 1)
 
         locker_page = self.client.get(f"/supply/lockers/{self.locker_id}")
-        self.assertIn("Забрано".encode(), locker_page.data)
+        self.assertNotIn("Шуруповёрт".encode(), locker_page.data)
+
+        archive_page = self.client.get(f"/supply/lockers/{self.locker_id}/archive")
+        self.assertEqual(archive_page.status_code, 200)
+        self.assertIn(self.EMPLOYEE_NAME.encode(), archive_page.data)
+        self.assertIn("Шуруповёрт".encode(), archive_page.data)
 
 
 if __name__ == "__main__":

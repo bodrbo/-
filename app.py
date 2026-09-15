@@ -15853,6 +15853,77 @@ def _supply_locker_photo_url(locker):
     return url_for("static", filename=f"supply_lockers/{locker['photo_filename']}")
 
 
+def _supply_locker_operations(db, locker_id):
+    """Everything that has ever passed through this locker, from every
+    source (an employee's return, a request-backed delivery, or a manual
+    admin drop) normalized to one shape. The admin/team UI deliberately
+    doesn't surface which source a row came from — only who it's for and
+    what's in it — so callers just filter this list by resolved_at:
+    None means still sitting in the locker, a timestamp means it moved to
+    the archive."""
+    ops = []
+    for row in db.execute(
+        "SELECT supply_request_returns.*, supply_requests.employee_name "
+        "FROM supply_request_returns "
+        "JOIN supply_requests ON supply_requests.id = supply_request_returns.request_id "
+        "WHERE supply_request_returns.locker_id = ?",
+        (locker_id,),
+    ).fetchall():
+        ret = dict(row)
+        ops.append({
+            "kind": "return",
+            "id": ret["id"],
+            "employee_name": ret["employee_name"],
+            "comment": None,
+            "date": ret["returned_at"],
+            "resolved_at": ret["collected_at"],
+            "lines": db.execute(
+                "SELECT item_name, quantity FROM supply_request_items "
+                "WHERE request_id = ? ORDER BY id",
+                (ret["request_id"],),
+            ).fetchall(),
+        })
+    for row in db.execute(
+        "SELECT supply_request_deliveries.*, supply_requests.employee_name "
+        "FROM supply_request_deliveries "
+        "JOIN supply_requests ON supply_requests.id = supply_request_deliveries.request_id "
+        "WHERE supply_request_deliveries.locker_id = ?",
+        (locker_id,),
+    ).fetchall():
+        delivery = dict(row)
+        ops.append({
+            "kind": "delivery",
+            "id": delivery["id"],
+            "employee_name": delivery["employee_name"],
+            "comment": None,
+            "date": delivery["delivered_at"],
+            "resolved_at": delivery["picked_up_at"],
+            "lines": db.execute(
+                "SELECT item_name, quantity FROM supply_request_items "
+                "WHERE request_id = ? ORDER BY id",
+                (delivery["request_id"],),
+            ).fetchall(),
+        })
+    for row in db.execute(
+        "SELECT * FROM supply_locker_drops WHERE locker_id = ?", (locker_id,)
+    ).fetchall():
+        drop = dict(row)
+        ops.append({
+            "kind": "drop",
+            "id": drop["id"],
+            "employee_name": drop["employee_name"],
+            "comment": drop["comment"],
+            "date": drop["delivered_at"],
+            "resolved_at": drop["picked_up_at"],
+            "lines": db.execute(
+                "SELECT item_name, quantity FROM supply_locker_drop_items "
+                "WHERE drop_id = ? ORDER BY id",
+                (drop["id"],),
+            ).fetchall(),
+        })
+    return ops
+
+
 @app.route("/supply/lockers")
 @admin_login_required
 def supply_lockers():
@@ -16007,53 +16078,11 @@ def supply_locker(locker_id):
         return redirect(url_for("supply_locker", locker_id=locker_id))
     locker = dict(locker)
     locker["photo_url"] = _supply_locker_photo_url(locker)
-    returns = []
-    for row in db.execute(
-        "SELECT supply_request_returns.*, supply_requests.employee_name "
-        "FROM supply_request_returns "
-        "JOIN supply_requests ON supply_requests.id = supply_request_returns.request_id "
-        "WHERE supply_request_returns.locker_id = ? "
-        "ORDER BY (supply_request_returns.collected_at IS NOT NULL), "
-        "supply_request_returns.returned_at DESC",
-        (locker_id,),
-    ).fetchall():
-        ret = dict(row)
-        ret["lines"] = db.execute(
-            "SELECT item_name, quantity FROM supply_request_items "
-            "WHERE request_id = ? ORDER BY id",
-            (ret["request_id"],),
-        ).fetchall()
-        returns.append(ret)
-    deliveries = []
-    for row in db.execute(
-        "SELECT supply_request_deliveries.*, supply_requests.employee_name "
-        "FROM supply_request_deliveries "
-        "JOIN supply_requests ON supply_requests.id = supply_request_deliveries.request_id "
-        "WHERE supply_request_deliveries.locker_id = ? "
-        "ORDER BY (supply_request_deliveries.picked_up_at IS NOT NULL), "
-        "supply_request_deliveries.delivered_at DESC",
-        (locker_id,),
-    ).fetchall():
-        delivery = dict(row)
-        delivery["lines"] = db.execute(
-            "SELECT item_name, quantity FROM supply_request_items "
-            "WHERE request_id = ? ORDER BY id",
-            (delivery["request_id"],),
-        ).fetchall()
-        deliveries.append(delivery)
-    drops = []
-    for row in db.execute(
-        "SELECT * FROM supply_locker_drops WHERE locker_id = ? "
-        "ORDER BY (picked_up_at IS NOT NULL), delivered_at DESC",
-        (locker_id,),
-    ).fetchall():
-        drop = dict(row)
-        drop["lines"] = db.execute(
-            "SELECT item_name, quantity FROM supply_locker_drop_items "
-            "WHERE drop_id = ? ORDER BY id",
-            (drop["id"],),
-        ).fetchall()
-        drops.append(drop)
+    operations = _supply_locker_operations(db, locker_id)
+    contents = sorted(
+        (op for op in operations if op["resolved_at"] is None),
+        key=lambda op: op["date"], reverse=True,
+    )
     team_employees = [
         r["employee_name"] for r in db.execute(
             "SELECT DISTINCT team_accounts.employee_name FROM team_accounts "
@@ -16063,8 +16092,25 @@ def supply_locker(locker_id):
     ]
     return render_template(
         "supply_locker.html", locker=locker, viewer_role="admin",
-        locker_error=session.pop("locker_error", None), returns=returns,
-        deliveries=deliveries, drops=drops, team_employees=team_employees,
+        locker_error=session.pop("locker_error", None), contents=contents,
+        team_employees=team_employees,
+    )
+
+
+@app.route("/supply/lockers/<int:locker_id>/archive")
+@admin_login_required
+def supply_locker_archive(locker_id):
+    db = get_db()
+    locker = db.execute("SELECT * FROM supply_lockers WHERE id = ?", (locker_id,)).fetchone()
+    if locker is None:
+        return redirect(url_for("supply_lockers"))
+    operations = _supply_locker_operations(db, locker_id)
+    archive = sorted(
+        (op for op in operations if op["resolved_at"] is not None),
+        key=lambda op: op["resolved_at"], reverse=True,
+    )
+    return render_template(
+        "supply_locker_archive.html", locker=dict(locker), archive=archive,
     )
 
 

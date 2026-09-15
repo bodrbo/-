@@ -177,33 +177,31 @@
   </section>
 
   <section class="panel">
-    <h2>Содержимое постамата</h2>
-    {% if returns %}
+    <div class="locker-contents-heading">
+      <h2>Содержимое постамата</h2>
+      <a href="{{ url_for('supply_locker_archive', locker_id=locker.id) }}" class="term">Архив →</a>
+    </div>
+    {% if contents %}
     <div class="table-scroll">
       <table class="records">
         <thead>
-          <tr><th>Дата возврата</th><th>Сотрудник</th><th>Позиции</th><th>Статус</th><th></th></tr>
+          <tr><th>Дата</th><th>Сотрудник</th><th>Позиции</th><th>Комментарий</th><th>Статус</th><th></th></tr>
         </thead>
         <tbody>
-          {% for ret in returns %}
+          {% for op in contents %}
           <tr>
-            <td class="muted">{{ ret.returned_at[:10]|ru_date }}</td>
-            <td>{{ ret.employee_name }}</td>
+            <td class="muted">{{ op.date[:10]|ru_date }}</td>
+            <td>{{ op.employee_name }}</td>
             <td>
-              {% for it in ret.lines %}
+              {% for it in op.lines %}
               {{ it.item_name }} — {{ it.quantity|float|round(2) }}{% if not loop.last %}<br>{% endif %}
               {% endfor %}
             </td>
+            <td class="muted">{{ op.comment or '—' }}</td>
+            <td><span class="status-badge status-supplyreq-new">Ожидает получения</span></td>
             <td>
-              {% if ret.collected_at %}
-              <span class="status-badge status-supplyreq-delivered">Забрано {{ ret.collected_at[:10]|ru_date }}</span>
-              {% else %}
-              <span class="status-badge status-supplyreq-new">Ожидает получения</span>
-              {% endif %}
-            </td>
-            <td>
-              {% if not ret.collected_at %}
-              <form action="{{ url_for('collect_supply_return', locker_id=locker.id, return_id=ret.id) }}" method="post">
+              {% if op.kind == 'return' %}
+              <form action="{{ url_for('collect_supply_return', locker_id=locker.id, return_id=op.id) }}" method="post">
                 <button type="submit" class="btn-secondary">Отметить как забрано</button>
               </form>
               {% endif %}
@@ -217,86 +215,7 @@
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
       <div class="t">Пока пусто</div>
-      <div class="s">Здесь появятся возвраты снабжения, переданные сотрудниками через этот постамат.</div>
-    </div>
-    {% endif %}
-  </section>
-
-  <section class="panel">
-    <h2>Доставленные заявки</h2>
-    {% if deliveries %}
-    <div class="table-scroll">
-      <table class="records">
-        <thead>
-          <tr><th>Дата доставки</th><th>Сотрудник</th><th>Позиции</th><th>Статус</th></tr>
-        </thead>
-        <tbody>
-          {% for d in deliveries %}
-          <tr>
-            <td class="muted">{{ d.delivered_at[:10]|ru_date }}</td>
-            <td>{{ d.employee_name }}</td>
-            <td>
-              {% for it in d.lines %}
-              {{ it.item_name }} — {{ it.quantity|float|round(2) }}{% if not loop.last %}<br>{% endif %}
-              {% endfor %}
-            </td>
-            <td>
-              {% if d.picked_up_at %}
-              <span class="status-badge status-supplyreq-delivered">Забрано {{ d.picked_up_at[:10]|ru_date }}</span>
-              {% else %}
-              <span class="status-badge status-supplyreq-new">Ожидает получения</span>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <div class="empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">Пока пусто</div>
-      <div class="s">Здесь появятся заявки на снабжение, доставленные в этот постамат.</div>
-    </div>
-    {% endif %}
-  </section>
-
-  <section class="panel">
-    <h2>Передано вручную</h2>
-    {% if drops %}
-    <div class="table-scroll">
-      <table class="records">
-        <thead>
-          <tr><th>Дата</th><th>Сотрудник</th><th>Позиции</th><th>Комментарий</th><th>Статус</th></tr>
-        </thead>
-        <tbody>
-          {% for d in drops %}
-          <tr>
-            <td class="muted">{{ d.delivered_at[:10]|ru_date }}</td>
-            <td>{{ d.employee_name }}</td>
-            <td>
-              {% for it in d.lines %}
-              {{ it.item_name }} — {{ it.quantity|float|round(2) }}{% if not loop.last %}<br>{% endif %}
-              {% endfor %}
-            </td>
-            <td class="muted">{{ d.comment or '—' }}</td>
-            <td>
-              {% if d.picked_up_at %}
-              <span class="status-badge status-supplyreq-delivered">Забрано {{ d.picked_up_at[:10]|ru_date }}</span>
-              {% else %}
-              <span class="status-badge status-supplyreq-new">Ожидает получения</span>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <div class="empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">Пока пусто</div>
-      <div class="s">Здесь появится всё, что вы передали сотрудникам через этот постамат напрямую.</div>
+      <div class="s">Здесь появится всё, что лежит в этом постамате — возвраты сотрудников, доставленные заявки и то, что вы передали напрямую.</div>
     </div>
     {% endif %}
   </section>

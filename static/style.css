@@ -5984,6 +5984,13 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   accent-color: var(--brass);
   cursor: pointer;
 }
+.locker-contents-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.locker-contents-heading h2 { margin: 0; }
 .tuning-orders-filter {
   padding: 0;
   margin-bottom: 14px;

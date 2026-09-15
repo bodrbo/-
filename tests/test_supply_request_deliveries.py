@@ -230,7 +230,7 @@ class SupplyRequestDeliveryTests(unittest.TestCase):
         delivery = self.get_delivery()
         self.assertIsNone(delivery["picked_up_at"])
 
-    def test_admin_locker_page_shows_picked_up_status(self):
+    def test_admin_locker_page_moves_picked_up_delivery_to_archive(self):
         self.set_locker(self.locker_id)
         self.set_status("delivered")
         self.login_as_team()
@@ -238,7 +238,12 @@ class SupplyRequestDeliveryTests(unittest.TestCase):
 
         self.login_as_admin()
         locker_page = self.client.get(f"/supply/lockers/{self.locker_id}")
-        self.assertIn("Забрано".encode(), locker_page.data)
+        self.assertNotIn("Перчатки".encode(), locker_page.data)
+
+        archive_page = self.client.get(f"/supply/lockers/{self.locker_id}/archive")
+        self.assertEqual(archive_page.status_code, 200)
+        self.assertIn(self.EMPLOYEE_NAME.encode(), archive_page.data)
+        self.assertIn("Перчатки".encode(), archive_page.data)
 
 
 if __name__ == "__main__":

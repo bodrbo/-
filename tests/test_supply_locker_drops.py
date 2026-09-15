@@ -184,7 +184,22 @@ class SupplyLockerDropTests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn(self.EMPLOYEE_NAME.encode(), page.data)
         self.assertIn("Ожидает получения".encode(), page.data)
-        self.assertIn("Передано вручную".encode(), page.data)
+        self.assertIn("Содержимое постамата".encode(), page.data)
+
+    def test_picked_up_drop_moves_to_archive(self):
+        self.create_drop()
+        drop = self.get_drop()
+        self.login_as_team()
+        self.client.post(f"/team/locker-drops/{drop['id']}/pickup")
+
+        self.login_as_admin()
+        locker_page = self.client.get(f"/supply/lockers/{self.locker_id}")
+        self.assertNotIn("Перчатки".encode(), locker_page.data)
+
+        archive_page = self.client.get(f"/supply/lockers/{self.locker_id}/archive")
+        self.assertEqual(archive_page.status_code, 200)
+        self.assertIn(self.EMPLOYEE_NAME.encode(), archive_page.data)
+        self.assertIn("Перчатки".encode(), archive_page.data)
 
     def test_employee_sees_pickup_button_and_can_pick_up(self):
         self.create_drop()
