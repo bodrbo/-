@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Заявки на снабжение — Снабжение</title>
+<title>Постоматы — Снабжение</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
@@ -50,7 +50,7 @@
     {% include '_admin_main_nav.html' %}
     <div class="title-block">
       <span class="kicker">Снабжение</span>
-      <h1>Заявки на снабжение</h1>
+      <h1>Постоматы</h1>
     </div>
     <div class="topbar-actions">
       <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
@@ -78,43 +78,50 @@
     <a href="{{ url_for('supply_requests') }}" class="{{ 'active' if sub_page == 'requests' }}">Заявки на снабжение</a>
   </nav>
 
+  {% if locker_error %}
+  <div class="alert"><strong>Не удалось добавить постомат:</strong> {{ locker_error }}</div>
+  {% endif %}
+
+  <section class="panel form-panel">
+    <h2>Добавить постомат</h2>
+    <form action="{{ url_for('add_supply_locker') }}" method="post" class="entry-form">
+      <div class="field">
+        <label for="locker_name">Название</label>
+        <input type="text" id="locker_name" name="name" placeholder="Сундук-постомат №2" required>
+      </div>
+      <div class="field field-wide">
+        <label for="locker_address">Адрес</label>
+        <input type="text" id="locker_address" name="address" placeholder="Например, г. Кронштадт, ул. ...">
+      </div>
+      <div class="field">
+        <label for="locker_volume">Объём</label>
+        <input type="text" id="locker_volume" name="volume" placeholder="Например, 340л">
+      </div>
+      <div class="field">
+        <label for="locker_access_code">Код-пароль</label>
+        <input type="text" id="locker_access_code" name="access_code" placeholder="Например, 000">
+      </div>
+      <div class="field field-submit">
+        <button type="submit">Добавить постомат</button>
+      </div>
+    </form>
+  </section>
+
   <section class="panel">
-    <h2>Заявки на снабжение</h2>
-    {% if requests %}
+    <h2>Постоматы</h2>
+    {% if lockers %}
     <div class="table-scroll">
       <table class="records">
         <thead>
-          <tr>
-            <th>Дата</th>
-            <th>Сотрудник</th>
-            <th>Позиции</th>
-            <th>Статус</th>
-            <th>Комментарий</th>
-            <th></th>
-          </tr>
+          <tr><th>Название</th><th>Адрес</th><th>Объём</th><th>Код-пароль</th></tr>
         </thead>
         <tbody>
-          {% for r in requests %}
-          <tr>
-            <td class="muted">{{ r.created_at[:10]|ru_date }}</td>
-            <td>{{ r.employee_name }}</td>
-            <td>
-              {% for it in r.lines %}
-              {{ it.item_name }} — {{ it.quantity|float|round(2) }}{% if not loop.last %}<br>{% endif %}
-              {% endfor %}
-            </td>
-            <td>
-              <span class="status-badge status-supplyreq-{{ r.status }}">
-                {{ request_statuses|selectattr('value', 'equalto', r.status)|map(attribute='label')|first }}
-              </span>
-            </td>
-            <td class="muted">{{ r.status_comment or '—' }}</td>
-            <td>
-              <button type="button" class="btn-secondary"
-                      onclick='openRequestStatusModal({{ url_for("set_supply_request_status", request_id=r.id)|tojson }}, {{ r.status|tojson }}, {{ (r.status_comment or "")|tojson }})'>
-                Изменить статус
-              </button>
-            </td>
+          {% for locker in lockers %}
+          <tr class="row-clickable" onclick="window.location.href='{{ url_for('supply_locker', locker_id=locker.id) }}'">
+            <td class="term">{{ locker.name }}</td>
+            <td class="muted">{{ locker.address or '—' }}</td>
+            <td>{{ locker.volume or '—' }}</td>
+            <td class="muted">{{ locker.access_code or '—' }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -123,58 +130,15 @@
     {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">Заявок пока нет</div>
-      <div class="s">Здесь появятся заявки на особое снабжение от капитанов и тюнингмэнов.</div>
+      <div class="t">Постоматов пока нет</div>
+      <div class="s">Добавьте первый постомат через форму выше.</div>
     </div>
     {% endif %}
   </section>
 
-  <div id="request-status-modal" class="photo-modal hidden" onclick="if (event.target === this) closeRequestStatusModal();">
-    <div class="photo-modal-inner">
-      <button type="button" class="photo-modal-close" onclick="closeRequestStatusModal()" aria-label="Закрыть">
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M5 5l10 10M15 5L5 15"/>
-        </svg>
-      </button>
-      <form id="request-status-form" method="post" class="assign-modal-card">
-        <h3>Изменить статус заявки</h3>
-        <div class="field">
-          <label for="request-status-select">Статус</label>
-          <select id="request-status-select" name="status" required>
-            {% for s in request_statuses %}
-            <option value="{{ s.value }}">{{ s.label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="field">
-          <label for="request-status-comment">Комментарий</label>
-          <textarea id="request-status-comment" name="comment" class="photo-comment-input"
-                    placeholder="Например: дата и время доставки"></textarea>
-        </div>
-        <button type="submit" class="btn-primary">Сохранить</button>
-      </form>
-    </div>
-  </div>
-
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
-<script>
-function openRequestStatusModal(actionUrl, currentStatus, currentComment) {
-  document.getElementById('request-status-form').action = actionUrl;
-  document.getElementById('request-status-select').value = currentStatus;
-  document.getElementById('request-status-comment').value = currentComment;
-  document.getElementById('request-status-modal').classList.remove('hidden');
-}
-
-function closeRequestStatusModal() {
-  document.getElementById('request-status-modal').classList.add('hidden');
-}
-
-document.addEventListener('keydown', function (e) {
-  if (e.key === 'Escape') closeRequestStatusModal();
-});
-</script>
 
 </body>
 </html>

@@ -2415,6 +2415,39 @@ def init_db():
         )
         """
     )
+    # Постоматы — physical pickup points where crew can be sent supplies
+    # and can drop off what they're returning from a boat. Distinct from
+    # supply_warehouses (which track per-product stock): a locker has no
+    # inventory of its own yet, just a location and an access code, since
+    # this is only the base — wiring it into supply requests is a
+    # separate follow-up.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS supply_lockers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            address TEXT NOT NULL DEFAULT '',
+            volume TEXT NOT NULL DEFAULT '',
+            access_code TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    if conn.execute(
+        "SELECT 1 FROM supply_lockers WHERE name = ?", ("Сундук-постомат №1",)
+    ).fetchone() is None:
+        locker_seed_now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        conn.execute(
+            "INSERT INTO supply_lockers "
+            "(name, address, volume, access_code, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                "Сундук-постомат №1", "Кронштадт, Цитадельское шоссе дом 4",
+                "340л", "000", locker_seed_now, locker_seed_now,
+            ),
+        )
+
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS supply_categories (
@@ -15592,6 +15625,98 @@ def add_supply_warehouse():
     )
     db.commit()
     return redirect(url_for("supply_warehouses"))
+
+
+@app.route("/supply/lockers")
+@admin_login_required
+def supply_lockers():
+    db = get_db()
+    lockers = db.execute(
+        "SELECT * FROM supply_lockers ORDER BY name"
+    ).fetchall()
+    return render_template(
+        "supply_lockers.html", active_page="supply", sub_page="lockers",
+        lockers=lockers, locker_error=session.pop("locker_error", None),
+    )
+
+
+@app.route("/supply/lockers/add", methods=["POST"])
+@admin_login_required
+def add_supply_locker():
+    db = get_db()
+    name = request.form.get("name", "").strip()
+    if not name:
+        session["locker_error"] = "Укажите название постомата."
+        return redirect(url_for("supply_lockers"))
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "INSERT INTO supply_lockers (name, address, volume, access_code, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            name, request.form.get("address", "").strip(),
+            request.form.get("volume", "").strip(),
+            request.form.get("access_code", "").strip(),
+            now, now,
+        ),
+    )
+    db.commit()
+    return redirect(url_for("supply_lockers"))
+
+
+@app.route("/supply/lockers/<int:locker_id>", methods=["GET", "POST"])
+@admin_login_required
+def supply_locker(locker_id):
+    db = get_db()
+    locker = db.execute(
+        "SELECT * FROM supply_lockers WHERE id = ?", (locker_id,)
+    ).fetchone()
+    if locker is None:
+        return redirect(url_for("supply_lockers"))
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        if not name:
+            session["locker_error"] = "Укажите название постомата."
+            return redirect(url_for("supply_locker", locker_id=locker_id))
+        db.execute(
+            "UPDATE supply_lockers SET name = ?, address = ?, volume = ?, "
+            "access_code = ?, updated_at = ? WHERE id = ?",
+            (
+                name, request.form.get("address", "").strip(),
+                request.form.get("volume", "").strip(),
+                request.form.get("access_code", "").strip(),
+                dt.datetime.now().strftime("%Y-%m-%d %H:%M"), locker_id,
+            ),
+        )
+        db.commit()
+        return redirect(url_for("supply_locker", locker_id=locker_id))
+    return render_template(
+        "supply_locker.html", locker=locker, viewer_role="admin",
+        locker_error=session.pop("locker_error", None),
+    )
+
+
+@app.route("/team/lockers")
+@team_login_required
+def team_lockers():
+    db = get_db()
+    lockers = db.execute(
+        "SELECT * FROM supply_lockers ORDER BY name"
+    ).fetchall()
+    return render_template("team_lockers.html", lockers=lockers)
+
+
+@app.route("/team/lockers/<int:locker_id>")
+@team_login_required
+def team_locker(locker_id):
+    db = get_db()
+    locker = db.execute(
+        "SELECT * FROM supply_lockers WHERE id = ?", (locker_id,)
+    ).fetchone()
+    if locker is None:
+        return redirect(url_for("team_lockers"))
+    return render_template(
+        "supply_locker.html", locker=locker, viewer_role="team", locker_error=None
+    )
 
 
 @app.route("/admin/import-moysklad-catalog")

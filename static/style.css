@@ -9000,6 +9000,7 @@ button.captain-command-alert:hover {
 .team-task-status-row,
 .team-task-material-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .team-task-material-row { margin-top: 8px; }
+.team-supply-lockers-link { display: block; width: max-content; max-width: 100%; margin-bottom: 10px; }
 .team-supply-create { margin-bottom: 14px; }
 .team-schedule-panel {
   display: flex;
