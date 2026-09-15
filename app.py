@@ -13282,6 +13282,13 @@ def team_dashboard():
                 "WHERE request_id = ?",
                 (r["id"],),
             ).fetchone()
+            req["delivery_locker_name"] = None
+            if req["delivery_locker_id"]:
+                locker_row = db.execute(
+                    "SELECT name FROM supply_lockers WHERE id = ?",
+                    (req["delivery_locker_id"],),
+                ).fetchone()
+                req["delivery_locker_name"] = locker_row["name"] if locker_row else None
             my_supply_requests.append(req)
 
     # "Что вам передали" — ad-hoc admin drops into a locker, with no
@@ -13767,10 +13774,27 @@ def team_create_supply_request():
     if not items:
         return _team_dashboard_section_redirect("supply")
 
+    # Optional — an employee can flag which postamat is convenient for
+    # them; admin still sees (and can freely change) the same
+    # delivery_locker_id field from /supply/requests, this just pre-fills
+    # it instead of leaving every new request unassigned.
+    delivery_locker_id = None
+    raw_locker_id = request.form.get("locker_id", "").strip()
+    if raw_locker_id:
+        try:
+            candidate_id = int(raw_locker_id)
+        except ValueError:
+            candidate_id = None
+        if candidate_id and db.execute(
+            "SELECT 1 FROM supply_lockers WHERE id = ?", (candidate_id,)
+        ).fetchone() is not None:
+            delivery_locker_id = candidate_id
+
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     cur = db.execute(
-        "INSERT INTO supply_requests (employee_name, status, created_at) VALUES (?, ?, ?)",
-        (employee_name, DEFAULT_SUPPLY_REQUEST_STATUS, now),
+        "INSERT INTO supply_requests (employee_name, status, delivery_locker_id, created_at) "
+        "VALUES (?, ?, ?, ?)",
+        (employee_name, DEFAULT_SUPPLY_REQUEST_STATUS, delivery_locker_id, now),
     )
     request_id = cur.lastrowid
     for name, qty in items:
