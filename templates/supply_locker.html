@@ -85,10 +85,33 @@
   <div class="alert"><strong>Не удалось сохранить:</strong> {{ locker_error }}</div>
   {% endif %}
 
+  <section class="panel locker-photo-panel">
+    <div class="boat-profile-photo locker-photo-box">
+      {% if locker.photo_url %}
+      <img src="{{ locker.photo_url }}" alt="{{ locker.name }}">
+      {% else %}
+      <div class="boat-model-placeholder" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 8l9-5 9 5-9 5-9-5z"/>
+          <path d="M3 8v8l9 5 9-5V8"/>
+          <path d="M12 13v8"/>
+        </svg>
+      </div>
+      {% endif %}
+    </div>
+    {% if viewer_role == 'admin' %}
+    <label class="boat-photo-control" for="locker_photo">
+      <span>{{ 'Заменить фотографию' if locker.photo_url else 'Добавить фотографию' }}</span>
+      <input type="file" id="locker_photo" name="photo" form="locker-edit-form" accept="image/jpeg,image/png,image/webp">
+    </label>
+    <p class="hint">Формат JPG, PNG или WebP.</p>
+    {% endif %}
+  </section>
+
   {% if viewer_role == 'admin' %}
   <section class="panel form-panel">
     <h2>Данные постомата</h2>
-    <form method="post" class="entry-form">
+    <form id="locker-edit-form" method="post" enctype="multipart/form-data" class="entry-form">
       <div class="field">
         <label for="locker_name">Название</label>
         <input type="text" id="locker_name" name="name" value="{{ locker.name }}" required>

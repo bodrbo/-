@@ -2434,6 +2434,11 @@ def init_db():
         )
         """
     )
+    supply_locker_cols = [
+        row[1] for row in conn.execute("PRAGMA table_info(supply_lockers)").fetchall()
+    ]
+    if "photo_filename" not in supply_locker_cols:
+        conn.execute("ALTER TABLE supply_lockers ADD COLUMN photo_filename TEXT")
     if conn.execute(
         "SELECT 1 FROM supply_lockers WHERE name = ?", ("Сундук-постомат №1",)
     ).fetchone() is None:
@@ -15627,6 +15632,12 @@ def add_supply_warehouse():
     return redirect(url_for("supply_warehouses"))
 
 
+def _supply_locker_photo_url(locker):
+    if not locker.get("photo_filename"):
+        return None
+    return url_for("static", filename=f"supply_lockers/{locker['photo_filename']}")
+
+
 @app.route("/supply/lockers")
 @admin_login_required
 def supply_lockers():
@@ -15677,18 +15688,32 @@ def supply_locker(locker_id):
         if not name:
             session["locker_error"] = "Укажите название постомата."
             return redirect(url_for("supply_locker", locker_id=locker_id))
+        photo_filename = locker["photo_filename"]
+        photo = request.files.get("photo")
+        if photo and photo.filename:
+            extension = os.path.splitext(photo.filename)[1].lower()
+            if extension not in WORK_PHOTO_EXTENSIONS:
+                session["locker_error"] = "Фотография должна быть в формате JPG, PNG или WebP."
+                return redirect(url_for("supply_locker", locker_id=locker_id))
+            photos_dir = os.path.join(app.static_folder, "supply_lockers")
+            os.makedirs(photos_dir, exist_ok=True)
+            photo_filename = f"{locker_id}-{secrets.token_hex(6)}{extension}"
+            photo.save(os.path.join(photos_dir, photo_filename))
         db.execute(
             "UPDATE supply_lockers SET name = ?, address = ?, volume = ?, "
-            "access_code = ?, updated_at = ? WHERE id = ?",
+            "access_code = ?, photo_filename = ?, updated_at = ? WHERE id = ?",
             (
                 name, request.form.get("address", "").strip(),
                 request.form.get("volume", "").strip(),
                 request.form.get("access_code", "").strip(),
+                photo_filename,
                 dt.datetime.now().strftime("%Y-%m-%d %H:%M"), locker_id,
             ),
         )
         db.commit()
         return redirect(url_for("supply_locker", locker_id=locker_id))
+    locker = dict(locker)
+    locker["photo_url"] = _supply_locker_photo_url(locker)
     return render_template(
         "supply_locker.html", locker=locker, viewer_role="admin",
         locker_error=session.pop("locker_error", None),
@@ -15714,6 +15739,8 @@ def team_locker(locker_id):
     ).fetchone()
     if locker is None:
         return redirect(url_for("team_lockers"))
+    locker = dict(locker)
+    locker["photo_url"] = _supply_locker_photo_url(locker)
     return render_template(
         "supply_locker.html", locker=locker, viewer_role="team", locker_error=None
     )

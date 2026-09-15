@@ -1,3 +1,5 @@
+import io
+import tempfile
 import unittest
 
 from support import application_module
@@ -11,6 +13,16 @@ class SupplyLockersTests(unittest.TestCase):
         application_module.init_db()
         application_module.app.config.update(TESTING=True)
         self.client = application_module.app.test_client()
+        self.upload_directory = tempfile.TemporaryDirectory()
+        self.original_static_folder = application_module.app.static_folder
+        application_module.app.static_folder = self.upload_directory.name
+        self.addCleanup(self.upload_directory.cleanup)
+        self.addCleanup(
+            setattr,
+            application_module.app,
+            "static_folder",
+            self.original_static_folder,
+        )
         with application_module.app.app_context():
             db = application_module.get_db()
             self._clear_test_data(db)
@@ -177,6 +189,71 @@ class SupplyLockersTests(unittest.TestCase):
         self.assertTrue(response.headers["Location"].endswith("/admin/login"))
         unchanged = self.seeded_locker()
         self.assertEqual(unchanged["name"], "Сундук-постомат №1")
+
+    def test_admin_uploads_photo_and_it_shows_on_both_profiles(self):
+        self.login_as_admin()
+        locker = self.seeded_locker()
+        response = self.client.post(
+            f"/supply/lockers/{locker['id']}",
+            data={
+                "name": locker["name"],
+                "address": locker["address"],
+                "volume": locker["volume"],
+                "access_code": locker["access_code"],
+                "photo": (io.BytesIO(b"test-image-content"), "locker.webp"),
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            updated = dict(
+                application_module.get_db()
+                .execute("SELECT * FROM supply_lockers WHERE id = ?", (locker["id"],))
+                .fetchone()
+            )
+        self.assertTrue(updated["photo_filename"].endswith(".webp"))
+
+        admin_page = self.client.get(f"/supply/lockers/{locker['id']}")
+        self.assertIn(
+            f"/static/supply_lockers/{updated['photo_filename']}".encode(),
+            admin_page.data,
+        )
+
+        self.login_as_team()
+        team_page = self.client.get(f"/team/lockers/{locker['id']}")
+        self.assertIn(
+            f"/static/supply_lockers/{updated['photo_filename']}".encode(),
+            team_page.data,
+        )
+        self.assertNotIn(b'name="photo"', team_page.data)
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "UPDATE supply_lockers SET photo_filename = NULL WHERE id = ?",
+                (locker["id"],),
+            )
+            db.commit()
+
+    def test_admin_rejects_unsupported_photo_type(self):
+        self.login_as_admin()
+        locker = self.seeded_locker()
+        response = self.client.post(
+            f"/supply/lockers/{locker['id']}",
+            data={
+                "name": locker["name"],
+                "address": locker["address"],
+                "volume": locker["volume"],
+                "access_code": locker["access_code"],
+                "photo": (io.BytesIO(b"not-really-a-pdf"), "locker.pdf"),
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as session:
+            self.assertIn("locker_error", session)
+        unchanged = self.seeded_locker()
+        self.assertIsNone(unchanged["photo_filename"])
 
 
 if __name__ == "__main__":
