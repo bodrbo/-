@@ -6294,6 +6294,19 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   height: 100%;
   object-fit: cover;
 }
+/* Motor photos are typically tall and narrow — cover-cropping them in a
+   wide boat-shaped box chopped off the top (cowling) or bottom
+   (propeller). Motors get their own taller box and object-fit: contain
+   so the whole motor stays in frame instead. */
+.boat-model-visual-motor { aspect-ratio: 4 / 5; }
+.boat-model-visual-motor > img {
+  object-fit: contain;
+  padding: 14px;
+}
+.boat-profile-photo-motor > img {
+  object-fit: contain;
+  padding: 18px;
+}
 .boat-model-placeholder {
   display: grid;
   width: 100%;
@@ -6527,6 +6540,7 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   aspect-ratio: 4 / 3;
   border-radius: 9px;
 }
+.boat-profile-photo-motor { aspect-ratio: 3 / 4; }
 .boat-photo-control {
   display: flex;
   align-items: center;

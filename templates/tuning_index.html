@@ -390,7 +390,7 @@
       {% for profile in boat_profiles %}
       <a href="{{ url_for('tuning_motor_profile' if is_motor_catalog else 'tuning_boat_profile', profile_id=profile.id) }}"
          class="boat-model-card" data-boat-model="{{ profile.model_name|lower }}">
-        <div class="boat-model-visual">
+        <div class="boat-model-visual{% if is_motor_catalog %} boat-model-visual-motor{% endif %}">
           {% if profile.photo_url %}
           <img src="{{ profile.photo_url }}" alt="{{ profile.model_name }}" loading="lazy">
           {% else %}
@@ -458,7 +458,7 @@
     <form action="{{ url_for('update_tuning_boat_profile', profile_id=boat_profile.id) }}"
           method="post" enctype="multipart/form-data" class="boat-profile-editor">
       <div class="boat-profile-photo-column">
-        <div class="boat-profile-photo">
+        <div class="boat-profile-photo{% if is_motor_catalog %} boat-profile-photo-motor{% endif %}">
           {% if boat_profile.photo_url %}
           <img src="{{ boat_profile.photo_url }}" alt="{{ boat_profile.model_name }}">
           {% else %}
