@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{ locker.name }} — Постоматы</title>
+<title>{{ locker.name }} — Постаматы</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
@@ -51,7 +51,7 @@
     </div>
     {% endif %}
     <div class="title-block">
-      <span class="kicker">Постоматы</span>
+      <span class="kicker">Постаматы</span>
       <h1>{{ locker.name }}</h1>
     </div>
     <div class="topbar-actions">
@@ -76,9 +76,9 @@
 <main class="wrap">
 
   {% if viewer_role == 'admin' %}
-  <a href="{{ url_for('supply_lockers') }}" class="term" style="display:inline-block; margin-bottom:14px;">← Назад к постоматам</a>
+  <a href="{{ url_for('supply_lockers') }}" class="term" style="display:inline-block; margin-bottom:14px;">← Назад к постаматам</a>
   {% else %}
-  <a href="{{ url_for('team_lockers') }}" class="term" style="display:inline-block; margin-bottom:14px;">← Ко всем постоматам</a>
+  <a href="{{ url_for('team_lockers') }}" class="term" style="display:inline-block; margin-bottom:14px;">← Ко всем постаматам</a>
   {% endif %}
 
   {% if locker_error %}
@@ -110,7 +110,7 @@
 
   {% if viewer_role == 'admin' %}
   <section class="panel form-panel">
-    <h2>Данные постомата</h2>
+    <h2>Данные постамата</h2>
     <form id="locker-edit-form" method="post" enctype="multipart/form-data" class="entry-form">
       <div class="field">
         <label for="locker_name">Название</label>
@@ -135,7 +135,7 @@
   </section>
 
   <section class="panel">
-    <h2>Содержимое постомата</h2>
+    <h2>Содержимое постамата</h2>
     {% if returns %}
     <div class="table-scroll">
       <table class="records">
@@ -175,7 +175,7 @@
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
       <div class="t">Пока пусто</div>
-      <div class="s">Здесь появятся возвраты снабжения, переданные сотрудниками через этот постомат.</div>
+      <div class="s">Здесь появятся возвраты снабжения, переданные сотрудниками через этот постамат.</div>
     </div>
     {% endif %}
   </section>
@@ -214,7 +214,7 @@
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
       <div class="t">Пока пусто</div>
-      <div class="s">Здесь появятся заявки на снабжение, доставленные в этот постомат.</div>
+      <div class="s">Здесь появятся заявки на снабжение, доставленные в этот постамат.</div>
     </div>
     {% endif %}
   </section>

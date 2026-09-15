@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Постоматы — Снабжение</title>
+<title>Постаматы — Снабжение</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
@@ -50,7 +50,7 @@
     {% include '_admin_main_nav.html' %}
     <div class="title-block">
       <span class="kicker">Снабжение</span>
-      <h1>Постоматы</h1>
+      <h1>Постаматы</h1>
     </div>
     <div class="topbar-actions">
       <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
@@ -74,20 +74,26 @@
   <nav class="sub-tabs">
     <a href="{{ url_for('supply_warehouses') }}" class="{{ 'active' if sub_page == 'warehouses' }}">Склады</a>
     <a href="{{ url_for('supply_catalog') }}" class="{{ 'active' if sub_page == 'catalog' }}">Каталог</a>
-    <a href="{{ url_for('supply_lockers') }}" class="{{ 'active' if sub_page == 'lockers' }}">Постоматы</a>
+    <a href="{{ url_for('supply_lockers') }}" class="{{ 'active' if sub_page == 'lockers' }}">Постаматы</a>
     <a href="{{ url_for('supply_requests') }}" class="{{ 'active' if sub_page == 'requests' }}">Заявки на снабжение</a>
   </nav>
 
   {% if locker_error %}
-  <div class="alert"><strong>Не удалось добавить постомат:</strong> {{ locker_error }}</div>
+  <div class="alert"><strong>Не удалось добавить постамат:</strong> {{ locker_error }}</div>
+  {% endif %}
+
+  {% if locker_notice %}
+  <div class="alert {{ 'alert-success' if locker_notice.type == 'success' }}" role="status">
+    {{ locker_notice.message }}
+  </div>
   {% endif %}
 
   <section class="panel form-panel">
-    <h2>Добавить постомат</h2>
+    <h2>Добавить постамат</h2>
     <form action="{{ url_for('add_supply_locker') }}" method="post" class="entry-form">
       <div class="field">
         <label for="locker_name">Название</label>
-        <input type="text" id="locker_name" name="name" placeholder="Сундук-постомат №2" required>
+        <input type="text" id="locker_name" name="name" placeholder="Сундук-постамат №2" required>
       </div>
       <div class="field field-wide">
         <label for="locker_address">Адрес</label>
@@ -102,22 +108,44 @@
         <input type="text" id="locker_access_code" name="access_code" placeholder="Например, 000">
       </div>
       <div class="field field-submit">
-        <button type="submit">Добавить постомат</button>
+        <button type="submit">Добавить постамат</button>
       </div>
     </form>
   </section>
 
   <section class="panel">
-    <h2>Постоматы</h2>
+    <h2>Постаматы</h2>
     {% if lockers %}
+    <form action="{{ url_for('bulk_delete_supply_lockers') }}" method="post"
+          class="locker-bulk-form" id="locker-bulk-form">
+      <div class="locker-bulk-count" aria-live="polite">
+        Выбрано: <strong id="locker-bulk-count">0</strong>
+      </div>
+      <button type="submit" class="locker-bulk-delete" id="locker-bulk-delete" disabled>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+          <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
+        </svg>
+        Удалить выбранные
+      </button>
+    </form>
     <div class="table-scroll">
-      <table class="records">
+      <table class="records" id="lockers-table">
         <thead>
-          <tr><th>Название</th><th>Адрес</th><th>Объём</th><th>Код-пароль</th></tr>
+          <tr>
+            <th class="locker-select-cell">
+              <input type="checkbox" id="locker-select-all" aria-label="Выбрать все постаматы">
+            </th>
+            <th>Название</th><th>Адрес</th><th>Объём</th><th>Код-пароль</th>
+          </tr>
         </thead>
         <tbody>
           {% for locker in lockers %}
           <tr class="row-clickable" onclick="window.location.href='{{ url_for('supply_locker', locker_id=locker.id) }}'">
+            <td class="locker-select-cell" onclick="event.stopPropagation()">
+              <input type="checkbox" name="locker_id" value="{{ locker.id }}"
+                     form="locker-bulk-form" class="locker-check"
+                     aria-label="Выбрать постамат «{{ locker.name }}»">
+            </td>
             <td class="term">{{ locker.name }}</td>
             <td class="muted">{{ locker.address or '—' }}</td>
             <td>{{ locker.volume or '—' }}</td>
@@ -130,8 +158,8 @@
     {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">Постоматов пока нет</div>
-      <div class="s">Добавьте первый постомат через форму выше.</div>
+      <div class="t">Постаматов пока нет</div>
+      <div class="s">Добавьте первый постамат через форму выше.</div>
     </div>
     {% endif %}
   </section>
@@ -139,6 +167,45 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+{% if lockers %}
+<script>
+(function initLockerBulkActions() {
+  var form = document.getElementById('locker-bulk-form');
+  if (!form) return;
+  var selectAll = document.getElementById('locker-select-all');
+  var checks = Array.prototype.slice.call(document.querySelectorAll('.locker-check'));
+  var count = document.getElementById('locker-bulk-count');
+  var deleteSubmit = document.getElementById('locker-bulk-delete');
+
+  function selectedCount() {
+    return checks.filter(function (checkbox) { return checkbox.checked; }).length;
+  }
+
+  function refreshState() {
+    var selected = selectedCount();
+    count.textContent = String(selected);
+    selectAll.checked = checks.length > 0 && selected === checks.length;
+    selectAll.indeterminate = selected > 0 && selected < checks.length;
+    deleteSubmit.disabled = selected === 0;
+  }
+
+  selectAll.addEventListener('change', function () {
+    checks.forEach(function (checkbox) { checkbox.checked = selectAll.checked; });
+    refreshState();
+  });
+  checks.forEach(function (checkbox) {
+    checkbox.addEventListener('change', refreshState);
+  });
+  form.addEventListener('submit', function (event) {
+    var selected = selectedCount();
+    if (!selected || !window.confirm('Удалить выбранные постаматы без возможности восстановления: ' + selected + '?')) {
+      event.preventDefault();
+    }
+  });
+  refreshState();
+})();
+</script>
+{% endif %}
 
 </body>
 </html>

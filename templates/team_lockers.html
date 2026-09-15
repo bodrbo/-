@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Постоматы</title>
+<title>Постаматы</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
@@ -38,7 +38,7 @@
     </div>
     <div class="title-block">
       <span class="kicker">Снабжение</span>
-      <h1>Постоматы</h1>
+      <h1>Постаматы</h1>
     </div>
     <div class="topbar-actions">
       <form action="{{ url_for('team_logout') }}" method="post" class="topbar-logout">
@@ -74,7 +74,7 @@
     {% else %}
     <div class="empty-state">
       <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-      <div class="t">Постоматов пока нет</div>
+      <div class="t">Постаматов пока нет</div>
     </div>
     {% endif %}
   </section>

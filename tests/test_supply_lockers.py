@@ -49,7 +49,7 @@ class SupplyLockersTests(unittest.TestCase):
         db.execute("DELETE FROM team_accounts WHERE employee_name = ?", (cls.EMPLOYEE_NAME,))
         db.execute("DELETE FROM employees WHERE name = ?", (cls.EMPLOYEE_NAME,))
         db.execute(
-            "DELETE FROM supply_lockers WHERE name != 'Сундук-постомат №1'"
+            "DELETE FROM supply_lockers WHERE name != 'Сундук-постамат №1'"
         )
         db.commit()
 
@@ -71,7 +71,7 @@ class SupplyLockersTests(unittest.TestCase):
             return dict(
                 application_module.get_db()
                 .execute(
-                    "SELECT * FROM supply_lockers WHERE name = 'Сундук-постомат №1'"
+                    "SELECT * FROM supply_lockers WHERE name = 'Сундук-постамат №1'"
                 )
                 .fetchone()
             )
@@ -90,15 +90,15 @@ class SupplyLockersTests(unittest.TestCase):
         self.login_as_admin()
         response = self.client.get("/supply/lockers")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Сундук-постомат №1".encode(), response.data)
-        self.assertIn("Постоматы".encode(), response.data)
+        self.assertIn("Сундук-постамат №1".encode(), response.data)
+        self.assertIn("Постаматы".encode(), response.data)
 
     def test_admin_creates_locker(self):
         self.login_as_admin()
         response = self.client.post(
             "/supply/lockers/add",
             data={
-                "name": "Сундук-постомат №2",
+                "name": "Сундук-постамат №2",
                 "address": "Санкт-Петербург, наб. Обводного канала",
                 "volume": "180л",
                 "access_code": "1234",
@@ -109,7 +109,7 @@ class SupplyLockersTests(unittest.TestCase):
             locker = dict(
                 application_module.get_db()
                 .execute(
-                    "SELECT * FROM supply_lockers WHERE name = 'Сундук-постомат №2'"
+                    "SELECT * FROM supply_lockers WHERE name = 'Сундук-постамат №2'"
                 )
                 .fetchone()
             )
@@ -131,7 +131,7 @@ class SupplyLockersTests(unittest.TestCase):
         response = self.client.post(
             f"/supply/lockers/{locker['id']}",
             data={
-                "name": "Сундук-постомат №1 (переименован)",
+                "name": "Сундук-постамат №1 (переименован)",
                 "address": "Новый адрес",
                 "volume": "500л",
                 "access_code": "999",
@@ -144,7 +144,7 @@ class SupplyLockersTests(unittest.TestCase):
                 .execute("SELECT * FROM supply_lockers WHERE id = ?", (locker["id"],))
                 .fetchone()
             )
-        self.assertEqual(updated["name"], "Сундук-постомат №1 (переименован)")
+        self.assertEqual(updated["name"], "Сундук-постамат №1 (переименован)")
         self.assertEqual(updated["address"], "Новый адрес")
         self.assertEqual(updated["volume"], "500л")
         self.assertEqual(updated["access_code"], "999")
@@ -152,7 +152,7 @@ class SupplyLockersTests(unittest.TestCase):
         with application_module.app.app_context():
             db = application_module.get_db()
             db.execute(
-                "UPDATE supply_lockers SET name = 'Сундук-постомат №1', "
+                "UPDATE supply_lockers SET name = 'Сундук-постамат №1', "
                 "address = 'Кронштадт, Цитадельское шоссе дом 4', volume = '340л', "
                 "access_code = '000' WHERE id = ?",
                 (locker["id"],),
@@ -167,7 +167,7 @@ class SupplyLockersTests(unittest.TestCase):
         self.login_as_team()
         response = self.client.get("/team/lockers")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Сундук-постомат №1".encode(), response.data)
+        self.assertIn("Сундук-постамат №1".encode(), response.data)
 
         locker = self.seeded_locker()
         detail = self.client.get(f"/team/lockers/{locker['id']}")
@@ -188,7 +188,7 @@ class SupplyLockersTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(response.headers["Location"].endswith("/admin/login"))
         unchanged = self.seeded_locker()
-        self.assertEqual(unchanged["name"], "Сундук-постомат №1")
+        self.assertEqual(unchanged["name"], "Сундук-постамат №1")
 
     def test_admin_uploads_photo_and_it_shows_on_both_profiles(self):
         self.login_as_admin()
@@ -254,6 +254,125 @@ class SupplyLockersTests(unittest.TestCase):
             self.assertIn("locker_error", session)
         unchanged = self.seeded_locker()
         self.assertIsNone(unchanged["photo_filename"])
+
+    def _add_locker(self, name, **overrides):
+        self.login_as_admin()
+        data = {"address": "", "volume": "", "access_code": ""}
+        data.update(overrides)
+        response = self.client.post(
+            "/supply/lockers/add",
+            data={"name": name, **data},
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            return dict(
+                application_module.get_db()
+                .execute("SELECT * FROM supply_lockers WHERE name = ?", (name,))
+                .fetchone()
+            )
+
+    def test_bulk_delete_requires_admin_login(self):
+        locker = self._add_locker("Постамат для удаления 1")
+        with self.client.session_transaction() as session:
+            session.clear()
+        response = self.client.post(
+            "/supply/lockers/bulk-delete", data={"locker_id": [str(locker["id"])]}
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/admin/login"))
+        with application_module.app.app_context():
+            still_there = application_module.get_db().execute(
+                "SELECT 1 FROM supply_lockers WHERE id = ?", (locker["id"],)
+            ).fetchone()
+        self.assertIsNotNone(still_there)
+
+    def test_bulk_delete_without_selection_errors(self):
+        self.login_as_admin()
+        response = self.client.post("/supply/lockers/bulk-delete", data={})
+        self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as session:
+            self.assertIn("locker_error", session)
+
+    def test_bulk_delete_removes_unused_lockers(self):
+        first = self._add_locker("Постамат для удаления 2")
+        second = self._add_locker("Постамат для удаления 3")
+        self.login_as_admin()
+        response = self.client.post(
+            "/supply/lockers/bulk-delete",
+            data={"locker_id": [str(first["id"]), str(second["id"])]},
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            remaining = application_module.get_db().execute(
+                "SELECT COUNT(*) AS c FROM supply_lockers WHERE id IN (?, ?)",
+                (first["id"], second["id"]),
+            ).fetchone()["c"]
+        self.assertEqual(remaining, 0)
+        with self.client.session_transaction() as session:
+            notice = session.get("locker_notice")
+        self.assertIsNotNone(notice)
+        self.assertEqual(notice["type"], "success")
+        self.assertIn("Удалено 2", notice["message"])
+
+    def test_bulk_delete_skips_locker_with_return_history(self):
+        locker = self._add_locker("Постамат с историей возврата")
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            req = db.execute(
+                "INSERT INTO supply_requests (employee_name, status, created_at) "
+                "VALUES (?, 'new', '2026-09-16 09:00')",
+                (self.EMPLOYEE_NAME,),
+            )
+            request_id = req.lastrowid
+            db.execute(
+                "INSERT INTO supply_request_returns "
+                "(request_id, locker_id, returned_at, created_at) VALUES (?, ?, ?, ?)",
+                (request_id, locker["id"], "2026-09-16 09:00", "2026-09-16 09:00"),
+            )
+            db.commit()
+
+        def _cleanup_request():
+            with application_module.app.app_context():
+                cleanup_db = application_module.get_db()
+                cleanup_db.execute(
+                    "DELETE FROM supply_request_returns WHERE request_id = ?",
+                    (request_id,),
+                )
+                cleanup_db.execute(
+                    "DELETE FROM supply_requests WHERE id = ?", (request_id,)
+                )
+                cleanup_db.commit()
+
+        self.addCleanup(_cleanup_request)
+
+        self.login_as_admin()
+        response = self.client.post(
+            "/supply/lockers/bulk-delete", data={"locker_id": [str(locker["id"])]}
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            still_there = application_module.get_db().execute(
+                "SELECT 1 FROM supply_lockers WHERE id = ?", (locker["id"],)
+            ).fetchone()
+        self.assertIsNotNone(still_there)
+        with self.client.session_transaction() as session:
+            notice = session.get("locker_notice")
+        self.assertEqual(notice["type"], "error")
+        self.assertIn("Пропущено 1", notice["message"])
+
+    def test_bulk_delete_ignores_garbage_ids(self):
+        locker = self._add_locker("Постамат для удаления 4")
+        self.login_as_admin()
+        response = self.client.post(
+            "/supply/lockers/bulk-delete",
+            data={"locker_id": ["not-a-number", str(locker["id"])]},
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            still_there = application_module.get_db().execute(
+                "SELECT 1 FROM supply_lockers WHERE id = ?", (locker["id"],)
+            ).fetchone()
+        self.assertIsNone(still_there)
 
 
 if __name__ == "__main__":

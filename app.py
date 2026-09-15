@@ -2419,7 +2419,7 @@ def init_db():
         )
         """
     )
-    # Постоматы — physical pickup points where crew can be sent supplies
+    # Постаматы — physical pickup points where crew can be sent supplies
     # and can drop off what they're returning from a boat. Distinct from
     # supply_warehouses (which track per-product stock): a locker has no
     # inventory of its own yet, just a location and an access code, since
@@ -2444,7 +2444,7 @@ def init_db():
     if "photo_filename" not in supply_locker_cols:
         conn.execute("ALTER TABLE supply_lockers ADD COLUMN photo_filename TEXT")
     if conn.execute(
-        "SELECT 1 FROM supply_lockers WHERE name = ?", ("Сундук-постомат №1",)
+        "SELECT 1 FROM supply_lockers WHERE name = ?", ("Сундук-постамат №1",)
     ).fetchone() is None:
         locker_seed_now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
         conn.execute(
@@ -2452,7 +2452,7 @@ def init_db():
             "(name, address, volume, access_code, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             (
-                "Сундук-постомат №1", "Кронштадт, Цитадельское шоссе дом 4",
+                "Сундук-постамат №1", "Кронштадт, Цитадельское шоссе дом 4",
                 "340л", "000", locker_seed_now, locker_seed_now,
             ),
         )
@@ -13772,7 +13772,7 @@ def team_return_supply_request(request_id):
         f"🔁 Возврат по заявке на снабжение\n"
         f"Сотрудник: {html.escape(employee_name)}\n"
         f"{items_text}\n"
-        f"Постомат: {html.escape(locker['name'])}"
+        f"Постамат: {html.escape(locker['name'])}"
         + (f" ({html.escape(locker['address'])})" if locker["address"] else "")
     )
     if req["type_assigned_by_admin_id"]:
@@ -15792,6 +15792,7 @@ def supply_lockers():
     return render_template(
         "supply_lockers.html", active_page="supply", sub_page="lockers",
         lockers=lockers, locker_error=session.pop("locker_error", None),
+        locker_notice=session.pop("locker_notice", None),
     )
 
 
@@ -15801,7 +15802,7 @@ def add_supply_locker():
     db = get_db()
     name = request.form.get("name", "").strip()
     if not name:
-        session["locker_error"] = "Укажите название постомата."
+        session["locker_error"] = "Укажите название постамата."
         return redirect(url_for("supply_lockers"))
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
@@ -15818,6 +15819,82 @@ def add_supply_locker():
     return redirect(url_for("supply_lockers"))
 
 
+@app.route("/supply/lockers/bulk-delete", methods=["POST"])
+@admin_login_required
+def bulk_delete_supply_lockers():
+    db = get_db()
+    raw_ids = request.form.getlist("locker_id")
+    locker_ids = []
+    seen_ids = set()
+    for raw_id in raw_ids:
+        try:
+            locker_id = int(str(raw_id).strip())
+        except (TypeError, ValueError):
+            continue
+        if locker_id not in seen_ids:
+            seen_ids.add(locker_id)
+            locker_ids.append(locker_id)
+
+    if not locker_ids:
+        session["locker_error"] = "Выберите хотя бы один постамат."
+        return redirect(url_for("supply_lockers"))
+
+    placeholders = ",".join("?" for _ in locker_ids)
+    # A locker with any return/delivery history (collected or not) is left
+    # alone — deleting it would silently drop that history from the joins
+    # in the admin/team supply views, not just its future capacity.
+    in_use_ids = set()
+    for table, column in (
+        ("supply_request_returns", "locker_id"),
+        ("supply_request_deliveries", "locker_id"),
+        ("supply_requests", "delivery_locker_id"),
+    ):
+        rows = db.execute(
+            f"SELECT DISTINCT {column} FROM {table} WHERE {column} IN ({placeholders})",
+            locker_ids,
+        ).fetchall()
+        in_use_ids.update(row[0] for row in rows)
+
+    deletable_ids = [lid for lid in locker_ids if lid not in in_use_ids]
+    if deletable_ids:
+        delete_placeholders = ",".join("?" for _ in deletable_ids)
+        photo_rows = db.execute(
+            f"SELECT photo_filename FROM supply_lockers WHERE id IN ({delete_placeholders})",
+            deletable_ids,
+        ).fetchall()
+        db.execute(
+            f"DELETE FROM supply_lockers WHERE id IN ({delete_placeholders})",
+            deletable_ids,
+        )
+        db.commit()
+        for row in photo_rows:
+            if row["photo_filename"]:
+                photo_path = os.path.join(
+                    app.static_folder, "supply_lockers", row["photo_filename"]
+                )
+                if os.path.exists(photo_path):
+                    os.remove(photo_path)
+
+    parts = []
+    if deletable_ids:
+        parts.append(
+            f"Удалено {len(deletable_ids)} "
+            f"{_plural_ru(len(deletable_ids), ('постамат', 'постамата', 'постаматов'))}."
+        )
+    skipped = len(locker_ids) - len(deletable_ids)
+    if skipped:
+        parts.append(
+            f"Пропущено {skipped} "
+            f"{_plural_ru(skipped, ('постамат', 'постамата', 'постаматов'))} "
+            "— в них есть история снабжения (возвраты или доставки)."
+        )
+    session["locker_notice"] = {
+        "type": "success" if deletable_ids else "error",
+        "message": " ".join(parts),
+    }
+    return redirect(url_for("supply_lockers"))
+
+
 @app.route("/supply/lockers/<int:locker_id>", methods=["GET", "POST"])
 @admin_login_required
 def supply_locker(locker_id):
@@ -15830,7 +15907,7 @@ def supply_locker(locker_id):
     if request.method == "POST":
         name = request.form.get("name", "").strip()
         if not name:
-            session["locker_error"] = "Укажите название постомата."
+            session["locker_error"] = "Укажите название постамата."
             return redirect(url_for("supply_locker", locker_id=locker_id))
         photo_filename = locker["photo_filename"]
         photo = request.files.get("photo")
@@ -16925,7 +17002,7 @@ def set_supply_request_status(request_id):
                     (request_id, delivery_locker["id"], now, now),
                 )
                 db.commit()
-            text += f"\n\nПостомат: {html.escape(delivery_locker['name'])}"
+            text += f"\n\nПостамат: {html.escape(delivery_locker['name'])}"
             if delivery_locker["address"]:
                 text += f" ({html.escape(delivery_locker['address'])})"
             if delivery_locker["access_code"]:

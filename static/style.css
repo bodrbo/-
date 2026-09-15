@@ -5932,6 +5932,58 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   cursor: pointer;
 }
 #orders-table { min-width: 960px; }
+.locker-bulk-form {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  background: var(--paper-alt);
+}
+.locker-bulk-count {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.locker-bulk-count strong { color: var(--ink); font-size: 15px; }
+.locker-bulk-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  margin: 0;
+  padding: 0 14px;
+  border: 1px solid rgba(179, 64, 44, .35);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--danger);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.locker-bulk-delete:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+.locker-bulk-delete:disabled { opacity: .5; cursor: not-allowed; }
+.locker-bulk-delete svg { width: 15px; height: 15px; }
+.locker-select-cell {
+  width: 24px;
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+.locker-select-cell input[type="checkbox"] {
+  display: block;
+  width: 17px;
+  height: 17px;
+  margin: 0 auto;
+  accent-color: var(--brass);
+  cursor: pointer;
+}
 .tuning-orders-filter {
   padding: 0;
   margin-bottom: 14px;

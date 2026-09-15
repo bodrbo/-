@@ -22,7 +22,7 @@ class SupplyRequestReturnTests(unittest.TestCase):
                 db, self.OTHER_EMPLOYEE_NAME, self.OTHER_USERNAME
             )
             self.locker_id = db.execute(
-                "SELECT id FROM supply_lockers WHERE name = 'Сундук-постомат №1'"
+                "SELECT id FROM supply_lockers WHERE name = 'Сундук-постамат №1'"
             ).fetchone()["id"]
             self.request_id = self._create_request(db, self.EMPLOYEE_NAME)
             db.commit()

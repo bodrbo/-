@@ -22,7 +22,7 @@ class SupplyRequestDeliveryTests(unittest.TestCase):
                 db, self.OTHER_EMPLOYEE_NAME, self.OTHER_USERNAME
             )
             self.locker_id = db.execute(
-                "SELECT id FROM supply_lockers WHERE name = 'Сундук-постомат №1'"
+                "SELECT id FROM supply_lockers WHERE name = 'Сундук-постамат №1'"
             ).fetchone()["id"]
             self.request_id = self._create_request(db, self.EMPLOYEE_NAME)
             db.commit()
@@ -148,7 +148,7 @@ class SupplyRequestDeliveryTests(unittest.TestCase):
         self.login_as_admin()
         page = self.client.get("/supply/requests")
         self.assertIn(b"selected", page.data)
-        self.assertIn("Сундук-постомат".encode(), page.data)
+        self.assertIn("Сундук-постамат".encode(), page.data)
 
     def test_delivered_status_without_locker_creates_no_delivery(self):
         self.set_status("delivered")
