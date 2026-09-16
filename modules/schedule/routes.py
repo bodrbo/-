@@ -2,6 +2,7 @@
 
 import datetime as dt
 
+import requests
 from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
 from modules.clients.constants import CLIENT_CONTACT_METHODS
@@ -32,6 +33,8 @@ def create_schedule_blueprint(
     yookassa_request=None,
     receipt_vat_code=lambda: 1,
     phone_normalizer=lambda phone: phone,
+    weather_configured=lambda: False,
+    weather_sync=None,
 ):
     blueprint = Blueprint("schedule", __name__)
 
@@ -98,6 +101,7 @@ def create_schedule_blueprint(
             ),
             tripster_configured=tripster_configured(),
             yookassa_configured=yookassa_configured(),
+            weather_configured=weather_configured(),
         )
 
     @blueprint.route("/schedule/clients/search")
@@ -398,6 +402,27 @@ def create_schedule_blueprint(
                 f"сопоставлено с услугами — {stats['matched']}, "
                 f"отмен — {stats['cancelled']}, "
                 f"ожидают оплаты или даты — {stats['pending']}.",
+                True,
+            )
+        return redirect_to_day(day, selected_employee)
+
+    @blueprint.route("/schedule/weather/sync", methods=["POST"])
+    @manage_required
+    def sync_weather():
+        day = services.parse_day(request.form.get("return_date")).isoformat()
+        selected_employee = request.form.get("return_employee", "all")
+        if not weather_configured() or weather_sync is None:
+            set_notice("Ключ OpenWeather не настроен на сервере.", False)
+            return redirect_to_day(day, selected_employee)
+        try:
+            stats = weather_sync(get_db())
+        except (requests.RequestException, RuntimeError, ValueError) as error:
+            set_notice(f"Не удалось обновить прогноз погоды: {error}", False)
+        else:
+            set_notice(
+                "Прогноз погоды обновлён: "
+                f"часов синхронизировано — {stats['hours_synced']}, "
+                f"предупреждений капитанам отправлено — {stats['alerts_sent']}.",
                 True,
             )
         return redirect_to_day(day, selected_employee)

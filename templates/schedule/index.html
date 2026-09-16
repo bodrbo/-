@@ -85,6 +85,14 @@
           <span>Tripster</span>
         </button>
       </form>
+      <form method="post" action="{{ url_for('schedule.sync_weather') }}" class="schedule-weather-form" onsubmit="showScheduleWeatherLoader(this)">
+        <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
+        <input type="hidden" name="return_employee" value="{{ selected_employee }}">
+        <button type="submit" class="schedule-weather-button" {{ 'disabled' if not weather_configured }} title="{{ 'Обновить прогноз погоды и разослать предупреждения капитанам' if weather_configured else 'Ключ OpenWeather не настроен' }}">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 13.6a3 3 0 01-.4-5.9 4.3 4.3 0 018.3-1.1 3.1 3.1 0 01-.6 7H6.2z"/><path d="M7 16.2v1M10.3 16.2v1.4M13.6 16.2v1"/></svg>
+          <span>Погода</span>
+        </button>
+      </form>
       <button type="button" class="schedule-roster-button" onclick="openScheduleRosterModal()">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="3"/><circle cx="14.5" cy="8" r="2.2"/><path d="M2.5 16c.4-3 2.1-4.6 4.7-4.6s4.4 1.6 4.8 4.6M12 12.2c2.8-.6 4.8.7 5.5 3.8"/></svg>
         <span>Состав</span>
@@ -673,6 +681,21 @@
     if (!loader) return;
     const label = loader.querySelector('.loader-label');
     if (label) label.textContent = 'Переимпорт рейсов…';
+    loader.classList.remove('hidden');
+  }
+
+  function showScheduleWeatherLoader(form) {
+    const button = form.querySelector('button[type="submit"]');
+    if (button) {
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      const text = button.querySelector('span');
+      if (text) text.textContent = 'Обновляем…';
+    }
+    const loader = document.getElementById('pageLoader');
+    if (!loader) return;
+    const label = loader.querySelector('.loader-label');
+    if (label) label.textContent = 'Обновляем прогноз погоды…';
     loader.classList.remove('hidden');
   }
 

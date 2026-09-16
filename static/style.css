@@ -4656,6 +4656,24 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-tripster-button:hover:not(:disabled) { border-color: #bd8f2a; background: #fff4d3; }
 .schedule-tripster-button:disabled { cursor: not-allowed; opacity: .5; }
 .schedule-tripster-button svg { width: 17px; height: 17px; }
+.schedule-weather-form { margin: 0; }
+.schedule-weather-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #a9d0ec;
+  border-radius: 11px;
+  background: #eaf5fd;
+  color: #1f5c85;
+  font-weight: 700;
+  cursor: pointer;
+}
+.schedule-weather-button:hover:not(:disabled) { border-color: var(--brass-strong); background: #dcedfa; }
+.schedule-weather-button:disabled { cursor: not-allowed; opacity: .5; }
+.schedule-weather-button svg { width: 17px; height: 17px; }
 .schedule-roster-button {
   display: inline-flex;
   align-items: center;
@@ -5850,6 +5868,7 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   .schedule-create-button { width: 44px; min-height: 44px; padding: 0; }
   .schedule-create-button span { position: absolute; overflow: hidden; width: 1px; height: 1px; clip: rect(0,0,0,0); white-space: nowrap; }
   .schedule-tripster-form { display: none; }
+  .schedule-weather-form { display: none; }
   .schedule-board-nav { grid-template-columns: auto minmax(0, 1fr); gap: 7px; padding-left: 9px; }
   .schedule-board-nav.is-contained { grid-template-columns: 1fr; }
   .schedule-board-nav.is-contained .schedule-board-nav-controls { display: none; }

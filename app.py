@@ -5014,6 +5014,8 @@ app.register_blueprint(
         yookassa_request=lambda *args, **kwargs: _yookassa_request(*args, **kwargs),
         receipt_vat_code=lambda: _current_yookassa_excursion_vat_code(get_db()),
         phone_normalizer=lambda phone: _normalize_ru_phone(phone),
+        weather_configured=lambda: weather_configured(),
+        weather_sync=lambda db: _sync_weather_forecast(db),
     )
 )
 
