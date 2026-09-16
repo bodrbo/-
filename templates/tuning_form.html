@@ -355,18 +355,28 @@
               </form>
             </td>
             <td class="muted">
+              {% if item.assignments %}
+              <ul class="item-assignment-list">
+                {% for a in item.assignments %}
+                <li>
+                  {% if a.assignment_status == 'pending' %}
+                  <span class="status-badge status-supplyreq-new">Ожидает ответа</span>
+                  {% elif a.assignment_status == 'accepted' %}
+                  <span class="status-badge status-supplyreq-delivered">Исполняет</span>
+                  {% else %}
+                  <span class="status-badge status-client-dissatisfied">Отклонено</span>
+                  {% endif %}
+                  {{ a.employee_name }}
+                  {% if a.comment %}<div class="assignment-comment-preview">{{ a.comment }}</div>{% endif %}
+                </li>
+                {% endfor %}
+              </ul>
+              {% endif %}
               {% if item.can_assign %}
               <button type="button" class="btn-secondary"
                       onclick='openAssignModal({{ url_for("assign_tuning_item", order_id=edit_order.id, item_id=item.id)|tojson }}, {{ item.work_name|tojson }})'>
                 Поручить задачу
               </button>
-              {% elif item.assignment and item.assignment.assignment_status == 'pending' %}
-              Ожидает ответа: {{ item.assignment.employee_name }}
-              {% elif item.assignment and item.assignment.assignment_status == 'accepted' %}
-              Исполнитель: {{ item.assignment.employee_name }}
-              {% endif %}
-              {% if item.assignment and item.assignment.comment %}
-              <div class="assignment-comment-preview">{{ item.assignment.comment }}</div>
               {% endif %}
             </td>
             <td class="row-actions">

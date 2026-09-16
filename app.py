@@ -8940,17 +8940,17 @@ def edit_tuning_order(order_id):
             "SELECT * FROM tuning_order_items WHERE order_id = ? ORDER BY id", (order_id,)
         ).fetchall():
             item = dict(row)
-            assignment_row = db.execute(
-                "SELECT * FROM tuning_item_assignments WHERE item_id = ? ORDER BY id DESC LIMIT 1",
-                (item["id"],),
-            ).fetchone()
-            assignment = dict(assignment_row) if assignment_row else None
-            item["assignment"] = assignment
-            item["can_assign"] = item["status"] != "removed" and (
-                assignment is None
-                or assignment["assignment_status"] == "rejected"
-                or (assignment["assignment_status"] == "accepted" and item["status"] == "done")
-            )
+            item["assignments"] = [
+                dict(a) for a in db.execute(
+                    "SELECT * FROM tuning_item_assignments WHERE item_id = ? ORDER BY id",
+                    (item["id"],),
+                ).fetchall()
+            ]
+            # One work item can carry several concurrent tasks (e.g. split
+            # between tuningmen, or reassigned after someone declines) —
+            # assigning another is always allowed, the admin decides when
+            # a work item has enough hands on it.
+            item["can_assign"] = item["status"] != "removed"
             items.append(item)
         assignable_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
         goods = db.execute(

@@ -7331,6 +7331,14 @@ button.btn-reject:hover { background: #932f20; }
   letter-spacing: .05em;
   text-transform: uppercase;
 }
+.item-assignment-list {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.item-assignment-list li { line-height: 1.4; }
 .assignment-comment-preview {
   max-width: 300px;
   margin-top: 5px;
