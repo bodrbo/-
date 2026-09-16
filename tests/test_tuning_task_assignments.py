@@ -180,6 +180,48 @@ class TuningTaskMultiAssignmentTests(unittest.TestCase):
         self.assertIn(self.EMPLOYEE_B, html)
         self.assertIn("Поручить задачу", html)
 
+    def test_board_shows_work_block_and_task_branches(self):
+        self.assign(self.EMPLOYEE_A, 1000, 2)
+        self.assign(self.EMPLOYEE_B, 1500, 1)
+        self.login_admin()
+        page = self.client.get(f"/tuning/{self.order_id}/board")
+        self.assertEqual(page.status_code, 200)
+        html = page.get_data(as_text=True)
+        self.assertIn("Полировка корпуса", html)
+        self.assertIn(self.EMPLOYEE_A, html)
+        self.assertIn(self.EMPLOYEE_B, html)
+        self.assertIn("Ожидает ответа", html)
+        self.assertIn("+ Поручить задачу", html)
+
+    def test_board_requires_admin_login(self):
+        with self.client.session_transaction() as session:
+            session.clear()
+        response = self.client.get(f"/tuning/{self.order_id}/board")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/admin/login", response.headers["Location"])
+
+    def test_board_shows_empty_hint_when_item_has_no_assignments(self):
+        self.login_admin()
+        page = self.client.get(f"/tuning/{self.order_id}/board")
+        self.assertIn("Пока никто не назначен".encode(), page.data)
+
+    def test_assign_from_board_returns_to_board(self):
+        self.login_admin()
+        response = self.client.post(
+            f"/tuning/{self.order_id}/item/{self.item_id}/assign",
+            data={
+                "employee_name": self.EMPLOYEE_A,
+                "rate": "1000",
+                "norm_hours": "2",
+                "comment": "",
+                "next": "board",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response.headers["Location"].endswith(f"/tuning/{self.order_id}/board")
+        )
+
     def test_each_employee_is_paid_independently_at_their_own_rate(self):
         self.assign(self.EMPLOYEE_A, 1000, 2)
         self.assign(self.EMPLOYEE_B, 1500, 1)

@@ -166,6 +166,15 @@
         Копировать заказ
       </button>
     </form>
+    <a href="{{ url_for('tuning_order_board', order_id=edit_order.id) }}" class="btn-secondary tuning-copy-order-button">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="2.5" y="3" width="5" height="5" rx="1"/>
+        <rect x="2.5" y="12" width="5" height="5" rx="1"/>
+        <rect x="12.5" y="7.5" width="5" height="5" rx="1"/>
+        <path d="M7.5 5.5h2a2 2 0 012 2V9M7.5 14.5h2a2 2 0 002-2V11"/>
+      </svg>
+      Доска задач
+    </a>
     <form action="{{ url_for('set_tuning_order_status', order_id=edit_order.id) }}" method="post"
           class="status-select-form tuning-order-status-select">
       <select name="status" onchange="this.form.submit()">

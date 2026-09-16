@@ -384,6 +384,30 @@ def _tuning_order_motors(db, order_id):
     ]
 
 
+def _tuning_order_items_with_assignments(db, order_id):
+    """Every work line on an order, each carrying the full list of tasks
+    (tuning_item_assignments rows) handed out against it — shared by the
+    order-edit page and the task board so both read the same shape."""
+    items = []
+    for row in db.execute(
+        "SELECT * FROM tuning_order_items WHERE order_id = ? ORDER BY id", (order_id,)
+    ).fetchall():
+        item = dict(row)
+        item["assignments"] = [
+            dict(a) for a in db.execute(
+                "SELECT * FROM tuning_item_assignments WHERE item_id = ? ORDER BY id",
+                (item["id"],),
+            ).fetchall()
+        ]
+        # One work item can carry several concurrent tasks (e.g. split
+        # between tuningmen, or reassigned after someone declines) —
+        # assigning another is always allowed, the admin decides when
+        # a work item has enough hands on it.
+        item["can_assign"] = item["status"] != "removed"
+        items.append(item)
+    return items
+
+
 def _tuning_order_motors_by_order(db, order_ids):
     result = {order_id: [] for order_id in order_ids}
     if not order_ids:
@@ -8935,23 +8959,7 @@ def edit_tuning_order(order_id):
 
     if request.method == "GET":
         boat_motors = _tuning_order_motors(db, order_id)
-        items = []
-        for row in db.execute(
-            "SELECT * FROM tuning_order_items WHERE order_id = ? ORDER BY id", (order_id,)
-        ).fetchall():
-            item = dict(row)
-            item["assignments"] = [
-                dict(a) for a in db.execute(
-                    "SELECT * FROM tuning_item_assignments WHERE item_id = ? ORDER BY id",
-                    (item["id"],),
-                ).fetchall()
-            ]
-            # One work item can carry several concurrent tasks (e.g. split
-            # between tuningmen, or reassigned after someone declines) —
-            # assigning another is always allowed, the admin decides when
-            # a work item has enough hands on it.
-            item["can_assign"] = item["status"] != "removed"
-            items.append(item)
+        items = _tuning_order_items_with_assignments(db, order_id)
         assignable_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
         goods = db.execute(
             "SELECT tuning_order_products.*, supply_warehouses.name AS writeoff_warehouse_name "
@@ -9287,11 +9295,15 @@ def set_tuning_item_status(order_id, item_id):
 @admin_login_required
 def assign_tuning_item(order_id, item_id):
     db = get_db()
+    return_endpoint = (
+        "tuning_order_board" if request.form.get("next") == "board"
+        else "edit_tuning_order"
+    )
     item = db.execute(
         "SELECT * FROM tuning_order_items WHERE id = ? AND order_id = ?", (item_id, order_id)
     ).fetchone()
     if item is None:
-        return redirect(url_for("edit_tuning_order", order_id=order_id))
+        return redirect(url_for(return_endpoint, order_id=order_id))
 
     employee_name = request.form.get("employee_name", "").strip()
     rate_raw = request.form.get("rate", "").strip().replace(",", ".")
@@ -9332,7 +9344,25 @@ def assign_tuning_item(order_id, item_id):
         )
         db.commit()
         _notify_task_assignment(db, ASSIGNMENT_TUNING, cur.lastrowid)
-    return redirect(url_for("edit_tuning_order", order_id=order_id))
+    return redirect(url_for(return_endpoint, order_id=order_id))
+
+
+@app.route("/tuning/<int:order_id>/board")
+@admin_login_required
+def tuning_order_board(order_id):
+    db = get_db()
+    order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None:
+        return redirect(url_for("tuning_index"))
+    items = _tuning_order_items_with_assignments(db, order_id)
+    assignable_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
+    return render_template(
+        "tuning_order_board.html",
+        order=order, items=items, work_statuses=WORK_STATUSES,
+        assignable_employees=assignable_employees,
+        active_page="tuning",
+        sub_page="subcontracts" if order["source"] == SUBCONTRACT_REQUEST_SOURCE else "orders",
+    )
 
 
 @app.route("/tuning/<int:order_id>/item/<int:item_id>/photo", methods=["POST"])
