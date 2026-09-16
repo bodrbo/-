@@ -3,6 +3,8 @@ import sqlite3
 import time
 import unittest
 
+import requests
+
 from modules.notifications import EVENT_SCHEDULE_BAD_WEATHER
 from modules.weather import client, repository, schema, services
 
@@ -38,7 +40,9 @@ class FakeResponse:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise RuntimeError(f"http {self.status_code}")
+            error = requests.HTTPError(f"{self.status_code} error")
+            error.response = self
+            raise error
 
     def json(self):
         return self._body
@@ -71,8 +75,16 @@ class WeatherClientTests(unittest.TestCase):
         def requester(url, params=None, timeout=None):
             return FakeResponse([], status_code=500)
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(requests.HTTPError):
             client.fetch_hourly_forecast("key", 1.0, 2.0, requester=requester)
+
+    def test_401_is_translated_into_an_actionable_message(self):
+        def requester(url, params=None, timeout=None):
+            return FakeResponse([], status_code=401)
+
+        with self.assertRaises(RuntimeError) as ctx:
+            client.fetch_hourly_forecast("key", 1.0, 2.0, requester=requester)
+        self.assertIn("One Call by Call", str(ctx.exception))
 
 
 class _WeatherFixture:
