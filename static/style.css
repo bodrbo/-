@@ -4943,6 +4943,20 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-body.is-read-only.can-view-clients .schedule-card { cursor: pointer; }
 .schedule-body.is-read-only.can-view-clients .schedule-card:hover { z-index: 5; transform: translateY(-1px); box-shadow: 0 12px 24px -14px rgba(15,42,53,.82); }
 .schedule-card.event { border-left-style: double; border-left-width: 6px; }
+.schedule-card.has-bad-weather { box-shadow: inset 0 0 0 1.5px var(--danger), 0 8px 18px -13px rgba(15,42,53,.7); }
+.schedule-card.has-bad-weather:hover { box-shadow: inset 0 0 0 1.5px var(--danger), 0 12px 24px -14px rgba(15,42,53,.82); }
+.schedule-card-weather {
+  display: block;
+  overflow: hidden;
+  width: 100%;
+  font-size: 9px;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: .85;
+}
+.schedule-card-weather.is-bad { font-weight: 700; opacity: 1; }
+.schedule-card.is-compact .schedule-card-weather { display: none; }
 .schedule-card-topline {
   display: flex;
   align-items: center;

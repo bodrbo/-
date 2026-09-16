@@ -1008,6 +1008,7 @@ def day_view(
     boat_colors,
     avatar_url,
     include_unassigned_tripster=True,
+    attach_weather=None,
 ):
     crew = repository.list_crew_employees(db)
     raw_items = repository.list_day_items(db, day.isoformat())
@@ -1084,6 +1085,11 @@ def day_view(
         item["boat_color"] = colors_by_boat.get(item["boat"], "#607d8b")
         item["boat_ink"] = _card_ink_for(item["boat_color"])
         items.append(item)
+
+    if attach_weather is not None:
+        # Must run before the card-copy loop below (`card = dict(item)`),
+        # so every per-employee card inherits item["weather"] too.
+        attach_weather(db, items)
 
     earliest = max(0, earliest)
     latest = min(24 * 60, latest)

@@ -122,6 +122,9 @@ from modules.schedule import (
     init_schema as init_schedule_schema,
 )
 from modules.schedule import services as schedule_services
+from modules.weather import client as weather_client
+from modules.weather import schema as weather_schema
+from modules.weather import services as weather_services
 from modules.excursion_services import (
     create_blueprint as create_excursion_services_blueprint,
     init_schema as init_excursion_services_schema,
@@ -872,6 +875,33 @@ MARINE_ROCKET_YML_URL = (
 THOUSAND_SIZES_YML_URL = (
     os.environ.get("THOUSAND_SIZES_YML_URL") or THOUSAND_SIZES_DEFAULT_YML_URL
 )
+
+# OpenWeather One Call API 4.0 ("One Call by Call" subscription — a separate
+# sign-up from any other OpenWeather key, see README). Without the key the
+# trip schedule simply shows no forecast and the cron sync/alert is a no-op.
+OPENWEATHER_API_KEY = os.environ.get("OPENWEATHER_API_KEY")
+WEATHER_MARINA_LAT = float(os.environ.get("WEATHER_MARINA_LAT", "59.983144"))
+WEATHER_MARINA_LON = float(os.environ.get("WEATHER_MARINA_LON", "29.742141"))
+
+
+def weather_configured():
+    return bool(OPENWEATHER_API_KEY)
+
+
+def _sync_weather_forecast(db):
+    """Best-effort: an OpenWeather outage must never break the shared hourly
+    cron it rides along with, so callers wrap this in their own try/except
+    exactly like the Marine Rocket and T-Bank steps beside it."""
+    if not weather_configured():
+        return {"configured": False}
+    hours_synced = weather_services.sync_forecast(
+        OPENWEATHER_API_KEY, WEATHER_MARINA_LAT, WEATHER_MARINA_LON, db,
+    )
+    alert_stats = weather_services.send_weather_alerts(
+        db, send_telegram_notification_to_employee
+    )
+    db.commit()
+    return {"configured": True, "hours_synced": hours_synced, **alert_stats}
 
 # ---------------------------------------------------------------------
 # Секрет для эндпоинта, который принимает лиды с формы обратной связи на
@@ -3330,6 +3360,7 @@ def init_db():
     init_client_segments_schema(conn)
     init_ai_assistant_schema(conn)
     init_investor_finance_schema(conn)
+    weather_schema.init_schema(conn)
     conn.commit()
     conn.close()
 
@@ -17697,6 +17728,18 @@ def cron_sync_fuel():
             f"{payout_stats['errors']} API errors"
         )
     )
+    try:
+        weather_stats = _sync_weather_forecast(db)
+    except Exception as error:
+        # A weather API outage must never stop fuel/YCLIENTS sync.
+        print(f"Weather sync failed: {error}", file=sys.stderr, flush=True)
+        weather_summary = "error: {}".format(error)
+    else:
+        weather_summary = (
+            "not configured" if not weather_stats["configured"]
+            else f"{weather_stats['hours_synced']} hours synced, "
+                 f"{weather_stats['alerts_sent']} captain alerts sent"
+        )
     if not yclients_configured():
         return (
             "yclients not configured; "
@@ -17704,7 +17747,8 @@ def cron_sync_fuel():
             f"{reminder_stats['sent_6h']} after 6h; "
             f"tbank payouts: {payout_summary}; "
             f"marine rocket: {marine_summary}; "
-            f"1000 sizes: {thousand_sizes_summary}",
+            f"1000 sizes: {thousand_sizes_summary}; "
+            f"weather: {weather_summary}",
             503,
         )
     try:
@@ -17734,7 +17778,26 @@ def cron_sync_fuel():
         f"{reminder_stats['sent_6h']} after 6h; "
         f"tbank payouts: {payout_summary}; "
         f"marine rocket: {marine_summary}; "
-        f"1000 sizes: {thousand_sizes_summary}",
+        f"1000 sizes: {thousand_sizes_summary}; "
+        f"weather: {weather_summary}",
+        200,
+    )
+
+
+@app.route("/internal/cron/sync-weather")
+def cron_sync_weather():
+    """Standalone weather sync + captain alert for diagnostics or a separate cron."""
+    if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
+        return "forbidden", 403
+    try:
+        stats = _sync_weather_forecast(get_db())
+    except Exception as error:
+        return "error: {}".format(error), 502
+    if not stats["configured"]:
+        return "weather not configured", 503
+    return (
+        f"ok: {stats['hours_synced']} hours synced, "
+        f"{stats['alerts_sent']} captain alerts sent",
         200,
     )
 

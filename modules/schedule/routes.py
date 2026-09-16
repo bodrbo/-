@@ -7,6 +7,8 @@ from flask import Blueprint, jsonify, redirect, render_template, request, sessio
 from modules.clients.constants import CLIENT_CONTACT_METHODS
 from modules.excursion_services import repository as service_repository
 
+from modules.weather import services as weather_services
+
 from . import notifications as schedule_notifications
 from . import repository, services, tripster_services
 from .constants import CREW_ROLES, ITEM_KINDS
@@ -65,6 +67,7 @@ def create_schedule_blueprint(
             boat_colors,
             avatar_url,
             include_unassigned_tripster=not team_view,
+            attach_weather=weather_services.attach_forecast,
         )
         return render_template(
             "schedule/index.html",

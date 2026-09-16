@@ -20,6 +20,7 @@ EVENT_SCHEDULE_ASSIGNED = "schedule.assigned"
 EVENT_SCHEDULE_RESCHEDULED = "schedule.rescheduled"
 EVENT_SCHEDULE_BOAT_CHANGED = "schedule.boat_changed"
 EVENT_SCHEDULE_CANCELLED = "schedule.cancelled"
+EVENT_SCHEDULE_BAD_WEATHER = "schedule.bad_weather"
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,13 @@ NOTIFICATION_RULES = {
         delivery="immediate",
         description="Назначенный сотруднику рейс отменён",
         recipient="assigned_employee",
+    ),
+    EVENT_SCHEDULE_BAD_WEATHER: NotificationRule(
+        event=EVENT_SCHEDULE_BAD_WEATHER,
+        positions=(),
+        delivery="immediate",
+        description="Прогноз на предстоящий рейс пересёк порог непогоды (ветер/осадки/гроза)",
+        recipient="trip_captains",
     ),
 }
 

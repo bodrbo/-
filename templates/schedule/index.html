@@ -170,17 +170,22 @@
             {% for card in cards_by_employee.get(employee.id, []) %}
             {% set card_tag = 'button' if can_manage or can_view_clients else 'article' %}
             <{{ card_tag }}{% if can_manage or can_view_clients %} type="button"{% endif %}
-                    class="schedule-card {{ card.kind }} {{ 'is-compact' if card.height_px < 50 else 'is-medium' if card.height_px < 105 }}"
+                    class="schedule-card {{ card.kind }} {{ 'is-compact' if card.height_px < 50 else 'is-medium' if card.height_px < 105 }}{{ ' has-bad-weather' if card.weather and card.weather.is_bad }}"
                     data-schedule-item-id="{{ card.id }}"
                     data-assignment-employee-id="{{ employee.id }}"
                     {% if can_manage %}data-move-url="{{ url_for('schedule.move_item', item_id=card.id) }}"{% endif %}
                     style="top: {{ card.top_px }}px; height: {{ card.height_px }}px; --schedule-card-color: {{ card.boat_color }}; --schedule-card-ink: {{ card.boat_ink }}"
-                    title="{{ card.start_time }}–{{ card.end_time }} · {{ card.service_name }} · {{ card.boat }}"
+                    title="{{ card.start_time }}–{{ card.end_time }} · {{ card.service_name }} · {{ card.boat }}{% if card.weather and card.weather.is_bad %} · Неблагоприятный прогноз: {{ card.weather.reasons|join(', ') }}{% endif %}"
                     {% if can_manage %}onpointerdown="startScheduleDrag(event, this)" onclick="handleScheduleCardClick(event, {{ card.id }})"{% elif can_view_clients %}onclick="event.stopPropagation(); openScheduleView({{ card.id }})"{% endif %}>
               <span class="schedule-card-topline">
                 <span class="schedule-card-time">{{ card.start_time }}–{{ card.end_time }}</span>
                 <span class="schedule-card-kind">{{ card.kind_label }}</span>
               </span>
+              {% if card.weather %}
+              <span class="schedule-card-weather{{ ' is-bad' if card.weather.is_bad }}">
+                {{ card.weather.temp|round|int }}°{% if card.weather.wind_dir %} · {{ card.weather.wind_dir }} {{ card.weather.wind_gust|round|int }} м/с{% endif %}{% if card.weather.precip_mm and card.weather.precip_mm > 0 %} · 🌧{% endif %}
+              </span>
+              {% endif %}
               <strong>{{ card.service_name }}</strong>
               <span class="schedule-card-boat">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 14h14l-2 3H5l-2-3zM6 14V8h7l2 6M8 8V5h4v3"/></svg>
