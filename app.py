@@ -18,6 +18,7 @@ import os
 import sys
 import json
 import html
+import math
 import time
 import uuid
 import secrets
@@ -7843,6 +7844,7 @@ app.register_blueprint(
 SHOP_MAP_SCALE = 24   # px per meter, drawn to scale
 SHOP_MAP_PADDING = 50  # px around the room rect for dimension labels
 SHOP_MAP_BOAT_GAP_M = 0.5  # minimum clearance required between two boats' hulls
+SHOP_MAP_ROTATE_HANDLE_GAP_PX = 12  # distance from the bow tip to the rotate handle
 
 
 def _shop_map_boats(db):
@@ -7871,40 +7873,69 @@ def _shop_map_boats(db):
 
 
 def _shop_map_boat_footprint(length_m, width_m, rotation_deg):
-    """A boat rotated 90° occupies width_m along x and length_m along y —
-    everything that checks bounds/overlap needs the footprint, not the
-    boat's own intrinsic length/width."""
-    if rotation_deg == 90:
-        return width_m, length_m
-    return length_m, width_m
+    """Axis-aligned bounding box of a length_m × width_m hull rotated by
+    rotation_deg (any angle, not just 0/90) around its own center. x_m/y_m
+    always refer to this box's top-left corner, whatever the current angle —
+    reduces to the old (width, length) swap exactly at 90°/270° and to
+    (length, width) at 0°/180°."""
+    rad = math.radians(rotation_deg)
+    cos_a, sin_a = abs(math.cos(rad)), abs(math.sin(rad))
+    footprint_w = length_m * cos_a + width_m * sin_a
+    footprint_h = length_m * sin_a + width_m * cos_a
+    return footprint_w, footprint_h
 
 
-def _shop_map_rects_overlap(ax, ay, aw, ah, bx, by, bw, bh, margin=0):
-    """True if rect A and rect B overlap, or (with margin > 0) come closer
-    than margin metres to each other — equivalent to inflating A by margin
-    on every side and testing that against B unchanged."""
+def _shop_map_obb_overlap(ax, ay, a_half_l, a_half_w, a_angle, bx, by, b_half_l, b_half_w, b_angle, margin=0):
+    """Separating-axis test for two rectangles given as center (x, y),
+    half-extents along their own length/width axes, and rotation in
+    degrees — used for boat-vs-boat and boat-vs-zone overlap now that a
+    boat's own rectangle isn't necessarily axis-aligned. margin inflates
+    both rectangles' half-extents by margin/2 each, so they're reported as
+    overlapping whenever they'd come closer than margin apart along any of
+    the four candidate axes (exact on the flat sides, slightly generous at
+    the corners — the same approximation the old axis-aligned margin used)."""
+    a_half_l, a_half_w = a_half_l + margin / 2, a_half_w + margin / 2
+    b_half_l, b_half_w = b_half_l + margin / 2, b_half_w + margin / 2
+    a_rad, b_rad = math.radians(a_angle), math.radians(b_angle)
+    a_axes = ((math.cos(a_rad), math.sin(a_rad)), (-math.sin(a_rad), math.cos(a_rad)))
+    b_axes = ((math.cos(b_rad), math.sin(b_rad)), (-math.sin(b_rad), math.cos(b_rad)))
+    dx, dy = bx - ax, by - ay
     eps = 0.001
-    return (
-        ax < bx + bw + margin - eps and ax + aw + margin > bx + eps
-        and ay < by + bh + margin - eps and ay + ah + margin > by + eps
-    )
+    for ux, uy in a_axes + b_axes:
+        gap = abs(dx * ux + dy * uy)
+        reach = (
+            a_half_l * abs(a_axes[0][0] * ux + a_axes[0][1] * uy)
+            + a_half_w * abs(a_axes[1][0] * ux + a_axes[1][1] * uy)
+            + b_half_l * abs(b_axes[0][0] * ux + b_axes[0][1] * uy)
+            + b_half_w * abs(b_axes[1][0] * ux + b_axes[1][1] * uy)
+        )
+        if gap > reach + eps:
+            return False
+    return True
 
 
 def _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, rotation_deg, exclude_boat_id=None):
     """Shared by the manual position form, drag, and rotate routes — a
     boat may not stick out of the room, overlap any fixed zone/element, or
-    come within SHOP_MAP_BOAT_GAP_M of another boat already on the map."""
+    come within SHOP_MAP_BOAT_GAP_M of another boat already on the map, at
+    any rotation angle."""
     footprint_w, footprint_h = _shop_map_boat_footprint(length_m, width_m, rotation_deg)
     if room is not None:
+        if x_m < -0.001 or y_m < -0.001:
+            return "Лодка на этой позиции выходит за пределы цеха."
         if x_m + footprint_w > room["length_m"] + 0.001:
             return "Лодка на этой позиции выходит за пределы цеха по длине."
         if y_m + footprint_h > room["width_m"] + 0.001:
             return "Лодка на этой позиции выходит за пределы цеха по ширине."
+    cx, cy = x_m + footprint_w / 2, y_m + footprint_h / 2
+    half_l, half_w = length_m / 2, width_m / 2
     for el in db.execute(
         "SELECT name, x_m, y_m, width_m, height_m FROM shop_map_elements"
     ).fetchall():
-        if _shop_map_rects_overlap(
-            x_m, y_m, footprint_w, footprint_h, el["x_m"], el["y_m"], el["width_m"], el["height_m"]
+        el_cx, el_cy = el["x_m"] + el["width_m"] / 2, el["y_m"] + el["height_m"] / 2
+        if _shop_map_obb_overlap(
+            cx, cy, half_l, half_w, rotation_deg,
+            el_cx, el_cy, el["width_m"] / 2, el["height_m"] / 2, 0,
         ):
             return f"Лодка пересекается с зоной «{el['name']}»."
     for boat in _shop_map_boats(db):
@@ -7913,8 +7944,11 @@ def _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, rotati
         if not boat["length_m"] or not boat["width_m"]:
             continue
         other_w, other_h = _shop_map_boat_footprint(boat["length_m"], boat["width_m"], boat["rotation_deg"])
-        if _shop_map_rects_overlap(
-            x_m, y_m, footprint_w, footprint_h, boat["x_m"], boat["y_m"], other_w, other_h,
+        other_cx = boat["x_m"] + other_w / 2
+        other_cy = boat["y_m"] + other_h / 2
+        if _shop_map_obb_overlap(
+            cx, cy, half_l, half_w, rotation_deg,
+            other_cx, other_cy, boat["length_m"] / 2, boat["width_m"] / 2, boat["rotation_deg"],
             margin=SHOP_MAP_BOAT_GAP_M,
         ):
             return (
@@ -8012,22 +8046,29 @@ def tuning_shop_map():
             boat["y_px"] = SHOP_MAP_PADDING + boat["y_m"] * SHOP_MAP_SCALE
             # box_w_px/box_h_px are the hull's own intrinsic length/width in
             # px — always the same regardless of rotation, since rotation is
-            # applied as an SVG rotate() around the translate point, not by
-            # swapping which dimension scales which local axis.
+            # applied as an SVG rotate() around the hull's own center, not
+            # by swapping which dimension scales which local axis.
             boat["box_w_px"] = boat["length_m"] * SHOP_MAP_SCALE
             boat["box_h_px"] = boat["width_m"] * SHOP_MAP_SCALE
-            if boat["rotation_deg"] == 90:
-                boat["tx_px"] = boat["x_px"] + boat["box_h_px"] / 2
-                boat["ty_px"] = boat["y_px"]
-                boat["footprint_w_px"] = boat["box_h_px"]
-                boat["footprint_h_px"] = boat["box_w_px"]
-            else:
-                boat["tx_px"] = boat["x_px"]
-                boat["ty_px"] = boat["y_px"] + boat["box_h_px"] / 2
-                boat["footprint_w_px"] = boat["box_w_px"]
-                boat["footprint_h_px"] = boat["box_h_px"]
-            boat["rotate_btn_x"] = boat["x_px"] + boat["footprint_w_px"] + 13
-            boat["rotate_btn_y"] = boat["y_px"] + 2
+            boat["footprint_w_px"], boat["footprint_h_px"] = _shop_map_boat_footprint(
+                boat["box_w_px"], boat["box_h_px"], boat["rotation_deg"]
+            )
+            # cx_px/cy_px is the hull's true geometric center — the pivot
+            # the template rotates the hull path around (see
+            # shop-map-boat-drag's transform), so it stays fixed as the
+            # boat spins to any angle instead of jumping between corners.
+            boat["cx_px"] = boat["x_px"] + boat["footprint_w_px"] / 2
+            boat["cy_px"] = boat["y_px"] + boat["footprint_h_px"] / 2
+            boat["pivot_shift_px"] = -boat["box_w_px"] / 2
+            rotation_rad = math.radians(boat["rotation_deg"])
+            half_len_px = boat["box_w_px"] / 2
+            # The rotate handle sits just beyond the bow, along the current
+            # heading — dragging it around the boat's center sets any angle.
+            handle_dist_px = half_len_px + SHOP_MAP_ROTATE_HANDLE_GAP_PX
+            boat["rotate_handle_x"] = boat["cx_px"] + handle_dist_px * math.cos(rotation_rad)
+            boat["rotate_handle_y"] = boat["cy_px"] + handle_dist_px * math.sin(rotation_rad)
+            boat["bow_x_px"] = boat["cx_px"] + half_len_px * math.cos(rotation_rad)
+            boat["bow_y_px"] = boat["cy_px"] + half_len_px * math.sin(rotation_rad)
             # Rough estimate of how many characters of the 10px bold label
             # fit across the footprint — end-truncated with an ellipsis so
             # the model's start (the identifying part) survives; a
@@ -8348,6 +8389,10 @@ def drag_shop_map_boat(boat_id):
 @app.route("/tuning/shop-map/boats/<int:boat_id>/rotate", methods=["POST"])
 @admin_login_required
 def rotate_shop_map_boat(boat_id):
+    """Sets the boat to an arbitrary rotation_deg (0-359, from the drag
+    handle), keeping its center fixed — x_m/y_m store the bounding box's
+    top-left corner, which shifts as the box grows/shrinks with the angle
+    even though the boat itself doesn't move."""
     db = get_db()
     boat_row, length_m, width_m = _shop_map_boat_with_profile(db, boat_id)
     if boat_row is None:
@@ -8355,10 +8400,21 @@ def rotate_shop_map_boat(boat_id):
     if not length_m or not width_m:
         return jsonify({"error": "У лодки не указаны размеры в профиле."}), 400
 
-    new_rotation = 90 if boat_row["rotation_deg"] == 0 else 0
+    try:
+        new_rotation = round(float(request.form.get("rotation_deg", "").replace(",", "."))) % 360
+    except ValueError:
+        return jsonify({"error": "Некорректный угол."}), 400
+
+    old_w, old_h = _shop_map_boat_footprint(length_m, width_m, boat_row["rotation_deg"])
+    center_x = boat_row["x_m"] + old_w / 2
+    center_y = boat_row["y_m"] + old_h / 2
+    new_w, new_h = _shop_map_boat_footprint(length_m, width_m, new_rotation)
+    new_x_m = center_x - new_w / 2
+    new_y_m = center_y - new_h / 2
+
     room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
     error = _shop_map_boat_placement_error(
-        db, room, boat_row["x_m"], boat_row["y_m"], length_m, width_m, new_rotation,
+        db, room, new_x_m, new_y_m, length_m, width_m, new_rotation,
         exclude_boat_id=boat_id,
     )
     if error:
@@ -8366,11 +8422,11 @@ def rotate_shop_map_boat(boat_id):
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
-        "UPDATE shop_map_boats SET rotation_deg = ?, updated_at = ? WHERE id = ?",
-        (new_rotation, now, boat_id),
+        "UPDATE shop_map_boats SET x_m = ?, y_m = ?, rotation_deg = ?, updated_at = ? WHERE id = ?",
+        (new_x_m, new_y_m, new_rotation, now, boat_id),
     )
     db.commit()
-    return jsonify({"rotation_deg": new_rotation})
+    return jsonify({"rotation_deg": new_rotation, "x_m": new_x_m, "y_m": new_y_m})
 
 
 @app.route("/tuning/shop-map/boats/<int:boat_id>/remove", methods=["POST"])
