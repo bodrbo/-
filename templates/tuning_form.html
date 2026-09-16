@@ -142,6 +142,10 @@
   <div class="alert tuning-copy-notice" role="status">{{ tuning_copy_notice }}</div>
   {% endif %}
 
+  {% if budget_warning %}
+  <div class="alert" role="alert">{{ budget_warning }}</div>
+  {% endif %}
+
   {% if errors %}
     <div class="alert">
       <strong>Не удалось сохранить заказ:</strong>
@@ -408,6 +412,13 @@
               </button>
             </td>
           </tr>
+          {% if item.status != 'removed' %}
+          <tr class="labor-budget-row{{ ' row-removed' if item.status == 'removed' }}">
+            <td colspan="{{ 6 if edit_order.source == 'subcontract_request' else 5 }}">
+              {% include '_tuning_labor_budget.html' %}
+            </td>
+          </tr>
+          {% endif %}
           {% endfor %}
         </tbody>
       </table>

@@ -3853,6 +3853,56 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .board-task-card strong { display: block; margin-top: 6px; font-size: 13px; }
 .board-task-header .status-badge { margin: 0; }
 .board-assign-button { display: block; width: 100%; margin-top: 12px; }
+.board-task-rate-form {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+  font-size: 11px;
+}
+.board-task-rate-input {
+  width: 56px;
+  min-width: 0;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.board-task-rate-save {
+  min-height: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+/* Labor budget strip — cost_price read as the anticipated labor budget
+   for a work item, vs. the sum of rate x norm_hours across its tasks.
+   Shared by the order page (as a row under the work) and the board (as
+   part of the work block) via _tuning_labor_budget.html. */
+.labor-budget { margin-top: 10px; }
+.labor-budget-track {
+  height: 6px;
+  border-radius: 4px;
+  background: var(--hairline-soft);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.labor-budget-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--brass-strong);
+}
+.labor-budget.is-over .labor-budget-fill { background: var(--danger); }
+.labor-budget-numbers {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+}
+.labor-budget-numbers > span:first-child { color: var(--ink-soft); font-weight: 700; }
+.labor-budget-over { color: var(--danger); font-weight: 700; }
+.labor-budget-row td { padding-top: 0; background: var(--paper-alt); }
+.labor-budget-row:hover td { background: var(--paper-alt); }
 .status-badge.status-waiting_for_capture { background: rgba(46, 134, 193, 0.16); color: var(--brass-strong); }
 .status-badge.status-waiting_for_capture::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232e86c1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='M8 4.8V8l2.4 1.4'/%3E%3C/svg%3E");

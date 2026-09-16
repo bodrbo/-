@@ -69,6 +69,10 @@
 
   <a href="{{ url_for('edit_tuning_order', order_id=order.id) }}" class="term board-back-link">← К заказу №{{ order.id }}</a>
 
+  {% if budget_warning %}
+  <div class="alert" role="alert">{{ budget_warning }}</div>
+  {% endif %}
+
   <section class="panel board-order-summary">
     <div>
       <strong>{{ order.client_name }}</strong>
@@ -89,6 +93,7 @@
         <div class="board-work-price{{ ' work-price-pending' if item.price_pending }}">
           {{ (item.price|money ~ ' ₽') if not item.price_pending else 'Ждёт расчёта' }}
         </div>
+        {% include '_tuning_labor_budget.html' %}
       </div>
 
       {% if item.assignments %}
@@ -106,7 +111,23 @@
               {% endif %}
             </div>
             <strong>{{ a.employee_name }}</strong>
-            <div class="hint" style="margin:2px 0 0;">{{ a.rate|float|round(2) }} ₽ × {{ a.norm_hours|float|round(2) }} ч</div>
+            {% if a.entry_id %}
+            <div class="hint" style="margin:2px 0 0;">
+              {{ a.rate|float|round(2) }} ₽ × {{ a.norm_hours|float|round(2) }} ч = {{ (a.rate * a.norm_hours)|money }} ₽ · выплачено
+            </div>
+            {% else %}
+            <form action="{{ url_for('update_tuning_assignment_terms', assignment_id=a.id) }}"
+                  method="post" class="board-task-rate-form">
+              <input type="text" name="rate" inputmode="decimal" class="board-task-rate-input"
+                     value="{{ a.rate|float|round(2) }}" aria-label="Ставка, ₽">
+              <span aria-hidden="true">₽ ×</span>
+              <input type="text" name="norm_hours" inputmode="decimal" class="board-task-rate-input"
+                     value="{{ a.norm_hours|float|round(2) }}" aria-label="Нормочасы">
+              <span aria-hidden="true">ч</span>
+              <button type="submit" class="btn-secondary board-task-rate-save">Сохранить</button>
+            </form>
+            <div class="hint" style="margin:2px 0 0;">= {{ (a.rate * a.norm_hours)|money }} ₽</div>
+            {% endif %}
             {% if a.comment %}<p class="assignment-comment-preview">{{ a.comment }}</p>{% endif %}
           </div>
         </div>

@@ -384,6 +384,37 @@ def _tuning_order_motors(db, order_id):
     ]
 
 
+def _tuning_item_assigned_labor_total(db, item_id):
+    """Sum of rate x norm_hours across every non-rejected task on one work
+    item — what's currently committed against its labor budget."""
+    return db.execute(
+        "SELECT COALESCE(SUM(rate * norm_hours), 0) AS total "
+        "FROM tuning_item_assignments WHERE item_id = ? AND assignment_status != 'rejected'",
+        (item_id,),
+    ).fetchone()["total"]
+
+
+def _apply_tuning_item_labor_budget(item):
+    """Attach labor-budget bookkeeping to a work item dict that already
+    carries its assignments list. cost_price doubles as the anticipated
+    labor budget for the item; this never blocks assigning more tasks,
+    it only makes the running total and any overage visible."""
+    assigned_total = sum(
+        a["rate"] * a["norm_hours"] for a in item["assignments"]
+        if a["assignment_status"] != "rejected"
+    )
+    budget = item["cost_price"]
+    item["labor_assigned_total"] = assigned_total
+    item["labor_budget"] = budget
+    item["labor_remaining"] = budget - assigned_total
+    item["labor_over_budget"] = not item["price_pending"] and assigned_total > budget
+    item["labor_percent"] = (
+        0 if item["price_pending"] or budget <= 0
+        else min(100, (assigned_total / budget) * 100)
+    )
+    return item
+
+
 def _tuning_order_items_with_assignments(db, order_id):
     """Every work line on an order, each carrying the full list of tasks
     (tuning_item_assignments rows) handed out against it — shared by the
@@ -404,6 +435,7 @@ def _tuning_order_items_with_assignments(db, order_id):
         # assigning another is always allowed, the admin decides when
         # a work item has enough hands on it.
         item["can_assign"] = item["status"] != "removed"
+        _apply_tuning_item_labor_budget(item)
         items.append(item)
     return items
 
@@ -9019,6 +9051,7 @@ def edit_tuning_order(order_id):
             modulkassa_configured=_modulkassa_configured(),
             tuning_copy_notice=session.pop("tuning_copy_notice", None),
             subcontract_partner=subcontract_partner,
+            budget_warning=session.pop("tuning_budget_warning", None),
         )
 
     errors, data = _process_tuning_form(
@@ -9348,7 +9381,61 @@ def assign_tuning_item(order_id, item_id):
         db.commit()
         for assignment_id in created_ids:
             _notify_task_assignment(db, ASSIGNMENT_TUNING, assignment_id)
+        _flag_tuning_item_budget_overrun(
+            db, item["id"], item["work_name"], item["cost_price"], item["price_pending"]
+        )
     return redirect(url_for(return_endpoint, order_id=order_id))
+
+
+def _flag_tuning_item_budget_overrun(db, item_id, work_name, cost_price, price_pending):
+    """Sets a one-time flash warning (read by both the order page and the
+    board) when a work item's committed task rates now exceed its
+    cost_price — the anticipated labor budget. Never blocks the action,
+    just surfaces it."""
+    if price_pending:
+        return
+    total = _tuning_item_assigned_labor_total(db, item_id)
+    if total > cost_price:
+        session["tuning_budget_warning"] = (
+            f"Внимание: по работе «{work_name}» тарифы задач "
+            f"({total:g} ₽) превышают заложенную себестоимость "
+            f"({cost_price:g} ₽) на {total - cost_price:g} ₽."
+        )
+
+
+@app.route("/tuning/assignments/<int:assignment_id>/rate", methods=["POST"])
+@admin_login_required
+def update_tuning_assignment_terms(assignment_id):
+    db = get_db()
+    assignment = db.execute(
+        "SELECT tia.*, ti.order_id, ti.work_name, ti.cost_price, ti.price_pending "
+        "FROM tuning_item_assignments tia "
+        "JOIN tuning_order_items ti ON ti.id = tia.item_id "
+        "WHERE tia.id = ?",
+        (assignment_id,),
+    ).fetchone()
+    if assignment is None:
+        return redirect(url_for("tuning_index"))
+    # Once a payroll entry exists for this task, its rate/hours are a
+    # historical record of what was actually paid — editing them here
+    # wouldn't change the entry, so it would just make the two disagree.
+    if not assignment["entry_id"]:
+        try:
+            rate = float(request.form.get("rate", "").strip().replace(",", "."))
+            hours = float(request.form.get("norm_hours", "").strip().replace(",", "."))
+        except ValueError:
+            rate = hours = None
+        if rate is not None and rate > 0 and hours is not None and hours > 0:
+            db.execute(
+                "UPDATE tuning_item_assignments SET rate = ?, norm_hours = ? WHERE id = ?",
+                (rate, hours, assignment_id),
+            )
+            db.commit()
+            _flag_tuning_item_budget_overrun(
+                db, assignment["item_id"], assignment["work_name"],
+                assignment["cost_price"], assignment["price_pending"],
+            )
+    return redirect(url_for("tuning_order_board", order_id=assignment["order_id"]))
 
 
 @app.route("/tuning/<int:order_id>/board")
@@ -9366,6 +9453,7 @@ def tuning_order_board(order_id):
         assignable_employees=assignable_employees,
         active_page="tuning",
         sub_page="subcontracts" if order["source"] == SUBCONTRACT_REQUEST_SOURCE else "orders",
+        budget_warning=session.pop("tuning_budget_warning", None),
     )
 
 

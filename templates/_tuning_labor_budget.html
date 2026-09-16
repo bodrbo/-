@@ -1,0 +1,19 @@
+{% if item.price_pending %}
+<div class="labor-budget">
+  <span class="hint" style="margin:0;">Себестоимость ещё не рассчитана — бюджет на труд не отслеживается.</span>
+</div>
+{% else %}
+<div class="labor-budget{{ ' is-over' if item.labor_over_budget }}">
+  <div class="labor-budget-track">
+    <div class="labor-budget-fill" style="width:{{ item.labor_percent }}%;"></div>
+  </div>
+  <div class="labor-budget-numbers">
+    {% if item.labor_over_budget %}
+    <span class="labor-budget-over">Бюджет на труд превышен на {{ (item.labor_assigned_total - item.labor_budget)|money }} ₽</span>
+    {% else %}
+    <span>Остаток бюджета на труд: {{ item.labor_remaining|money }} ₽</span>
+    {% endif %}
+    <span class="hint" style="margin:0;">{{ item.labor_assigned_total|money }} из {{ item.labor_budget|money }} ₽ себестоимости</span>
+  </div>
+</div>
+{% endif %}

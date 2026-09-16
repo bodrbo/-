@@ -6,7 +6,11 @@ from werkzeug.datastructures import MultiDict
 from support import application_module
 
 
-class TuningTaskMultiAssignmentTests(unittest.TestCase):
+class _TuningTaskFixture:
+    """Shared order/item/employee fixture — not a TestCase itself, so
+    subclassing it for a second test class doesn't re-run these methods'
+    tests twice under unittest's discovery."""
+
     CLIENT_TOKEN = "multi-assign-test-client"
     EMPLOYEE_A = "Мастеров Первый"
     EMPLOYEE_B = "Мастеров Второй"
@@ -160,6 +164,8 @@ class TuningTaskMultiAssignmentTests(unittest.TestCase):
             f"/tuning/{self.order_id}/item/{self.item_id}/assign", data=data
         )
 
+
+class TuningTaskMultiAssignmentTests(_TuningTaskFixture, unittest.TestCase):
     def test_assigning_several_employees_at_once_creates_one_row_each(self):
         response = self.assign_many(
             [(self.EMPLOYEE_A, 1200, 3), (self.EMPLOYEE_B, 1200, 3)],
@@ -361,6 +367,120 @@ class TuningTaskMultiAssignmentTests(unittest.TestCase):
         self.assertIsNotNone(entry_b)
         self.assertEqual(entry_a["amount"], 2000)
         self.assertEqual(entry_b["amount"], 1500)
+
+
+class TuningLaborBudgetTests(_TuningTaskFixture, unittest.TestCase):
+    """cost_price on the fixture item is 500 — reused here as the labor
+    budget under test, so tasks totalling under/over that trip the
+    different branches of the budget strip and the overrun warning."""
+
+    def get_assignment_id(self, employee_name):
+        with application_module.app.app_context():
+            return application_module.get_db().execute(
+                "SELECT id FROM tuning_item_assignments WHERE item_id = ? "
+                "AND employee_name = ?",
+                (self.item_id, employee_name),
+            ).fetchone()["id"]
+
+    def test_board_shows_remaining_budget_when_within_budget(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)  # 200 of 500
+        self.login_admin()
+        page = self.client.get(f"/tuning/{self.order_id}/board")
+        html = page.get_data(as_text=True)
+        self.assertIn("Остаток бюджета на труд", html)
+        self.assertNotIn("превышен", html)
+
+    def test_order_page_also_shows_budget_strip(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        self.login_admin()
+        page = self.client.get(f"/tuning/edit/{self.order_id}")
+        self.assertIn("Остаток бюджета на труд".encode(), page.data)
+
+    def test_assigning_over_budget_flags_warning_and_board_shows_overrun(self):
+        response = self.assign(self.EMPLOYEE_A, 400, 2)  # 800 > 500 budget
+        self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as session:
+            self.assertIn("tuning_budget_warning", session)
+            self.assertIn("Полировка корпуса", session["tuning_budget_warning"])
+
+        page = self.client.get(f"/tuning/{self.order_id}/board")
+        html = page.get_data(as_text=True)
+        self.assertIn("Бюджет на труд превышен", html)
+        # the flash is one-shot
+        with self.client.session_transaction() as session:
+            self.assertNotIn("tuning_budget_warning", session)
+
+    def test_assigning_within_budget_sets_no_warning(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        with self.client.session_transaction() as session:
+            self.assertNotIn("tuning_budget_warning", session)
+
+    def test_update_assignment_terms_changes_rate_and_can_trigger_overrun(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)  # 200 of 500, within budget
+        assignment_id = self.get_assignment_id(self.EMPLOYEE_A)
+        self.login_admin()
+        response = self.client.post(
+            f"/tuning/assignments/{assignment_id}/rate",
+            data={"rate": "400", "norm_hours": "2"},  # 800 > 500
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT rate, norm_hours FROM tuning_item_assignments WHERE id = ?",
+                (assignment_id,),
+            ).fetchone()
+        self.assertEqual(row["rate"], 400)
+        self.assertEqual(row["norm_hours"], 2)
+        with self.client.session_transaction() as session:
+            self.assertIn("tuning_budget_warning", session)
+
+    def test_update_assignment_terms_is_blocked_once_paid(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        assignment_id = self.get_assignment_id(self.EMPLOYEE_A)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            entry = db.execute(
+                "INSERT INTO entries (employee, work_type, rate, quantity, amount, "
+                "work_date, created_at) VALUES (?, 'Полировка корпуса', 100, 2, 200, "
+                "'2026-09-01', '2026-09-01 12:00')",
+                (self.EMPLOYEE_A,),
+            )
+            db.execute(
+                "UPDATE tuning_item_assignments SET entry_id = ? WHERE id = ?",
+                (entry.lastrowid, assignment_id),
+            )
+            db.commit()
+
+        self.login_admin()
+        response = self.client.post(
+            f"/tuning/assignments/{assignment_id}/rate",
+            data={"rate": "999", "norm_hours": "9"},
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT rate, norm_hours FROM tuning_item_assignments WHERE id = ?",
+                (assignment_id,),
+            ).fetchone()
+        self.assertEqual(row["rate"], 100)
+        self.assertEqual(row["norm_hours"], 2)
+
+    def test_rejected_assignments_do_not_count_toward_budget(self):
+        self.assign(self.EMPLOYEE_A, 400, 2)  # would be over budget
+        assignment_id = self.get_assignment_id(self.EMPLOYEE_A)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "UPDATE tuning_item_assignments SET assignment_status = 'rejected' "
+                "WHERE id = ?",
+                (assignment_id,),
+            )
+            db.commit()
+        self.login_admin()
+        page = self.client.get(f"/tuning/{self.order_id}/board")
+        html = page.get_data(as_text=True)
+        self.assertNotIn("Бюджет на труд превышен", html)
+        self.assertIn("Остаток бюджета на труд", html)
 
 
 if __name__ == "__main__":
