@@ -145,12 +145,16 @@
         <h3>Поручить задачу</h3>
         <p class="hint" id="assign-modal-description"></p>
         <div class="field">
-          <label for="assign-employee">Сотрудник</label>
-          <select id="assign-employee" name="employee_name" required>
+          <span>Сотрудники</span>
+          <p class="hint" style="margin:0 0 2px;">Можно выбрать нескольких — задача уйдёт каждому на одинаковых условиях.</p>
+          <div class="assign-employee-checklist">
             {% for e in assignable_employees %}
-            <option value="{{ e }}">{{ e }}</option>
+            <label class="assign-employee-option">
+              <input type="checkbox" name="employee_name[]" value="{{ e }}">
+              <span>{{ e }}</span>
+            </label>
             {% endfor %}
-          </select>
+          </div>
         </div>
         <div class="field">
           <label for="assign-rate">Ставка, ₽</label>
@@ -175,17 +179,31 @@
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 <script>
 function openAssignModal(actionUrl, description) {
-  document.getElementById('assign-form').action = actionUrl;
+  var form = document.getElementById('assign-form');
+  form.action = actionUrl;
   document.getElementById('assign-modal-description').textContent = description;
   document.getElementById('assign-rate').value = '';
   document.getElementById('assign-hours').value = '';
   document.getElementById('assign-comment').value = '';
+  form.querySelectorAll('input[name="employee_name[]"]').forEach(function (cb) { cb.checked = false; });
   document.getElementById('assign-modal').classList.remove('hidden');
 }
 
 function closeAssignModal() {
   document.getElementById('assign-modal').classList.add('hidden');
 }
+
+(function () {
+  var form = document.getElementById('assign-form');
+  if (!form) return;
+  form.addEventListener('submit', function (event) {
+    var anyChecked = form.querySelector('input[name="employee_name[]"]:checked');
+    if (!anyChecked) {
+      event.preventDefault();
+      window.alert('Выберите хотя бы одного сотрудника.');
+    }
+  });
+})();
 
 document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') closeAssignModal();

@@ -9305,12 +9305,23 @@ def assign_tuning_item(order_id, item_id):
     if item is None:
         return redirect(url_for(return_endpoint, order_id=order_id))
 
-    employee_name = request.form.get("employee_name", "").strip()
+    # Accepts either the old single-select field name or the checklist's
+    # employee_name[] — one submission can hand the same task (same rate,
+    # hours and comment) to several people at once.
+    raw_names = request.form.getlist("employee_name[]") or request.form.getlist("employee_name")
     rate_raw = request.form.get("rate", "").strip().replace(",", ".")
     hours_raw = request.form.get("norm_hours", "").strip().replace(",", ".")
     comment = request.form.get("comment", "").strip()
 
     valid_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
+    seen = set()
+    employee_names = []
+    for raw_name in raw_names:
+        name = raw_name.strip()
+        if name in valid_employees and name not in seen:
+            seen.add(name)
+            employee_names.append(name)
+
     rate = hours = None
     try:
         rate = float(rate_raw)
@@ -9322,28 +9333,26 @@ def assign_tuning_item(order_id, item_id):
         pass
 
     if (
-        employee_name in valid_employees
+        employee_names
         and rate is not None
         and rate > 0
         and hours is not None
         and hours > 0
         and len(comment) <= TASK_ASSIGNMENT_COMMENT_MAX_LENGTH
     ):
-        cur = db.execute(
-            "INSERT INTO tuning_item_assignments "
-            "(item_id, employee_name, rate, norm_hours, comment, assignment_status, assigned_at) "
-            "VALUES (?, ?, ?, ?, ?, 'pending', ?)",
-            (
-                item_id,
-                employee_name,
-                rate,
-                hours,
-                comment,
-                dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
-            ),
-        )
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        created_ids = []
+        for employee_name in employee_names:
+            cur = db.execute(
+                "INSERT INTO tuning_item_assignments "
+                "(item_id, employee_name, rate, norm_hours, comment, assignment_status, assigned_at) "
+                "VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+                (item_id, employee_name, rate, hours, comment, now),
+            )
+            created_ids.append(cur.lastrowid)
         db.commit()
-        _notify_task_assignment(db, ASSIGNMENT_TUNING, cur.lastrowid)
+        for assignment_id in created_ids:
+            _notify_task_assignment(db, ASSIGNMENT_TUNING, assignment_id)
     return redirect(url_for(return_endpoint, order_id=order_id))
 
 

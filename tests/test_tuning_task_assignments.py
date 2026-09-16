@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 from support import application_module
 
@@ -151,6 +152,70 @@ class TuningTaskMultiAssignmentTests(unittest.TestCase):
                 "comment": f"Задача для {employee_name}",
             },
         )
+
+    def assign_many(self, employee_names, rate, hours, comment=""):
+        self.login_admin()
+        from werkzeug.datastructures import MultiDict
+        data = MultiDict()
+        for name in employee_names:
+            data.add("employee_name[]", name)
+        data["rate"] = str(rate)
+        data["norm_hours"] = str(hours)
+        data["comment"] = comment
+        return self.client.post(
+            f"/tuning/{self.order_id}/item/{self.item_id}/assign", data=data
+        )
+
+    def test_assigning_several_employees_at_once_creates_one_row_each(self):
+        response = self.assign_many(
+            [self.EMPLOYEE_A, self.EMPLOYEE_B], 1200, 3, "Общая формулировка задачи"
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            rows = application_module.get_db().execute(
+                "SELECT employee_name, rate, norm_hours, comment, assignment_status "
+                "FROM tuning_item_assignments WHERE item_id = ? ORDER BY id",
+                (self.item_id,),
+            ).fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["employee_name"], self.EMPLOYEE_A)
+        self.assertEqual(rows[1]["employee_name"], self.EMPLOYEE_B)
+        for row in rows:
+            self.assertEqual(row["rate"], 1200)
+            self.assertEqual(row["norm_hours"], 3)
+            self.assertEqual(row["comment"], "Общая формулировка задачи")
+            self.assertEqual(row["assignment_status"], "pending")
+
+    def test_assigning_several_employees_notifies_each_of_them(self):
+        with mock.patch.object(
+            application_module, "send_telegram_notification_to_employee"
+        ) as notify:
+            self.assign_many([self.EMPLOYEE_A, self.EMPLOYEE_B], 1200, 3)
+        self.assertEqual(notify.call_count, 2)
+        notified_names = {call.args[1] for call in notify.call_args_list}
+        self.assertEqual(notified_names, {self.EMPLOYEE_A, self.EMPLOYEE_B})
+
+    def test_duplicate_and_invalid_names_in_selection_are_ignored(self):
+        response = self.assign_many(
+            [self.EMPLOYEE_A, self.EMPLOYEE_A, "Кто-то Несуществующий"], 1200, 3
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            rows = application_module.get_db().execute(
+                "SELECT employee_name FROM tuning_item_assignments WHERE item_id = ?",
+                (self.item_id,),
+            ).fetchall()
+        self.assertEqual([r["employee_name"] for r in rows], [self.EMPLOYEE_A])
+
+    def test_empty_selection_creates_nothing(self):
+        response = self.assign_many([], 1200, 3)
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            count = application_module.get_db().execute(
+                "SELECT COUNT(*) AS c FROM tuning_item_assignments WHERE item_id = ?",
+                (self.item_id,),
+            ).fetchone()["c"]
+        self.assertEqual(count, 0)
 
     def test_second_assignment_is_allowed_while_first_is_still_active(self):
         first = self.assign(self.EMPLOYEE_A, 1000, 2)
