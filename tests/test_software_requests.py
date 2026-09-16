@@ -216,6 +216,78 @@ class SoftwareRequestTests(unittest.TestCase):
         self.assertEqual(called_admin_id, self.admin_id)
         self.assertIn("Выполнена", called_text)
 
+    def test_status_change_to_done_sends_photo_to_employee_author(self):
+        self.login_team()
+        description = f"{self.DESCRIPTION_PREFIX} Добавить экспорт в Excel"
+        created = self.client.post(
+            "/software-requests", json={"description": description}
+        ).get_json()
+
+        self.login_admin()
+        with mock.patch.object(
+            application_module, "send_telegram_photo_to_employee"
+        ) as notify_photo_employee, mock.patch.object(
+            application_module, "send_telegram_photo_to_admin"
+        ) as notify_photo_admin:
+            response = self.client.post(
+                f"/settings/software-requests/{created['request_id']}/status",
+                data={"status": "done"},
+            )
+        self.assertEqual(response.status_code, 302)
+        notify_photo_admin.assert_not_called()
+        notify_photo_employee.assert_called_once()
+        called_employee_name, called_path = (
+            notify_photo_employee.call_args[0][1], notify_photo_employee.call_args[0][2]
+        )
+        self.assertEqual(called_employee_name, self.EMPLOYEE_NAME)
+        self.assertTrue(called_path.endswith("software-request-done.jpg"))
+
+    def test_status_change_to_done_sends_photo_to_admin_author(self):
+        self.login_admin()
+        description = f"{self.DESCRIPTION_PREFIX} Добавить сортировку в таблице"
+        created = self.client.post(
+            "/software-requests", json={"description": description}
+        ).get_json()
+
+        with mock.patch.object(
+            application_module, "send_telegram_photo_to_employee"
+        ) as notify_photo_employee, mock.patch.object(
+            application_module, "send_telegram_photo_to_admin"
+        ) as notify_photo_admin:
+            response = self.client.post(
+                f"/settings/software-requests/{created['request_id']}/status",
+                data={"status": "done"},
+            )
+        self.assertEqual(response.status_code, 302)
+        notify_photo_employee.assert_not_called()
+        notify_photo_admin.assert_called_once()
+        called_admin_id, called_path = (
+            notify_photo_admin.call_args[0][1], notify_photo_admin.call_args[0][2]
+        )
+        self.assertEqual(called_admin_id, self.admin_id)
+        self.assertTrue(called_path.endswith("software-request-done.jpg"))
+
+    def test_status_change_to_other_statuses_does_not_send_photo(self):
+        self.login_team()
+        description = f"{self.DESCRIPTION_PREFIX} Исправить опечатку в заголовке"
+        created = self.client.post(
+            "/software-requests", json={"description": description}
+        ).get_json()
+
+        self.login_admin()
+        with mock.patch.object(
+            application_module, "send_telegram_photo_to_employee"
+        ) as notify_photo_employee, mock.patch.object(
+            application_module, "send_telegram_photo_to_admin"
+        ) as notify_photo_admin:
+            response = self.client.post(
+                f"/settings/software-requests/{created['request_id']}/status",
+                data={"status": "in_progress"},
+            )
+        self.assertEqual(response.status_code, 302)
+        notify_photo_employee.assert_not_called()
+        notify_photo_admin.assert_not_called()
+
     def test_settings_journal_is_admin_only(self):
         response = self.client.get("/settings/software-requests")
         self.assertEqual(response.status_code, 302)

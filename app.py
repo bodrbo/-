@@ -1041,6 +1041,16 @@ def send_telegram_notification_to_employee(db, employee_name, text):
     return send_telegram_notification(text, chat_id=chat_id)
 
 
+def send_telegram_photo_to_employee(db, employee_name, photo_path, caption=None):
+    """Same routing as send_telegram_notification_to_employee, for a photo."""
+    chat_id = telegram_chat_id_for_employee(db, employee_name)
+    if chat_id is None:
+        status = f"skipped: no telegram_chat_id linked for {employee_name!r}"
+        _log_telegram(f"Telegram photo {status}")
+        return status
+    return send_telegram_photo(photo_path, caption=caption, chat_id=chat_id)
+
+
 def _notify_task_assignment(db, assignment_type, assignment_id):
     """App adapter used by both assignment interfaces."""
     return notify_task_assigned(
@@ -1066,6 +1076,23 @@ def send_telegram_notification_to_admin(db, admin_id, text):
         return send_telegram_notification_to_employee(db, row["employee_name"], text)
     status = f"skipped: no telegram_chat_id linked for admin_id={admin_id!r}"
     _log_telegram(f"Telegram notification {status}")
+    return status
+
+
+def send_telegram_photo_to_admin(db, admin_id, photo_path, caption=None):
+    """Same routing as send_telegram_notification_to_admin, for a photo."""
+    row = db.execute(
+        "SELECT a.telegram_chat_id, a.employee_id, e.name AS employee_name "
+        "FROM admin_accounts a LEFT JOIN employees e ON e.id = a.employee_id "
+        "WHERE a.id = ?",
+        (admin_id,),
+    ).fetchone()
+    if row is not None and row["telegram_chat_id"]:
+        return send_telegram_photo(photo_path, caption=caption, chat_id=row["telegram_chat_id"])
+    if row is not None and row["employee_id"] is not None and row["employee_name"]:
+        return send_telegram_photo_to_employee(db, row["employee_name"], photo_path, caption=caption)
+    status = f"skipped: no telegram_chat_id linked for admin_id={admin_id!r}"
+    _log_telegram(f"Telegram photo {status}")
     return status
 
 
@@ -4969,6 +4996,8 @@ app.register_blueprint(
         active_admin_account=_active_admin_account,
         notify_employee=lambda *args, **kwargs: send_telegram_notification_to_employee(*args, **kwargs),
         notify_admin=lambda *args, **kwargs: send_telegram_notification_to_admin(*args, **kwargs),
+        notify_photo_employee=lambda *args, **kwargs: send_telegram_photo_to_employee(*args, **kwargs),
+        notify_photo_admin=lambda *args, **kwargs: send_telegram_photo_to_admin(*args, **kwargs),
     )
 )
 app.register_blueprint(

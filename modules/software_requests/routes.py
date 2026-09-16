@@ -2,11 +2,16 @@
 
 import datetime as dt
 import html
+import os
 
-from flask import Blueprint, jsonify, make_response, redirect, render_template, request, session, url_for
+from flask import Blueprint, current_app, jsonify, make_response, redirect, render_template, request, session, url_for
 
 from . import repository
 from .constants import DESCRIPTION_MAX_LENGTH, PAGE_PATH_MAX_LENGTH, REQUEST_STATUSES
+
+# Bundled alongside the "delivered" locker photo — same fire-and-forget
+# static-asset convention, see app.py's supply-request delivery notice.
+DONE_PHOTO_FILENAME = "software-request-done.jpg"
 
 
 def create_blueprint(
@@ -16,6 +21,8 @@ def create_blueprint(
     active_admin_account,
     notify_employee,
     notify_admin,
+    notify_photo_employee,
+    notify_photo_admin,
 ):
     blueprint = Blueprint("software_requests", __name__)
 
@@ -125,6 +132,16 @@ def create_blueprint(
                     notify_admin(db, item["author_admin_id"], text)
                 elif item["author_type"] == "employee":
                     notify_employee(db, item["author_name"], text)
+
+                if status == "done":
+                    photo_path = os.path.join(
+                        current_app.static_folder, "telegram", DONE_PHOTO_FILENAME
+                    )
+                    if os.path.exists(photo_path):
+                        if item["author_type"] == "admin" and item["author_admin_id"]:
+                            notify_photo_admin(db, item["author_admin_id"], photo_path)
+                        elif item["author_type"] == "employee":
+                            notify_photo_employee(db, item["author_name"], photo_path)
         return redirect(url_for("software_requests.index"))
 
     return blueprint
