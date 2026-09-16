@@ -16357,12 +16357,11 @@ def add_supply_locker_drop(locker_id):
     )
     if comment:
         text += f"\n\nКомментарий: {html.escape(comment)}"
-    send_telegram_notification_to_employee(db, employee_name, text)
-    chat_id = telegram_chat_id_for_employee(db, employee_name)
-    if chat_id is not None:
-        photo_path = os.path.join(app.static_folder, "telegram", "supply-delivered.jpg")
-        if os.path.exists(photo_path):
-            send_telegram_photo(photo_path, chat_id=chat_id)
+    photo_path = os.path.join(app.static_folder, "telegram", "supply-delivered.jpg")
+    if os.path.exists(photo_path):
+        send_telegram_photo_to_employee(db, employee_name, photo_path, caption=text)
+    else:
+        send_telegram_notification_to_employee(db, employee_name, text)
     return redirect(url_for("supply_locker", locker_id=locker_id))
 
 
@@ -17397,13 +17396,12 @@ def set_supply_request_status(request_id):
                 text += f" ({html.escape(delivery_locker['address'])})"
             if delivery_locker["access_code"]:
                 text += f"\nКод-пароль: {html.escape(delivery_locker['access_code'])}"
-        send_telegram_notification_to_employee(db, req["employee_name"], text)
-        if delivery_locker is not None:
-            chat_id = telegram_chat_id_for_employee(db, req["employee_name"])
-            if chat_id is not None:
-                photo_path = os.path.join(app.static_folder, "telegram", "supply-delivered.jpg")
-                if os.path.exists(photo_path):
-                    send_telegram_photo(photo_path, chat_id=chat_id)
+        photo_path = os.path.join(app.static_folder, "telegram", "supply-delivered.jpg")
+        send_as_photo = delivery_locker is not None and os.path.exists(photo_path)
+        if send_as_photo:
+            send_telegram_photo_to_employee(db, req["employee_name"], photo_path, caption=text)
+        else:
+            send_telegram_notification_to_employee(db, req["employee_name"], text)
     return redirect(url_for("supply_requests"))
 
 
