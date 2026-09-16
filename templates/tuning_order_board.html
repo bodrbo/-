@@ -144,25 +144,36 @@
         <input type="hidden" name="next" value="board">
         <h3>Поручить задачу</h3>
         <p class="hint" id="assign-modal-description"></p>
-        <div class="field">
-          <span>Сотрудники</span>
-          <p class="hint" style="margin:0 0 2px;">Можно выбрать нескольких — задача уйдёт каждому на одинаковых условиях.</p>
-          <div class="assign-employee-checklist">
-            {% for e in assignable_employees %}
-            <label class="assign-employee-option">
-              <input type="checkbox" name="employee_name[]" value="{{ e }}">
-              <span>{{ e }}</span>
-            </label>
-            {% endfor %}
+        <div class="field field-wide">
+          <span>Сотрудники и условия</span>
+          <p class="hint" style="margin:0 0 2px;">У каждого может быть своя ставка и нормочасы — например, опытный мастер и новичок на одной задаче.</p>
+          <div id="assign-rows">
+            <div class="assign-employee-row">
+              <select name="employee_name[]" class="assign-row-employee" required>
+                <option value="" selected disabled>Сотрудник…</option>
+                {% for e in assignable_employees %}
+                <option value="{{ e }}">{{ e }}</option>
+                {% endfor %}
+              </select>
+              <input type="text" name="rate[]" class="assign-row-rate" inputmode="decimal" placeholder="Ставка, ₽" required>
+              <input type="text" name="norm_hours[]" class="assign-row-hours" inputmode="decimal" placeholder="Нормочасы" required>
+              <button type="button" class="btn-delete" onclick="removeAssignEmployeeRow(this)" title="Убрать сотрудника">✕</button>
+            </div>
           </div>
-        </div>
-        <div class="field">
-          <label for="assign-rate">Ставка, ₽</label>
-          <input type="text" id="assign-rate" name="rate" inputmode="decimal" required>
-        </div>
-        <div class="field">
-          <label for="assign-hours">Нормочасы</label>
-          <input type="text" id="assign-hours" name="norm_hours" inputmode="decimal" required>
+          <template id="assign-row-template">
+            <div class="assign-employee-row">
+              <select name="employee_name[]" class="assign-row-employee" required>
+                <option value="" selected disabled>Сотрудник…</option>
+                {% for e in assignable_employees %}
+                <option value="{{ e }}">{{ e }}</option>
+                {% endfor %}
+              </select>
+              <input type="text" name="rate[]" class="assign-row-rate" inputmode="decimal" placeholder="Ставка, ₽" required>
+              <input type="text" name="norm_hours[]" class="assign-row-hours" inputmode="decimal" placeholder="Нормочасы" required>
+              <button type="button" class="btn-delete" onclick="removeAssignEmployeeRow(this)" title="Убрать сотрудника">✕</button>
+            </div>
+          </template>
+          <button type="button" class="btn-add" onclick="addAssignEmployeeRow()">Добавить сотрудника</button>
         </div>
         <div class="field">
           <label for="assign-comment">Комментарий к задаче</label>
@@ -182,10 +193,17 @@ function openAssignModal(actionUrl, description) {
   var form = document.getElementById('assign-form');
   form.action = actionUrl;
   document.getElementById('assign-modal-description').textContent = description;
-  document.getElementById('assign-rate').value = '';
-  document.getElementById('assign-hours').value = '';
+  var rows = document.querySelectorAll('#assign-rows .assign-employee-row');
+  rows.forEach(function (row, index) {
+    if (index === 0) {
+      row.querySelector('.assign-row-employee').value = '';
+      row.querySelector('.assign-row-rate').value = '';
+      row.querySelector('.assign-row-hours').value = '';
+    } else {
+      row.remove();
+    }
+  });
   document.getElementById('assign-comment').value = '';
-  form.querySelectorAll('input[name="employee_name[]"]').forEach(function (cb) { cb.checked = false; });
   document.getElementById('assign-modal').classList.remove('hidden');
 }
 
@@ -193,17 +211,17 @@ function closeAssignModal() {
   document.getElementById('assign-modal').classList.add('hidden');
 }
 
-(function () {
-  var form = document.getElementById('assign-form');
-  if (!form) return;
-  form.addEventListener('submit', function (event) {
-    var anyChecked = form.querySelector('input[name="employee_name[]"]:checked');
-    if (!anyChecked) {
-      event.preventDefault();
-      window.alert('Выберите хотя бы одного сотрудника.');
-    }
-  });
-})();
+function addAssignEmployeeRow() {
+  var container = document.getElementById('assign-rows');
+  var template = document.getElementById('assign-row-template');
+  container.appendChild(template.content.cloneNode(true));
+}
+
+function removeAssignEmployeeRow(btn) {
+  var rows = document.querySelectorAll('#assign-rows .assign-employee-row');
+  if (rows.length <= 1) return;
+  btn.closest('.assign-employee-row').remove();
+}
 
 document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') closeAssignModal();

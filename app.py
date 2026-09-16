@@ -9305,44 +9305,39 @@ def assign_tuning_item(order_id, item_id):
     if item is None:
         return redirect(url_for(return_endpoint, order_id=order_id))
 
-    # Accepts either the old single-select field name or the checklist's
-    # employee_name[] — one submission can hand the same task (same rate,
-    # hours and comment) to several people at once.
-    raw_names = request.form.getlist("employee_name[]") or request.form.getlist("employee_name")
-    rate_raw = request.form.get("rate", "").strip().replace(",", ".")
-    hours_raw = request.form.get("norm_hours", "").strip().replace(",", ".")
+    # One submission can hand the same task to several people at once, each
+    # added as their own row — so each gets their own rate and norm-hours
+    # (an experienced hand and a trainee on the same job rarely earn the
+    # same amount for it), while the comment describing the task is shared.
+    raw_names = request.form.getlist("employee_name[]")
+    raw_rates = request.form.getlist("rate[]")
+    raw_hours = request.form.getlist("norm_hours[]")
     comment = request.form.get("comment", "").strip()
 
     valid_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
     seen = set()
-    employee_names = []
-    for raw_name in raw_names:
-        name = raw_name.strip()
-        if name in valid_employees and name not in seen:
-            seen.add(name)
-            employee_names.append(name)
+    rows = []
+    for i in range(len(raw_names)):
+        name = raw_names[i].strip()
+        if not name or name not in valid_employees or name in seen:
+            continue
+        try:
+            rate = float(raw_rates[i].strip().replace(",", "."))
+        except (IndexError, ValueError):
+            continue
+        try:
+            hours = float(raw_hours[i].strip().replace(",", "."))
+        except (IndexError, ValueError):
+            continue
+        if rate <= 0 or hours <= 0:
+            continue
+        seen.add(name)
+        rows.append((name, rate, hours))
 
-    rate = hours = None
-    try:
-        rate = float(rate_raw)
-    except ValueError:
-        pass
-    try:
-        hours = float(hours_raw)
-    except ValueError:
-        pass
-
-    if (
-        employee_names
-        and rate is not None
-        and rate > 0
-        and hours is not None
-        and hours > 0
-        and len(comment) <= TASK_ASSIGNMENT_COMMENT_MAX_LENGTH
-    ):
+    if rows and len(comment) <= TASK_ASSIGNMENT_COMMENT_MAX_LENGTH:
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
         created_ids = []
-        for employee_name in employee_names:
+        for employee_name, rate, hours in rows:
             cur = db.execute(
                 "INSERT INTO tuning_item_assignments "
                 "(item_id, employee_name, rate, norm_hours, comment, assignment_status, assigned_at) "

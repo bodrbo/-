@@ -460,12 +460,12 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         ) as notification:
             response = self.client.post(
                 f"/tuning/{order_id}/item/{item_id}/assign",
-                data={
-                    "employee_name": "Дмитрий Тарусов",
-                    "rate": "2000",
-                    "norm_hours": "1.5",
-                    "comment": "Согласовать место установки с клиентом",
-                },
+                data=MultiDict([
+                    ("employee_name[]", "Дмитрий Тарусов"),
+                    ("rate[]", "2000"),
+                    ("norm_hours[]", "1.5"),
+                    ("comment", "Согласовать место установки с клиентом"),
+                ]),
             )
 
         self.assertEqual(response.status_code, 302)

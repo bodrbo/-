@@ -7146,30 +7146,17 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 }
 .assign-modal-card h3 { margin: 0; font-size: 17px; color: var(--ink); }
 .assign-modal-card .hint { margin: -6px 0 0; }
-.assign-employee-checklist {
-  display: grid;
-  gap: 7px;
-  max-height: 180px;
-  overflow-y: auto;
-  padding: 9px 11px;
-  border: 1px solid var(--hairline);
-  border-radius: 8px;
-  background: var(--paper-alt);
-}
-.assign-employee-option {
+.assign-employee-row {
   display: flex;
-  align-items: center;
   gap: 8px;
-  font-size: 13px;
-  cursor: pointer;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  align-items: center;
 }
-.assign-employee-option input {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--brass);
-  cursor: pointer;
-}
+.assign-employee-row:last-of-type { margin-bottom: 0; }
+.assign-employee-row .assign-row-employee { flex: 2 1 150px; min-width: 0; }
+.assign-employee-row .assign-row-rate,
+.assign-employee-row .assign-row-hours { flex: 1 1 90px; min-width: 0; }
 
 .photo-modal-close {
   position: absolute;
