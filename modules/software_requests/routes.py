@@ -128,20 +128,21 @@ def create_blueprint(
                     f"<b>{html.escape(REQUEST_STATUSES[status])}</b>\n"
                     f"«{html.escape(snippet)}»"
                 )
-                if item["author_type"] == "admin" and item["author_admin_id"]:
-                    notify_admin(db, item["author_admin_id"], text)
-                elif item["author_type"] == "employee":
-                    notify_employee(db, item["author_name"], text)
+                photo_path = os.path.join(
+                    current_app.static_folder, "telegram", DONE_PHOTO_FILENAME
+                )
+                send_as_photo = status == "done" and os.path.exists(photo_path)
 
-                if status == "done":
-                    photo_path = os.path.join(
-                        current_app.static_folder, "telegram", DONE_PHOTO_FILENAME
-                    )
-                    if os.path.exists(photo_path):
-                        if item["author_type"] == "admin" and item["author_admin_id"]:
-                            notify_photo_admin(db, item["author_admin_id"], photo_path)
-                        elif item["author_type"] == "employee":
-                            notify_photo_employee(db, item["author_name"], photo_path)
+                if item["author_type"] == "admin" and item["author_admin_id"]:
+                    if send_as_photo:
+                        notify_photo_admin(db, item["author_admin_id"], photo_path, caption=text)
+                    else:
+                        notify_admin(db, item["author_admin_id"], text)
+                elif item["author_type"] == "employee":
+                    if send_as_photo:
+                        notify_photo_employee(db, item["author_name"], photo_path, caption=text)
+                    else:
+                        notify_employee(db, item["author_name"], text)
         return redirect(url_for("software_requests.index"))
 
     return blueprint

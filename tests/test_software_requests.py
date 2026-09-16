@@ -205,7 +205,7 @@ class SoftwareRequestTests(unittest.TestCase):
         ) as notify_admin:
             response = self.client.post(
                 f"/settings/software-requests/{created['request_id']}/status",
-                data={"status": "done"},
+                data={"status": "new"},
             )
         self.assertEqual(response.status_code, 302)
         notify_employee.assert_not_called()
@@ -214,9 +214,9 @@ class SoftwareRequestTests(unittest.TestCase):
             notify_admin.call_args[0][1], notify_admin.call_args[0][2]
         )
         self.assertEqual(called_admin_id, self.admin_id)
-        self.assertIn("Выполнена", called_text)
+        self.assertIn("Новая", called_text)
 
-    def test_status_change_to_done_sends_photo_to_employee_author(self):
+    def test_status_change_to_done_sends_photo_with_text_as_caption_to_employee(self):
         self.login_team()
         description = f"{self.DESCRIPTION_PREFIX} Добавить экспорт в Excel"
         created = self.client.post(
@@ -228,21 +228,30 @@ class SoftwareRequestTests(unittest.TestCase):
             application_module, "send_telegram_photo_to_employee"
         ) as notify_photo_employee, mock.patch.object(
             application_module, "send_telegram_photo_to_admin"
-        ) as notify_photo_admin:
+        ) as notify_photo_admin, mock.patch.object(
+            application_module, "send_telegram_notification_to_employee"
+        ) as notify_employee, mock.patch.object(
+            application_module, "send_telegram_notification_to_admin"
+        ) as notify_admin:
             response = self.client.post(
                 f"/settings/software-requests/{created['request_id']}/status",
                 data={"status": "done"},
             )
         self.assertEqual(response.status_code, 302)
         notify_photo_admin.assert_not_called()
+        notify_employee.assert_not_called()
+        notify_admin.assert_not_called()
         notify_photo_employee.assert_called_once()
         called_employee_name, called_path = (
             notify_photo_employee.call_args[0][1], notify_photo_employee.call_args[0][2]
         )
+        called_caption = notify_photo_employee.call_args.kwargs["caption"]
         self.assertEqual(called_employee_name, self.EMPLOYEE_NAME)
         self.assertTrue(called_path.endswith("software-request-done.jpg"))
+        self.assertIn("Выполнена", called_caption)
+        self.assertIn("Добавить экспорт в Excel", called_caption)
 
-    def test_status_change_to_done_sends_photo_to_admin_author(self):
+    def test_status_change_to_done_sends_photo_with_text_as_caption_to_admin(self):
         self.login_admin()
         description = f"{self.DESCRIPTION_PREFIX} Добавить сортировку в таблице"
         created = self.client.post(
@@ -253,19 +262,27 @@ class SoftwareRequestTests(unittest.TestCase):
             application_module, "send_telegram_photo_to_employee"
         ) as notify_photo_employee, mock.patch.object(
             application_module, "send_telegram_photo_to_admin"
-        ) as notify_photo_admin:
+        ) as notify_photo_admin, mock.patch.object(
+            application_module, "send_telegram_notification_to_employee"
+        ) as notify_employee, mock.patch.object(
+            application_module, "send_telegram_notification_to_admin"
+        ) as notify_admin:
             response = self.client.post(
                 f"/settings/software-requests/{created['request_id']}/status",
                 data={"status": "done"},
             )
         self.assertEqual(response.status_code, 302)
         notify_photo_employee.assert_not_called()
+        notify_employee.assert_not_called()
+        notify_admin.assert_not_called()
         notify_photo_admin.assert_called_once()
         called_admin_id, called_path = (
             notify_photo_admin.call_args[0][1], notify_photo_admin.call_args[0][2]
         )
+        called_caption = notify_photo_admin.call_args.kwargs["caption"]
         self.assertEqual(called_admin_id, self.admin_id)
         self.assertTrue(called_path.endswith("software-request-done.jpg"))
+        self.assertIn("Выполнена", called_caption)
 
     def test_status_change_to_other_statuses_does_not_send_photo(self):
         self.login_team()

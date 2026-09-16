@@ -1013,6 +1013,7 @@ def send_telegram_photo(photo_path, caption=None, chat_id=None):
             data = {"chat_id": chat_id}
             if caption:
                 data["caption"] = caption
+                data["parse_mode"] = "HTML"
             resp = requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
                 data=data, files={"photo": f}, timeout=20,
