@@ -164,12 +164,30 @@
 
   <div class="fleet-sub-grid">
 
-    <section class="panel">
-      <h2>Осмотры</h2>
+    <details class="panel collapsible-panel" id="fleet-checklists">
+      <summary>
+        <span>Осмотры</span>
+        {% if checklists %}<span class="badge">{{ checklists|length }}</span>{% endif %}
+        <span class="chev" aria-hidden="true"></span>
+      </summary>
+      <div class="collapsible-body">
       {% if checklists %}
-      <div class="fleet-checklist-list">
+      <div class="entry-form fleet-checklist-filter">
+        <div class="field field-narrow">
+          <label for="checklistFilterFrom">С даты</label>
+          <input type="date" id="checklistFilterFrom" oninput="filterFleetChecklists()">
+        </div>
+        <div class="field field-narrow">
+          <label for="checklistFilterTo">По дату</label>
+          <input type="date" id="checklistFilterTo" oninput="filterFleetChecklists()">
+        </div>
+        <div class="field field-submit">
+          <button type="button" class="btn-secondary" onclick="resetFleetChecklistFilter()">Сбросить</button>
+        </div>
+      </div>
+      <div class="fleet-checklist-list" id="fleetChecklistList">
         {% for c in checklists %}
-        <details class="fleet-checklist-item">
+        <details class="fleet-checklist-item" data-started="{{ c.started_at[:10] }}">
           <summary>
             <span class="fci-type">{{ checklist_type_labels.get(c.checklist_type, c.checklist_type) }}</span>
             <span class="fci-meta">{{ c.started_at[:10]|ru_date }} {{ c.started_at[11:16] }} · {{ c.employee_name }}</span>
@@ -225,6 +243,7 @@
         </details>
         {% endfor %}
       </div>
+      <p class="hint" id="fleetChecklistEmptyHint" hidden>За выбранный период осмотров нет.</p>
       {% else %}
       <div class="empty-state">
         <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
@@ -232,10 +251,16 @@
         <div class="s">Здесь появятся предрейсовые и послерейсовые осмотры, пройденные капитанами.</div>
       </div>
       {% endif %}
-    </section>
+      </div>
+    </details>
 
-    <section class="panel">
-      <h2>Документы</h2>
+    <details class="panel collapsible-panel" id="fleet-documents">
+      <summary>
+        <span>Документы</span>
+        {% if documents %}<span class="badge">{{ documents|length }}</span>{% endif %}
+        <span class="chev" aria-hidden="true"></span>
+      </summary>
+      <div class="collapsible-body">
       <form action="{{ url_for('fleet.upload_document', boat_index=boat_index) }}" method="post"
             enctype="multipart/form-data" class="fleet-document-form">
         <div class="field">
@@ -307,7 +332,8 @@
         <div class="s">Загрузите судовой билет, судовую роль или другие документы по судну.</div>
       </div>
       {% endif %}
-    </section>
+      </div>
+    </details>
 
   </div>
 
@@ -384,6 +410,29 @@
 </main>
 
 <script>
+// Plain string comparison on ISO "YYYY-MM-DD" dates sorts correctly, so no
+// Date parsing is needed for the range check.
+function filterFleetChecklists() {
+  var list = document.getElementById('fleetChecklistList');
+  if (!list) return;
+  var from = document.getElementById('checklistFilterFrom').value;
+  var to = document.getElementById('checklistFilterTo').value;
+  var visibleCount = 0;
+  list.querySelectorAll(':scope > .fleet-checklist-item').forEach(function (item) {
+    var started = item.dataset.started;
+    var visible = (!from || started >= from) && (!to || started <= to);
+    item.hidden = !visible;
+    if (visible) visibleCount += 1;
+  });
+  var emptyHint = document.getElementById('fleetChecklistEmptyHint');
+  if (emptyHint) emptyHint.hidden = visibleCount > 0;
+}
+function resetFleetChecklistFilter() {
+  document.getElementById('checklistFilterFrom').value = '';
+  document.getElementById('checklistFilterTo').value = '';
+  filterFleetChecklists();
+}
+
 // Images reuse the existing photo modal (openPhotoModal below); a PDF can't
 // go in an <img>, so it gets its own tiny iframe-based modal instead — no
 // modal for .doc/.docx, browsers can't render those inline at all, so those

@@ -3288,6 +3288,7 @@ body.modal-open { overflow: hidden; }
 @media (max-width: 860px) {
   .fleet-sub-grid { grid-template-columns: 1fr; }
 }
+.fleet-checklist-filter { margin-bottom: 16px; }
 .fleet-checklist-list { display: flex; flex-direction: column; gap: 12px; }
 .fleet-checklist-item > summary {
   display: flex;
