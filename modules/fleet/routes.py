@@ -51,8 +51,7 @@ def create_fleet_blueprint(
 
         db = get_db()
         profile = repository.get_boat_profile(db, boat)
-        defects = services.defects_for_boat(db, boat)
-        current_defects, archived_defects = services.split_defects(defects)
+        current_defects = services.current_defects_for_boat(db, boat)
 
         def _valid_iso_date(raw):
             raw = (raw or "").strip()
@@ -64,15 +63,26 @@ def create_fleet_blueprint(
                 return None
             return raw
 
+        def _valid_page(raw):
+            try:
+                return max(1, int(raw))
+            except (TypeError, ValueError):
+                return 1
+
         checklist_from = _valid_iso_date(request.args.get("checklist_from"))
         checklist_to = _valid_iso_date(request.args.get("checklist_to"))
-        try:
-            checklist_page = max(1, int(request.args.get("checklist_page", "1")))
-        except ValueError:
-            checklist_page = 1
+        checklist_page = _valid_page(request.args.get("checklist_page", "1"))
         checklists = services.fleet_boat_checklists(
             db, boat,
             date_from=checklist_from, date_to=checklist_to, page=checklist_page,
+        )
+
+        archive_from = _valid_iso_date(request.args.get("archive_from"))
+        archive_to = _valid_iso_date(request.args.get("archive_to"))
+        archive_page = _valid_page(request.args.get("archive_page", "1"))
+        archived_defects = services.archived_defects_for_boat(
+            db, boat,
+            date_from=archive_from, date_to=archive_to, page=archive_page,
         )
 
         return render_template(
@@ -86,7 +96,7 @@ def create_fleet_blueprint(
             checklists_total=checklists["total"],
             checklists_page=checklists["page"],
             checklists_total_pages=checklists["total_pages"],
-            checklist_pagination_items=services.checklist_pagination_items(
+            checklist_pagination_items=services.fleet_pagination_items(
                 checklists["page"], checklists["total_pages"]
             ),
             checklist_filter_from=checklist_from or "",
@@ -96,7 +106,18 @@ def create_fleet_blueprint(
             ),
             documents=repository.list_documents(db, boat),
             current_defects=current_defects,
-            archived_defects=archived_defects,
+            archived_defects=archived_defects["items"],
+            archived_defects_total=archived_defects["total"],
+            archived_defects_page=archived_defects["page"],
+            archived_defects_total_pages=archived_defects["total_pages"],
+            archive_pagination_items=services.fleet_pagination_items(
+                archived_defects["page"], archived_defects["total_pages"]
+            ),
+            archive_filter_from=archive_from or "",
+            archive_filter_to=archive_to or "",
+            archive_open=bool(
+                archive_from or archive_to or request.args.get("archive_page")
+            ),
             defect_statuses=DEFECT_STATUSES,
             open_defects_count=len(current_defects),
             assignable_employees=services.assignable_employees(db),

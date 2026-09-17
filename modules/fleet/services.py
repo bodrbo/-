@@ -16,7 +16,7 @@ from .constants import (
 
 
 DEFECT_DESCRIPTION_MAX_LENGTH = 1000
-CHECKLISTS_PER_PAGE = 20
+FLEET_ARCHIVE_PAGE_SIZE = 20
 
 
 def current_timestamp():
@@ -74,7 +74,7 @@ def get_checklist_answer_photos(db, answer_id):
     ]
 
 
-def fleet_boat_checklists(db, boat, date_from=None, date_to=None, page=1, per_page=CHECKLISTS_PER_PAGE):
+def fleet_boat_checklists(db, boat, date_from=None, date_to=None, page=1, per_page=FLEET_ARCHIVE_PAGE_SIZE):
     total = repository.count_checklists(db, boat, date_from, date_to)
     total_pages = max(1, -(-total // per_page))  # ceiling division, no math import needed
     page = max(1, min(page, total_pages))
@@ -112,7 +112,7 @@ def fleet_boat_checklists(db, boat, date_from=None, date_to=None, page=1, per_pa
     }
 
 
-def checklist_pagination_items(current_page, total_pages):
+def fleet_pagination_items(current_page, total_pages):
     """Page-number list for the pager, collapsing distant pages to a single
     ellipsis — same shape as app.py's _client_pagination_items, duplicated
     here rather than imported to avoid a circular import (app.py imports
@@ -136,23 +136,44 @@ def checklist_pagination_items(current_page, total_pages):
     return items
 
 
-def defects_for_boat(db, boat):
-    defects = []
-    for row in repository.list_defects(db, boat):
-        defect = dict(row)
-        assignment_row = repository.get_latest_assignment(db, defect["id"])
-        assignment = dict(assignment_row) if assignment_row else None
-        defect["assignment"] = assignment
-        defect["can_assign"] = (
-            assignment is None
-            or assignment["assignment_status"] == "rejected"
-            or (
-                assignment["assignment_status"] == "accepted"
-                and assignment["entry_id"] is not None
-            )
+def _enrich_defect_with_assignment(db, row):
+    defect = dict(row)
+    assignment_row = repository.get_latest_assignment(db, defect["id"])
+    assignment = dict(assignment_row) if assignment_row else None
+    defect["assignment"] = assignment
+    defect["can_assign"] = (
+        assignment is None
+        or assignment["assignment_status"] == "rejected"
+        or (
+            assignment["assignment_status"] == "accepted"
+            and assignment["entry_id"] is not None
         )
-        defects.append(defect)
-    return defects
+    )
+    return defect
+
+
+def current_defects_for_boat(db, boat):
+    return [
+        _enrich_defect_with_assignment(db, row)
+        for row in repository.list_current_defects(db, boat)
+    ]
+
+
+def archived_defects_for_boat(db, boat, date_from=None, date_to=None, page=1, per_page=FLEET_ARCHIVE_PAGE_SIZE):
+    total = repository.count_archived_defects(db, boat, date_from, date_to)
+    total_pages = max(1, -(-total // per_page))
+    page = max(1, min(page, total_pages))
+    items = [
+        _enrich_defect_with_assignment(db, row)
+        for row in repository.list_archived_defects(db, boat, date_from, date_to, page, per_page)
+    ]
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "total_pages": total_pages,
+        "per_page": per_page,
+    }
 
 
 def create_manual_defect(db, boat, description, reported_by):
@@ -184,16 +205,6 @@ def create_manual_defect(db, boat, description, reported_by):
         current_timestamp(),
     )
     return True, "Неисправность добавлена в текущий список.", defect_id
-
-
-def split_defects(defects):
-    current = [defect for defect in defects if defect["status"] != "resolved"]
-    archived = sorted(
-        (defect for defect in defects if defect["status"] == "resolved"),
-        key=lambda defect: (defect["updated_at"], defect["id"]),
-        reverse=True,
-    )
-    return current, archived
 
 
 def assignable_employees(db):

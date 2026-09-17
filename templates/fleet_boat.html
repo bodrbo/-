@@ -141,23 +141,73 @@
     </div>
   </details>
 
-  <details class="panel collapsible-panel defect-archive-panel">
+  <details class="panel collapsible-panel defect-archive-panel" id="fleet-defect-archive"{{ ' open' if archive_open }}>
     <summary>
       <span>Архив неисправностей</span>
-      {% if archived_defects %}<span class="badge badge-success">{{ archived_defects|length }}</span>{% endif %}
+      {% if archived_defects_total %}<span class="badge badge-success">{{ archived_defects_total }}</span>{% endif %}
       <span class="chev" aria-hidden="true"></span>
     </summary>
     <div class="collapsible-body">
-      {% if archived_defects %}
-      {% set defect_rows = archived_defects %}
-      {% set archive_mode = true %}
-      {% include '_fleet_defects_table.html' %}
-      {% else %}
+      {% if archived_defects_total == 0 and not archive_filter_from and not archive_filter_to %}
       <div class="empty-state">
         <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
         <div class="t">Архив пока пуст</div>
         <div class="s">Неисправности попадут сюда автоматически после получения статуса «Устранена».</div>
       </div>
+      {% else %}
+      <form method="get" action="{{ url_for('fleet.boat_detail', boat_index=boat_index) }}#fleet-defect-archive" class="entry-form fleet-date-filter">
+        <div class="field field-narrow">
+          <label for="archiveFilterFrom">С даты</label>
+          <input type="date" id="archiveFilterFrom" name="archive_from" value="{{ archive_filter_from }}">
+        </div>
+        <div class="field field-narrow">
+          <label for="archiveFilterTo">По дату</label>
+          <input type="date" id="archiveFilterTo" name="archive_to" value="{{ archive_filter_to }}">
+        </div>
+        <div class="field field-submit">
+          <button type="submit" class="btn-primary">Показать</button>
+        </div>
+        {% if archive_filter_from or archive_filter_to %}
+        <div class="field field-submit">
+          <a class="btn-secondary" href="{{ url_for('fleet.boat_detail', boat_index=boat_index) }}#fleet-defect-archive">Сбросить</a>
+        </div>
+        {% endif %}
+      </form>
+      {% if archived_defects %}
+      {% set defect_rows = archived_defects %}
+      {% set archive_mode = true %}
+      {% include '_fleet_defects_table.html' %}
+      <nav class="tuning-clients-pagination" aria-label="Страницы архива неисправностей">
+        <span class="tuning-clients-page-summary">
+          Неисправностей: {{ archived_defects_total }} · страница {{ archived_defects_page }} из {{ archived_defects_total_pages }}
+        </span>
+        {% if archived_defects_total_pages > 1 %}
+        <div class="tuning-clients-page-links">
+          {% if archived_defects_page > 1 %}
+          <a href="{{ url_for('fleet.boat_detail', boat_index=boat_index, archive_from=archive_filter_from or none, archive_to=archive_filter_to or none, archive_page=archived_defects_page - 1) }}#fleet-defect-archive">←</a>
+          {% else %}
+          <span class="disabled">←</span>
+          {% endif %}
+          {% for page_number in archive_pagination_items %}
+            {% if page_number is none %}
+            <span class="ellipsis">…</span>
+            {% elif page_number == archived_defects_page %}
+            <span class="current" aria-current="page">{{ page_number }}</span>
+            {% else %}
+            <a href="{{ url_for('fleet.boat_detail', boat_index=boat_index, archive_from=archive_filter_from or none, archive_to=archive_filter_to or none, archive_page=page_number) }}#fleet-defect-archive">{{ page_number }}</a>
+            {% endif %}
+          {% endfor %}
+          {% if archived_defects_page < archived_defects_total_pages %}
+          <a href="{{ url_for('fleet.boat_detail', boat_index=boat_index, archive_from=archive_filter_from or none, archive_to=archive_filter_to or none, archive_page=archived_defects_page + 1) }}#fleet-defect-archive">→</a>
+          {% else %}
+          <span class="disabled">→</span>
+          {% endif %}
+        </div>
+        {% endif %}
+      </nav>
+      {% else %}
+      <p class="hint">За выбранный период неисправностей нет.</p>
+      {% endif %}
       {% endif %}
     </div>
   </details>
@@ -178,7 +228,7 @@
         <div class="s">Здесь появятся предрейсовые и послерейсовые осмотры, пройденные капитанами.</div>
       </div>
       {% else %}
-      <form method="get" action="{{ url_for('fleet.boat_detail', boat_index=boat_index) }}#fleet-checklists" class="entry-form fleet-checklist-filter">
+      <form method="get" action="{{ url_for('fleet.boat_detail', boat_index=boat_index) }}#fleet-checklists" class="entry-form fleet-date-filter">
         <div class="field field-narrow">
           <label for="checklistFilterFrom">С даты</label>
           <input type="date" id="checklistFilterFrom" name="checklist_from" value="{{ checklist_filter_from }}">

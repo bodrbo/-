@@ -110,10 +110,46 @@ def delete_document(db, document_id):
     db.commit()
 
 
-def list_defects(db, boat):
+def list_current_defects(db, boat):
     return db.execute(
-        "SELECT * FROM boat_defects WHERE boat = ? ORDER BY reported_at DESC, id DESC",
+        "SELECT * FROM boat_defects WHERE boat = ? AND status != 'resolved' "
+        "ORDER BY reported_at DESC, id DESC",
         (boat,),
+    ).fetchall()
+
+
+def _archived_defect_date_filter(boat, date_from, date_to):
+    """Filters on reported_at ("Обнаружено", the only date column shown in
+    the archive table) — see _checklist_date_filter above for why a bare
+    "YYYY-MM-DD" bound compares correctly against it as text."""
+    query = " WHERE boat = ? AND status = 'resolved'"
+    params = [boat]
+    if date_from:
+        query += " AND reported_at >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND reported_at <= ?"
+        params.append(date_to + " 23:59")
+    return query, params
+
+
+def count_archived_defects(db, boat, date_from=None, date_to=None):
+    where, params = _archived_defect_date_filter(boat, date_from, date_to)
+    return db.execute(
+        f"SELECT COUNT(*) FROM boat_defects{where}", params
+    ).fetchone()[0]
+
+
+def list_archived_defects(db, boat, date_from=None, date_to=None, page=1, per_page=20):
+    where, params = _archived_defect_date_filter(boat, date_from, date_to)
+    params = params + [per_page, (page - 1) * per_page]
+    return db.execute(
+        f"SELECT * FROM boat_defects{where} "
+        # Sort stays on updated_at (most recently resolved first), unlike
+        # the reported_at filter above — archive order was never tied to
+        # discovery date, only the new date filter is.
+        "ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?",
+        params,
     ).fetchall()
 
 
