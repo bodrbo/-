@@ -21,3 +21,8 @@ CACHE_RETENTION_HOURS = 6
 COMPASS_POINTS = (
     "С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З", "СЗ",
 )
+
+# Bundled alongside the other Telegram photo assets — same fire-and-forget
+# static-asset convention, see app.py's supply-delivered / software-request
+# "done" photo notices.
+BAD_WEATHER_PHOTO_FILENAME = "weather-bad.jpg"

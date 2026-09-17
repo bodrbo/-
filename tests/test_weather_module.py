@@ -267,6 +267,46 @@ class SendWeatherAlertsTests(_WeatherFixture, unittest.TestCase):
         self.assertNotIn(self.GUIDE, notified_names)
         self.assertIn("Неблагоприятный прогноз", calls[0][1])
 
+    def test_sends_as_a_single_photo_with_caption_when_a_photo_sender_is_given(self):
+        trip_start = dt.datetime.now() + dt.timedelta(hours=2)
+        self._bad_weather_now(trip_start)
+        self._create_trip(
+            trip_start.strftime("%Y-%m-%d %H:%M"),
+            (trip_start + dt.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M"),
+            captain=True, guide=True,
+        )
+        text_calls = []
+        photo_calls = []
+        stats = services.send_weather_alerts(
+            self.db,
+            employee_sender=lambda db, name, text: text_calls.append(name) or "sent",
+            employee_photo_sender=lambda db, name, path, caption=None: (
+                photo_calls.append((name, path, caption)) or "sent"
+            ),
+            photo_path="static/telegram/weather-bad.jpg",
+        )
+        self.assertEqual(stats["alerts_sent"], 1)
+        self.assertEqual(text_calls, [])
+        self.assertEqual(len(photo_calls), 1)
+        name, path, caption = photo_calls[0]
+        self.assertEqual(name, self.CAPTAIN)
+        self.assertEqual(path, "static/telegram/weather-bad.jpg")
+        self.assertIn("Неблагоприятный прогноз", caption)
+
+    def test_falls_back_to_text_without_a_photo_sender(self):
+        trip_start = dt.datetime.now() + dt.timedelta(hours=2)
+        self._bad_weather_now(trip_start)
+        self._create_trip(
+            trip_start.strftime("%Y-%m-%d %H:%M"),
+            (trip_start + dt.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M"),
+        )
+        text_calls = []
+        stats = services.send_weather_alerts(
+            self.db, lambda db, name, text: text_calls.append(name) or "sent"
+        )
+        self.assertEqual(stats["alerts_sent"], 1)
+        self.assertEqual(text_calls, [self.CAPTAIN])
+
     def test_does_not_resend_once_delivered(self):
         trip_start = dt.datetime.now() + dt.timedelta(hours=2)
         self._bad_weather_now(trip_start)

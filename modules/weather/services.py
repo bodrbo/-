@@ -126,13 +126,21 @@ def _alert_text(trip, verdict):
     )
 
 
-def send_weather_alerts(db, employee_sender, now=None):
+def send_weather_alerts(
+    db, employee_sender, employee_photo_sender=None, photo_path=None, now=None
+):
     """Idempotent per trip: one delivery row per schedule_item_id blocks a
     re-run (or a later cron tick after the forecast worsens further) from
-    re-sending the same warning to the same captains."""
+    re-sending the same warning to the same captains.
+
+    Sent as a single photo-with-caption message (not text then a separate
+    photo) when both employee_photo_sender and an existing photo_path are
+    given — same one-message convention as the other Telegram photo
+    notices in this app; falls back to plain text otherwise."""
     now = now or dt.datetime.now()
     attempted_at = now.strftime("%Y-%m-%d %H:%M")
     trips = repository.list_upcoming_captain_trips(db, now, ALERT_LOOKAHEAD_HOURS)
+    send_as_photo = employee_photo_sender is not None and photo_path is not None
     sent = 0
     for trip in trips:
         if repository.alert_already_sent(db, trip["id"], EVENT_SCHEDULE_BAD_WEATHER):
@@ -141,10 +149,15 @@ def send_weather_alerts(db, employee_sender, now=None):
         if verdict is None or not verdict["is_bad"]:
             continue
         text = _alert_text(trip, verdict)
-        statuses = [
-            employee_sender(db, captain["employee_name"], text)
-            for captain in trip["captains"]
-        ]
+        statuses = []
+        for captain in trip["captains"]:
+            if send_as_photo:
+                status = employee_photo_sender(
+                    db, captain["employee_name"], photo_path, caption=text
+                )
+            else:
+                status = employee_sender(db, captain["employee_name"], text)
+            statuses.append(status)
         repository.record_alert(
             db, trip["id"], EVENT_SCHEDULE_BAD_WEATHER, attempted_at, statuses
         )

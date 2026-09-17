@@ -122,7 +122,7 @@ from modules.schedule import (
     init_schema as init_schedule_schema,
 )
 from modules.schedule import services as schedule_services
-from modules.weather import client as weather_client
+from modules.weather import constants as weather_constants
 from modules.weather import schema as weather_schema
 from modules.weather import services as weather_services
 from modules.excursion_services import (
@@ -897,8 +897,13 @@ def _sync_weather_forecast(db):
     hours_synced = weather_services.sync_forecast(
         OPENWEATHER_API_KEY, WEATHER_MARINA_LAT, WEATHER_MARINA_LON, db,
     )
+    photo_path = os.path.join(
+        app.static_folder, "telegram", weather_constants.BAD_WEATHER_PHOTO_FILENAME
+    )
     alert_stats = weather_services.send_weather_alerts(
-        db, send_telegram_notification_to_employee
+        db, send_telegram_notification_to_employee,
+        employee_photo_sender=send_telegram_photo_to_employee,
+        photo_path=photo_path if os.path.exists(photo_path) else None,
     )
     db.commit()
     return {"configured": True, "hours_synced": hours_synced, **alert_stats}
