@@ -55,11 +55,15 @@ def evaluate_trip_weather(db, starts_at, ends_at):
 
     departure = rows[0]
     worst_gust = 0.0
+    worst_gust_dir = None
     max_precip_mm = 0.0
     is_storm = False
     for row in rows:
         gust = row["wind_gust"] if row["wind_gust"] is not None else row["wind_speed"]
-        worst_gust = max(worst_gust, gust or 0.0)
+        gust = gust or 0.0
+        if gust > worst_gust:
+            worst_gust = gust
+            worst_gust_dir = row["wind_deg"]
         max_precip_mm = max(max_precip_mm, row["precip_mm"] or 0.0)
         weather_id = row["weather_id"]
         if weather_id is not None and THUNDERSTORM_ID_MIN <= weather_id < THUNDERSTORM_ID_MAX:
@@ -67,7 +71,11 @@ def evaluate_trip_weather(db, starts_at, ends_at):
 
     reasons = []
     if worst_gust > WIND_GUST_ALERT_MS:
-        reasons.append(f"ветер до {worst_gust:.0f} м/с")
+        direction = _compass(worst_gust_dir)
+        wind_reason = f"ветер до {worst_gust:.0f} м/с"
+        if direction:
+            wind_reason += f", направление {direction}"
+        reasons.append(wind_reason)
     if max_precip_mm > 0:
         reasons.append("осадки")
     if is_storm:
@@ -78,6 +86,7 @@ def evaluate_trip_weather(db, starts_at, ends_at):
         "reasons": reasons,
         "departure": departure,
         "worst_gust": worst_gust,
+        "worst_gust_dir": worst_gust_dir,
         "max_precip_mm": max_precip_mm,
     }
 

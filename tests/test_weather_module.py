@@ -167,13 +167,27 @@ class EvaluateTripWeatherTests(_WeatherFixture, unittest.TestCase):
         trip_start = dt.datetime.now() + dt.timedelta(hours=2)
         hour = trip_start.replace(minute=0, second=0, microsecond=0)
         repository.upsert_forecast_hours(
-            self.db, [_hour_record(hour, wind_speed=5.0, wind_gust=14.0)], "now"
+            self.db, [_hour_record(hour, wind_speed=5.0, wind_gust=14.0, wind_deg=180)], "now"
         )
         starts = trip_start.strftime("%Y-%m-%d %H:%M")
         ends = (trip_start + dt.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
         verdict = services.evaluate_trip_weather(self.db, starts, ends)
         self.assertTrue(verdict["is_bad"])
         self.assertIn("ветер", verdict["reasons"][0])
+        self.assertIn("направление Ю", verdict["reasons"][0])
+        self.assertEqual(verdict["worst_gust_dir"], 180)
+
+    def test_wind_reason_omits_direction_when_deg_is_missing(self):
+        trip_start = dt.datetime.now() + dt.timedelta(hours=2)
+        hour = trip_start.replace(minute=0, second=0, microsecond=0)
+        record = _hour_record(hour, wind_speed=5.0, wind_gust=14.0)
+        record["wind_deg"] = None
+        repository.upsert_forecast_hours(self.db, [record], "now")
+        starts = trip_start.strftime("%Y-%m-%d %H:%M")
+        ends = (trip_start + dt.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        verdict = services.evaluate_trip_weather(self.db, starts, ends)
+        self.assertTrue(verdict["is_bad"])
+        self.assertNotIn("направление", verdict["reasons"][0])
 
     def test_flags_any_measurable_precipitation(self):
         trip_start = dt.datetime.now() + dt.timedelta(hours=2)
