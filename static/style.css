@@ -5157,23 +5157,31 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 5px 14px;
-  margin-top: 10px;
-  font-size: 14px;
+  gap: 6px 18px;
+  margin-top: 12px;
+}
+/* Qualified with the .schedule-modal-header ancestor (not just the bare
+   class) so these beat ".schedule-modal-header span" above — that rule
+   targets every span in the header, including these, and would otherwise
+   win on specificity and force its 9px uppercase mono styling in here. */
+.schedule-modal-header .schedule-modal-weather-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-family: 'Open Sans', -apple-system, sans-serif;
+  text-transform: none;
+  font-size: 19px;
   font-weight: 700;
   color: #cfe8f5;
 }
-.schedule-modal-weather-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-}
-.schedule-modal-weather-item svg { flex: 0 0 16px; width: 16px; height: 16px; }
-.schedule-modal-weather.is-bad { color: #ff9d8a; }
-.schedule-modal-weather-warning {
+.schedule-modal-weather-item svg { flex: 0 0 22px; width: 22px; height: 22px; }
+.schedule-modal-weather.is-bad .schedule-modal-weather-item { color: #ff9d8a; }
+.schedule-modal-header .schedule-modal-weather-warning {
   flex-basis: 100%;
-  font-size: 12px;
+  font-family: 'Open Sans', -apple-system, sans-serif;
+  text-transform: none;
+  font-size: 14px;
   font-weight: 600;
   color: #ff9d8a;
 }
