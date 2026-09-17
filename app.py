@@ -1374,6 +1374,10 @@ TUNING_ACTIVE_TOTAL_STATUSES = frozenset((
     "in_progress",
 ))
 DEFAULT_ORDER_STATUS = "estimate"
+# The two statuses that mark an order as actually finished — completed_at is
+# stamped once on first arrival here and left untouched while the status
+# stays within this set (e.g. "done" -> "handed_over").
+TUNING_DONE_STATUSES = frozenset(("done", "handed_over"))
 
 CLIENT_STATUSES = [
     {"value": "satisfied", "label": "Довольный"},
@@ -3023,6 +3027,16 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_tuning_orders_order_date "
         "ON tuning_orders (order_date)"
     )
+    if "deadline_date" not in tuning_cols:
+        # Admin-set target completion date, shown under order_date to both
+        # admin and client. NULL means no deadline was set.
+        conn.execute("ALTER TABLE tuning_orders ADD COLUMN deadline_date TEXT")
+    if "completed_at" not in tuning_cols:
+        # Stamped once when status first reaches "done"/"handed_over" (see
+        # TUNING_DONE_STATUSES) and left alone while it stays within that
+        # set, so moving between the two doesn't reset it. Cleared if the
+        # order is reopened to an earlier status.
+        conn.execute("ALTER TABLE tuning_orders ADD COLUMN completed_at TEXT")
     boat_profile_cols = {
         row[1]
         for row in conn.execute("PRAGMA table_info(tuning_boat_profiles)").fetchall()
@@ -5153,6 +5167,13 @@ def _process_tuning_form(
             order_date = dt.date.fromisoformat(order_date_raw).isoformat()
         except ValueError:
             errors.append("Укажите корректную дату заказа.")
+    deadline_date_raw = form.get("deadline_date", "").strip()
+    deadline_date = None
+    if deadline_date_raw:
+        try:
+            deadline_date = dt.date.fromisoformat(deadline_date_raw).isoformat()
+        except ValueError:
+            errors.append("Укажите корректный срок исполнения.")
     sale_channel = form.get("sale_channel", "direct").strip()
     if sale_channel not in [c["value"] for c in SALE_CHANNELS]:
         sale_channel = "direct"
@@ -5292,7 +5313,7 @@ def _process_tuning_form(
         boat_model=boat_model, boat_registration_number=boat_registration_number,
         motor_model=motor_model, motor_serial_number=motor_serial_number,
         boat_motors=boat_motors, phone=phone,
-        order_date=order_date,
+        order_date=order_date, deadline_date=deadline_date,
         sale_channel=sale_channel, discount_type=discount_type, discount_value=discount_value,
         # discount_pct is kept only for older code/rows that still read it —
         # 0 when the discount is a fixed amount, since it isn't a percent.
@@ -5844,6 +5865,47 @@ def _plural_ru(n, forms):
     if 2 <= n % 10 <= 4:
         return forms[1]
     return forms[2]
+
+
+def _tuning_order_deadline_view(deadline_date, completed_at, status):
+    """Display fields for the deadline/actual-completion date shown under
+    order_date in the orders list, client cabinet and order edit page.
+
+    Once the order has a completed_at (stamped on first arrival at a
+    TUNING_DONE_STATUSES status), that date replaces the deadline in the
+    display. Returns ISO date strings, never pre-formatted, so templates
+    keep using the existing |ru_date filter.
+    """
+    display_date = None
+    is_actual = False
+    overdue_days = None
+    if completed_at:
+        display_date = completed_at[:10]
+        is_actual = True
+        if deadline_date:
+            completed_day = dt.date.fromisoformat(display_date)
+            deadline_day = dt.date.fromisoformat(deadline_date)
+            if completed_day > deadline_day:
+                overdue_days = (completed_day - deadline_day).days
+    elif deadline_date:
+        display_date = deadline_date
+        if status not in TUNING_DONE_STATUSES:
+            deadline_day = dt.date.fromisoformat(deadline_date)
+            today = dt.date.today()
+            if today > deadline_day:
+                overdue_days = (today - deadline_day).days
+    tooltip = None
+    if overdue_days:
+        tooltip = (
+            f"Заказ был просрочен на {overdue_days} "
+            f"{_plural_ru(overdue_days, ('день', 'дня', 'дней'))}"
+        )
+    return {
+        "deadline_display": display_date,
+        "deadline_is_actual": is_actual,
+        "deadline_is_overdue": overdue_days is not None,
+        "deadline_overdue_tooltip": tooltip,
+    }
 
 
 def _three_digits_ru(n, feminine=False):
@@ -6761,6 +6823,9 @@ def tuning_index():
         )
         order["boat_profile_id"] = boat_profile_id
         order["motor_profile_id"] = motor_profile_id
+        order.update(_tuning_order_deadline_view(
+            order["deadline_date"], order["completed_at"], order["status"]
+        ))
         orders.append(order)
     active_orders_total = sum(
         order["total"]
@@ -8679,14 +8744,15 @@ def add_tuning_order():
     cur = db.execute(
         "INSERT INTO tuning_orders (client_id, client_name, equipment_type, boat_model, "
         "boat_registration_number, motor_model, motor_serial_number, sale_channel, phone, "
-        "discount_pct, discount_type, discount_value, subtotal, total, status, order_date, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "discount_pct, discount_type, discount_value, subtotal, total, status, order_date, "
+        "deadline_date, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (client_id, data["client_name"], data["equipment_type"], data["boat_model"],
          data["boat_registration_number"], data["motor_model"],
          data["motor_serial_number"], data["sale_channel"], data["phone"],
          data["discount_pct"], data["discount_type"], data["discount_value"],
          data["subtotal"], data["total"], DEFAULT_ORDER_STATUS,
-         data["order_date"], now, now),
+         data["order_date"], data["deadline_date"], now, now),
     )
     order_id = cur.lastrowid
     _replace_tuning_order_motors(
@@ -9139,9 +9205,12 @@ def edit_tuning_order(order_id):
             "motor_model": order["motor_model"],
             "motor_serial_number": order["motor_serial_number"],
             "sale_channel": order["sale_channel"], "phone": order["phone"],
-            "order_date": order["order_date"],
+            "order_date": order["order_date"], "deadline_date": order["deadline_date"] or "",
             "discount_type": order["discount_type"], "discount_value": order["discount_value"],
         }
+        deadline_view = _tuning_order_deadline_view(
+            order["deadline_date"], order["completed_at"], order["status"]
+        )
         hull_sheets = db.execute(
             "SELECT * FROM hull_diagnostic_sheets WHERE tuning_order_id = ? ORDER BY id", (order_id,)
         ).fetchall()
@@ -9153,6 +9222,7 @@ def edit_tuning_order(order_id):
         reminder_recipients = _note_reminder_recipients(db)
         return render_template(
             "tuning_form.html", edit_order=order, errors=None, form_values=form_values,
+            deadline_view=deadline_view,
             items_prefill=items, boat_motors_prefill=boat_motors,
             sale_channels=SALE_CHANNELS, active_page="tuning", sub_page=tuning_sub_page,
             today=dt.date.today().isoformat(),
@@ -9196,6 +9266,9 @@ def edit_tuning_order(order_id):
         ).fetchall()
         return render_template(
             "tuning_form.html", edit_order=order, errors=errors, form_values=request.form,
+            deadline_view=_tuning_order_deadline_view(
+                order["deadline_date"], order["completed_at"], order["status"]
+            ),
             items_prefill=None, boat_motors_prefill=_boat_motor_form_values(request.form),
             sale_channels=SALE_CHANNELS, active_page="tuning", sub_page=tuning_sub_page,
             today=dt.date.today().isoformat(),
@@ -9222,12 +9295,13 @@ def edit_tuning_order(order_id):
     db.execute(
         "UPDATE tuning_orders SET client_id=?, client_name=?, equipment_type=?, boat_model=?, "
         "boat_registration_number=?, motor_model=?, motor_serial_number=?, sale_channel=?, phone=?, "
-        "discount_pct=?, discount_type=?, discount_value=?, subtotal=?, total=?, order_date=?, updated_at=? WHERE id=?",
+        "discount_pct=?, discount_type=?, discount_value=?, subtotal=?, total=?, order_date=?, "
+        "deadline_date=?, updated_at=? WHERE id=?",
         (client_id, data["client_name"], data["equipment_type"], data["boat_model"],
          data["boat_registration_number"], data["motor_model"],
          data["motor_serial_number"], data["sale_channel"], data["phone"],
          data["discount_pct"], data["discount_type"], data["discount_value"],
-         data["subtotal"], data["total"], data["order_date"], now, order_id),
+         data["subtotal"], data["total"], data["order_date"], data["deadline_date"], now, order_id),
     )
     _replace_tuning_order_motors(
         db, order_id, data["equipment_type"], data["boat_motors"], now
@@ -9374,6 +9448,27 @@ def bulk_edit_tuning_orders():
         return redirect(return_url)
 
     if action == "status":
+        # Same completed_at rules as the single-order status route, applied
+        # per chunk against each order's *current* status — so this must
+        # run before the blanket status overwrite below.
+        new_becomes_done = new_status in TUNING_DONE_STATUSES
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        done_placeholders = ",".join("?" for _ in TUNING_DONE_STATUSES)
+        for offset in range(0, len(order_ids), 500):
+            chunk = order_ids[offset:offset + 500]
+            chunk_placeholders = ",".join("?" for _ in chunk)
+            if new_becomes_done:
+                db.execute(
+                    f"UPDATE tuning_orders SET completed_at = ? "
+                    f"WHERE id IN ({chunk_placeholders}) AND status NOT IN ({done_placeholders})",
+                    [now, *chunk, *TUNING_DONE_STATUSES],
+                )
+            else:
+                db.execute(
+                    f"UPDATE tuning_orders SET completed_at = NULL "
+                    f"WHERE id IN ({chunk_placeholders}) AND status IN ({done_placeholders})",
+                    [*chunk, *TUNING_DONE_STATUSES],
+                )
         db.executemany(
             "UPDATE tuning_orders SET status = ? WHERE id = ?",
             [(new_status, order_id) for order_id in order_ids],
@@ -9422,7 +9517,27 @@ def set_tuning_order_status(order_id):
         return redirect(url_for("tuning_index"))
     status = request.form.get("status", "").strip()
     if status in [s["value"] for s in ORDER_STATUSES]:
-        db.execute("UPDATE tuning_orders SET status = ? WHERE id = ?", (status, order_id))
+        was_done = order["status"] in TUNING_DONE_STATUSES
+        becomes_done = status in TUNING_DONE_STATUSES
+        if becomes_done and not was_done:
+            # First arrival at "done"/"handed_over" — stamp the actual
+            # completion date once.
+            completed_at = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+            db.execute(
+                "UPDATE tuning_orders SET status = ?, completed_at = ? WHERE id = ?",
+                (status, completed_at, order_id),
+            )
+        elif was_done and not becomes_done:
+            # Reopened to an earlier status — the old completion date no
+            # longer describes reality.
+            db.execute(
+                "UPDATE tuning_orders SET status = ?, completed_at = NULL WHERE id = ?",
+                (status, order_id),
+            )
+        else:
+            # Moving between the two done statuses (or staying within the
+            # same not-done status) leaves completed_at untouched.
+            db.execute("UPDATE tuning_orders SET status = ? WHERE id = ?", (status, order_id))
         db.commit()
         if status == "in_progress":
             _auto_place_boat_on_shop_map(db, order)
@@ -10000,7 +10115,7 @@ def _render_client_dashboard(
     order_columns = (
         "id, equipment_type, boat_model, boat_registration_number, motor_model, "
         "motor_serial_number, discount_type, discount_value, total, status, "
-        "order_date, created_at, source"
+        "order_date, deadline_date, completed_at, created_at, source"
     )
     if is_admin_view:
         order_columns += ", sale_channel, updated_at, source_ref"
@@ -10067,6 +10182,9 @@ def _render_client_dashboard(
             if order.get("source") == SUBCONTRACT_REQUEST_SOURCE
             else "outgoing"
         )
+        order.update(_tuning_order_deadline_view(
+            order["deadline_date"], order["completed_at"], order["status"]
+        ))
         order["motors"] = _tuning_order_motors(db, o["id"])
         order["paid_amount"] = paid_amount
         order["remaining"] = remaining

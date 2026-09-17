@@ -198,6 +198,15 @@
       <span class="k">Дата заказа</span>
       <span class="v">{{ edit_order.order_date|ru_date }}</span>
     </div>
+    {% if deadline_view and deadline_view.deadline_display %}
+    <div class="order-summary-item">
+      <span class="k">Срок исполнения</span>
+      <span class="v{{ ' tuning-deadline-overdue' if deadline_view.deadline_is_overdue }}"
+            {% if deadline_view.deadline_overdue_tooltip %}title="{{ deadline_view.deadline_overdue_tooltip }}"{% endif %}>
+        {{ deadline_view.deadline_display|ru_date }}
+      </span>
+    </div>
+    {% endif %}
     <div class="order-summary-item">
       <span class="k">Клиент</span>
       <span class="v">
@@ -916,6 +925,12 @@
           <input type="date" id="order_date" name="order_date"
                  value="{{ form_values.order_date if form_values and form_values.order_date else today }}" required>
           <span class="field-context">Дата принятия заказа, а не добавления в систему</span>
+        </div>
+        <div class="field field-narrow">
+          <label for="deadline_date">Срок исполнения</label>
+          <input type="date" id="deadline_date" name="deadline_date"
+                 value="{{ form_values.deadline_date if form_values and form_values.deadline_date else '' }}">
+          <span class="field-context">Необязательно. Видно клиенту</span>
         </div>
         <div class="field">
           <label for="sale_channel">Канал продажи</label>

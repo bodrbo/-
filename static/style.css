@@ -7684,6 +7684,12 @@ button.btn-reject:hover { background: #932f20; }
   font-size: 12.5px;
   color: var(--muted);
 }
+.tuning-deadline-overdue { color: var(--danger); cursor: help; }
+.tuning-order-deadline {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+}
 
 /* --- hero dashboard: grand total + per-boat investor split --- */
 .hero-grid {

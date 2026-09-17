@@ -287,6 +287,12 @@
         <summary>
           <span class="oc-num">№{{ o.id }}</span>
           <span class="oc-date">{{ o.order_date|ru_date }}</span>
+          {% if o.deadline_display %}
+          <span class="oc-date{{ ' tuning-deadline-overdue' if o.deadline_is_overdue }}"
+                {% if o.deadline_overdue_tooltip %}title="{{ o.deadline_overdue_tooltip }}"{% endif %}>
+            Срок: {{ o.deadline_display|ru_date }}
+          </span>
+          {% endif %}
           <span class="oc-boat">{{ o|tuning_equipment_label }}</span>
           <span class="status-badge status-{{ o.status }}">{{ o.status|order_status_label }}</span>
           {% if incoming_subcontract %}

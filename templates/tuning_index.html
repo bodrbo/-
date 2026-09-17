@@ -213,7 +213,15 @@
                      aria-label="Выбрать заказ №{{ o.id }}">
             </td>
             <td><a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="term">№{{ o.id }}</a></td>
-            <td class="muted">{{ o.order_date|ru_date }}</td>
+            <td class="muted">
+              {{ o.order_date|ru_date }}
+              {% if o.deadline_display %}
+              <span class="tuning-order-deadline{{ ' tuning-deadline-overdue' if o.deadline_is_overdue }}"
+                    {% if o.deadline_overdue_tooltip %}title="{{ o.deadline_overdue_tooltip }}"{% endif %}>
+                {{ o.deadline_display|ru_date }}
+              </span>
+              {% endif %}
+            </td>
             <td>
               {% if o.client_id %}
               <a href="{{ url_for('admin_client_dashboard', client_id=o.client_id) }}">{{ o.client_name }}</a>
