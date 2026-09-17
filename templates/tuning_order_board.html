@@ -102,13 +102,14 @@
         <div class="board-task-branch">
           <div class="board-task-card">
             <div class="board-task-header">
-              {% if a.assignment_status == 'pending' %}
-              <span class="status-badge status-supplyreq-new">Ожидает ответа</span>
-              {% elif a.assignment_status == 'accepted' %}
-              <span class="status-badge status-supplyreq-delivered">Исполняет</span>
-              {% else %}
-              <span class="status-badge status-client-dissatisfied">Отклонено</span>
-              {% endif %}
+              <form action="{{ url_for('set_tuning_assignment_status', assignment_id=a.id) }}"
+                    method="post" class="status-select-form">
+                <select name="status" onchange="this.form.submit()">
+                  {% for s in assignment_statuses %}
+                  <option value="{{ s.value }}" {{ 'selected' if a.assignment_status == s.value }}>{{ s.label }}</option>
+                  {% endfor %}
+                </select>
+              </form>
             </div>
             <strong>{{ a.employee_name }}</strong>
             {% if a.entry_id %}

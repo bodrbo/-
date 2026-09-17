@@ -9546,6 +9546,42 @@ def set_tuning_order_status(order_id):
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
+def _pay_tuning_item_assignments(db, item_id):
+    """Pays out rate x norm-hours for every accepted-but-unpaid assignment on
+    a work item, the moment the item reaches "done" — shared by the admin's
+    own status change (Статусы работ / доска задач) and the tuningman's own
+    (team_tuning_task_set_status), so payroll never depends on which side
+    marks the work finished. Guarded per assignment by entry_id, so
+    re-saving "done" (or toggling back and forth) can't pay twice."""
+    item = db.execute(
+        "SELECT * FROM tuning_order_items WHERE id = ?", (item_id,)
+    ).fetchone()
+    if item is None:
+        return
+    assignments = db.execute(
+        "SELECT * FROM tuning_item_assignments "
+        "WHERE item_id = ? AND assignment_status = 'accepted' AND entry_id IS NULL",
+        (item_id,),
+    ).fetchall()
+    if not assignments:
+        return
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    today = dt.date.today().isoformat()
+    project_id = _project_id_for_tuning_order(db, item["order_id"])
+    for assignment in assignments:
+        amount = assignment["rate"] * assignment["norm_hours"]
+        cur = db.execute(
+            "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at, project_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (assignment["employee_name"], item["work_name"], assignment["rate"], assignment["norm_hours"],
+             amount, today, now, project_id),
+        )
+        db.execute(
+            "UPDATE tuning_item_assignments SET entry_id = ? WHERE id = ?",
+            (cur.lastrowid, assignment["id"]),
+        )
+
+
 @app.route("/tuning/<int:order_id>/item/<int:item_id>/status", methods=["POST"])
 @admin_login_required
 def set_tuning_item_status(order_id, item_id):
@@ -9556,6 +9592,8 @@ def set_tuning_item_status(order_id, item_id):
             "UPDATE tuning_order_items SET status = ? WHERE id = ? AND order_id = ?",
             (status, item_id, order_id),
         )
+        if status == "done":
+            _pay_tuning_item_assignments(db, item_id)
         db.commit()
         # Moving a work item to/from "Задача снята" changes whether its
         # price counts toward the order — keep subtotal/total in sync.
@@ -9677,6 +9715,36 @@ def update_tuning_assignment_terms(assignment_id):
     return redirect(url_for("tuning_order_board", order_id=assignment["order_id"]))
 
 
+@app.route("/tuning/assignments/<int:assignment_id>/status", methods=["POST"])
+@admin_login_required
+def set_tuning_assignment_status(assignment_id):
+    """Lets the admin accept/reject a task on a tuningman's behalf (or
+    reopen one), the same way the tuningman can from their own dashboard —
+    useful when the assignee can't respond themselves. Doesn't touch
+    entry_id: moving a paid assignment's status around never un-pays it,
+    since entries are a historical record, not a reactive one."""
+    db = get_db()
+    assignment = db.execute(
+        "SELECT tia.*, ti.order_id FROM tuning_item_assignments tia "
+        "JOIN tuning_order_items ti ON ti.id = tia.item_id "
+        "WHERE tia.id = ?",
+        (assignment_id,),
+    ).fetchone()
+    if assignment is None:
+        return redirect(url_for("tuning_index"))
+    status = request.form.get("status", "").strip()
+    if status in [s["value"] for s in ASSIGNMENT_STATUSES]:
+        db.execute(
+            "UPDATE tuning_item_assignments SET assignment_status = ?, responded_at = ? WHERE id = ?",
+            (status, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), assignment_id),
+        )
+        db.commit()
+    return redirect(
+        url_for("tuning_order_board", order_id=assignment["order_id"])
+        + f"#board-work-{assignment['item_id']}"
+    )
+
+
 @app.route("/tuning/<int:order_id>/board")
 @admin_login_required
 def tuning_order_board(order_id):
@@ -9689,6 +9757,7 @@ def tuning_order_board(order_id):
     return render_template(
         "tuning_order_board.html",
         order=order, items=items, work_statuses=WORK_STATUSES,
+        assignment_statuses=ASSIGNMENT_STATUSES,
         assignable_employees=assignable_employees,
         active_page="tuning",
         sub_page="subcontracts" if order["source"] == SUBCONTRACT_REQUEST_SOURCE else "orders",
@@ -14000,8 +14069,9 @@ def team_tuning_task_respond(assignment_id):
 def team_tuning_task_set_status(assignment_id):
     """Mirrors team_task_set_status for tuning-order work items: writes
     straight to tuning_order_items.status (the same field the admin's own
-    Статусы работ table edits) and pays out rate × norm-hours the first time
-    the item reaches "done", guarded by entry_id against double payment."""
+    Статусы работ table edits) and, via _pay_tuning_item_assignments, pays
+    out every accepted-but-unpaid assignee the first time the item reaches
+    "done" — the same payout the admin's own status change triggers."""
     db = get_db()
     employee_name = session.get("team_employee_name")
     assignment = db.execute(
@@ -14022,24 +14092,12 @@ def team_tuning_task_set_status(assignment_id):
     if item is None:
         return _team_dashboard_section_redirect("tasks")
 
-    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
         "UPDATE tuning_order_items SET status = ? WHERE id = ?",
         (status, assignment["item_id"]),
     )
-    if status == "done" and not assignment["entry_id"]:
-        amount = assignment["rate"] * assignment["norm_hours"]
-        project_id = _project_id_for_tuning_order(db, item["order_id"])
-        cur = db.execute(
-            "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at, project_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (employee_name, item["work_name"], assignment["rate"], assignment["norm_hours"],
-             amount, dt.date.today().isoformat(), now, project_id),
-        )
-        db.execute(
-            "UPDATE tuning_item_assignments SET entry_id = ? WHERE id = ?",
-            (cur.lastrowid, assignment_id),
-        )
+    if status == "done":
+        _pay_tuning_item_assignments(db, assignment["item_id"])
     db.commit()
     return _team_dashboard_section_redirect("tasks")
 
