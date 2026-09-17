@@ -164,30 +164,42 @@
 
   <div class="fleet-sub-grid">
 
-    <details class="panel collapsible-panel" id="fleet-checklists">
+    <details class="panel collapsible-panel" id="fleet-checklists"{{ ' open' if checklists_open }}>
       <summary>
         <span>Осмотры</span>
-        {% if checklists %}<span class="badge">{{ checklists|length }}</span>{% endif %}
+        {% if checklists_total %}<span class="badge">{{ checklists_total }}</span>{% endif %}
         <span class="chev" aria-hidden="true"></span>
       </summary>
       <div class="collapsible-body">
-      {% if checklists %}
-      <div class="entry-form fleet-checklist-filter">
+      {% if checklists_total == 0 and not checklist_filter_from and not checklist_filter_to %}
+      <div class="empty-state">
+        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        <div class="t">Осмотров пока нет</div>
+        <div class="s">Здесь появятся предрейсовые и послерейсовые осмотры, пройденные капитанами.</div>
+      </div>
+      {% else %}
+      <form method="get" action="{{ url_for('fleet.boat_detail', boat_index=boat_index) }}#fleet-checklists" class="entry-form fleet-checklist-filter">
         <div class="field field-narrow">
           <label for="checklistFilterFrom">С даты</label>
-          <input type="date" id="checklistFilterFrom" oninput="filterFleetChecklists()">
+          <input type="date" id="checklistFilterFrom" name="checklist_from" value="{{ checklist_filter_from }}">
         </div>
         <div class="field field-narrow">
           <label for="checklistFilterTo">По дату</label>
-          <input type="date" id="checklistFilterTo" oninput="filterFleetChecklists()">
+          <input type="date" id="checklistFilterTo" name="checklist_to" value="{{ checklist_filter_to }}">
         </div>
         <div class="field field-submit">
-          <button type="button" class="btn-secondary" onclick="resetFleetChecklistFilter()">Сбросить</button>
+          <button type="submit" class="btn-primary">Показать</button>
         </div>
-      </div>
-      <div class="fleet-checklist-list" id="fleetChecklistList">
+        {% if checklist_filter_from or checklist_filter_to %}
+        <div class="field field-submit">
+          <a class="btn-secondary" href="{{ url_for('fleet.boat_detail', boat_index=boat_index) }}#fleet-checklists">Сбросить</a>
+        </div>
+        {% endif %}
+      </form>
+      {% if checklists %}
+      <div class="fleet-checklist-list">
         {% for c in checklists %}
-        <details class="fleet-checklist-item" data-started="{{ c.started_at[:10] }}">
+        <details class="fleet-checklist-item">
           <summary>
             <span class="fci-type">{{ checklist_type_labels.get(c.checklist_type, c.checklist_type) }}</span>
             <span class="fci-meta">{{ c.started_at[:10]|ru_date }} {{ c.started_at[11:16] }} · {{ c.employee_name }}</span>
@@ -243,13 +255,37 @@
         </details>
         {% endfor %}
       </div>
-      <p class="hint" id="fleetChecklistEmptyHint" hidden>За выбранный период осмотров нет.</p>
+      <nav class="tuning-clients-pagination" aria-label="Страницы осмотров">
+        <span class="tuning-clients-page-summary">
+          Осмотров: {{ checklists_total }} · страница {{ checklists_page }} из {{ checklists_total_pages }}
+        </span>
+        {% if checklists_total_pages > 1 %}
+        <div class="tuning-clients-page-links">
+          {% if checklists_page > 1 %}
+          <a href="{{ url_for('fleet.boat_detail', boat_index=boat_index, checklist_from=checklist_filter_from or none, checklist_to=checklist_filter_to or none, checklist_page=checklists_page - 1) }}#fleet-checklists">←</a>
+          {% else %}
+          <span class="disabled">←</span>
+          {% endif %}
+          {% for page_number in checklist_pagination_items %}
+            {% if page_number is none %}
+            <span class="ellipsis">…</span>
+            {% elif page_number == checklists_page %}
+            <span class="current" aria-current="page">{{ page_number }}</span>
+            {% else %}
+            <a href="{{ url_for('fleet.boat_detail', boat_index=boat_index, checklist_from=checklist_filter_from or none, checklist_to=checklist_filter_to or none, checklist_page=page_number) }}#fleet-checklists">{{ page_number }}</a>
+            {% endif %}
+          {% endfor %}
+          {% if checklists_page < checklists_total_pages %}
+          <a href="{{ url_for('fleet.boat_detail', boat_index=boat_index, checklist_from=checklist_filter_from or none, checklist_to=checklist_filter_to or none, checklist_page=checklists_page + 1) }}#fleet-checklists">→</a>
+          {% else %}
+          <span class="disabled">→</span>
+          {% endif %}
+        </div>
+        {% endif %}
+      </nav>
       {% else %}
-      <div class="empty-state">
-        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
-        <div class="t">Осмотров пока нет</div>
-        <div class="s">Здесь появятся предрейсовые и послерейсовые осмотры, пройденные капитанами.</div>
-      </div>
+      <p class="hint">За выбранный период осмотров нет.</p>
+      {% endif %}
       {% endif %}
       </div>
     </details>
@@ -410,29 +446,6 @@
 </main>
 
 <script>
-// Plain string comparison on ISO "YYYY-MM-DD" dates sorts correctly, so no
-// Date parsing is needed for the range check.
-function filterFleetChecklists() {
-  var list = document.getElementById('fleetChecklistList');
-  if (!list) return;
-  var from = document.getElementById('checklistFilterFrom').value;
-  var to = document.getElementById('checklistFilterTo').value;
-  var visibleCount = 0;
-  list.querySelectorAll(':scope > .fleet-checklist-item').forEach(function (item) {
-    var started = item.dataset.started;
-    var visible = (!from || started >= from) && (!to || started <= to);
-    item.hidden = !visible;
-    if (visible) visibleCount += 1;
-  });
-  var emptyHint = document.getElementById('fleetChecklistEmptyHint');
-  if (emptyHint) emptyHint.hidden = visibleCount > 0;
-}
-function resetFleetChecklistFilter() {
-  document.getElementById('checklistFilterFrom').value = '';
-  document.getElementById('checklistFilterTo').value = '';
-  filterFleetChecklists();
-}
-
 // Images reuse the existing photo modal (openPhotoModal below); a PDF can't
 // go in an <img>, so it gets its own tiny iframe-based modal instead — no
 // modal for .doc/.docx, browsers can't render those inline at all, so those

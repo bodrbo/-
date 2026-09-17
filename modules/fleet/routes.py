@@ -1,5 +1,6 @@
 """HTTP routes for the fleet module."""
 
+import datetime as dt
 import os
 import secrets
 
@@ -52,6 +53,28 @@ def create_fleet_blueprint(
         profile = repository.get_boat_profile(db, boat)
         defects = services.defects_for_boat(db, boat)
         current_defects, archived_defects = services.split_defects(defects)
+
+        def _valid_iso_date(raw):
+            raw = (raw or "").strip()
+            if not raw:
+                return None
+            try:
+                dt.datetime.strptime(raw, "%Y-%m-%d")
+            except ValueError:
+                return None
+            return raw
+
+        checklist_from = _valid_iso_date(request.args.get("checklist_from"))
+        checklist_to = _valid_iso_date(request.args.get("checklist_to"))
+        try:
+            checklist_page = max(1, int(request.args.get("checklist_page", "1")))
+        except ValueError:
+            checklist_page = 1
+        checklists = services.fleet_boat_checklists(
+            db, boat,
+            date_from=checklist_from, date_to=checklist_to, page=checklist_page,
+        )
+
         return render_template(
             "fleet_boat.html",
             boat=boat,
@@ -59,7 +82,18 @@ def create_fleet_blueprint(
             boats=BOATS,
             boat_photo_url=services.boat_photo_url(profile),
             boat_photo_notice=session.pop("boat_photo_notice", None),
-            checklists=services.fleet_boat_checklists(db, boat),
+            checklists=checklists["items"],
+            checklists_total=checklists["total"],
+            checklists_page=checklists["page"],
+            checklists_total_pages=checklists["total_pages"],
+            checklist_pagination_items=services.checklist_pagination_items(
+                checklists["page"], checklists["total_pages"]
+            ),
+            checklist_filter_from=checklist_from or "",
+            checklist_filter_to=checklist_to or "",
+            checklists_open=bool(
+                checklist_from or checklist_to or request.args.get("checklist_page")
+            ),
             documents=repository.list_documents(db, boat),
             current_defects=current_defects,
             archived_defects=archived_defects,

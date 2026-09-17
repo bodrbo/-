@@ -16,6 +16,7 @@ from .constants import (
 
 
 DEFECT_DESCRIPTION_MAX_LENGTH = 1000
+CHECKLISTS_PER_PAGE = 20
 
 
 def current_timestamp():
@@ -73,9 +74,12 @@ def get_checklist_answer_photos(db, answer_id):
     ]
 
 
-def fleet_boat_checklists(db, boat):
+def fleet_boat_checklists(db, boat, date_from=None, date_to=None, page=1, per_page=CHECKLISTS_PER_PAGE):
+    total = repository.count_checklists(db, boat, date_from, date_to)
+    total_pages = max(1, -(-total // per_page))  # ceiling division, no math import needed
+    page = max(1, min(page, total_pages))
     checklists = []
-    for row in repository.list_checklists(db, boat):
+    for row in repository.list_checklists(db, boat, date_from, date_to, page, per_page):
         questions = checklist_questions_for(row["checklist_type"], row["boat"])
         answers = repository.list_checklist_answers(db, row["id"])
         problems = [
@@ -99,7 +103,37 @@ def fleet_boat_checklists(db, boat):
                 "problems": problems,
             }
         )
-    return checklists
+    return {
+        "items": checklists,
+        "total": total,
+        "page": page,
+        "total_pages": total_pages,
+        "per_page": per_page,
+    }
+
+
+def checklist_pagination_items(current_page, total_pages):
+    """Page-number list for the pager, collapsing distant pages to a single
+    ellipsis — same shape as app.py's _client_pagination_items, duplicated
+    here rather than imported to avoid a circular import (app.py imports
+    this package to build its blueprint)."""
+    if total_pages <= 7:
+        return list(range(1, total_pages + 1))
+    visible = sorted({
+        1,
+        total_pages,
+        max(1, current_page - 1),
+        current_page,
+        min(total_pages, current_page + 1),
+    })
+    items = []
+    previous = None
+    for page_number in visible:
+        if previous is not None and page_number - previous > 1:
+            items.append(None)
+        items.append(page_number)
+        previous = page_number
+    return items
 
 
 def defects_for_boat(db, boat):

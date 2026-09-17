@@ -34,10 +34,37 @@ def save_boat_photo(db, boat, filename, updated_at):
     db.commit()
 
 
-def list_checklists(db, boat):
+def _checklist_date_filter(boat, date_from, date_to):
+    """started_at is "YYYY-MM-DD HH:MM" text; a bare "YYYY-MM-DD" bound
+    compares correctly against it lexicographically (it's a prefix of any
+    timestamp on that day), so no date parsing is needed for >= date_from.
+    date_to gets " 23:59" appended so the whole end day is included, not
+    just its midnight."""
+    query = " WHERE boat = ?"
+    params = [boat]
+    if date_from:
+        query += " AND started_at >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND started_at <= ?"
+        params.append(date_to + " 23:59")
+    return query, params
+
+
+def count_checklists(db, boat, date_from=None, date_to=None):
+    where, params = _checklist_date_filter(boat, date_from, date_to)
     return db.execute(
-        "SELECT * FROM boat_checklists WHERE boat = ? ORDER BY started_at DESC, id DESC",
-        (boat,),
+        f"SELECT COUNT(*) FROM boat_checklists{where}", params
+    ).fetchone()[0]
+
+
+def list_checklists(db, boat, date_from=None, date_to=None, page=1, per_page=20):
+    where, params = _checklist_date_filter(boat, date_from, date_to)
+    params = params + [per_page, (page - 1) * per_page]
+    return db.execute(
+        f"SELECT * FROM boat_checklists{where} "
+        "ORDER BY started_at DESC, id DESC LIMIT ? OFFSET ?",
+        params,
     ).fetchall()
 
 
