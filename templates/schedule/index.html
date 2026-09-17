@@ -252,6 +252,7 @@
       <div>
         <span id="scheduleModalEyebrow">Новый рейс</span>
         <h2 id="scheduleModalTitle">Добавить в расписание</h2>
+        <div class="schedule-modal-weather" id="scheduleModalWeather" hidden></div>
       </div>
       <button type="button" class="schedule-modal-close" onclick="closeScheduleModal()" aria-label="Закрыть">×</button>
     </header>
@@ -411,6 +412,7 @@
       <div>
         <span id="scheduleDetailEyebrow">Групповая экскурсия</span>
         <h2 id="scheduleDetailTitle">—</h2>
+        <div class="schedule-modal-weather" id="scheduleDetailWeather" hidden></div>
       </div>
       <button type="button" class="schedule-modal-close" onclick="closeScheduleDetailModal()" aria-label="Закрыть">×</button>
     </header>
@@ -724,6 +726,39 @@
     const safe = Math.max(0, Math.min(1439, minutes));
     return String(Math.floor(safe / 60)).padStart(2, '0') + ':' + String(safe % 60).padStart(2, '0');
   }
+  function renderScheduleHeaderWeather(elementId, weather) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    if (!weather) {
+      el.hidden = true;
+      el.innerHTML = '';
+      return;
+    }
+    el.hidden = false;
+    el.classList.toggle('is-bad', !!weather.is_bad);
+    const parts = [
+      '<span class="schedule-modal-weather-item">'
+        + '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 11.7V4.8a1.5 1.5 0 00-3 0v6.9a2.6 2.6 0 103 0z"/></svg>'
+        + Math.round(weather.temp) + '°</span>',
+      '<span class="schedule-modal-weather-item">'
+        + '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.7h9.2a1.9 1.9 0 10-1.9-1.9"/><path d="M2.5 10.3h11.8a2.1 2.1 0 11-2.1 2.1"/><path d="M2.5 13.9h6.3"/></svg>'
+        + (weather.wind_dir ? weather.wind_dir + ' ' : '') + Math.round(weather.wind_gust) + ' м/с</span>',
+    ];
+    if (weather.precip_mm > 0) {
+      parts.push(
+        '<span class="schedule-modal-weather-item">'
+        + '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.3s4.7 5.5 4.7 8.6a4.7 4.7 0 11-9.4 0c0-3.1 4.7-8.6 4.7-8.6z"/></svg>'
+        + '</span>'
+      );
+    }
+    if (weather.is_bad && (weather.reasons || []).length) {
+      parts.push(
+        '<span class="schedule-modal-weather-warning">Неблагоприятный прогноз: '
+        + scheduleEscapeHtml(weather.reasons.join(', ')) + '</span>'
+      );
+    }
+    el.innerHTML = parts.join('');
+  }
   function setScheduleModalOpen(open) {
     const modal = document.getElementById('scheduleModal');
     const header = document.querySelector('.schedule-topbar');
@@ -778,6 +813,7 @@
     });
     document.getElementById('scheduleModalEyebrow').textContent = 'Новый рейс';
     document.getElementById('scheduleModalTitle').textContent = 'Добавить в расписание';
+    renderScheduleHeaderWeather('scheduleModalWeather', null);
     document.getElementById('scheduleSubmit').textContent = 'Создать рейс';
     syncScheduleKind();
   }
@@ -867,6 +903,7 @@
     item.assignment_ids.forEach((employeeId, index) => addScheduleAssignment(employeeId, item.assignment_roles[index]));
     document.getElementById('scheduleModalEyebrow').textContent = item.kind_label;
     document.getElementById('scheduleModalTitle').textContent = tripInfoOnly ? `${item.service_name} — данные рейса` : item.service_name;
+    renderScheduleHeaderWeather('scheduleModalWeather', item.weather);
     document.getElementById('scheduleSubmit').textContent = 'Сохранить изменения';
     const deleteForm = document.getElementById('scheduleDeleteForm');
     deleteForm.action = scheduleCreateUrl + '/' + item.id + '/delete';
@@ -1051,6 +1088,7 @@
     scheduleDetailExpandedIds.clear();
     document.getElementById('scheduleDetailEyebrow').textContent = item.kind_label;
     document.getElementById('scheduleDetailTitle').textContent = item.service_name;
+    renderScheduleHeaderWeather('scheduleDetailWeather', item.weather);
     document.getElementById('scheduleDetailBoat').textContent = item.boat;
     const crewNames = (item.assignments || []).map(a => a.employee_name);
     document.getElementById('scheduleDetailCrew').textContent =
