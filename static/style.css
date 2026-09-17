@@ -4964,17 +4964,29 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-card.has-bad-weather { box-shadow: inset 0 0 0 1.5px var(--danger), 0 8px 18px -13px rgba(15,42,53,.7); }
 .schedule-card.has-bad-weather:hover { box-shadow: inset 0 0 0 1.5px var(--danger), 0 12px 24px -14px rgba(15,42,53,.82); }
 .schedule-card-weather {
-  display: block;
-  overflow: hidden;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 9px;
   width: 100%;
-  font-size: 9px;
-  line-height: 1.3;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  opacity: .85;
+  margin-top: auto;
+  padding-top: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  opacity: .92;
 }
-.schedule-card-weather.is-bad { font-weight: 700; opacity: 1; }
+.schedule-card-weather-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+.schedule-card-weather-item svg { flex: 0 0 14px; width: 14px; height: 14px; }
+.schedule-card-weather.is-bad { color: var(--danger); opacity: 1; }
 .schedule-card.is-compact .schedule-card-weather { display: none; }
+.schedule-card.is-medium .schedule-card-weather { font-size: 11px; }
+.schedule-card.is-medium .schedule-card-weather-item svg { flex-basis: 12px; width: 12px; height: 12px; }
 .schedule-card-topline {
   display: flex;
   align-items: center;

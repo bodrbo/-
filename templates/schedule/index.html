@@ -189,11 +189,6 @@
                 <span class="schedule-card-time">{{ card.start_time }}–{{ card.end_time }}</span>
                 <span class="schedule-card-kind">{{ card.kind_label }}</span>
               </span>
-              {% if card.weather %}
-              <span class="schedule-card-weather{{ ' is-bad' if card.weather.is_bad }}">
-                {{ card.weather.temp|round|int }}°{% if card.weather.wind_dir %} · {{ card.weather.wind_dir }} {{ card.weather.wind_gust|round|int }} м/с{% endif %}{% if card.weather.precip_mm and card.weather.precip_mm > 0 %} · 🌧{% endif %}
-              </span>
-              {% endif %}
               <strong>{{ card.service_name }}</strong>
               <span class="schedule-card-boat">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 14h14l-2 3H5l-2-3zM6 14V8h7l2 6M8 8V5h4v3"/></svg>
@@ -203,6 +198,23 @@
               <span class="schedule-card-meta"><span class="schedule-card-event-count">{{ card.participants_count }}/{{ card.capacity }} мест</span><span class="schedule-card-role"> · {{ card.assignment_role }}</span></span>
               {% else %}
               <span class="schedule-card-meta">{{ card.customer_name }}{% if card.customer_phone %} · {{ card.customer_phone }}{% endif %}</span>
+              {% endif %}
+              {% if card.weather %}
+              <span class="schedule-card-weather{{ ' is-bad' if card.weather.is_bad }}">
+                <span class="schedule-card-weather-item">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 11.7V4.8a1.5 1.5 0 00-3 0v6.9a2.6 2.6 0 103 0z"/></svg>
+                  {{ card.weather.temp|round|int }}°
+                </span>
+                <span class="schedule-card-weather-item">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.7h9.2a1.9 1.9 0 10-1.9-1.9"/><path d="M2.5 10.3h11.8a2.1 2.1 0 11-2.1 2.1"/><path d="M2.5 13.9h6.3"/></svg>
+                  {% if card.weather.wind_dir %}{{ card.weather.wind_dir }} {% endif %}{{ card.weather.wind_gust|round|int }} м/с
+                </span>
+                {% if card.weather.precip_mm and card.weather.precip_mm > 0 %}
+                <span class="schedule-card-weather-item">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.3s4.7 5.5 4.7 8.6a4.7 4.7 0 11-9.4 0c0-3.1 4.7-8.6 4.7-8.6z"/></svg>
+                </span>
+                {% endif %}
+              </span>
               {% endif %}
             </{{ card_tag }}>
             {% endfor %}
