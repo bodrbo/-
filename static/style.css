@@ -3820,6 +3820,11 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .board-work-block.status-in_progress { border-left-color: var(--brass-strong); }
 .board-work-block.status-done { border-left-color: var(--success); }
 .board-work-block.status-removed { border-left-color: var(--danger); }
+.board-work-block.is-highlighted { animation: boardWorkHighlightFlash 1.4s ease-out; }
+@keyframes boardWorkHighlightFlash {
+  from { background-color: #fff3b0; box-shadow: 0 0 0 3px #ffd633; }
+  to { background-color: var(--paper); box-shadow: var(--shadow); }
+}
 .board-work-block h3 { margin: 8px 0 4px; font-size: 15px; line-height: 1.3; }
 .board-work-price { color: var(--muted); font-size: 12px; font-weight: 700; }
 .board-work-price.work-price-pending { font-style: italic; }
@@ -7538,14 +7543,19 @@ button.btn-reject:hover { background: #932f20; }
   letter-spacing: .05em;
   text-transform: uppercase;
 }
-.item-assignment-list {
-  display: grid;
-  gap: 8px;
-  margin: 0 0 8px;
-  padding: 0;
-  list-style: none;
+.tuning-item-task-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
 }
-.item-assignment-list li { line-height: 1.4; }
+.tuning-item-task-actions .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.tuning-item-task-actions svg { width: 15px; height: 15px; flex: none; }
 .assignment-comment-preview {
   max-width: 300px;
   margin-top: 5px;

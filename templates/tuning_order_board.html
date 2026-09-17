@@ -85,7 +85,7 @@
   <div class="tuning-board" role="list" aria-label="Работы заказа и их задачи">
     {% for item in items %}
     <section class="board-column" role="listitem">
-      <div class="board-work-block status-{{ item.status }}">
+      <div class="board-work-block status-{{ item.status }}" id="board-work-{{ item.id }}">
         <span class="status-badge status-{{ item.status }}">
           {{ work_statuses|selectattr('value', 'equalto', item.status)|map(attribute='label')|first }}
         </span>
@@ -247,6 +247,26 @@ function removeAssignEmployeeRow(btn) {
 document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') closeAssignModal();
 });
+
+// Arriving from "Доска задач" on a work item's row (tuning_form.html) —
+// the URL fragment names that work's block id, jump to it and flash it
+// yellow for a second so it's obvious which one it is among the rest.
+(function () {
+  var hash = window.location.hash;
+  if (!hash) return;
+  var target;
+  try {
+    target = document.querySelector(hash);
+  } catch (e) {
+    return;
+  }
+  if (!target) return;
+  target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+  target.classList.add('is-highlighted');
+  target.addEventListener('animationend', function () {
+    target.classList.remove('is-highlighted');
+  }, { once: true });
+})();
 </script>
 
 </body>

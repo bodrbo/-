@@ -353,7 +353,7 @@
     {% if items_prefill %}
     <div class="table-scroll">
       <table class="records">
-        <thead><tr><th>Работа</th><th>{{ 'Открытая цена, ₽' if edit_order.source == 'subcontract_request' else 'Цена, ₽' }}</th>{% if edit_order.source == 'subcontract_request' %}<th>Закрытая цена, ₽</th>{% endif %}<th>Статус</th><th>Задача</th><th>Фото</th></tr></thead>
+        <thead><tr><th>Работа</th><th>{{ 'Открытая цена, ₽' if edit_order.source == 'subcontract_request' else 'Цена, ₽' }}</th>{% if edit_order.source == 'subcontract_request' %}<th>Закрытая цена, ₽</th>{% endif %}<th>Статус</th><th>Задачи</th><th>Фото</th></tr></thead>
         <tbody>
           {% for item in items_prefill %}
           <tr class="{{ 'row-removed' if item.status == 'removed' }}">
@@ -377,29 +377,24 @@
               </form>
             </td>
             <td class="muted">
-              {% if item.assignments %}
-              <ul class="item-assignment-list">
-                {% for a in item.assignments %}
-                <li>
-                  {% if a.assignment_status == 'pending' %}
-                  <span class="status-badge status-supplyreq-new">Ожидает ответа</span>
-                  {% elif a.assignment_status == 'accepted' %}
-                  <span class="status-badge status-supplyreq-delivered">Исполняет</span>
-                  {% else %}
-                  <span class="status-badge status-client-dissatisfied">Отклонено</span>
-                  {% endif %}
-                  {{ a.employee_name }}
-                  {% if a.comment %}<div class="assignment-comment-preview">{{ a.comment }}</div>{% endif %}
-                </li>
-                {% endfor %}
-              </ul>
-              {% endif %}
-              {% if item.can_assign %}
-              <button type="button" class="btn-secondary"
-                      onclick='openAssignModal({{ url_for("assign_tuning_item", order_id=edit_order.id, item_id=item.id)|tojson }}, {{ item.work_name|tojson }})'>
-                Поручить задачу
-              </button>
-              {% endif %}
+              <div class="tuning-item-task-actions">
+                {% if item.can_assign %}
+                <button type="button" class="btn-secondary"
+                        onclick='openAssignModal({{ url_for("assign_tuning_item", order_id=edit_order.id, item_id=item.id)|tojson }}, {{ item.work_name|tojson }})'>
+                  Поручить задачу
+                </button>
+                {% endif %}
+                <a href="{{ url_for('tuning_order_board', order_id=edit_order.id) }}#board-work-{{ item.id }}"
+                   class="btn-secondary">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="2.5" y="3" width="5" height="5" rx="1"/>
+                    <rect x="2.5" y="12" width="5" height="5" rx="1"/>
+                    <rect x="12.5" y="7.5" width="5" height="5" rx="1"/>
+                    <path d="M7.5 5.5h2a2 2 0 012 2V9M7.5 14.5h2a2 2 0 002-2V11"/>
+                  </svg>
+                  Доска задач
+                </a>
+              </div>
             </td>
             <td class="row-actions">
               {% set photos = work_photos_by_item.get(item.id, []) %}
