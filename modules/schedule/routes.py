@@ -2,7 +2,6 @@
 
 import datetime as dt
 
-import requests
 from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
 from modules.clients.constants import CLIENT_CONTACT_METHODS
@@ -416,7 +415,11 @@ def create_schedule_blueprint(
             return redirect_to_day(day, selected_employee)
         try:
             stats = weather_sync(get_db())
-        except (requests.RequestException, RuntimeError, ValueError) as error:
+        except Exception as error:
+            # Wider than the Tripster catch beside it on purpose: this
+            # wraps a network call plus a database write, and a raw 500
+            # here is worse than a slightly-too-broad catch — the same
+            # call is already wrapped this broadly in the hourly cron.
             set_notice(f"Не удалось обновить прогноз погоды: {error}", False)
         else:
             set_notice(

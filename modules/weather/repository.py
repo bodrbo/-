@@ -10,6 +10,11 @@ def upsert_forecast_hours(db, hours, fetched_at):
     timestamp as naive local server time (see schedule_items.starts_at),
     so fromtimestamp() here keeps this cache directly comparable to those
     columns without a timezone library anywhere in the codebase.
+
+    Plain select-then-insert/update rather than an upsert (``INSERT ...
+    ON CONFLICT``) — this hosting has a documented history of that syntax
+    misbehaving in production (see modules/settings/repository.py), so the
+    codebase avoids it everywhere.
     """
     for record in hours:
         dt_unix = record.get("dt")
@@ -19,23 +24,31 @@ def upsert_forecast_hours(db, hours, fetched_at):
         rain = (record.get("rain") or {}).get("1h") or 0
         snow = (record.get("snow") or {}).get("1h") or 0
         weather = (record.get("weather") or [{}])[0]
-        db.execute(
-            "INSERT INTO weather_forecast_hours "
-            "(local_hour, dt_unix, temp, wind_speed, wind_gust, wind_deg, "
-            "precip_mm, weather_id, weather_main, fetched_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(local_hour) DO UPDATE SET "
-            "dt_unix = excluded.dt_unix, temp = excluded.temp, "
-            "wind_speed = excluded.wind_speed, wind_gust = excluded.wind_gust, "
-            "wind_deg = excluded.wind_deg, precip_mm = excluded.precip_mm, "
-            "weather_id = excluded.weather_id, weather_main = excluded.weather_main, "
-            "fetched_at = excluded.fetched_at",
-            (
-                local_hour, dt_unix, record.get("temp"), record.get("wind_speed"),
-                record.get("wind_gust"), record.get("wind_deg"), rain + snow,
-                weather.get("id"), weather.get("main"), fetched_at,
-            ),
+        values = (
+            dt_unix, record.get("temp"), record.get("wind_speed"),
+            record.get("wind_gust"), record.get("wind_deg"), rain + snow,
+            weather.get("id"), weather.get("main"), fetched_at,
         )
+        existing = db.execute(
+            "SELECT 1 FROM weather_forecast_hours WHERE local_hour = ?",
+            (local_hour,),
+        ).fetchone()
+        if existing is not None:
+            db.execute(
+                "UPDATE weather_forecast_hours SET "
+                "dt_unix = ?, temp = ?, wind_speed = ?, wind_gust = ?, wind_deg = ?, "
+                "precip_mm = ?, weather_id = ?, weather_main = ?, fetched_at = ? "
+                "WHERE local_hour = ?",
+                values + (local_hour,),
+            )
+        else:
+            db.execute(
+                "INSERT INTO weather_forecast_hours "
+                "(dt_unix, temp, wind_speed, wind_gust, wind_deg, "
+                "precip_mm, weather_id, weather_main, fetched_at, local_hour) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                values + (local_hour,),
+            )
     db.commit()
 
 
