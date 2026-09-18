@@ -100,7 +100,7 @@
   {% if tuning_bulk_notice %}
   <div class="alert success" role="status">{{ tuning_bulk_notice }}</div>
   {% endif %}
-  <details class="panel tuning-orders-filter"{% if date_filter_error %} open{% endif %}>
+  <details class="panel tuning-orders-filter"{% if date_filter_error %} open{% endif %} data-tour-target="tuning-filters">
     <summary>
       <span class="tuning-orders-filter-icon" aria-hidden="true">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
@@ -153,12 +153,12 @@
       <h2>Заказы</h2>
       <div class="tuning-orders-actions">
         <a href="{{ url_for('add_tuning_subcontract') }}" class="btn-secondary">Добавить субподряд</a>
-        <a href="{{ url_for('add_tuning_order') }}" class="btn-add">Добавить заказ</a>
+        <a href="{{ url_for('add_tuning_order') }}" class="btn-add" data-tour-target="tuning-add-order">Добавить заказ</a>
       </div>
     </div>
     {% if orders %}
     <form action="{{ url_for('bulk_edit_tuning_orders') }}" method="post"
-          class="tuning-bulk-form" id="tuning-bulk-form">
+          class="tuning-bulk-form" id="tuning-bulk-form" data-tour-target="tuning-bulk-panel">
       <input type="hidden" name="return_q" value="{{ search_query }}">
       <input type="hidden" name="return_status" value="{{ selected_status }}">
       <input type="hidden" name="return_date_from" value="{{ date_from }}">
@@ -190,7 +190,8 @@
         <thead>
           <tr>
             <th class="tuning-select-cell">
-              <input type="checkbox" id="tuning-select-all" aria-label="Выбрать все показанные заказы">
+              <input type="checkbox" id="tuning-select-all" aria-label="Выбрать все показанные заказы"
+                     data-tour-target="tuning-select-all">
             </th>
             <th>№</th>
             <th>Дата</th>

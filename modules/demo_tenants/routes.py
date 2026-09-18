@@ -7,12 +7,12 @@ import secrets
 from flask import Blueprint, redirect, render_template, request, session, url_for
 
 from . import repository, services
-from .constants import DEMO_LOGO_EXTENSIONS, DEMO_MODULES
+from .constants import DEMO_LOGO_EXTENSIONS, DEMO_MODULES, DEMO_TOUR_STEPS
 
 
 def create_blueprint(
-    get_db, admin_login_required, tenant_db_dir, tenant_logo_dir,
-    provision_tenant_db, seed_tenant_db,
+    get_db, get_shared_db, admin_login_required, tenant_db_dir, tenant_logo_dir,
+    provision_tenant_db, seed_tenant_db, client_ip,
 ):
     blueprint = Blueprint("demo_tenants", __name__)
 
@@ -156,7 +156,12 @@ def create_blueprint(
                 return redirect(url_for("index"))
             return render_template("demo_tenant_login.html", error=None)
 
-        db = get_db()
+        # Always the shared DB, never get_db() — a browser submitting this
+        # form while an old demo session cookie is still around would
+        # otherwise have get_db() resolve to THAT tenant's own isolated
+        # database (session["demo_tenant_db_path"]), where no
+        # demo_tenants row exists at all, and every login would 401.
+        db = get_shared_db()
         tenant = services.authenticate(
             db, request.form.get("username", ""), request.form.get("password", ""),
         )
@@ -174,11 +179,37 @@ def create_blueprint(
         session["demo_tenant_empty_state_logo"] = tenant["empty_state_logo_filename"]
         session["demo_tenant_favicon"] = tenant["favicon_filename"]
         session["demo_tenant_accent_color"] = tenant["accent_color"]
+        if services.note_login_ip(db, tenant["id"], client_ip()):
+            session["demo_tour_step"] = 0
+            return redirect(url_for(DEMO_TOUR_STEPS[0]["endpoint"]))
         return redirect(url_for("index"))
 
     @blueprint.route("/demo/logout", methods=["POST"])
     def logout():
         session.clear()
         return redirect(url_for("demo_tenants.login"))
+
+    @blueprint.route("/demo/tour/next")
+    def tour_next():
+        """A plain link, not a form: advancing the tour has no server-side
+        effect besides the session counter, so there's nothing a GET here
+        could destroy — matches the "просто перейти по ссылке" feel the
+        tour is built around."""
+        if not session.get("demo_tenant_id"):
+            return redirect(url_for("demo_tenants.login"))
+        step = session.get("demo_tour_step")
+        if step is None:
+            return redirect(url_for("index"))
+        next_step = step + 1
+        if next_step >= len(DEMO_TOUR_STEPS):
+            session.pop("demo_tour_step", None)
+            return redirect(url_for("index"))
+        session["demo_tour_step"] = next_step
+        return redirect(url_for(DEMO_TOUR_STEPS[next_step]["endpoint"]))
+
+    @blueprint.route("/demo/tour/skip")
+    def tour_skip():
+        session.pop("demo_tour_step", None)
+        return redirect(request.referrer or url_for("index"))
 
     return blueprint

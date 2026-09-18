@@ -1,0 +1,89 @@
+<div class="demo-tour" data-demo-tour data-demo-tour-targets='{{ demo_tour_active_step.targets|tojson }}'>
+  <div class="demo-tour-card" data-demo-tour-card>
+    <span class="demo-tour-arrow" data-demo-tour-arrow aria-hidden="true"></span>
+    <div class="demo-tour-step">Шаг {{ demo_tour_step_number }} из {{ demo_tour_total_steps }}</div>
+    <h3 class="demo-tour-title">{{ demo_tour_active_step.title }}</h3>
+    <p class="demo-tour-text">{{ demo_tour_active_step.text }}</p>
+    <div class="demo-tour-actions">
+      <a href="{{ url_for('demo_tenants.tour_skip') }}" class="demo-tour-skip">Пропустить обучение</a>
+      <a href="{{ url_for('demo_tenants.tour_next') }}" class="demo-tour-next">
+        {{ 'Готово' if demo_tour_step_number == demo_tour_total_steps else 'Далее' }}
+      </a>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  // Captured synchronously — document.currentScript is only valid while
+  // this script is actually executing, not from inside the deferred
+  // callback below.
+  var root = document.currentScript.previousElementSibling;
+  if (!root || !root.hasAttribute('data-demo-tour')) return;
+
+  // This partial is included from _admin_main_nav.html, in the page's
+  // <header> — most tour targets (further down in <main>) don't exist in
+  // the DOM yet when this script tag itself runs, since the HTML parser
+  // hasn't reached them. Wait for the full document instead.
+  document.addEventListener('DOMContentLoaded', init);
+
+  function init() {
+    var card = root.querySelector('[data-demo-tour-card]');
+    var arrow = root.querySelector('[data-demo-tour-arrow]');
+    var selectors = [];
+    try {
+      selectors = JSON.parse(root.getAttribute('data-demo-tour-targets') || '[]');
+    } catch (error) {}
+
+    var targets = [];
+    selectors.forEach(function (selector) {
+      var el = document.querySelector(selector);
+      if (el) targets.push(el);
+    });
+
+    if (!targets.length) {
+      // Nothing on this page matched (layout changed, module hidden,
+      // etc.) — fall back to a centered card so the tour never just
+      // silently breaks.
+      card.classList.add('demo-tour-card-centered');
+      return;
+    }
+
+    targets.forEach(function (el) { el.classList.add('demo-tour-highlight'); });
+    var anchor = targets[0];
+
+    function position() {
+      var rect = anchor.getBoundingClientRect();
+      var cardRect = card.getBoundingClientRect();
+      var margin = 14;
+      var top = rect.bottom + margin;
+      var above = false;
+      if (top + cardRect.height > window.innerHeight - 12) {
+        var aboveTop = rect.top - cardRect.height - margin;
+        if (aboveTop > 12) {
+          top = aboveTop;
+          above = true;
+        } else {
+          top = Math.max(12, window.innerHeight - cardRect.height - 12);
+        }
+      }
+      var left = rect.left + rect.width / 2 - cardRect.width / 2;
+      left = Math.max(12, Math.min(left, window.innerWidth - cardRect.width - 12));
+      card.style.top = top + 'px';
+      card.style.left = left + 'px';
+      card.classList.toggle('demo-tour-card-above', above);
+      var arrowLeft = rect.left + rect.width / 2 - left;
+      arrowLeft = Math.max(18, Math.min(arrowLeft, cardRect.width - 18));
+      arrow.style.left = arrowLeft + 'px';
+    }
+
+    // "instant" (not the default "auto") explicitly bypasses this site's
+    // global `scroll-behavior: smooth` — with a smooth scroll still in
+    // flight, position() below would read the target's PRE-scroll
+    // coordinates and place the card in the wrong spot.
+    anchor.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+    position();
+    window.addEventListener('resize', position);
+    window.addEventListener('scroll', position, { passive: true });
+  }
+})();
+</script>

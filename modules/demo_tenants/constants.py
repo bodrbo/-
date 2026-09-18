@@ -33,3 +33,51 @@ DEMO_MODULE_PATH_PREFIXES = {
 }
 
 DEMO_LOGO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".svg", ".webp", ".ico"}
+
+# Guided-tour script shown to a demo tenant the first time we see a new IP
+# address for that account (see services.note_login_ip / routes.tour_next).
+# Each step names the Flask endpoint it belongs to (the card only renders
+# when the current request resolves to that endpoint — see
+# _demo_tour_active_step in app.py) and one or more `data-tour-target`
+# selectors on that page to spotlight. Edit this list to add/reorder/retext
+# steps — nothing else needs to change.
+DEMO_TOUR_STEPS = [
+    {
+        "endpoint": "tuning_index",
+        "targets": ["[data-tour-target='nav-tuning']"],
+        "title": "Тюнинг-центр",
+        "text": "Главный раздел системы «Тюнинг-центр» — здесь происходит вся работа с заказами.",
+    },
+    {
+        "endpoint": "tuning_index",
+        "targets": ["[data-tour-target='tuning-subnav-orders']"],
+        "title": "Заказы",
+        "text": (
+            "В подразделе «Заказы» выдаётся полный список всех заказов — тут и "
+            "завершённые, и активные заказы с возможностью отфильтровать их по "
+            "любым данным клиента, модели лодки/мотора, статусу, номеру заказа "
+            "или дате."
+        ),
+    },
+    {
+        "endpoint": "tuning_index",
+        "targets": ["[data-tour-target='tuning-filters']"],
+        "title": "Фильтры",
+        "text": "Вот здесь можно отфильтровать список заказов по разным параметрам.",
+    },
+    {
+        "endpoint": "tuning_index",
+        "targets": ["[data-tour-target='tuning-add-order']"],
+        "title": "Новый заказ",
+        "text": "Добавить заказ можно по этой кнопке.",
+    },
+    {
+        "endpoint": "tuning_index",
+        "targets": [
+            "[data-tour-target='tuning-select-all']",
+            "[data-tour-target='tuning-bulk-panel']",
+        ],
+        "title": "Массовые действия",
+        "text": "Здесь можно массово изменить заказам статусы или удалить ненужные заказы.",
+    },
+]

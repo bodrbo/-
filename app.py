@@ -80,6 +80,7 @@ from integrations.thousand_sizes import (
 )
 from modules.demo_tenants import create_blueprint as create_demo_tenants_blueprint
 from modules.demo_tenants import DEMO_MODULES
+from modules.demo_tenants import DEMO_TOUR_STEPS
 from modules.demo_tenants.services import module_for_request as _demo_module_for_request
 from modules.employees import create_employees_blueprint
 from modules.employees.capabilities import (
@@ -3485,6 +3486,22 @@ def init_db(db_path=None):
         conn.execute("ALTER TABLE demo_tenants ADD COLUMN empty_state_logo_filename TEXT")
     if "favicon_filename" not in demo_tenant_cols:
         conn.execute("ALTER TABLE demo_tenants ADD COLUMN favicon_filename TEXT")
+    # Which IPs have already seen a given demo account — the guided tour
+    # (DEMO_TOUR_STEPS) launches once per never-before-seen IP; see
+    # services.note_login_ip. Only meaningful against the shared/main DB
+    # (get_shared_db) — it also gets created, unused, in each tenant's own
+    # DB since init_db() builds the same schema everywhere.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS demo_tenant_seen_ips (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id INTEGER NOT NULL,
+            ip_address TEXT NOT NULL,
+            first_seen_at TEXT NOT NULL,
+            UNIQUE(tenant_id, ip_address)
+        )
+        """
+    )
     conn.commit()
     conn.close()
 
@@ -18622,6 +18639,19 @@ DEMO_TENANT_DB_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "de
 DEMO_TENANT_LOGO_DIR = os.path.join(app.static_folder, "demo_logos")
 
 
+def _client_ip():
+    """The visitor's real IP for the "new IP → show the guided tour again"
+    check (services.note_login_ip) — behind a reverse proxy, request.
+    remote_addr is the proxy's own address for every visitor, which would
+    make every login look like the same IP. X-Forwarded-For's first hop is
+    the original client; fall back to remote_addr when the app is reached
+    directly (e.g. local/dev)."""
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.remote_addr or ""
+
+
 def _provision_demo_tenant_db(db_path):
     """Builds a fresh, fully-migrated database for a new demo tenant, then
     strips every real-world bootstrap row init_db() unconditionally seeds
@@ -18687,11 +18717,13 @@ def _seed_demo_tenant_db(db_path):
 app.register_blueprint(
     create_demo_tenants_blueprint(
         get_db=get_db,
+        get_shared_db=get_shared_db,
         admin_login_required=admin_login_required,
         tenant_db_dir=DEMO_TENANT_DB_DIR,
         tenant_logo_dir=DEMO_TENANT_LOGO_DIR,
         provision_tenant_db=_provision_demo_tenant_db,
         seed_tenant_db=_seed_demo_tenant_db,
+        client_ip=_client_ip,
     )
 )
 
@@ -18749,6 +18781,18 @@ def _demo_tenant_template_context():
         # same as before this feature existed.
         return enabled is None or module_key in enabled
 
+    # Guided tour (DEMO_TOUR_STEPS): only rendered when the CURRENT page is
+    # the one the active step actually belongs to — session["demo_tour_step"]
+    # tracks progress, but a step's card only appears once the tenant has
+    # actually navigated (via the tour's own "Далее" link) to its page, not
+    # on every other page they might click into meanwhile.
+    tour_step_index = session.get("demo_tour_step") if tenant_id else None
+    tour_active_step = None
+    if tour_step_index is not None and 0 <= tour_step_index < len(DEMO_TOUR_STEPS):
+        step = DEMO_TOUR_STEPS[tour_step_index]
+        if request.endpoint == step["endpoint"]:
+            tour_active_step = step
+
     return {
         "is_demo_tenant": bool(tenant_id),
         "demo_module_enabled": demo_module_enabled,
@@ -18758,6 +18802,9 @@ def _demo_tenant_template_context():
         "demo_tenant_favicon": session.get("demo_tenant_favicon") if tenant_id else None,
         "demo_tenant_accent_color": accent_color,
         "demo_tenant_accent_is_dark": bool(accent_color) and _hex_color_is_dark(accent_color),
+        "demo_tour_active_step": tour_active_step,
+        "demo_tour_step_number": (tour_step_index + 1) if tour_active_step else None,
+        "demo_tour_total_steps": len(DEMO_TOUR_STEPS),
     }
 
 

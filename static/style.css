@@ -11101,3 +11101,81 @@ button.partner-open-price-save svg {
 .shop-map-boat-rotate-handle:hover circle {
   fill: var(--brass-strong);
 }
+
+/* --- demo guided tour (modules/demo_tenants, DEMO_TOUR_STEPS) --- */
+.demo-tour-highlight {
+  position: relative;
+  z-index: 3100;
+  border-radius: 8px;
+  box-shadow: 0 0 0 3px var(--paper), 0 0 0 6px var(--brass), 0 6px 22px -6px rgba(52, 152, 219, .65);
+  animation: demo-tour-pulse 1.8s ease-in-out infinite;
+}
+@keyframes demo-tour-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px var(--paper), 0 0 0 6px var(--brass), 0 6px 22px -6px rgba(52, 152, 219, .65); }
+  50% { box-shadow: 0 0 0 3px var(--paper), 0 0 0 6px var(--brass-strong), 0 6px 28px -4px rgba(52, 152, 219, .85); }
+}
+.demo-tour-card {
+  position: fixed;
+  z-index: 3200;
+  width: min(320px, calc(100vw - 24px));
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: var(--ink);
+  color: var(--parchment);
+  box-shadow: 0 20px 40px -12px rgba(15, 42, 53, .55);
+  transition: top .18s ease, left .18s ease;
+}
+.demo-tour-card-centered {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+.demo-tour-arrow {
+  position: absolute;
+  top: -8px;
+  width: 16px;
+  height: 16px;
+  background: var(--ink);
+  transform: translateX(-50%) rotate(45deg);
+  border-radius: 3px;
+}
+.demo-tour-card-above .demo-tour-arrow { top: auto; bottom: -8px; }
+.demo-tour-card-centered .demo-tour-arrow { display: none; }
+.demo-tour-step {
+  font-family: 'PT Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--brass);
+  margin-bottom: 6px;
+}
+.demo-tour-title { margin: 0 0 6px; font-size: 16px; color: #fff; }
+.demo-tour-text { margin: 0; font-size: 13px; line-height: 1.5; color: var(--parchment); }
+.demo-tour-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+}
+.demo-tour-skip {
+  font-size: 12px;
+  color: var(--parchment);
+  opacity: .75;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.demo-tour-skip:hover { opacity: 1; }
+.demo-tour-next {
+  flex: none;
+  padding: 8px 16px;
+  border-radius: 7px;
+  background: var(--brass);
+  color: var(--on-accent);
+  font-weight: 700;
+  font-size: 13px;
+  text-decoration: none;
+}
+.demo-tour-next:hover { background: var(--brass-strong); }

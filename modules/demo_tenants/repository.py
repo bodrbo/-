@@ -80,3 +80,16 @@ def update_tenant(
 def delete_tenant(db, tenant_id):
     db.execute("DELETE FROM demo_tenants WHERE id = ?", (tenant_id,))
     db.commit()
+
+
+def record_seen_ip(db, tenant_id, ip_address, first_seen_at):
+    """Returns True the first time this (tenant, ip) pair is recorded,
+    False if it was already known — INSERT OR IGNORE against the UNIQUE
+    constraint is the atomic "have we seen this before" check."""
+    cur = db.execute(
+        "INSERT OR IGNORE INTO demo_tenant_seen_ips (tenant_id, ip_address, first_seen_at) "
+        "VALUES (?, ?, ?)",
+        (tenant_id, ip_address, first_seen_at),
+    )
+    db.commit()
+    return cur.rowcount > 0

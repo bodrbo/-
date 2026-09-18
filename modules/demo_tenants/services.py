@@ -226,3 +226,14 @@ def module_for_request(blueprint_name, path):
         if any(path.startswith(prefix) for prefix in prefixes):
             return module_key
     return None
+
+
+def note_login_ip(db, tenant_id, ip_address):
+    """Records this IP against the tenant the first time it's seen and
+    reports whether the guided tour should start — see DEMO_TOUR_STEPS.
+    A blank/unknown IP (address stripped away by some proxy setup) never
+    triggers the tour: we'd otherwise show it to every single login."""
+    ip_address = (ip_address or "").strip()
+    if not ip_address:
+        return False
+    return repository.record_seen_ip(db, tenant_id, ip_address, current_timestamp())
