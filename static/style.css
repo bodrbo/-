@@ -8104,6 +8104,12 @@ table.records tr.row-expense td.amount { color: var(--danger); }
   height: auto;
   opacity: 0.28;
 }
+/* A demo tenant's own logo (see _empty_state_logo.html) is usually a
+   plain text wordmark, not an illustration like our mascot — at the same
+   width it reads as illegibly small, so it gets twice the room. */
+.empty-logo-tenant {
+  width: 216px;
+}
 
 .alert {
   background: #f6e2da;

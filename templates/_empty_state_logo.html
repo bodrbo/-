@@ -1,7 +1,7 @@
 {% if is_demo_tenant and demo_tenant_empty_state_logo %}
-<img src="{{ url_for('static', filename='demo_logos/' + demo_tenant_empty_state_logo) }}" alt="" class="empty-logo">
+<img src="{{ url_for('static', filename='demo_logos/' + demo_tenant_empty_state_logo) }}" alt="" class="empty-logo empty-logo-tenant">
 {% elif is_demo_tenant and demo_tenant_logo %}
-<img src="{{ url_for('static', filename='demo_logos/' + demo_tenant_logo) }}" alt="" class="empty-logo">
+<img src="{{ url_for('static', filename='demo_logos/' + demo_tenant_logo) }}" alt="" class="empty-logo empty-logo-tenant">
 {% else %}
 <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
 {% endif %}
