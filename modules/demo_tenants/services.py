@@ -180,6 +180,29 @@ def delete_tenant(db, tenant_id):
     return True, f"Демо-аккаунт «{tenant['company_name']}» удалён."
 
 
+def reset_tenant_data(db, tenant_id, provision_db, seed_db=None):
+    """Rebuilds a tenant's own database from scratch at the same db_path —
+    same login, branding and module set, but every order/fleet/client row
+    wiped and (if seed_db is given) reseeded fresh. For fixing a tenant
+    whose data was seeded before a bug in seed_demo_data.py (or in
+    provisioning's own real-data cleanup) got fixed, without having to
+    delete the account and redo its branding/module setup from scratch.
+    provision_db only ever CREATEs (idempotent — IF NOT EXISTS), so the old
+    file is removed first; that's what actually clears the stale data."""
+    tenant = repository.get_tenant(db, tenant_id)
+    if tenant is None:
+        return False, "Демо-аккаунт не найден."
+    try:
+        if tenant["db_path"] and os.path.exists(tenant["db_path"]):
+            os.remove(tenant["db_path"])
+    except OSError as exc:
+        return False, f"Не удалось удалить старые данные: {exc}"
+    provision_db(tenant["db_path"])
+    if seed_db is not None:
+        seed_db(tenant["db_path"])
+    return True, f"Данные демо-аккаунта «{tenant['company_name']}» пересозданы."
+
+
 def authenticate(db, username, password):
     row = repository.get_tenant_by_username(db, (username or "").strip())
     if row is None or not check_password_hash(row["password_hash"], password or ""):

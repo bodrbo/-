@@ -79,6 +79,17 @@ def create_blueprint(
         session["demo_tenant_notice" if success else "demo_tenant_error"] = message
         return redirect(url_for("demo_tenants.index"))
 
+    @blueprint.route("/demo-admin/tenants/<int:tenant_id>/reset", methods=["POST"])
+    @admin_login_required
+    def reset(tenant_id):
+        db = get_db()
+        success, message = services.reset_tenant_data(
+            db, tenant_id, provision_tenant_db,
+            seed_tenant_db if request.form.get("seed_demo_data") else None,
+        )
+        session["demo_tenant_notice" if success else "demo_tenant_error"] = message
+        return redirect(url_for("demo_tenants.index"))
+
     @blueprint.route("/demo-admin/tenants/<int:tenant_id>/edit")
     @admin_login_required
     def edit(tenant_id):

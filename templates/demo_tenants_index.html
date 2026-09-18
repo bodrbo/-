@@ -140,6 +140,11 @@
             <td class="muted">{{ t.created_at }}</td>
             <td class="row-actions">
               <a href="{{ url_for('demo_tenants.edit', tenant_id=t.id) }}" class="btn-secondary">Изменить</a>
+              <form action="{{ url_for('demo_tenants.reset', tenant_id=t.id) }}" method="post"
+                    onsubmit="return confirm('Стереть все данные (заказы, флот, клиентов и т.п.) демо-аккаунта «' + {{ t.company_name|tojson }} + '» и заполнить заново? Логин, пароль, бренд и модули не изменятся.');">
+                <input type="hidden" name="seed_demo_data" value="1">
+                <button type="submit" class="btn-secondary">Сбросить данные</button>
+              </form>
               <form action="{{ url_for('demo_tenants.delete', tenant_id=t.id) }}" method="post"
                     onsubmit="return confirm('Удалить демо-аккаунт «' + {{ t.company_name|tojson }} + '» и его данные?');">
                 <button type="submit" class="icon-btn danger" title="Удалить">
