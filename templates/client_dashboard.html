@@ -42,7 +42,8 @@
 <header class="topbar">
   <div class="topbar-inner">
     <div class="brand">
-      <a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo brand-logo-large"></a>
+      {% set topbar_brand_large = true %}
+      {% include '_topbar_brand.html' %}
     </div>
     <div class="title-block">
       <h1>{{ 'ЛК партнёра · администратор' if is_admin_view and is_tuning_partner else 'ЛК клиента · администратор' if is_admin_view else 'Экскурсионный клиент' if is_manager_view else 'Личный кабинет партнёра' if is_tuning_partner else 'Личный кабинет клиента' }}</h1>

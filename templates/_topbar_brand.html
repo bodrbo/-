@@ -19,11 +19,11 @@
 {% endif %}
 <a href="{{ url_for('index') }}">
   {% if demo_tenant_logo %}
-  <img src="{{ url_for('static', filename='demo_logos/' + demo_tenant_logo) }}" alt="{{ demo_tenant_company_name }}" class="brand-logo">
+  <img src="{{ url_for('static', filename='demo_logos/' + demo_tenant_logo) }}" alt="{{ demo_tenant_company_name }}" class="brand-logo{{ ' brand-logo-large' if topbar_brand_large }}">
   {% else %}
-  <span class="brand-logo-text">{{ demo_tenant_company_name }}</span>
+  <span class="brand-logo-text{{ ' brand-logo-text-large' if topbar_brand_large }}">{{ demo_tenant_company_name }}</span>
   {% endif %}
 </a>
 {% else %}
-<a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a>
+<a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo{{ ' brand-logo-large' if topbar_brand_large }}"></a>
 {% endif %}

@@ -2050,6 +2050,7 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
 /* Demo tenants without an uploaded logo (see _topbar_brand.html) fall
    back to their company name as plain text in the same brand slot. */
 .brand-logo-text { font-size: 20px; font-weight: 700; color: var(--brass-strong); }
+.brand-logo-text-large { font-size: 26px; }
 
 /* Hidden on desktop — the nav shows inline there. Only takes over as a
    burger button under the mobile breakpoint below. */
