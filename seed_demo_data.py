@@ -226,6 +226,7 @@ def seed(appmod, db, db_path=None, client=None):
     order_b, items_b = add_order(
         "Козлова Мария", "Wellboat Крым 620", deadline_offset_days=-3,
         items=[("Ремонт транца", 20000, 2.2)],
+        phone="+79007654321",
     )
     set_order_status(order_b["id"], "in_progress")
     assignment_3 = assign(order_b["id"], items_b[0]["id"], tuner_1["employee_name"], 15000, 10)
@@ -236,6 +237,7 @@ def seed(appmod, db, db_path=None, client=None):
     order_c, items_c = add_order(
         "ООО «Паруса Балтики»", "Каютный катер Норд 850", deadline_offset_days=2,
         items=[("Установка навигации", 35000, 1.6)],
+        phone="+78121112233",
     )
     set_order_status(order_c["id"], "in_progress")
     assignment_4 = assign(order_c["id"], items_c[0]["id"], tuner_2["employee_name"], 20000, 12)
@@ -248,6 +250,7 @@ def seed(appmod, db, db_path=None, client=None):
     order_d, items_d = add_order(
         "Тестовый Клиент", "Лодка ПВХ 380", deadline_offset_days=10,
         items=[("Диагностика", 3000, 1.5)],
+        phone="+79009998877",
     )
     set_order_status(order_d["id"], "cancelled")
 
@@ -255,6 +258,7 @@ def seed(appmod, db, db_path=None, client=None):
     add_order(
         "Фёдоров Никита", "Мотор Yamaha 115", deadline_offset_days=14,
         items=[("Расчёт стоимости работ", 0, 0)],
+        phone="+79005554433",
     )
 
     # ---- Финансы: транзакции по проектам (для Аналитики) -------------
@@ -295,7 +299,7 @@ def seed(appmod, db, db_path=None, client=None):
 
     # ---- Клиентская база ----------------------------------------------
     for name, phone, email in [
-        ("Смирнов Алексей", "+79001234567", "smirnov@example.com"),
+        ("Смирнов Алексей", "+79001112233", "smirnov@example.com"),
         ("Козлова Мария", "+79007654321", "kozlova@example.com"),
         ("ООО «Паруса Балтики»", "+78121112233", "parusa@example.com"),
     ]:
