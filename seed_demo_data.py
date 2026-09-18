@@ -255,11 +255,15 @@ def seed(appmod, db, db_path=None, client=None):
         phone="+79001112233",
     )
     set_order_status(order_a["id"], "in_progress")
-    assignment_1 = assign(order_a["id"], items_a[0]["id"], tuner_1["employee_name"], 12000, 8, "Полный цикл полировки")
+    # Rate x hours here is the employee's payout, deducted from the item's
+    # price (cost_price x multiplier) as project expense once "done" — kept
+    # well below price so every qualifying project stays profitable in
+    # Аналитика rather than showing a demotivating loss.
+    assignment_1 = assign(order_a["id"], items_a[0]["id"], tuner_1["employee_name"], 900, 8, "Полный цикл полировки")
     set_assignment_status(assignment_1["id"], "accepted")
     set_assignment_status(assignment_1["id"], "in_progress")
     set_assignment_status(assignment_1["id"], "done")  # начисляет гонорар
-    assignment_2 = assign(order_a["id"], items_a[1]["id"], tuner_2["employee_name"], 6000, 4)
+    assignment_2 = assign(order_a["id"], items_a[1]["id"], tuner_2["employee_name"], 700, 4)
     set_assignment_status(assignment_2["id"], "accepted")
     set_assignment_status(assignment_2["id"], "in_progress")
 
@@ -271,7 +275,7 @@ def seed(appmod, db, db_path=None, client=None):
         phone="+79007654321",
     )
     set_order_status(order_b["id"], "in_progress")
-    assignment_3 = assign(order_b["id"], items_b[0]["id"], tuner_1["employee_name"], 15000, 10)
+    assignment_3 = assign(order_b["id"], items_b[0]["id"], tuner_1["employee_name"], 900, 10)
     set_assignment_status(assignment_3["id"], "accepted")
 
     # Order 3 — Выполнен, передан: срок был соблюдён (completed_at раньше
@@ -282,7 +286,7 @@ def seed(appmod, db, db_path=None, client=None):
         phone="+78121112233",
     )
     set_order_status(order_c["id"], "in_progress")
-    assignment_4 = assign(order_c["id"], items_c[0]["id"], tuner_2["employee_name"], 20000, 12)
+    assignment_4 = assign(order_c["id"], items_c[0]["id"], tuner_2["employee_name"], 1200, 12)
     set_assignment_status(assignment_4["id"], "accepted")
     set_assignment_status(assignment_4["id"], "done")
     set_order_status(order_c["id"], "done")
@@ -320,6 +324,9 @@ def seed(appmod, db, db_path=None, client=None):
     project_a = db.execute(
         "SELECT id FROM projects WHERE tuning_order_id = ?", (order_a["id"],)
     ).fetchone()["id"]
+    project_b = db.execute(
+        "SELECT id FROM projects WHERE tuning_order_id = ?", (order_b["id"],)
+    ).fetchone()["id"]
     project_c = db.execute(
         "SELECT id FROM projects WHERE tuning_order_id = ?", (order_c["id"],)
     ).fetchone()["id"]
@@ -328,6 +335,7 @@ def seed(appmod, db, db_path=None, client=None):
     ).fetchone()["id"]
     today = _today_offset(0)
     add_transaction(today, "in", 46000, "Смирнов Алексей", "Предоплата по заказу", project_a)
+    add_transaction(today, "in", 25000, "Козлова Мария", "Предоплата по заказу", project_b)
     add_transaction(today, "in", 91600, "ООО «Паруса Балтики»", "Оплата заказа полностью", project_c)
     # Отменённый заказ: транзакция есть, но проект не должен попасть в
     # подсчёт Аналитики — так проверяется фильтр по статусу заказа.
