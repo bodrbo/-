@@ -748,10 +748,15 @@ def get_work_item_photos(db, item_id):
     ]
 
 
-def format_money(value, decimals=2):
+def format_money(value, decimals=0):
     """Format a number with a thin space as the thousands separator and,
     when decimals > 0, a comma as the decimal separator (Russian convention
-    — Python's f-string grouping only gives us a period)."""
+    — Python's f-string grouping only gives us a period). Every money
+    display in the system goes through this (the |money filter, or this
+    function called directly) with decimals left at the default — whole
+    rubles, no kopecks. Some call sites pass decimals=2 deliberately (e.g.
+    the transaction-split mismatch message) where exact kopeck-level
+    amounts matter for the message to make sense; those are unaffected."""
     try:
         value = float(value)
     except (TypeError, ValueError):
