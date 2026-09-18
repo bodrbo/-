@@ -4143,6 +4143,7 @@ def unmark_paid():
 
 @app.route("/pay/tbank", methods=["POST"])
 @admin_login_required
+@no_real_data_for_demo_tenant
 def tbank_create_payout():
     employee = request.form.get("employee", "").strip()
     period_key = request.form.get("week", "").strip()
@@ -4161,6 +4162,7 @@ def tbank_create_payout():
 
 @app.route("/pay/tbank/<int:payout_id>/status", methods=["POST"])
 @admin_login_required
+@no_real_data_for_demo_tenant
 def tbank_check_payout_status(payout_id):
     employee_filter = request.form.get("employee_filter", "all")
     db = get_db()

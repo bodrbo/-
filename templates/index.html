@@ -245,7 +245,11 @@
       <span class="k">{{ employee }}</span>
       <span class="v">{{ sum|money }} ₽</span>
       {% if is_paid %}<span class="paid-badge">Оплачено</span>{% endif %}
-      {% if selected_week != 'all' and tbank_configured %}
+      {% if selected_week != 'all' and is_demo_tenant %}
+      <div class="tbank-payout-row" onclick="event.stopPropagation();">
+        <button type="button" class="btn-secondary btn-small" onclick="openTbankDemoModal()">Отправить в Т-Банк</button>
+      </div>
+      {% elif selected_week != 'all' and tbank_configured %}
       {% set tp = tbank_payouts.get(employee) %}
       <div class="tbank-payout-row" onclick="event.stopPropagation();">
         {% if tp and tp.status == 'created' %}
@@ -303,6 +307,21 @@
     <input type="hidden" name="week" id="payFormWeek">
     <input type="hidden" name="employee_filter" value="{{ selected_employee }}">
   </form>
+  {% endif %}
+
+  {% if is_demo_tenant %}
+  <div class="confirm-modal" id="tbankDemoModal" aria-hidden="true">
+    <div class="confirm-modal-backdrop" data-tbank-demo-modal-close></div>
+    <div class="confirm-modal-box" role="dialog" aria-modal="true" aria-labelledby="tbankDemoModalText">
+      <p class="confirm-modal-text" id="tbankDemoModalText">
+        Банк пока не подключён. В полной версии можно будет интегрироваться с вашим
+        банковским счётом и автоматически отправлять выплаты сотрудникам.
+      </p>
+      <div class="confirm-modal-actions">
+        <button type="button" class="btn-primary" data-tbank-demo-modal-close>Понятно</button>
+      </div>
+    </div>
+  </div>
   {% endif %}
 
   <section class="panel">
@@ -413,6 +432,28 @@ document.addEventListener('DOMContentLoaded', function () {
     applyProjectItems(projectSelect, {{ (form_values.work_type if form_values else '')|tojson }});
   }
 });
+
+function openTbankDemoModal() {
+  var modal = document.getElementById('tbankDemoModal');
+  if (!modal) return;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+(function () {
+  var tbankModal = document.getElementById('tbankDemoModal');
+  if (!tbankModal) return;
+  function closeTbankDemoModal() {
+    tbankModal.classList.remove('open');
+    tbankModal.setAttribute('aria-hidden', 'true');
+  }
+  tbankModal.querySelectorAll('[data-tbank-demo-modal-close]').forEach(function (el) {
+    el.addEventListener('click', closeTbankDemoModal);
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && tbankModal.classList.contains('open')) closeTbankDemoModal();
+  });
+})();
 
 (function () {
   var modal = document.getElementById('payModal');
