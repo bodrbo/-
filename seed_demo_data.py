@@ -44,6 +44,7 @@ the shared process's own unconditional init_db() again.)
 import argparse
 import datetime as dt
 import os
+import sqlite3
 import sys
 
 DB_PATH_ENV = "WORKHOURS_DB_PATH"
@@ -51,6 +52,28 @@ DB_PATH_ENV = "WORKHOURS_DB_PATH"
 
 def _today_offset(days):
     return (dt.date.today() + dt.timedelta(days=days)).isoformat()
+
+
+def _real_catalog_model_names(appmod, equipment_type, limit):
+    """Real tuning_boat_profiles model names (appmod.DB_PATH — the shared/
+    main database, not the tenant db this script is populating) so seeded
+    orders reference actual catalog cards with real photos/specs — see
+    _tuning_catalog_db in app.py. Falls back to [] (caller then uses its
+    own made-up names) when the shared catalog can't be read or has too
+    few entries — this also keeps a standalone demo deployment (where
+    appmod.DB_PATH IS the database being seeded, and so has no catalog yet
+    at seed time) working exactly as before."""
+    try:
+        conn = sqlite3.connect(appmod.DB_PATH)
+        rows = conn.execute(
+            "SELECT model_name FROM tuning_boat_profiles WHERE equipment_type = ? "
+            "ORDER BY model_name COLLATE NOCASE LIMIT ?",
+            (equipment_type, limit),
+        ).fetchall()
+        conn.close()
+        return [row[0] for row in rows]
+    except sqlite3.Error:
+        return []
 
 
 def main():
@@ -126,6 +149,21 @@ def seed(appmod, db, db_path=None, client=None):
     db.execute("DELETE FROM admin_accounts")
     db.commit()
 
+    # Prefer real catalog model names (real photos/specs, see
+    # _tuning_catalog_db in app.py) over made-up ones, so a demo tenant's
+    # seeded orders point at actual catalog cards — falling back to the
+    # made-up names for whichever slots the real catalog can't fill.
+    fallback_boat_models = [
+        "RIB Тюнинг-Про 780", "Wellboat Крым 620",
+        "Каютный катер Норд 850", "Лодка ПВХ 380",
+    ]
+    boat_models = (
+        _real_catalog_model_names(appmod, "boat", len(fallback_boat_models))
+        + fallback_boat_models
+    )[:len(fallback_boat_models)]
+    real_motor_models = _real_catalog_model_names(appmod, "motor", 1)
+    motor_model = real_motor_models[0] if real_motor_models else "Мотор Yamaha 115"
+
     if client is None:
         client = appmod.app.test_client()
         with client.session_transaction() as sess:
@@ -161,11 +199,15 @@ def seed(appmod, db, db_path=None, client=None):
     tuner_2 = add_employee("Пётр Механиков", "Тюнингмэн")
 
     # ---- Тюнинг-центр: заказы в разных статусах ----------------------
-    def add_order(client_name, boat_model, deadline_offset_days, items, phone="+79001234567"):
+    def add_order(
+        client_name, boat_model, deadline_offset_days, items,
+        phone="+79001234567", equipment_type="boat",
+    ):
         data = {
             "client_name": client_name,
-            "equipment_type": "boat",
-            "boat_model": boat_model,
+            "equipment_type": equipment_type,
+            "boat_model": boat_model if equipment_type == "boat" else "",
+            "motor_model": boat_model if equipment_type == "motor" else "",
             "boat_registration_number": "",
             "phone": phone,
             "sale_channel": "direct",
@@ -208,7 +250,7 @@ def seed(appmod, db, db_path=None, client=None):
     # и оплачена, вторая в работе — показывает начисление гонорара и
     # разные статусы задач в одной работе.
     order_a, items_a = add_order(
-        "Смирнов Алексей", "RIB Тюнинг-Про 780", deadline_offset_days=5,
+        "Смирнов Алексей", boat_models[0], deadline_offset_days=5,
         items=[("Полировка корпуса", 15000, 2), ("Замена уплотнений", 8000, 1.8)],
         phone="+79001112233",
     )
@@ -224,7 +266,7 @@ def seed(appmod, db, db_path=None, client=None):
     # Order 2 — В работе, срок просрочен (демонстрирует подсветку и
     # тултип «Заказ был просрочен»), задача ещё не начата.
     order_b, items_b = add_order(
-        "Козлова Мария", "Wellboat Крым 620", deadline_offset_days=-3,
+        "Козлова Мария", boat_models[1], deadline_offset_days=-3,
         items=[("Ремонт транца", 20000, 2.2)],
         phone="+79007654321",
     )
@@ -235,7 +277,7 @@ def seed(appmod, db, db_path=None, client=None):
     # Order 3 — Выполнен, передан: срок был соблюдён (completed_at раньше
     # deadline_date), задача выполнена и оплачена.
     order_c, items_c = add_order(
-        "ООО «Паруса Балтики»", "Каютный катер Норд 850", deadline_offset_days=2,
+        "ООО «Паруса Балтики»", boat_models[2], deadline_offset_days=2,
         items=[("Установка навигации", 35000, 1.6)],
         phone="+78121112233",
     )
@@ -248,7 +290,7 @@ def seed(appmod, db, db_path=None, client=None):
 
     # Order 4 — Отменён: проверяет, что Аналитика его не считает.
     order_d, items_d = add_order(
-        "Тестовый Клиент", "Лодка ПВХ 380", deadline_offset_days=10,
+        "Тестовый Клиент", boat_models[3], deadline_offset_days=10,
         items=[("Диагностика", 3000, 1.5)],
         phone="+79009998877",
     )
@@ -256,9 +298,9 @@ def seed(appmod, db, db_path=None, client=None):
 
     # Order 5 — просто новая заявка, без движения: показывает воронку.
     add_order(
-        "Фёдоров Никита", "Мотор Yamaha 115", deadline_offset_days=14,
+        "Фёдоров Никита", motor_model, deadline_offset_days=14,
         items=[("Расчёт стоимости работ", 0, 0)],
-        phone="+79005554433",
+        phone="+79005554433", equipment_type="motor",
     )
 
     # ---- Финансы: транзакции по проектам (для Аналитики) -------------

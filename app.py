@@ -1624,14 +1624,29 @@ def get_shared_db():
     """Always the shared/main database, ignoring any demo-tenant session
     override — for the handful of things that must stay one common pool
     across every demo tenant and the real business rather than isolated
-    per tenant like everything else (see get_db()). Currently just the
-    software-request journal (modules/software_requests): a demo tenant's
+    per tenant like everything else (see get_db()). Used by: the
+    software-request journal (modules/software_requests, a demo tenant's
     own feedback should land in the one list the real admin already
-    reads, not vanish into their private per-tenant database."""
+    reads); and read-only lookups into the real tuning_boat_profiles
+    catalog (see _tuning_catalog_db) — real photos/specs are shown, but
+    never real orders, which always come from the tenant's own get_db()."""
     if "shared_db" not in g:
         g.shared_db = sqlite3.connect(DB_PATH)
         g.shared_db.row_factory = sqlite3.Row
     return g.shared_db
+
+
+def _tuning_catalog_db():
+    """Where to read tuning_boat_profiles (boat/motor catalog: name, photo,
+    specs) from. A demo tenant sees the real catalog — its photos and
+    specs are the whole point of the "tastier demo" — via get_shared_db(),
+    without cloning a potentially large table (with photo files) into
+    every tenant's own database. Everything ORDER-related (which models
+    have orders, their counts/totals, the orders themselves) must still
+    come from the tenant's own get_db() — joining shared-catalog rows
+    against real orders would leak exactly the customer data this whole
+    demo-tenant system exists to keep isolated."""
+    return get_shared_db() if session.get("demo_tenant_id") else get_db()
 
 
 @app.teardown_appcontext
@@ -7662,8 +7677,11 @@ def _render_tuning_equipment_catalog(equipment_type):
                 _tuning_equipment_profile_key(equipment_type, model_name), []
             ).append(order)
 
+    # Real catalog rows (name/photo/specs) for a demo tenant, but the
+    # order matching just above is always against the tenant's own
+    # get_db() — see _tuning_catalog_db.
     profiles = []
-    for row in db.execute(
+    for row in _tuning_catalog_db().execute(
         "SELECT * FROM tuning_boat_profiles WHERE equipment_type = ? "
         "ORDER BY model_name COLLATE NOCASE",
         (equipment_type,),
@@ -7704,7 +7722,9 @@ def tuning_motor_catalog():
 
 def _render_tuning_equipment_profile(profile_id, expected_type):
     db = get_db()
-    profile_row = db.execute(
+    # Real catalog row for a demo tenant (see _tuning_catalog_db) — every
+    # order looked up further down stays on db, the tenant's own.
+    profile_row = _tuning_catalog_db().execute(
         "SELECT * FROM tuning_boat_profiles WHERE id = ?", (profile_id,)
     ).fetchone()
     if profile_row is None:
@@ -7811,6 +7831,7 @@ def tuning_motor_profile(profile_id):
 @app.route("/tuning/boats/<int:profile_id>/edit", methods=["POST"])
 @app.route("/tuning/equipment/<int:profile_id>/edit", methods=["POST"])
 @admin_login_required
+@no_real_data_for_demo_tenant
 def update_tuning_boat_profile(profile_id):
     db = get_db()
     profile = db.execute(
@@ -7969,6 +7990,7 @@ def update_tuning_boat_profile(profile_id):
 
 @app.route("/tuning/equipment/<int:profile_id>/type", methods=["POST"])
 @admin_login_required
+@no_real_data_for_demo_tenant
 def update_tuning_equipment_profile_type(profile_id):
     db = get_db()
     profile = db.execute(
