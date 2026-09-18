@@ -445,9 +445,8 @@
             <button type="submit" class="btn-reject">Отклонить</button>
           </form>
         </div>
-        {% elif task.assignment_status == 'accepted' %}
+        {% elif task.kind == 'defect' and task.assignment_status == 'accepted' %}
         <div class="team-task-status-row">
-          {% if task.kind == 'defect' %}
           <span class="status-badge status-defect-{{ task.defect_status }}">
             {{ defect_statuses|selectattr('value', 'equalto', task.defect_status)|map(attribute='label')|first }}
           </span>
@@ -460,21 +459,23 @@
               {% endfor %}
             </select>
           </form>
-          {% else %}
-          <span class="status-badge status-{{ task.item_status }}">
-            {{ work_statuses|selectattr('value', 'equalto', task.item_status)|map(attribute='label')|first }}
-          </span>
+        </div>
+        {% elif task.kind == 'tuning' and task.assignment_status in ('accepted', 'in_progress') %}
+        <div class="team-task-status-row">
           <form action="{{ url_for('team_tuning_task_set_status', assignment_id=task.id) }}"
                 method="post" class="status-select-form">
             {% if can_access_fleet %}<input type="hidden" name="boat_index" value="{{ boat_index }}">{% endif %}
             <select name="status" onchange="this.form.submit()">
-              {% for s in work_statuses %}
-              <option value="{{ s.value }}" {{ 'selected' if task.item_status == s.value }}
-                      {{ 'disabled' if s.value == 'removed' and task.item_status != 'removed' }}>{{ s.label }}</option>
+              <option value="accepted" disabled {{ 'selected' if task.assignment_status == 'accepted' }}>Принята</option>
+              {% for s in tuning_progress_statuses %}
+              <option value="{{ s.value }}" {{ 'selected' if task.assignment_status == s.value }}>{{ s.label }}</option>
               {% endfor %}
             </select>
           </form>
-          {% endif %}
+        </div>
+        {% elif task.kind == 'tuning' and task.assignment_status == 'done' %}
+        <div class="team-task-status-row">
+          <span class="status-badge status-supplyreq-delivered">Выполнена</span>
         </div>
         {% if task.kind == 'tuning' %}
         <div class="team-task-material-row">
