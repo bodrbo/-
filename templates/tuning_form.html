@@ -60,7 +60,9 @@
     {{ (item.price|money ~ ' ₽') if item and not item.price_pending else 'Ждёт расчёта' }}
   </span>
   {% endif %}
-  <button type="button" class="btn-delete" onclick="removeWorkRow(this)" title="Убрать работу">✕</button>
+  <button type="button" class="btn-delete" onclick="removeWorkRow(this)" title="Убрать работу">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+  </button>
 </div>
 {% endmacro %}
 
@@ -95,7 +97,7 @@
   <button type="button" class="icon-btn danger boat-motor-remove"
           onclick="removeBoatMotorRow(this)" title="Убрать мотор" aria-label="Убрать мотор">
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M4 6h12M8 6V4h4v2M6 6l1 11h6l1-11M9 9v5M11 9v5"/>
+      <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
     </svg>
   </button>
 </div>
@@ -786,6 +788,7 @@
 
       <div class="form-group">
         <div class="form-group-label"><span class="n">1</span>Клиент</div>
+
         <div class="field-row-inner">
         <div class="field" data-tuning-client-combo>
           <label for="client_name_search">Клиент тюнинга</label>
@@ -814,6 +817,12 @@
           </div>
           <span class="field-context">Выберите клиента из базы тюнинга или введите нового.</span>
         </div>
+        <div class="field field-narrow">
+          <label for="phone">Телефон</label>
+          <input type="text" id="phone" name="phone" inputmode="tel" data-tuning-client-phone
+                 value="{{ form_values.phone if form_values else '' }}">
+          <span class="field-context">Необязательно</span>
+        </div>
         <fieldset class="field equipment-type-field">
           <legend>Тип техники</legend>
           <div class="equipment-type-switch">
@@ -829,6 +838,9 @@
             </label>
           </div>
         </fieldset>
+        </div>
+
+        <div class="field-row-inner" style="margin-top:16px;">
         <div class="field" id="boatModelField" {{ 'hidden' if selected_equipment_type == 'motor' }}>
           <div class="field-label-with-link">
             <label for="boat_model_search">Модель лодки</label>
@@ -858,29 +870,12 @@
           </div>
           <span class="field-context">Выберите модель из каталога или введите название новой.</span>
         </div>
-        <div class="field" id="boatRegistrationNumberField" {{ 'hidden' if selected_equipment_type == 'motor' }}>
+        <div class="field field-narrow" id="boatRegistrationNumberField" {{ 'hidden' if selected_equipment_type == 'motor' }}>
           <label for="boat_registration_number">Бортовой номер</label>
           <input type="text" id="boat_registration_number" name="boat_registration_number"
                  value="{{ form_values.boat_registration_number if form_values else '' }}"
                  placeholder="Например: Р 12-34 ЛО">
           <span class="field-context">Необязательно</span>
-        </div>
-        <div class="field-wide boat-motors-field" id="boatMotorsField" {{ 'hidden' if selected_equipment_type == 'motor' }}>
-          <div class="boat-motors-heading">
-            <div>
-              <span class="field-static-label">Моторы</span>
-              <span class="field-context">Необязательно. Можно указать несколько моторов и их серийные номера.</span>
-            </div>
-            <button type="button" class="btn-add" onclick="addBoatMotorRow()">Добавить мотор</button>
-          </div>
-          <div id="boat-motors-container">
-            {% if boat_motors_prefill %}
-              {% for motor in boat_motors_prefill %}{{ boat_motor_row(motor) }}{% endfor %}
-            {% else %}
-              {{ boat_motor_row() }}
-            {% endif %}
-          </div>
-          <template id="boat-motor-row-template">{{ boat_motor_row() }}</template>
         </div>
         <div class="field" id="motorModelField" {{ 'hidden' if selected_equipment_type != 'motor' }}>
           <div class="field-label-with-link">
@@ -911,19 +906,36 @@
           </div>
           <span class="field-context">Выберите мотор из каталога или введите новую модель.</span>
         </div>
-        <div class="field" id="motorSerialNumberField" {{ 'hidden' if selected_equipment_type != 'motor' }}>
+        <div class="field field-narrow" id="motorSerialNumberField" {{ 'hidden' if selected_equipment_type != 'motor' }}>
           <label for="motor_serial_number">Серийный номер</label>
           <input type="text" id="motor_serial_number" name="motor_serial_number"
                  value="{{ form_values.motor_serial_number if form_values else '' }}"
                  placeholder="Указан на шильдике мотора">
           <span class="field-context">Необязательно</span>
         </div>
-        <div class="field field-narrow">
-          <label for="phone">Телефон</label>
-          <input type="text" id="phone" name="phone" inputmode="tel" data-tuning-client-phone
-                 value="{{ form_values.phone if form_values else '' }}">
-          <span class="field-context">Необязательно</span>
         </div>
+
+        <div class="field-row-inner" style="margin-top:16px;">
+        <div class="field-wide boat-motors-field" id="boatMotorsField" {{ 'hidden' if selected_equipment_type == 'motor' }}>
+          <div class="boat-motors-heading">
+            <div>
+              <span class="field-static-label">Моторы</span>
+              <span class="field-context">Необязательно. Можно указать несколько моторов и их серийные номера.</span>
+            </div>
+            <button type="button" class="btn-add" onclick="addBoatMotorRow()">Добавить мотор</button>
+          </div>
+          <div id="boat-motors-container">
+            {% if boat_motors_prefill %}
+              {% for motor in boat_motors_prefill %}{{ boat_motor_row(motor) }}{% endfor %}
+            {% else %}
+              {{ boat_motor_row() }}
+            {% endif %}
+          </div>
+          <template id="boat-motor-row-template">{{ boat_motor_row() }}</template>
+        </div>
+        </div>
+
+        <div class="field-row-inner" style="margin-top:16px;">
         <div class="field field-narrow">
           <label for="order_date">Дата заказа</label>
           <input type="date" id="order_date" name="order_date"
@@ -936,7 +948,7 @@
                  value="{{ form_values.deadline_date if form_values and form_values.deadline_date else '' }}">
           <span class="field-context">Необязательно. Видно клиенту</span>
         </div>
-        <div class="field">
+        <div class="field field-narrow">
           <label for="sale_channel">Канал продажи</label>
           <select id="sale_channel" name="sale_channel">
             {% for c in sale_channels %}
@@ -1080,7 +1092,9 @@
               </select>
               <input type="text" name="rate[]" class="assign-row-rate" inputmode="decimal" placeholder="Ставка, ₽" required>
               <input type="text" name="norm_hours[]" class="assign-row-hours" inputmode="decimal" placeholder="Нормочасы" required>
-              <button type="button" class="btn-delete" onclick="removeAssignEmployeeRow(this)" title="Убрать сотрудника">✕</button>
+              <button type="button" class="btn-delete" onclick="removeAssignEmployeeRow(this)" title="Убрать сотрудника">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+              </button>
             </div>
           </div>
           <template id="assign-row-template">
@@ -1093,7 +1107,9 @@
               </select>
               <input type="text" name="rate[]" class="assign-row-rate" inputmode="decimal" placeholder="Ставка, ₽" required>
               <input type="text" name="norm_hours[]" class="assign-row-hours" inputmode="decimal" placeholder="Нормочасы" required>
-              <button type="button" class="btn-delete" onclick="removeAssignEmployeeRow(this)" title="Убрать сотрудника">✕</button>
+              <button type="button" class="btn-delete" onclick="removeAssignEmployeeRow(this)" title="Убрать сотрудника">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+              </button>
             </div>
           </template>
           <button type="button" class="btn-add" onclick="addAssignEmployeeRow()">Добавить сотрудника</button>

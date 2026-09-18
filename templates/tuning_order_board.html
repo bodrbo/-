@@ -177,7 +177,9 @@
               </select>
               <input type="text" name="rate[]" class="assign-row-rate" inputmode="decimal" placeholder="Ставка, ₽" required>
               <input type="text" name="norm_hours[]" class="assign-row-hours" inputmode="decimal" placeholder="Нормочасы" required>
-              <button type="button" class="btn-delete" onclick="removeAssignEmployeeRow(this)" title="Убрать сотрудника">✕</button>
+              <button type="button" class="btn-delete" onclick="removeAssignEmployeeRow(this)" title="Убрать сотрудника">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+              </button>
             </div>
           </div>
           <template id="assign-row-template">
@@ -190,7 +192,9 @@
               </select>
               <input type="text" name="rate[]" class="assign-row-rate" inputmode="decimal" placeholder="Ставка, ₽" required>
               <input type="text" name="norm_hours[]" class="assign-row-hours" inputmode="decimal" placeholder="Нормочасы" required>
-              <button type="button" class="btn-delete" onclick="removeAssignEmployeeRow(this)" title="Убрать сотрудника">✕</button>
+              <button type="button" class="btn-delete" onclick="removeAssignEmployeeRow(this)" title="Убрать сотрудника">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+              </button>
             </div>
           </template>
           <button type="button" class="btn-add" onclick="addAssignEmployeeRow()">Добавить сотрудника</button>

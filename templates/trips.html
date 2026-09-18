@@ -64,7 +64,9 @@
          value="{{ item.quantity if item else '' }}" required>
   <input type="text" inputmode="decimal" name="rate[]" class="labor-rate" placeholder="Ставка, ₽"
          value="{{ item.rate if item else '' }}" required>
-  <button type="button" class="btn-delete" onclick="{{ remove_handler }}(this)" title="Убрать сотрудника">✕</button>
+  <button type="button" class="btn-delete" onclick="{{ remove_handler }}(this)" title="Убрать сотрудника">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+  </button>
 </div>
 {% endmacro %}
 
@@ -226,7 +228,9 @@
               <div class="expense-row">
                 <input type="text" name="expense_desc[]" value="{{ desc }}" placeholder="Например, ремонт">
                 <input type="text" name="expense_amount[]" value="{{ amt }}" placeholder="Сумма" inputmode="decimal">
-                <button type="button" class="btn-delete" onclick="this.parentElement.remove()">✕</button>
+                <button type="button" class="btn-delete" onclick="this.parentElement.remove()">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+                </button>
               </div>
               {% endfor %}
             {% endif %}
@@ -922,7 +926,9 @@ function addExpenseRow() {
   div.className = 'expense-row';
   div.innerHTML = '<input type="text" name="expense_desc[]" placeholder="Например, ремонт">' +
                   '<input type="text" name="expense_amount[]" placeholder="Сумма" inputmode="decimal">' +
-                  '<button type="button" class="btn-delete" onclick="this.parentElement.remove()">✕</button>';
+                  '<button type="button" class="btn-delete" onclick="this.parentElement.remove()">' +
+                  '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>' +
+                  '</button>';
   container.appendChild(div);
 }
 
@@ -1018,7 +1024,7 @@ function addEditExpenseRow(item) {
   remove.type = 'button';
   remove.className = 'btn-delete';
   remove.title = 'Убрать расход';
-  remove.textContent = '✕';
+  remove.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>';
   remove.addEventListener('click', function () { row.remove(); });
   row.appendChild(description);
   row.appendChild(amount);

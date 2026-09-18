@@ -115,13 +115,17 @@
       <div id="defects-container">
         <div class="defect-row">
           <input type="text" name="defect[]" placeholder="Например, скрипит уключина">
-          <button type="button" class="btn-delete" onclick="removeDefectRow(this)" title="Убрать">✕</button>
+          <button type="button" class="btn-delete" onclick="removeDefectRow(this)" title="Убрать">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+          </button>
         </div>
       </div>
       <template id="defect-row-template">
         <div class="defect-row">
           <input type="text" name="defect[]" placeholder="Например, скрипит уключина">
-          <button type="button" class="btn-delete" onclick="removeDefectRow(this)" title="Убрать">✕</button>
+          <button type="button" class="btn-delete" onclick="removeDefectRow(this)" title="Убрать">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+          </button>
         </div>
       </template>
       <button type="button" class="btn-add" onclick="addDefectRow()">Добавить ещё</button>

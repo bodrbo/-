@@ -152,14 +152,18 @@
           <div class="supply-request-row">
             <input type="text" name="item_name[]" placeholder="Наименование" class="supply-request-item">
             <input type="text" inputmode="decimal" name="quantity[]" placeholder="Количество" class="supply-request-quantity">
-            <button type="button" class="btn-delete" onclick="removeLockerDropRow(this)" title="Убрать позицию">✕</button>
+            <button type="button" class="btn-delete" onclick="removeLockerDropRow(this)" title="Убрать позицию">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+            </button>
           </div>
         </div>
         <template id="locker-drop-row-template">
           <div class="supply-request-row">
             <input type="text" name="item_name[]" placeholder="Наименование" class="supply-request-item">
             <input type="text" inputmode="decimal" name="quantity[]" placeholder="Количество" class="supply-request-quantity">
-            <button type="button" class="btn-delete" onclick="removeLockerDropRow(this)" title="Убрать позицию">✕</button>
+            <button type="button" class="btn-delete" onclick="removeLockerDropRow(this)" title="Убрать позицию">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+            </button>
           </div>
         </template>
         <button type="button" class="btn-add" onclick="addLockerDropRow()">Добавить позицию</button>

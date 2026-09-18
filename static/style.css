@@ -4244,8 +4244,8 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .field-row-inner {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
-  align-items: end;
+  gap: 16px 16px;
+  align-items: start;
 }
 
 .expense-row {
@@ -6711,7 +6711,24 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   border-top: 1px dashed var(--hairline);
 }
 .boat-motor-row .field { min-width: 0; }
-.boat-motor-remove { width: 38px; height: 42px; margin: 0; }
+/* Not inside ".row-actions", so it gets none of the unified icon-button
+   chrome from that selector — styled explicitly here instead of falling
+   back to the browser's own default button look. */
+.boat-motor-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 42px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.boat-motor-remove:hover { background: var(--danger); color: #fff8f4; border-color: var(--danger); }
 .boat-motor-remove svg { width: 16px; height: 16px; }
 @media (max-width: 700px) {
   .boat-motors-heading { align-items: flex-start; }
@@ -8041,18 +8058,26 @@ table.records td.amount, table.gloss td.amount { font-weight: 700; color: var(--
 table.gloss td.term { font-weight: 700; color: var(--ink); font-variant-numeric: normal; }
 
 /* "button." (not just ".btn-delete") so this out-specifies the generic
-   button[type="submit"] rule above for delete buttons that submit a form. */
+   button[type="submit"] rule above for delete buttons that submit a form.
+   Same look as the unified ".row-actions .icon-btn.danger" trash icon
+   used everywhere else, kept as its own class since .btn-delete removes
+   an unstaged row client-side (no confirm, no request) rather than
+   deleting a saved record. */
 button.btn-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
   background: none;
   border: 1px solid var(--hairline);
-  color: var(--danger);
+  color: var(--ink-soft);
   border-radius: 6px;
   width: 27px;
   height: 27px;
+  padding: 0;
   cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
 }
+button.btn-delete svg { width: 13px; height: 13px; }
 button.btn-delete:hover { background: var(--danger); color: #fff8f4; border-color: var(--danger); }
 
 /* --- unified icon buttons (table row actions) ---
