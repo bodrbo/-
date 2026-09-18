@@ -18638,10 +18638,29 @@ def _demo_tenant_module_gate():
     return None
 
 
+def _hex_color_is_dark(hex_color):
+    """Perceptual-luminance check on a #rgb/#rrggbb string — used to decide
+    whether text drawn straight in a demo tenant's accent color (not text
+    sitting ON a brass-colored surface, that's --on-accent's job) stays
+    legible when that accent is customized. See _demo_tenant_template_context."""
+    value = (hex_color or "").lstrip("#")
+    if len(value) == 3:
+        value = "".join(ch * 2 for ch in value)
+    if len(value) != 6:
+        return False
+    try:
+        r, g, b = (int(value[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return False
+    luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+    return luminance < 0.5
+
+
 @app.context_processor
 def _demo_tenant_template_context():
     tenant_id = session.get("demo_tenant_id")
     enabled = {m for m in (session.get("demo_tenant_modules") or "").split(",") if m} if tenant_id else None
+    accent_color = session.get("demo_tenant_accent_color") if tenant_id else None
 
     def demo_module_enabled(module_key):
         # No active tenant session (a real employee/admin) sees everything,
@@ -18655,7 +18674,8 @@ def _demo_tenant_template_context():
         "demo_tenant_logo": session.get("demo_tenant_logo") if tenant_id else None,
         "demo_tenant_empty_state_logo": session.get("demo_tenant_empty_state_logo") if tenant_id else None,
         "demo_tenant_favicon": session.get("demo_tenant_favicon") if tenant_id else None,
-        "demo_tenant_accent_color": session.get("demo_tenant_accent_color") if tenant_id else None,
+        "demo_tenant_accent_color": accent_color,
+        "demo_tenant_accent_is_dark": bool(accent_color) and _hex_color_is_dark(accent_color),
     }
 
 

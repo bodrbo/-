@@ -1,6 +1,17 @@
 {% if is_demo_tenant %}
 {% if demo_tenant_accent_color %}
-<style>:root { --brass: {{ demo_tenant_accent_color }}; --brass-strong: {{ demo_tenant_accent_color }}; }</style>
+<style>:root {
+  --brass: {{ demo_tenant_accent_color }};
+  --brass-strong: {{ demo_tenant_accent_color }};
+  {% if demo_tenant_accent_is_dark %}
+  /* A dark accent stays fine as text drawn ON the light panels most of the
+     site uses (--brass-strong there), but a few spots (like the "Осталось
+     доплатить" card) put that same color as text on a dark card — see
+     --brass-on-dark in style.css. Force it white there so it doesn't go
+     dark-on-dark. */
+  --brass-on-dark: #ffffff;
+  {% endif %}
+}</style>
 {% endif %}
 {% set favicon_logo = demo_tenant_favicon or demo_tenant_logo or demo_tenant_empty_state_logo %}
 {% if favicon_logo %}

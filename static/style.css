@@ -67,6 +67,13 @@
   --brass: #3498db;
   --brass-strong: #2e86c1;
   --on-accent: #ffffff;
+  /* --brass-strong used as text ON A DARK CARD (not on light panels,
+     that's most of the ~100 other --brass-strong uses and stays fine
+     regardless of accent) — normally the same blue reads fine on --ink,
+     but a demo tenant's own accent color could be dark, going dark-on-dark.
+     Defaults to --brass-strong (identical to today); overridden to white
+     only for a dark demo accent — see _topbar_brand.html. */
+  --brass-on-dark: var(--brass-strong);
   --danger: #b3402c;
   --success: #2f6b4f;
   --warning: #a8631a;
@@ -6328,7 +6335,7 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   background: var(--ink);
   border-color: var(--ink);
 }
-.total-card-grand .k { color: var(--brass-strong); }
+.total-card-grand .k { color: var(--brass-on-dark); }
 .total-card-grand .v { color: #eaf4fc; }
 .total-card-grand .d { color: rgba(234, 244, 252, .68); }
 
