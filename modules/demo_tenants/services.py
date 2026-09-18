@@ -12,6 +12,8 @@ from .constants import (
 )
 
 TENANT_NAME_MAX_LENGTH = 160
+USERNAME_MAX_LENGTH = 60
+PASSWORD_MIN_LENGTH = 6
 
 # Company names here are almost always Russian — without this, every
 # Cyrillic name collapses to the same empty slug ("tenant", "tenant-2", …),
@@ -53,6 +55,28 @@ def current_timestamp():
     return dt.datetime.now().strftime("%Y-%m-%d %H:%M")
 
 
+def _clean_accent_color(accent_color):
+    # Rendered straight into a <style> block (see _topbar_brand.html) —
+    # only accept a plain hex color, never whatever was typed/submitted.
+    accent_color = (accent_color or "").strip()
+    if not re.fullmatch(r"#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}", accent_color):
+        return ""
+    return accent_color
+
+
+def _validate_username(db, raw_username, exclude_id):
+    username = (raw_username or "").strip()
+    if not username:
+        return None, "Укажите логин."
+    if len(username) > USERNAME_MAX_LENGTH:
+        return None, f"Логин — не более {USERNAME_MAX_LENGTH} символов."
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", username):
+        return None, "Логин: только латинские буквы, цифры, точка, дефис и подчёркивание."
+    if repository.username_exists(db, username, exclude_id=exclude_id):
+        return None, "Такой логин уже занят другим демо-аккаунтом."
+    return username, None
+
+
 def create_tenant(
     db, raw_company_name, raw_modules, accent_color, logo_filename,
     tenant_db_dir, provision_db, seed_db=None,
@@ -68,11 +92,7 @@ def create_tenant(
         return False, f"Название — не более {TENANT_NAME_MAX_LENGTH} символов.", None
 
     modules = sorted({m for m in (raw_modules or []) if m in DEMO_MODULE_KEYS})
-    # Rendered straight into a <style> block (see _topbar_brand.html) —
-    # only accept a plain hex color, never whatever was typed/submitted.
-    accent_color = (accent_color or "").strip()
-    if not re.fullmatch(r"#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}", accent_color):
-        accent_color = ""
+    accent_color = _clean_accent_color(accent_color)
 
     slug = _unique_slug(db, _slugify(company_name))
     username = f"demo.{slug}"
@@ -94,6 +114,45 @@ def create_tenant(
         "tenant_id": tenant_id, "slug": slug,
         "username": username, "password": password,
     }
+
+
+def update_tenant(
+    db, tenant_id, raw_company_name, raw_modules, accent_color, logo_filename,
+    raw_username, raw_password,
+):
+    """logo_filename is the newly uploaded file's name, or None to keep
+    whatever the tenant already has. raw_password blank keeps the
+    existing password — only a non-empty value resets it."""
+    tenant = repository.get_tenant(db, tenant_id)
+    if tenant is None:
+        return False, "Демо-аккаунт не найден."
+
+    company_name = " ".join((raw_company_name or "").split())
+    if not company_name:
+        return False, "Укажите название компании."
+    if len(company_name) > TENANT_NAME_MAX_LENGTH:
+        return False, f"Название — не более {TENANT_NAME_MAX_LENGTH} символов."
+
+    username, error = _validate_username(db, raw_username, exclude_id=tenant_id)
+    if error:
+        return False, error
+
+    raw_password = (raw_password or "").strip()
+    password_hash = None
+    if raw_password:
+        if len(raw_password) < PASSWORD_MIN_LENGTH:
+            return False, f"Пароль — минимум {PASSWORD_MIN_LENGTH} символов."
+        password_hash = generate_password_hash(raw_password, method="pbkdf2:sha256")
+
+    modules = sorted({m for m in (raw_modules or []) if m in DEMO_MODULE_KEYS})
+    accent_color = _clean_accent_color(accent_color)
+    final_logo = logo_filename if logo_filename is not None else tenant["logo_filename"]
+
+    repository.update_tenant(
+        db, tenant_id, company_name, final_logo, accent_color,
+        ",".join(modules), username, password_hash,
+    )
+    return True, f"Демо-аккаунт «{company_name}» обновлён."
 
 
 def delete_tenant(db, tenant_id):

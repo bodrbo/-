@@ -16,6 +16,18 @@ def create_blueprint(
 ):
     blueprint = Blueprint("demo_tenants", __name__)
 
+    def _save_uploaded_logo():
+        file = request.files.get("logo")
+        if not (file and file.filename):
+            return None
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in DEMO_LOGO_EXTENSIONS:
+            return None
+        os.makedirs(tenant_logo_dir, exist_ok=True)
+        filename = f"{secrets.token_hex(8)}{ext}"
+        file.save(os.path.join(tenant_logo_dir, filename))
+        return filename
+
     @blueprint.route("/demo-admin/tenants")
     @admin_login_required
     def index():
@@ -36,14 +48,7 @@ def create_blueprint(
     @admin_login_required
     def create():
         db = get_db()
-        logo_filename = None
-        file = request.files.get("logo")
-        if file and file.filename:
-            ext = os.path.splitext(file.filename)[1].lower()
-            if ext in DEMO_LOGO_EXTENSIONS:
-                os.makedirs(tenant_logo_dir, exist_ok=True)
-                logo_filename = f"{secrets.token_hex(8)}{ext}"
-                file.save(os.path.join(tenant_logo_dir, logo_filename))
+        logo_filename = _save_uploaded_logo()
 
         success, message, credentials = services.create_tenant(
             db,
@@ -69,6 +74,55 @@ def create_blueprint(
         success, message = services.delete_tenant(db, tenant_id)
         session["demo_tenant_notice" if success else "demo_tenant_error"] = message
         return redirect(url_for("demo_tenants.index"))
+
+    @blueprint.route("/demo-admin/tenants/<int:tenant_id>/edit")
+    @admin_login_required
+    def edit(tenant_id):
+        db = get_db()
+        tenant = repository.get_tenant(db, tenant_id)
+        if tenant is None:
+            return redirect(url_for("demo_tenants.index"))
+        return render_template(
+            "demo_tenant_edit.html", active_page="demo_tenants",
+            tenant=dict(tenant, modules=services.enabled_module_set(tenant)),
+            demo_modules=DEMO_MODULES,
+            error=session.pop("demo_tenant_error", None),
+        )
+
+    @blueprint.route("/demo-admin/tenants/<int:tenant_id>/edit", methods=["POST"])
+    @admin_login_required
+    def update(tenant_id):
+        db = get_db()
+        tenant = repository.get_tenant(db, tenant_id)
+        if tenant is None:
+            return redirect(url_for("demo_tenants.index"))
+
+        new_logo_filename = _save_uploaded_logo()
+        success, message = services.update_tenant(
+            db, tenant_id,
+            request.form.get("company_name", ""),
+            request.form.getlist("modules"),
+            request.form.get("accent_color", ""),
+            new_logo_filename,
+            request.form.get("username", ""),
+            request.form.get("password", ""),
+        )
+        # Only drop the old file once the new one is safely referenced by a
+        # successful save — an upload that fails validation elsewhere in
+        # the form shouldn't silently orphan the tenant's current logo.
+        if success and new_logo_filename and tenant["logo_filename"]:
+            old_path = os.path.join(tenant_logo_dir, tenant["logo_filename"])
+            try:
+                if os.path.exists(old_path):
+                    os.remove(old_path)
+            except OSError:
+                pass
+
+        if success:
+            session["demo_tenant_notice"] = message
+            return redirect(url_for("demo_tenants.index"))
+        session["demo_tenant_error"] = message
+        return redirect(url_for("demo_tenants.edit", tenant_id=tenant_id))
 
     @blueprint.route("/demo/login", methods=["GET", "POST"])
     def login():

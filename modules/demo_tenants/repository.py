@@ -22,6 +22,17 @@ def slug_exists(db, slug):
     ).fetchone() is not None
 
 
+def username_exists(db, username, exclude_id=None):
+    if exclude_id is not None:
+        return db.execute(
+            "SELECT 1 FROM demo_tenants WHERE username = ? AND id != ?",
+            (username, exclude_id),
+        ).fetchone() is not None
+    return db.execute(
+        "SELECT 1 FROM demo_tenants WHERE username = ?", (username,)
+    ).fetchone() is not None
+
+
 def create_tenant(
     db, slug, company_name, logo_filename, accent_color, enabled_modules,
     username, password_hash, db_path, created_at,
@@ -36,6 +47,30 @@ def create_tenant(
     )
     db.commit()
     return cur.lastrowid
+
+
+def update_tenant(
+    db, tenant_id, company_name, logo_filename, accent_color, enabled_modules,
+    username, password_hash,
+):
+    """password_hash is None to leave the existing password untouched —
+    only overwritten when the admin actually typed a new one."""
+    if password_hash is not None:
+        db.execute(
+            "UPDATE demo_tenants SET company_name = ?, logo_filename = ?, "
+            "accent_color = ?, enabled_modules = ?, username = ?, password_hash = ? "
+            "WHERE id = ?",
+            (company_name, logo_filename, accent_color, enabled_modules,
+             username, password_hash, tenant_id),
+        )
+    else:
+        db.execute(
+            "UPDATE demo_tenants SET company_name = ?, logo_filename = ?, "
+            "accent_color = ?, enabled_modules = ?, username = ? WHERE id = ?",
+            (company_name, logo_filename, accent_color, enabled_modules,
+             username, tenant_id),
+        )
+    db.commit()
 
 
 def delete_tenant(db, tenant_id):

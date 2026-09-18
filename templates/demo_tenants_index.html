@@ -129,6 +129,7 @@
             </td>
             <td class="muted">{{ t.created_at }}</td>
             <td class="row-actions">
+              <a href="{{ url_for('demo_tenants.edit', tenant_id=t.id) }}" class="btn-secondary">Изменить</a>
               <form action="{{ url_for('demo_tenants.delete', tenant_id=t.id) }}" method="post"
                     onsubmit="return confirm('Удалить демо-аккаунт «' + {{ t.company_name|tojson }} + '» и его данные?');">
                 <button type="submit" class="icon-btn danger" title="Удалить">
