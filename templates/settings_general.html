@@ -38,7 +38,9 @@
 <main class="wrap software-requests-page">
   <nav class="sub-tabs software-settings-tabs" aria-label="Разделы настроек">
     <a href="{{ url_for('settings.index') }}" class="active">Общие настройки</a>
+    {% if not is_demo_tenant %}
     <a href="{{ url_for('software_requests.index') }}">Заявки на доработку софта</a>
+    {% endif %}
   </nav>
 
   {% if notice %}<p class="alert success">{{ notice }}</p>{% endif %}

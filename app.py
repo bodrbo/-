@@ -1615,11 +1615,28 @@ def get_db():
     return g.db
 
 
+def get_shared_db():
+    """Always the shared/main database, ignoring any demo-tenant session
+    override — for the handful of things that must stay one common pool
+    across every demo tenant and the real business rather than isolated
+    per tenant like everything else (see get_db()). Currently just the
+    software-request journal (modules/software_requests): a demo tenant's
+    own feedback should land in the one list the real admin already
+    reads, not vanish into their private per-tenant database."""
+    if "shared_db" not in g:
+        g.shared_db = sqlite3.connect(DB_PATH)
+        g.shared_db.row_factory = sqlite3.Row
+    return g.shared_db
+
+
 @app.teardown_appcontext
 def close_db(exception=None):
     db = g.pop("db", None)
     if db is not None:
         db.close()
+    shared_db = g.pop("shared_db", None)
+    if shared_db is not None:
+        shared_db.close()
 
 
 def init_db(db_path=None):
@@ -3836,6 +3853,21 @@ def no_real_data_for_demo_tenant(view):
     return wrapped
 
 
+def admin_only_no_demo_tenant(view):
+    """Admin-only, and refuses a demo-tenant session too even though it
+    already passes admin_login_required — for internal views that aren't
+    a toggleable module (see DEMO_MODULES) and that a demo viewer
+    specifically shouldn't reach, like the shared software-request
+    journal (every company's and every real employee's own requests).
+    404s for the same reason as no_real_data_for_demo_tenant."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if session.get("demo_tenant_id"):
+            abort(404)
+        return admin_login_required(view)(*args, **kwargs)
+    return wrapped
+
+
 def _active_team_account(db):
     team_id = session.get("team_id")
     if not team_id:
@@ -5147,8 +5179,8 @@ app.register_blueprint(
 # =======================================================================
 app.register_blueprint(
     create_software_requests_blueprint(
-        get_db=get_db,
-        admin_login_required=admin_login_required,
+        get_db=get_shared_db,
+        admin_only_no_demo_tenant=admin_only_no_demo_tenant,
         active_team_account=_active_team_account,
         active_admin_account=_active_admin_account,
         notify_employee=lambda *args, **kwargs: send_telegram_notification_to_employee(*args, **kwargs),

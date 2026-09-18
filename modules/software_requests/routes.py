@@ -16,7 +16,7 @@ DONE_PHOTO_FILENAME = "software-request-done.jpg"
 
 def create_blueprint(
     get_db,
-    admin_login_required,
+    admin_only_no_demo_tenant,
     active_team_account,
     active_admin_account,
     notify_employee,
@@ -90,7 +90,7 @@ def create_blueprint(
         return jsonify({"ok": True, "request_id": request_id}), 201
 
     @blueprint.route("/settings/software-requests")
-    @admin_login_required
+    @admin_only_no_demo_tenant
     def index():
         selected_status = request.args.get("status", "")
         if selected_status not in REQUEST_STATUSES:
@@ -109,7 +109,7 @@ def create_blueprint(
         )
 
     @blueprint.route("/settings/software-requests/<int:request_id>/status", methods=["POST"])
-    @admin_login_required
+    @admin_only_no_demo_tenant
     def set_status(request_id):
         status = request.form.get("status", "")
         if status in REQUEST_STATUSES:
