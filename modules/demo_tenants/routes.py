@@ -50,6 +50,7 @@ def create_blueprint(
         db = get_db()
         logo_filename = _save_uploaded_logo("logo")
         empty_state_logo_filename = _save_uploaded_logo("empty_state_logo")
+        favicon_filename = _save_uploaded_logo("favicon")
 
         success, message, credentials = services.create_tenant(
             db,
@@ -58,6 +59,7 @@ def create_blueprint(
             request.form.get("accent_color", ""),
             logo_filename,
             empty_state_logo_filename,
+            favicon_filename,
             tenant_db_dir,
             provision_tenant_db,
             seed_tenant_db if request.form.get("seed_demo_data") else None,
@@ -101,6 +103,7 @@ def create_blueprint(
 
         new_logo_filename = _save_uploaded_logo("logo")
         new_empty_state_logo_filename = _save_uploaded_logo("empty_state_logo")
+        new_favicon_filename = _save_uploaded_logo("favicon")
         success, message = services.update_tenant(
             db, tenant_id,
             request.form.get("company_name", ""),
@@ -108,6 +111,7 @@ def create_blueprint(
             request.form.get("accent_color", ""),
             new_logo_filename,
             new_empty_state_logo_filename,
+            new_favicon_filename,
             request.form.get("username", ""),
             request.form.get("password", ""),
         )
@@ -118,6 +122,7 @@ def create_blueprint(
             for new_filename, old_filename in (
                 (new_logo_filename, tenant["logo_filename"]),
                 (new_empty_state_logo_filename, tenant["empty_state_logo_filename"]),
+                (new_favicon_filename, tenant["favicon_filename"]),
             ):
                 if new_filename and old_filename:
                     old_path = os.path.join(tenant_logo_dir, old_filename)
@@ -156,6 +161,7 @@ def create_blueprint(
         session["demo_tenant_modules"] = tenant["enabled_modules"]
         session["demo_tenant_logo"] = tenant["logo_filename"]
         session["demo_tenant_empty_state_logo"] = tenant["empty_state_logo_filename"]
+        session["demo_tenant_favicon"] = tenant["favicon_filename"]
         session["demo_tenant_accent_color"] = tenant["accent_color"]
         return redirect(url_for("index"))
 

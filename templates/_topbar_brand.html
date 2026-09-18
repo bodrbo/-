@@ -2,6 +2,21 @@
 {% if demo_tenant_accent_color %}
 <style>:root { --brass: {{ demo_tenant_accent_color }}; --brass-strong: {{ demo_tenant_accent_color }}; }</style>
 {% endif %}
+{% set favicon_logo = demo_tenant_favicon or demo_tenant_logo or demo_tenant_empty_state_logo %}
+{% if favicon_logo %}
+<script>
+(function () {
+  var href = {{ url_for('static', filename='demo_logos/' + favicon_logo) | tojson }};
+  document.querySelectorAll('link[rel~="icon"], link[rel="shortcut icon"]').forEach(function (el) {
+    el.parentNode.removeChild(el);
+  });
+  var link = document.createElement('link');
+  link.rel = 'icon';
+  link.href = href;
+  document.head.appendChild(link);
+})();
+</script>
+{% endif %}
 <a href="{{ url_for('index') }}">
   {% if demo_tenant_logo %}
   <img src="{{ url_for('static', filename='demo_logos/' + demo_tenant_logo) }}" alt="{{ demo_tenant_company_name }}" class="brand-logo">

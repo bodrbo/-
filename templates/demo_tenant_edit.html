@@ -77,6 +77,18 @@
           {% endif %}
           <input type="file" id="empty_state_logo" name="empty_state_logo" accept=".png,.jpg,.jpeg,.svg,.webp">
         </div>
+        <div class="field">
+          <label for="favicon">Фавикон</label>
+          {% if tenant.favicon_filename %}
+          <p class="hint" style="margin:0 0 4px;">
+            <img src="{{ url_for('static', filename='demo_logos/' + tenant.favicon_filename) }}"
+                 alt="" style="height:28px; vertical-align:middle;"> сейчас загружен — выберите файл, чтобы заменить
+          </p>
+          {% else %}
+          <p class="hint" style="margin:0 0 4px;">Без него — логотип из шапки, а если и его нет — логотип для заглушек.</p>
+          {% endif %}
+          <input type="file" id="favicon" name="favicon" accept=".png,.jpg,.jpeg,.svg,.webp,.ico">
+        </div>
       </div>
 
       <div class="field-row-inner">

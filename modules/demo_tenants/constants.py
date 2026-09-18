@@ -32,4 +32,4 @@ DEMO_MODULE_PATH_PREFIXES = {
     "supply": ("/supply",),
 }
 
-DEMO_LOGO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".svg", ".webp"}
+DEMO_LOGO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".svg", ".webp", ".ico"}
