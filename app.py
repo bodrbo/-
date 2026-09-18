@@ -6144,6 +6144,17 @@ def _scaled_logo_flowable(logo_path, max_width, max_height):
 
 COMPANY_NAME = 'ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "БОДРЫЙ БОЦМАН"'
 COMPANY_ADDRESS = "197762, Россия, г Санкт-Петербург, г Кронштадт, ул Мануильского, 20 литера а, 2"
+
+
+def _document_company_identity():
+    """(name, address) to print on a generated document (акт, акт
+    приёма-передачи) — a demo tenant's own company name instead of ours,
+    with no address line at all (we don't have one to show, and printing
+    ours would be the exact leak this exists to avoid). Outside a
+    demo-tenant session, unchanged: our real registered name/address."""
+    if session.get("demo_tenant_id"):
+        return session.get("demo_tenant_name") or "Демо", None
+    return COMPANY_NAME, COMPANY_ADDRESS
 # Search context, coordinates and zoom from the shared Yandex URL are omitted:
 # the organisation id and add-review flag identify the same target while keeping
 # the printed QR substantially less dense and easier for phones to scan.
@@ -6464,8 +6475,10 @@ def _build_act_pdf(order, items, goods=()):
     if logo_flowable is not None:
         flow.append(logo_flowable)
     flow.append(Spacer(1, 12))
-    flow.append(Paragraph(f"<u>{COMPANY_NAME}</u>", style_company))
-    flow.append(Paragraph(COMPANY_ADDRESS, style_address))
+    doc_company_name, doc_company_address = _document_company_identity()
+    flow.append(Paragraph(f"<u>{doc_company_name}</u>", style_company))
+    if doc_company_address:
+        flow.append(Paragraph(doc_company_address, style_address))
     flow.append(Paragraph("Акт выполненных работ", style_title))
     flow.append(Paragraph(f"По заказу № {order['id']} от {order_date}", style_subtitle))
 
@@ -6666,8 +6679,10 @@ def _build_handover_act_pdf(order, items, goods=()):
     if logo_flowable is not None:
         flow.append(logo_flowable)
     flow.append(Spacer(1, 12))
-    flow.append(Paragraph(f"<u>{COMPANY_NAME}</u>", style_company))
-    flow.append(Paragraph(COMPANY_ADDRESS, style_address))
+    doc_company_name, doc_company_address = _document_company_identity()
+    flow.append(Paragraph(f"<u>{doc_company_name}</u>", style_company))
+    if doc_company_address:
+        flow.append(Paragraph(doc_company_address, style_address))
     flow.append(Paragraph("Акт приёма-передачи", style_title))
     flow.append(Paragraph(f"По заказу № {order['id']} от {order_date}", style_subtitle))
 
