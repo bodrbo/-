@@ -405,7 +405,7 @@
     </nav>
     {% else %}
     <div class="empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      {% include '_empty_state_logo.html' %}
       <div class="t">{{ 'По вашему запросу товары не найдены' if catalog_query else 'В этой категории пока нет товаров' if selected_category else 'В каталоге пока нет товаров' }}</div>
       <div class="s">{{ 'Измените запрос и повторите поиск.' if catalog_query else 'Назначьте категорию товарам или выберите другой раздел.' if selected_category else 'Добавьте первый товар через форму выше.' }}</div>
     </div>

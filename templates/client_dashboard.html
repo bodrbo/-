@@ -543,7 +543,7 @@
     </div>
     {% else %}
     <div class="empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      {% include '_empty_state_logo.html' %}
       <div class="t">{{ ('Входящих заявок пока нет' if partner_request_view == 'incoming' else 'Исходящих заявок пока нет') if is_tuning_partner else 'Заказов пока нет' }}</div>
       <div class="s">{{ ('Сюда попадут субподряды, которые Бодрый тюнинг-центр отправит партнёру.' if partner_request_view == 'incoming' else 'Создайте заявку на расчёт — после ответа она останется здесь как заказ.') if is_tuning_partner else 'Здесь появятся ваши заказы из тюнинг-центра.' }}</div>
     </div>

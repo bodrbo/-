@@ -211,7 +211,7 @@
     </div>
     {% else %}
     <div class="empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      {% include '_empty_state_logo.html' %}
       <div class="t">Пока пусто</div>
       <div class="s">Здесь появится всё, что лежит в этом постамате — возвраты сотрудников, доставленные заявки и то, что вы передали напрямую.</div>
     </div>

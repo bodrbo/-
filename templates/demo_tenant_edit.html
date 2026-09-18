@@ -56,7 +56,7 @@
           <input type="color" id="accent_color" name="accent_color" value="{{ tenant.accent_color or '#3498db' }}">
         </div>
         <div class="field">
-          <label for="logo">Логотип</label>
+          <label for="logo">Логотип в шапке</label>
           {% if tenant.logo_filename %}
           <p class="hint" style="margin:0 0 4px;">
             <img src="{{ url_for('static', filename='demo_logos/' + tenant.logo_filename) }}"
@@ -64,6 +64,18 @@
           </p>
           {% endif %}
           <input type="file" id="logo" name="logo" accept=".png,.jpg,.jpeg,.svg,.webp">
+        </div>
+        <div class="field">
+          <label for="empty_state_logo">Логотип для заглушек</label>
+          {% if tenant.empty_state_logo_filename %}
+          <p class="hint" style="margin:0 0 4px;">
+            <img src="{{ url_for('static', filename='demo_logos/' + tenant.empty_state_logo_filename) }}"
+                 alt="" style="height:28px; vertical-align:middle;"> сейчас загружен — выберите файл, чтобы заменить
+          </p>
+          {% else %}
+          <p class="hint" style="margin:0 0 4px;">Без него — логотип из шапки, а если и его нет — маскот.</p>
+          {% endif %}
+          <input type="file" id="empty_state_logo" name="empty_state_logo" accept=".png,.jpg,.jpeg,.svg,.webp">
         </div>
       </div>
 

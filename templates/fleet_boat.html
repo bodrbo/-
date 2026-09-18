@@ -131,7 +131,7 @@
       {% include '_fleet_defects_table.html' %}
       {% else %}
       <div class="empty-state">
-        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        {% include '_empty_state_logo.html' %}
         <div class="t">Текущих неисправностей нет</div>
         <div class="s">Все обнаруженные проблемы устранены.</div>
       </div>
@@ -148,7 +148,7 @@
     <div class="collapsible-body">
       {% if archived_defects_total == 0 and not archive_filter_from and not archive_filter_to %}
       <div class="empty-state">
-        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        {% include '_empty_state_logo.html' %}
         <div class="t">Архив пока пуст</div>
         <div class="s">Неисправности попадут сюда автоматически после получения статуса «Устранена».</div>
       </div>
@@ -221,7 +221,7 @@
       <div class="collapsible-body">
       {% if checklists_total == 0 and not checklist_filter_from and not checklist_filter_to %}
       <div class="empty-state">
-        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        {% include '_empty_state_logo.html' %}
         <div class="t">Осмотров пока нет</div>
         <div class="s">Здесь появятся предрейсовые и послерейсовые осмотры, пройденные капитанами.</div>
       </div>
@@ -411,7 +411,7 @@
       </div>
       {% else %}
       <div class="empty-state">
-        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        {% include '_empty_state_logo.html' %}
         <div class="t">Документов пока нет</div>
         <div class="s">Загрузите судовой билет, судовую роль или другие документы по судну.</div>
       </div>

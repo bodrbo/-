@@ -392,7 +392,7 @@
       </div>
       {% else %}
       <div class="empty-state">
-        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        {% include '_empty_state_logo.html' %}
         <div class="t">За выбранный период записей нет</div>
         <div class="s">Смените период в фильтре выше.</div>
       </div>
@@ -498,7 +498,7 @@
       {% endfor %}
       {% else %}
       <div class="empty-state">
-        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        {% include '_empty_state_logo.html' %}
         <div class="t">Задач пока нет</div>
         <div class="s">Порученные капитану или тюнингмэну задачи появятся здесь.</div>
       </div>
@@ -588,7 +588,7 @@
       {% endfor %}
       {% else %}
       <div class="empty-state">
-        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        {% include '_empty_state_logo.html' %}
         <div class="t">Заявок пока нет</div>
         <div class="s">Если чего-то не хватает на складе, создайте заявку кнопкой выше.</div>
       </div>

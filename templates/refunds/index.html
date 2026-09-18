@@ -28,7 +28,7 @@
 <header class="topbar">
   <div class="topbar-inner">
     <div class="topbar-top-row">
-      <div class="brand"><a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a></div>
+      <div class="brand">{% include '_topbar_brand.html' %}</div>
       <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>
       </button>
@@ -167,7 +167,7 @@
       </article>
       {% endfor %}
     {% else %}
-    <div class="empty-state"><img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo"><div class="t">Записей за период пока нет</div><div class="s">Обновите сверку или измените даты и фильтры.</div></div>
+    <div class="empty-state">{% include '_empty_state_logo.html' %}<div class="t">Записей за период пока нет</div><div class="s">Обновите сверку или измените даты и фильтры.</div></div>
     {% endif %}
   </section>
 

@@ -123,7 +123,7 @@
     </div>
     {% else %}
     <div class="empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      {% include '_empty_state_logo.html' %}
       <div class="t">Проектов пока нет</div>
       <div class="s">Проект появится сам, как только создадите заказ в тюнинг-центре.</div>
     </div>

@@ -3425,6 +3425,11 @@ def init_db(db_path=None):
         )
         """
     )
+    demo_tenant_cols = [
+        row[1] for row in conn.execute("PRAGMA table_info(demo_tenants)").fetchall()
+    ]
+    if "empty_state_logo_filename" not in demo_tenant_cols:
+        conn.execute("ALTER TABLE demo_tenants ADD COLUMN empty_state_logo_filename TEXT")
     conn.commit()
     conn.close()
 
@@ -18596,6 +18601,7 @@ def _demo_tenant_template_context():
         "demo_module_enabled": demo_module_enabled,
         "demo_tenant_company_name": session.get("demo_tenant_name") if tenant_id else None,
         "demo_tenant_logo": session.get("demo_tenant_logo") if tenant_id else None,
+        "demo_tenant_empty_state_logo": session.get("demo_tenant_empty_state_logo") if tenant_id else None,
         "demo_tenant_accent_color": session.get("demo_tenant_accent_color") if tenant_id else None,
     }
 

@@ -147,7 +147,7 @@
   </div>
   {% else %}
   <div class="panel empty-state">
-    <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+    {% include '_empty_state_logo.html' %}
     <div class="t">Работ пока нет</div>
     <div class="s">Добавьте работы в заказе — они появятся здесь как блоки.</div>
   </div>

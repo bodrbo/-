@@ -146,7 +146,7 @@
     </nav>
     {% else %}
     <div class="empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      {% include '_empty_state_logo.html' %}
       <div class="t">{{ 'По вашему запросу товары не найдены' if search_query else 'На складе пока пусто' }}</div>
       <div class="s">{{ 'Измените запрос и повторите поиск.' if search_query else 'Оприходуйте товары через страницу товара в каталоге.' }}</div>
     </div>

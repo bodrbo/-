@@ -19,7 +19,7 @@
 <header class="topbar">
   <div class="topbar-inner">
     <div class="topbar-top-row">
-      <div class="brand"><a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a></div>
+      <div class="brand">{% include '_topbar_brand.html' %}</div>
       <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>
       </button>
@@ -127,7 +127,7 @@
     </article>
     {% else %}
     <div class="panel empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      {% include '_empty_state_logo.html' %}
       <div class="t">В каталоге пока нет сопутствующих товаров</div>
       <div class="s">Добавьте первый товар выше.</div>
     </div>
@@ -239,7 +239,7 @@
     </article>
     {% else %}
     <div class="panel empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      {% include '_empty_state_logo.html' %}
       <div class="t">В этом подразделе пока нет услуг</div>
       <div class="s">Добавьте первую услугу с нужным способом расчёта выше.</div>
     </div>

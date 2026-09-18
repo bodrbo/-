@@ -261,7 +261,7 @@
     </div>
     {% else %}
     <div class="empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      {% include '_empty_state_logo.html' %}
       <div class="t">{{ contact_plural ~ ' не найдены' if search_query else contact_plural ~ ' пока отсутствуют' }}</div>
       <div class="s">{% if search_query %}Измените имя или номер телефона и повторите поиск.{% elif is_partner_directory %}Переведите нужный контакт в партнеры через поле «Тип контакта».{% elif client_section == 'excursion' %}Они появятся здесь после добавления первого клиента в рейс.{% else %}Они появятся здесь после создания первого тюнинг-заказа.{% endif %}</div>
     </div>

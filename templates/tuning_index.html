@@ -292,7 +292,7 @@
     </div>
     {% else %}
     <div class="empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      {% include '_empty_state_logo.html' %}
       <div class="t">{{ 'Заказы не найдены' if filters_active else 'Заказов пока нет' }}</div>
       <div class="s">{{ 'Измените условия или сбросьте фильтры.' if filters_active else 'Добавьте первый заказ кнопкой выше.' }}</div>
       {% if filters_active %}<a href="{{ url_for('tuning_index') }}" class="btn-secondary">Сбросить фильтры</a>{% endif %}
@@ -364,7 +364,7 @@
     </div>
     {% else %}
     <div class="empty-state">
-      <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+      {% include '_empty_state_logo.html' %}
       <div class="t">Субподрядов пока нет</div>
       <div class="s">Создайте заявку, выберите клиента и партнёра-исполнителя.</div>
       <a href="{{ url_for('add_tuning_subcontract') }}" class="btn-secondary">Добавить субподряд</a>

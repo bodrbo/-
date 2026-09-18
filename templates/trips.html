@@ -323,7 +323,7 @@
         </div>
         {% else %}
         <div class="empty-state">
-          <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+          {% include '_empty_state_logo.html' %}
           <div class="t">Нет записей, ожидающих подтверждения</div>
           <div class="s">Новые завершённые рейсы появятся автоматически; период выше можно проверить вручную.</div>
         </div>
@@ -506,7 +506,7 @@
       </div>
       {% else %}
       <div class="empty-state">
-        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        {% include '_empty_state_logo.html' %}
         <div class="t">Договоров пока нет</div>
         <div class="s">Заполните форму выше, чтобы сформировать первый.</div>
       </div>
@@ -624,7 +624,7 @@
         {% endfor %}
         {% else %}
         <div class="empty-state">
-          <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+          {% include '_empty_state_logo.html' %}
           <div class="t">За выбранный период рейсов нет</div>
           <div class="s">Добавьте рейс через форму выше или смените период/катер в фильтре.</div>
         </div>
@@ -691,7 +691,7 @@
         </div>
         {% else %}
         <div class="empty-state">
-          <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+          {% include '_empty_state_logo.html' %}
           <div class="t">За выбранный период записей нет</div>
           <div class="s">Добавьте рейс через форму выше или смените период/катер в фильтре.</div>
         </div>
@@ -738,7 +738,7 @@
       </div>
       {% else %}
       <div class="empty-state">
-        <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+        {% include '_empty_state_logo.html' %}
         <div class="t">Выплат пока не записано</div>
         <div class="s">Используйте форму «Записать выплату инвестору» в сводке по катерам выше.</div>
       </div>

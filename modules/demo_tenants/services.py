@@ -79,7 +79,7 @@ def _validate_username(db, raw_username, exclude_id):
 
 def create_tenant(
     db, raw_company_name, raw_modules, accent_color, logo_filename,
-    tenant_db_dir, provision_db, seed_db=None,
+    empty_state_logo_filename, tenant_db_dir, provision_db, seed_db=None,
 ):
     """provision_db(path) must build the tenant's own database schema at
     that path AND make sure no real admin/investor data ends up in it
@@ -105,7 +105,8 @@ def create_tenant(
         seed_db(db_path)
 
     tenant_id = repository.create_tenant(
-        db, slug, company_name, logo_filename or None, accent_color,
+        db, slug, company_name, logo_filename or None,
+        empty_state_logo_filename or None, accent_color,
         ",".join(modules), username,
         generate_password_hash(password, method="pbkdf2:sha256"),
         db_path, current_timestamp(),
@@ -118,11 +119,12 @@ def create_tenant(
 
 def update_tenant(
     db, tenant_id, raw_company_name, raw_modules, accent_color, logo_filename,
-    raw_username, raw_password,
+    empty_state_logo_filename, raw_username, raw_password,
 ):
-    """logo_filename is the newly uploaded file's name, or None to keep
-    whatever the tenant already has. raw_password blank keeps the
-    existing password — only a non-empty value resets it."""
+    """logo_filename / empty_state_logo_filename are the newly uploaded
+    files' names, or None each to keep whatever the tenant already has.
+    raw_password blank keeps the existing password — only a non-empty
+    value resets it."""
     tenant = repository.get_tenant(db, tenant_id)
     if tenant is None:
         return False, "Демо-аккаунт не найден."
@@ -147,10 +149,14 @@ def update_tenant(
     modules = sorted({m for m in (raw_modules or []) if m in DEMO_MODULE_KEYS})
     accent_color = _clean_accent_color(accent_color)
     final_logo = logo_filename if logo_filename is not None else tenant["logo_filename"]
+    final_empty_state_logo = (
+        empty_state_logo_filename if empty_state_logo_filename is not None
+        else tenant["empty_state_logo_filename"]
+    )
 
     repository.update_tenant(
-        db, tenant_id, company_name, final_logo, accent_color,
-        ",".join(modules), username, password_hash,
+        db, tenant_id, company_name, final_logo, final_empty_state_logo,
+        accent_color, ",".join(modules), username, password_hash,
     )
     return True, f"Демо-аккаунт «{company_name}» обновлён."
 

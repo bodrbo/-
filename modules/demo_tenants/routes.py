@@ -16,8 +16,8 @@ def create_blueprint(
 ):
     blueprint = Blueprint("demo_tenants", __name__)
 
-    def _save_uploaded_logo():
-        file = request.files.get("logo")
+    def _save_uploaded_logo(field_name):
+        file = request.files.get(field_name)
         if not (file and file.filename):
             return None
         ext = os.path.splitext(file.filename)[1].lower()
@@ -48,7 +48,8 @@ def create_blueprint(
     @admin_login_required
     def create():
         db = get_db()
-        logo_filename = _save_uploaded_logo()
+        logo_filename = _save_uploaded_logo("logo")
+        empty_state_logo_filename = _save_uploaded_logo("empty_state_logo")
 
         success, message, credentials = services.create_tenant(
             db,
@@ -56,6 +57,7 @@ def create_blueprint(
             request.form.getlist("modules"),
             request.form.get("accent_color", ""),
             logo_filename,
+            empty_state_logo_filename,
             tenant_db_dir,
             provision_tenant_db,
             seed_tenant_db if request.form.get("seed_demo_data") else None,
@@ -97,26 +99,33 @@ def create_blueprint(
         if tenant is None:
             return redirect(url_for("demo_tenants.index"))
 
-        new_logo_filename = _save_uploaded_logo()
+        new_logo_filename = _save_uploaded_logo("logo")
+        new_empty_state_logo_filename = _save_uploaded_logo("empty_state_logo")
         success, message = services.update_tenant(
             db, tenant_id,
             request.form.get("company_name", ""),
             request.form.getlist("modules"),
             request.form.get("accent_color", ""),
             new_logo_filename,
+            new_empty_state_logo_filename,
             request.form.get("username", ""),
             request.form.get("password", ""),
         )
         # Only drop the old file once the new one is safely referenced by a
         # successful save — an upload that fails validation elsewhere in
         # the form shouldn't silently orphan the tenant's current logo.
-        if success and new_logo_filename and tenant["logo_filename"]:
-            old_path = os.path.join(tenant_logo_dir, tenant["logo_filename"])
-            try:
-                if os.path.exists(old_path):
-                    os.remove(old_path)
-            except OSError:
-                pass
+        if success:
+            for new_filename, old_filename in (
+                (new_logo_filename, tenant["logo_filename"]),
+                (new_empty_state_logo_filename, tenant["empty_state_logo_filename"]),
+            ):
+                if new_filename and old_filename:
+                    old_path = os.path.join(tenant_logo_dir, old_filename)
+                    try:
+                        if os.path.exists(old_path):
+                            os.remove(old_path)
+                    except OSError:
+                        pass
 
         if success:
             session["demo_tenant_notice"] = message
@@ -146,6 +155,7 @@ def create_blueprint(
         session["demo_tenant_db_path"] = tenant["db_path"]
         session["demo_tenant_modules"] = tenant["enabled_modules"]
         session["demo_tenant_logo"] = tenant["logo_filename"]
+        session["demo_tenant_empty_state_logo"] = tenant["empty_state_logo_filename"]
         session["demo_tenant_accent_color"] = tenant["accent_color"]
         return redirect(url_for("index"))
 

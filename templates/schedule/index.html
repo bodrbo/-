@@ -24,9 +24,7 @@
 <header class="topbar schedule-topbar">
   <div class="topbar-inner">
     <div class="topbar-top-row">
-      <div class="brand">
-        <a href="{{ url_for('home') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Бодрый Боцман" class="brand-logo"></a>
-      </div>
+      <div class="brand">{% include '_topbar_brand.html' %}</div>
       {% if not team_view %}<button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>
       </button>{% endif %}
@@ -227,7 +225,7 @@
   <p class="schedule-board-hint">{% if can_manage %}Нажмите на карточку для редактирования или перетащите её по времени и между сотрудниками.{% elif can_view_clients %}Нажмите на карточку рейса, чтобы посмотреть экипаж и список клиентов.{% else %}Для изменений расписания обратитесь к администратору или менеджеру по работе с клиентами.{% endif %}</p>
   {% else %}
   <section class="panel empty-state schedule-empty">
-    <img src="{{ url_for('static', filename='mascot.png') }}" alt="" class="empty-logo">
+    {% include '_empty_state_logo.html' %}
     {% if crew and can_manage %}
     <div class="t">Состав на этот день пока не добавлен</div>
     <div class="s">Добавьте капитанов и гидов, которые работают {{ day_label }}.</div>

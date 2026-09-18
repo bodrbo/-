@@ -34,41 +34,42 @@ def username_exists(db, username, exclude_id=None):
 
 
 def create_tenant(
-    db, slug, company_name, logo_filename, accent_color, enabled_modules,
-    username, password_hash, db_path, created_at,
+    db, slug, company_name, logo_filename, empty_state_logo_filename, accent_color,
+    enabled_modules, username, password_hash, db_path, created_at,
 ):
     cur = db.execute(
         "INSERT INTO demo_tenants "
-        "(slug, company_name, logo_filename, accent_color, enabled_modules, "
-        "username, password_hash, db_path, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (slug, company_name, logo_filename, accent_color, enabled_modules,
-         username, password_hash, db_path, created_at),
+        "(slug, company_name, logo_filename, empty_state_logo_filename, accent_color, "
+        "enabled_modules, username, password_hash, db_path, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (slug, company_name, logo_filename, empty_state_logo_filename, accent_color,
+         enabled_modules, username, password_hash, db_path, created_at),
     )
     db.commit()
     return cur.lastrowid
 
 
 def update_tenant(
-    db, tenant_id, company_name, logo_filename, accent_color, enabled_modules,
-    username, password_hash,
+    db, tenant_id, company_name, logo_filename, empty_state_logo_filename,
+    accent_color, enabled_modules, username, password_hash,
 ):
     """password_hash is None to leave the existing password untouched —
     only overwritten when the admin actually typed a new one."""
     if password_hash is not None:
         db.execute(
             "UPDATE demo_tenants SET company_name = ?, logo_filename = ?, "
-            "accent_color = ?, enabled_modules = ?, username = ?, password_hash = ? "
-            "WHERE id = ?",
-            (company_name, logo_filename, accent_color, enabled_modules,
-             username, password_hash, tenant_id),
+            "empty_state_logo_filename = ?, accent_color = ?, enabled_modules = ?, "
+            "username = ?, password_hash = ? WHERE id = ?",
+            (company_name, logo_filename, empty_state_logo_filename, accent_color,
+             enabled_modules, username, password_hash, tenant_id),
         )
     else:
         db.execute(
             "UPDATE demo_tenants SET company_name = ?, logo_filename = ?, "
-            "accent_color = ?, enabled_modules = ?, username = ? WHERE id = ?",
-            (company_name, logo_filename, accent_color, enabled_modules,
-             username, tenant_id),
+            "empty_state_logo_filename = ?, accent_color = ?, enabled_modules = ?, "
+            "username = ? WHERE id = ?",
+            (company_name, logo_filename, empty_state_logo_filename, accent_color,
+             enabled_modules, username, tenant_id),
         )
     db.commit()
 
