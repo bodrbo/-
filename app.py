@@ -1378,6 +1378,10 @@ DEFAULT_ORDER_STATUS = "estimate"
 # stamped once on first arrival here and left untouched while the status
 # stays within this set (e.g. "done" -> "handed_over").
 TUNING_DONE_STATUSES = frozenset(("done", "handed_over"))
+# Аналитика → Проекты only counts orders that have actually started work —
+# a still-unconfirmed request, a pending estimate, one stuck in QC, or a
+# cancelled order shouldn't count toward revenue/expense/profit.
+TUNING_ANALYTICS_ORDER_STATUSES = ("in_progress", "done", "handed_over")
 
 CLIENT_STATUSES = [
     {"value": "satisfied", "label": "Довольный"},
@@ -15343,6 +15347,13 @@ def _item_profitability(db, order_id):
 @admin_login_required
 def analytics_projects():
     db = get_db()
+    # Only orders that have actually started (В работе/Выполнен/Выполнен,
+    # передан) count here — see TUNING_ANALYTICS_ORDER_STATUSES.
+    qualifying_projects_sql = (
+        "SELECT projects.id FROM projects "
+        "JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
+        "WHERE tuning_orders.status IN (?, ?, ?)"
+    )
     rows = db.execute(
         "SELECT projects.*, tuning_orders.client_name AS client_name, "
         "tuning_orders.boat_model AS boat_model, "
@@ -15350,8 +15361,10 @@ def analytics_projects():
         "tuning_orders.equipment_type AS equipment_type, "
         "tuning_orders.motor_model AS motor_model, "
         "tuning_orders.motor_serial_number AS motor_serial_number "
-        "FROM projects LEFT JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
-        "ORDER BY projects.created_at DESC, projects.id DESC"
+        "FROM projects JOIN tuning_orders ON tuning_orders.id = projects.tuning_order_id "
+        "WHERE tuning_orders.status IN (?, ?, ?) "
+        "ORDER BY projects.created_at DESC, projects.id DESC",
+        TUNING_ANALYTICS_ORDER_STATUSES,
     ).fetchall()
     projects = []
     for p in rows:
@@ -15372,23 +15385,25 @@ def analytics_projects():
         "COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE 0 END), 0) AS income, "
         "COALESCE(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END), 0) AS expense "
         "FROM bank_transactions WHERE substr(operation_date, 1, 7) = ? "
-        "AND (project_id IS NOT NULL OR id IN (SELECT DISTINCT transaction_id FROM transaction_splits))",
-        (month_prefix,),
+        "AND (project_id IN (" + qualifying_projects_sql + ") "
+        "OR id IN (SELECT DISTINCT transaction_id FROM transaction_splits "
+        "WHERE project_id IN (" + qualifying_projects_sql + ")))",
+        (month_prefix,) + TUNING_ANALYTICS_ORDER_STATUSES + TUNING_ANALYTICS_ORDER_STATUSES,
     ).fetchone()
     month_entries_expense = db.execute(
         "SELECT COALESCE(SUM(amount), 0) AS expense FROM entries "
-        "WHERE project_id IS NOT NULL AND substr(work_date, 1, 7) = ?",
-        (month_prefix,),
+        "WHERE project_id IN (" + qualifying_projects_sql + ") AND substr(work_date, 1, 7) = ?",
+        TUNING_ANALYTICS_ORDER_STATUSES + (month_prefix,),
     ).fetchone()["expense"]
     month_materials_expense = db.execute(
         "SELECT COALESCE(SUM(amount), 0) AS expense FROM supply_writeoffs "
-        "WHERE project_id IS NOT NULL AND substr(created_at, 1, 7) = ?",
-        (month_prefix,),
+        "WHERE project_id IN (" + qualifying_projects_sql + ") AND substr(created_at, 1, 7) = ?",
+        TUNING_ANALYTICS_ORDER_STATUSES + (month_prefix,),
     ).fetchone()["expense"]
     month_payments_income = db.execute(
         "SELECT COALESCE(SUM(amount), 0) AS income FROM tuning_payments "
-        "WHERE project_id IS NOT NULL AND substr(paid_at, 1, 7) = ?",
-        (month_prefix,),
+        "WHERE project_id IN (" + qualifying_projects_sql + ") AND substr(paid_at, 1, 7) = ?",
+        TUNING_ANALYTICS_ORDER_STATUSES + (month_prefix,),
     ).fetchone()["income"]
     month_income = month_row["income"] + month_payments_income
     month_expense = month_row["expense"] + month_entries_expense + month_materials_expense
