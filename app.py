@@ -1265,6 +1265,22 @@ WORK_TYPES = [
     {"name": "Индивидуальная аренда на 2.5 часа", "rate": 1100, "hours": 2.5},
 ]
 
+# Substituted for WORK_TYPES on a demo-tenant session (see
+# _work_types_for_session) — the real list is our actual tour pricing, and
+# picking one on the "Вид работы" select auto-fills rate/hours straight
+# from it (applyWorkType() in index.html/trips.html), so a demo viewer
+# would otherwise see live business pricing rather than a placeholder.
+DEMO_WORK_TYPES = [
+    {"name": "Вид работы 1", "rate": 1000, "hours": 1},
+    {"name": "Вид работы 2", "rate": 1500, "hours": 1.5},
+    {"name": "Вид работы 3", "rate": 2000, "hours": 2},
+    {"name": "Вид работы 4", "rate": 2500, "hours": 2.5},
+]
+
+
+def _work_types_for_session():
+    return DEMO_WORK_TYPES if session.get("demo_tenant_id") else WORK_TYPES
+
 # Гарантированный минимум за смену: если сотрудник в этот день числится в
 # Yclients (есть хоть одна не удалённая запись с его именем), но его
 # фактический заработок за день по нашим записям меньше этой суммы —
@@ -4054,7 +4070,7 @@ def index():
         "index.html",
         **ctx,
         employees_form=_active_employee_names(db),
-        work_types=WORK_TYPES,
+        work_types=_work_types_for_session(),
         custom_value=CUSTOM_VALUE,
         today=dt.date.today().isoformat(),
         active_page="payroll",
@@ -4190,7 +4206,7 @@ def add_entry():
             "index.html",
             **ctx,
             employees_form=_active_employee_names(db),
-            work_types=WORK_TYPES,
+            work_types=_work_types_for_session(),
             custom_value=CUSTOM_VALUE,
             today=dt.date.today().isoformat(),
             errors=errors,
@@ -4246,7 +4262,7 @@ def add_manager_fee():
             "index.html",
             **ctx,
             employees_form=_active_employee_names(db),
-            work_types=WORK_TYPES,
+            work_types=_work_types_for_session(),
             custom_value=CUSTOM_VALUE,
             today=dt.date.today().isoformat(),
             manager_errors=errors,
@@ -4367,7 +4383,7 @@ def _trips_list_context(db, selected_month=None, selected_boat="all"):
 def _trips_common_kwargs(db):
     return dict(
         employees_form=_active_employee_names(db),
-        work_types=WORK_TYPES,
+        work_types=_work_types_for_session(),
         sale_channels=SALE_CHANNELS,
         custom_value=CUSTOM_VALUE,
         today=dt.date.today().isoformat(),
