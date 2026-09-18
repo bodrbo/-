@@ -82,6 +82,14 @@ def create_refunds_blueprint(
     @admin_login_required
     def sync():
         start_date, end_date = period_from(request.form)
+        if session.get("demo_tenant_id"):
+            # Real YCLIENTS/ЮKassa records must never land in a demo
+            # tenant's own database — see no_real_data_for_demo_tenant
+            # in app.py.
+            return redirect_index(
+                "Сверка с YCLIENTS/ЮKassa недоступна в демо-режиме.",
+                False, start_date, end_date,
+            )
         if not yclients_configured() or not yookassa_configured():
             return redirect_index(
                 "Для сверки должны быть настроены одновременно YCLIENTS и ЮKassa.",

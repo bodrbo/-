@@ -383,6 +383,11 @@ def create_schedule_blueprint(
     def sync_tripster():
         day = services.parse_day(request.form.get("return_date")).isoformat()
         selected_employee = request.form.get("return_employee", "all")
+        if session.get("demo_tenant_id"):
+            # Real Tripster bookings must never land in a demo tenant's
+            # own database — see no_real_data_for_demo_tenant in app.py.
+            set_notice("Синхронизация с Tripster недоступна в демо-режиме.", False)
+            return redirect_to_day(day, selected_employee)
         if not tripster_configured() or tripster_fetcher is None:
             set_notice("Токен Tripster не настроен на сервере.", False)
             return redirect_to_day(day, selected_employee)

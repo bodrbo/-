@@ -5,7 +5,7 @@
       <h2>Топливо на борту</h2>
       <p>Бак {{ fuel.capacity_liters|round(1) }} л · групповой рейс −{{ fuel.group_trip_liters|round(1) }} л</p>
     </div>
-    {% if viewer_role == 'admin' %}
+    {% if viewer_role == 'admin' and not is_demo_tenant %}
     <form action="{{ url_for('fuel_sync_now') }}" method="post" class="fuel-sync-form">
       <input type="hidden" name="boat_index" value="{{ boat_index }}">
       <button type="submit" class="btn-secondary">Обновить из YCLIENTS</button>

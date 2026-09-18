@@ -82,7 +82,7 @@
       <p>{% if is_partner_directory %}Здесь отображаются контакты со статусом «Партнёр». Перенос сохраняет карточку, историю заказов, рейсов и платежей.{% elif client_section == 'excursion' %}Сюда автоматически попадают клиенты, добавленные в рейсы. Эта база используется при создании новых записей на экскурсии.{% else %}Эта база используется в тюнинг-заказах и выездной диагностике. Туристы без тюнинг-заказов здесь не показываются.{% endif %}</p>
     </div>
     <div class="tuning-clients-heading-actions">
-      {% if client_section == 'excursion' %}
+      {% if client_section == 'excursion' and not is_demo_tenant %}
       <form action="{{ url_for('import_yclients_client_directory') }}" method="post">
         <button type="submit" class="btn-secondary" {{ 'disabled' if not yclients_import_configured }}>
           Импортировать из YCLIENTS

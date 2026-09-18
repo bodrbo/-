@@ -3796,6 +3796,23 @@ def admin_login_required(view):
     return wrapped
 
 
+def no_real_data_for_demo_tenant(view):
+    """Refuses a route that pulls real data through our own credentials or
+    bundled files — a bank statement, YClients, Tripster, a supplier
+    catalog feed, the one-off МойСклад import — for a demo-tenant session.
+    Those must never reach a tenant's database, however convincing the
+    module needs to look; only touching data the tenant already owns
+    doesn't need this. 404s rather than redirects with a message, same
+    reasoning as the module-visibility gate: don't reveal the feature
+    exists at all."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if session.get("demo_tenant_id"):
+            abort(404)
+        return view(*args, **kwargs)
+    return wrapped
+
+
 def _active_team_account(db):
     team_id = session.get("team_id")
     if not team_id:
@@ -4859,6 +4876,7 @@ def delete_investor_payout(payout_id):
 
 @app.route("/trips/investor-history/import", methods=["POST"])
 @admin_login_required
+@no_real_data_for_demo_tenant
 def import_investor_history():
     """Load the old Bodryi Pervyi investor ledger without duplicating rows."""
     uploaded = request.files.get("investor_workbook")
@@ -7446,6 +7464,7 @@ def update_client_relationship(client_id):
 
 @app.route("/admin/clients/import-yclients", methods=["POST"])
 @excursion_manager_or_admin_required
+@no_real_data_for_demo_tenant
 def import_yclients_client_directory():
     if not yclients_configured():
         session["client_import_notice"] = {
@@ -12928,6 +12947,7 @@ def _import_yclients_trip_records(
 
 @app.route("/trips/import", methods=["GET"])
 @admin_login_required
+@no_real_data_for_demo_tenant
 def import_index():
     """The import queue lives inside the trips page itself (as a collapsible
     section) — this route just renders that same page with the section
@@ -12946,6 +12966,7 @@ def import_index():
 
 @app.route("/trips/import/fetch", methods=["POST"])
 @admin_login_required
+@no_real_data_for_demo_tenant
 def import_fetch():
     db = get_db()
     if not yclients_configured():
@@ -13024,6 +13045,7 @@ def import_fetch():
 
 @app.route("/trips/import/review/<int:candidate_id>", methods=["GET"])
 @admin_login_required
+@no_real_data_for_demo_tenant
 def import_review(candidate_id):
     db = get_db()
     row = db.execute(
@@ -13341,6 +13363,7 @@ def _try_auto_import_candidate(db, row):
 
 @app.route("/trips/import/confirm/<int:candidate_id>", methods=["POST"])
 @admin_login_required
+@no_real_data_for_demo_tenant
 def import_confirm(candidate_id):
     db = get_db()
     row = db.execute(
@@ -13378,6 +13401,7 @@ def import_confirm(candidate_id):
 
 @app.route("/trips/import/skip/<int:candidate_id>", methods=["POST"])
 @admin_login_required
+@no_real_data_for_demo_tenant
 def import_skip(candidate_id):
     db = get_db()
     row = db.execute(
@@ -15238,6 +15262,7 @@ def analytics_transactions_fragment():
 
 @app.route("/analytics/fetch", methods=["POST"])
 @admin_login_required
+@no_real_data_for_demo_tenant
 def analytics_fetch():
     if not tbank_statement_configured():
         return redirect(url_for("analytics_index"))
@@ -16757,6 +16782,7 @@ def team_locker(locker_id):
 
 @app.route("/admin/import-moysklad-catalog")
 @admin_login_required
+@no_real_data_for_demo_tenant
 def import_moysklad_catalog():
     # One-off, idempotent import of scripts/moysklad_import.json (the
     # parsed МойСклад "Остатки" report) — a route rather than a standalone
@@ -17093,6 +17119,7 @@ def bulk_assign_supply_category():
 
 @app.route("/supply/catalog/marine-rocket/sync", methods=["POST"])
 @admin_login_required
+@no_real_data_for_demo_tenant
 def sync_marine_rocket_now():
     try:
         queued = _queue_marine_rocket_sync(get_db())
@@ -17132,6 +17159,7 @@ def marine_rocket_sync_status():
 
 @app.route("/supply/catalog/1000-sizes/sync", methods=["POST"])
 @admin_login_required
+@no_real_data_for_demo_tenant
 def sync_thousand_sizes_now():
     try:
         queued = _queue_thousand_sizes_sync(get_db())
@@ -17899,6 +17927,7 @@ def _sync_hourly_yclients(db, now=None):
 
 @app.route("/fleet/fuel/sync", methods=["POST"])
 @admin_login_required
+@no_real_data_for_demo_tenant
 def fuel_sync_now():
     try:
         boat_index = int(request.form.get("boat_index", "0"))
@@ -18456,16 +18485,26 @@ DEMO_TENANT_LOGO_DIR = os.path.join(app.static_folder, "demo_logos")
 
 def _provision_demo_tenant_db(db_path):
     """Builds a fresh, fully-migrated database for a new demo tenant, then
-    strips the bootstrap ADMIN_ACCOUNTS/INVESTOR_ACCOUNTS rows init_db()
-    unconditionally seeds into any database — those carry real production
-    names and password hashes and have no business in a tenant a prospect
-    might see. Demo tenants authenticate via demo_tenants.username instead
-    (see _active_admin_account's demo-tenant bypass), so this table being
-    empty doesn't lock anyone out."""
+    strips every real-world bootstrap row init_db() unconditionally seeds
+    into any database: ADMIN_ACCOUNTS/INVESTOR_ACCOUNTS (real names and
+    password hashes) and, less obviously, the EMPLOYEES/
+    INITIAL_EMPLOYEE_POSITIONS backfill in modules/employees/constants.py —
+    that one seeds our actual staff directly into "employees" on every
+    fresh database, and since TEAM_ACCOUNTS only creates a login for a
+    name that already exists in "employees", wiping employees first also
+    keeps their real team_accounts credentials from ever being written.
+    Demo tenants authenticate via demo_tenants.username instead (see
+    _active_admin_account's demo-tenant bypass), so none of this being
+    empty locks anyone out."""
     init_db(db_path)
     conn = sqlite3.connect(db_path)
     conn.execute("DELETE FROM admin_accounts")
     conn.execute("DELETE FROM investors")
+    conn.execute("DELETE FROM team_accounts")
+    conn.execute("DELETE FROM employee_positions")
+    conn.execute("DELETE FROM employees")
+    conn.execute("DELETE FROM employee_telegram_accounts")
+    conn.execute("DELETE FROM telegram_contacts")
     conn.commit()
     conn.close()
 

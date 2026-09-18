@@ -88,7 +88,7 @@
   <div class="import-note hint">{{ fetch_result }}</div>
   {% endif %}
 
-  {% if tbank_configured %}
+  {% if tbank_configured and not is_demo_tenant %}
   <section class="panel">
     <h2>Загрузить выписку из Т-Банка</h2>
     <form action="{{ url_for('analytics_fetch') }}" method="post" class="entry-form">

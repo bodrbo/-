@@ -136,6 +136,7 @@
           {% endif %}
         </p>
       </div>
+      {% if not is_demo_tenant %}
       <form action="{{ url_for('sync_marine_rocket_now') }}" method="post">
         <button type="submit"
                 {% if marine_rocket_job and marine_rocket_job.status in ('queued', 'running') %}disabled aria-busy="true"{% endif %}>
@@ -146,6 +147,7 @@
           {% endif %}
         </button>
       </form>
+      {% endif %}
     </div>
   </section>
 
@@ -161,6 +163,7 @@
           {% endif %}
         </p>
       </div>
+      {% if not is_demo_tenant %}
       <form action="{{ url_for('sync_thousand_sizes_now') }}" method="post">
         <button type="submit"
                 {% if thousand_sizes_job and thousand_sizes_job.status in ('queued', 'running') %}disabled aria-busy="true"{% endif %}>
@@ -171,6 +174,7 @@
           {% endif %}
         </button>
       </form>
+      {% endif %}
     </div>
   </section>
 
