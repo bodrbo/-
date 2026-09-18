@@ -25,6 +25,22 @@ OTHER_DEFECT_COUNT_LIMIT = 20
 RECOMMENDATIONS_LIMIT = 6000
 
 
+def _demo_document_logo_path():
+    """The logo to print on a generated diagnostic PDF — a demo tenant's
+    own logo (the empty-state variant, meant to read on a light
+    background — a printed sheet is exactly that) instead of ours. None
+    when the tenant hasn't uploaded either logo, so build_diagnostic_pdf
+    omits the image rather than falling back to ours. Outside a demo
+    session, the real logo-act.png path, unchanged from before this
+    existed. Mirrors app.py's _document_logo_path for the same reasoning."""
+    if session.get("demo_tenant_id"):
+        filename = session.get("demo_tenant_empty_state_logo") or session.get("demo_tenant_logo")
+        if not filename:
+            return None
+        return os.path.join(current_app.static_folder, "demo_logos", filename)
+    return os.path.join(current_app.static_folder, "logo-act.png")
+
+
 def create_blueprint(
     get_db,
     admin_login_required,
@@ -818,6 +834,7 @@ def create_blueprint(
                 ),
                 os.path.join(current_app.static_folder, "fonts"),
                 extra_defects=extra_defects,
+                logo_path=_demo_document_logo_path(),
             )
         except (ImportError, OSError):
             return (

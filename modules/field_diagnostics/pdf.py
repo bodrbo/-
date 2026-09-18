@@ -8,6 +8,10 @@ from .constants import DIAGNOSTIC_BLOCKS
 
 
 _FONTS_REGISTERED = False
+# Distinguishes "caller didn't pass logo_path" (use logo-act.png, same as
+# always) from "caller explicitly passed None" (a demo tenant with no
+# logo uploaded — omit the image rather than falling back to ours).
+_DEFAULT_LOGO = object()
 
 
 def _register_fonts(fonts_dir):
@@ -35,13 +39,19 @@ def _value(row, key, default=""):
 
 
 def build_diagnostic_pdf(sheet, answers, inspection_label, fonts_dir,
-                         extra_defects=()):
-    """Return a print-ready A4 diagnostic report as bytes."""
+                         extra_defects=(), logo_path=_DEFAULT_LOGO):
+    """Return a print-ready A4 diagnostic report as bytes.
+
+    logo_path overrides the default logo-act.png — the caller uses this to
+    print a demo tenant's own logo instead of ours (see app.py's
+    _document_logo_path). None from that override means the tenant hasn't
+    uploaded one; the logo is omitted rather than falling back to ours."""
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER, TA_RIGHT
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
+    from reportlab.lib.utils import ImageReader
     from reportlab.platypus import (
         Image,
         KeepTogether,
@@ -155,13 +165,28 @@ def build_diagnostic_pdf(sheet, answers, inspection_label, fonts_dir,
         if _value(answer, "status") == "problem"
     ]
 
-    logo_path = os.path.join(os.path.dirname(fonts_dir), "logo-act.png")
-    logo_width = 130
-    story = [
+    if logo_path is _DEFAULT_LOGO:
         # The same advertising header used by both tuning acts. The source
         # artwork already includes the logo and website address, so keeping
         # it as one image preserves the brand proportions exactly.
-        Image(logo_path, width=logo_width, height=logo_width * 230 / 836),
+        logo_path = os.path.join(os.path.dirname(fonts_dir), "logo-act.png")
+    logo_width = 130
+    logo_flowable = None
+    if logo_path and os.path.isfile(logo_path):
+        try:
+            actual_width, actual_height = ImageReader(logo_path).getSize()
+        except Exception:
+            actual_width = actual_height = None
+        if actual_width and actual_height:
+            logo_max_height = logo_width * 230 / 836
+            scale = min(logo_width / actual_width, logo_max_height / actual_height)
+            logo_flowable = Image(
+                logo_path, width=actual_width * scale, height=actual_height * scale
+            )
+    story = []
+    if logo_flowable is not None:
+        story.append(logo_flowable)
+    story += [
         Spacer(1, 12),
         Paragraph("ДИАГНОСТИЧЕСКИЙ ЛИСТ", title_style),
         Paragraph("Лист № %s" % safe(_value(sheet, "id")), sheet_number_style),

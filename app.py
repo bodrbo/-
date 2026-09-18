@@ -6104,6 +6104,44 @@ def _register_act_fonts():
     _ACT_FONTS_REGISTERED = True
 
 
+def _document_logo_path():
+    """The logo to print on a generated document (акт, акт приёма-передачи,
+    полевая диагностика) — a demo tenant's own logo instead of ours. Uses
+    the empty-state variant specifically, not the header one: that one is
+    designed to read on a light background (a printed sheet is exactly
+    that), where the header logo might be a light/white mark meant to sit
+    on a dark topbar. Falls back to the header logo if no empty-state one
+    was uploaded, and to None (caller omits the logo rather than showing
+    ours) if neither was. Outside a demo-tenant session, unchanged:
+    logo-act.png, same as before this existed."""
+    if session.get("demo_tenant_id"):
+        filename = session.get("demo_tenant_empty_state_logo") or session.get("demo_tenant_logo")
+        if not filename:
+            return None
+        return os.path.join(app.static_folder, "demo_logos", filename)
+    return os.path.join(app.static_folder, "logo-act.png")
+
+
+def _scaled_logo_flowable(logo_path, max_width, max_height):
+    """A ReportLab Image flowable for logo_path scaled to fit inside
+    max_width x max_height while keeping its own aspect ratio — unlike a
+    fixed width/height pair assuming logo-act.png's own proportions, a
+    demo tenant's uploaded logo can be any shape. Returns None if the path
+    is None or the file is missing/unreadable, so callers can skip the
+    logo entirely instead of embedding a broken image."""
+    from reportlab.lib.utils import ImageReader
+    from reportlab.platypus import Image
+
+    if not logo_path or not os.path.isfile(logo_path):
+        return None
+    try:
+        width, height = ImageReader(logo_path).getSize()
+    except Exception:
+        return None
+    scale = min(max_width / width, max_height / height)
+    return Image(logo_path, width=width * scale, height=height * scale)
+
+
 COMPANY_NAME = 'ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "БОДРЫЙ БОЦМАН"'
 COMPANY_ADDRESS = "197762, Россия, г Санкт-Петербург, г Кронштадт, ул Мануильского, 20 литера а, 2"
 # Search context, coordinates and zoom from the shared Yandex URL are omitted:
@@ -6421,9 +6459,10 @@ def _build_act_pdf(order, items, goods=()):
         order_date = _order_business_date(order)
 
     flow = []
-    logo_path = os.path.join(app.static_folder, "logo-act.png")
     logo_w = 130
-    flow.append(Image(logo_path, width=logo_w, height=logo_w * 230 / 836))
+    logo_flowable = _scaled_logo_flowable(_document_logo_path(), logo_w, logo_w * 230 / 836)
+    if logo_flowable is not None:
+        flow.append(logo_flowable)
     flow.append(Spacer(1, 12))
     flow.append(Paragraph(f"<u>{COMPANY_NAME}</u>", style_company))
     flow.append(Paragraph(COMPANY_ADDRESS, style_address))
@@ -6622,9 +6661,10 @@ def _build_handover_act_pdf(order, items, goods=()):
         order_date = _order_business_date(order)
 
     flow = []
-    logo_path = os.path.join(app.static_folder, "logo-act.png")
     logo_w = 130
-    flow.append(Image(logo_path, width=logo_w, height=logo_w * 230 / 836))
+    logo_flowable = _scaled_logo_flowable(_document_logo_path(), logo_w, logo_w * 230 / 836)
+    if logo_flowable is not None:
+        flow.append(logo_flowable)
     flow.append(Spacer(1, 12))
     flow.append(Paragraph(f"<u>{COMPANY_NAME}</u>", style_company))
     flow.append(Paragraph(COMPANY_ADDRESS, style_address))
