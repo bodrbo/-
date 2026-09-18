@@ -79,7 +79,7 @@
   {% endif %}
 
   <section class="panel form-panel">
-    <h2>Рассчитать гонорар гида/капитана/тюнингмэна вручную</h2>
+    <h2>{{ 'Рассчитать гонорар сотрудника вручную' if is_demo_tenant else 'Рассчитать гонорар гида/капитана/тюнингмэна вручную' }}</h2>
     <form action="{{ url_for('add_entry') }}" method="post" class="entry-form" id="entry-form">
 
       <div class="field">
@@ -157,6 +157,7 @@
     </div>
   {% endif %}
 
+  {% if not is_demo_tenant %}
   <section class="panel form-panel">
     <h2>Рассчитать гонорар менеджера по продажам</h2>
     <form action="{{ url_for('add_manager_fee') }}" method="post" class="entry-form" id="manager-form">
@@ -197,6 +198,7 @@
     <p class="hint">Гонорар = (выручка рейсов за выбранную неделю × 3% ÷ 7 + оклад 45 000 ₽ ÷ дней в текущем месяце) × количество смен.</p>
     {% endif %}
   </section>
+  {% endif %}
 
   <section class="panel filter-panel">
     <h2>Период и сотрудник</h2>
@@ -304,7 +306,7 @@
   {% endif %}
 
   <section class="panel">
-    <h2>Записи за выбранный период</h2>
+    <h2>{{ 'Работы за выбранный период' if is_demo_tenant else 'Записи за выбранный период' }}</h2>
     {% if entries %}
     <div class="table-scroll">
       <table class="records">
