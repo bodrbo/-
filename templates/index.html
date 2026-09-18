@@ -247,7 +247,7 @@
       {% if is_paid %}<span class="paid-badge">Оплачено</span>{% endif %}
       {% if selected_week != 'all' and is_demo_tenant %}
       <div class="tbank-payout-row" onclick="event.stopPropagation();">
-        <button type="button" class="btn-secondary btn-small" onclick="openTbankDemoModal()">Отправить в Т-Банк</button>
+        <button type="button" class="btn-secondary btn-small" onclick="openTbankDemoModal()">Отправить в банк</button>
       </div>
       {% elif selected_week != 'all' and tbank_configured %}
       {% set tp = tbank_payouts.get(employee) %}
