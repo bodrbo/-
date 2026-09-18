@@ -31,7 +31,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 from flask import (
-    Flask, g, jsonify, redirect, render_template, request, send_from_directory, session, url_for,
+    Flask, abort, g, has_request_context, jsonify, redirect, render_template, request,
+    send_from_directory, session, url_for,
 )
 from werkzeug.datastructures import MultiDict
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -77,6 +78,9 @@ from integrations.thousand_sizes import (
     sale_price_with_markup as thousand_sizes_sale_price,
     sync_catalog as sync_thousand_sizes_catalog,
 )
+from modules.demo_tenants import create_blueprint as create_demo_tenants_blueprint
+from modules.demo_tenants import DEMO_MODULES
+from modules.demo_tenants.services import module_for_request as _demo_module_for_request
 from modules.employees import create_employees_blueprint
 from modules.employees.capabilities import (
     DOCUMENTS as TEAM_DOCUMENTS,
@@ -1579,7 +1583,15 @@ MONTHS_NOM = [
 
 def get_db():
     if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH)
+        # A demo-tenant session (see modules/demo_tenants) points every query
+        # at that tenant's own isolated SQLite file instead of the shared
+        # one — has_request_context() guards this for callers that only
+        # push an app context (management scripts, tests), where `session`
+        # isn't available at all.
+        db_path = DB_PATH
+        if has_request_context():
+            db_path = session.get("demo_tenant_db_path") or DB_PATH
+        g.db = sqlite3.connect(db_path)
         g.db.row_factory = sqlite3.Row
         g.db.create_function(
             "CASEFOLD", 1, lambda value: str(value or "").casefold()
@@ -1594,10 +1606,15 @@ def close_db(exception=None):
         db.close()
 
 
-def init_db():
+def init_db(db_path=None):
     """Create the entries table if needed, and migrate older DBs that don't
-    yet have the work_date column."""
-    conn = sqlite3.connect(DB_PATH)
+    yet have the work_date column.
+
+    db_path lets a caller build the exact same schema at a different file —
+    used to provision a fresh, isolated SQLite database for a new demo
+    tenant (see modules/demo_tenants). Left out, this builds/migrates the
+    app's own DB_PATH, same as ever."""
+    conn = sqlite3.connect(db_path or DB_PATH)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS entries (
@@ -3392,6 +3409,22 @@ def init_db():
     init_ai_assistant_schema(conn)
     init_investor_finance_schema(conn)
     weather_schema.init_schema(conn)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS demo_tenants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug TEXT NOT NULL UNIQUE,
+            company_name TEXT NOT NULL,
+            logo_filename TEXT,
+            accent_color TEXT,
+            enabled_modules TEXT NOT NULL DEFAULT '',
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            db_path TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
     conn.commit()
     conn.close()
 
@@ -3669,7 +3702,24 @@ def _active_admin_account(db=None):
     Legacy administrator accounts have no employee_id and remain valid. Accounts
     bridged from the employee directory are checked against the live position on
     every request, so removing the position revokes existing sessions too.
+
+    A demo-tenant session (see modules/demo_tenants) is treated as a full
+    admin here too — a synthetic account, never backed by an admin_accounts
+    row — so every existing @admin_login_required route keeps working
+    unchanged for a demo viewer. Module visibility for that session is
+    enforced separately, by the demo_tenant_gate before_request hook.
     """
+    demo_tenant_id = session.get("demo_tenant_id")
+    if demo_tenant_id:
+        # A real admin_accounts.id is always a positive AUTOINCREMENT
+        # integer, so a negative one can never collide with a real
+        # account — and staying an int (not e.g. "demo-5") matters
+        # because some callers do int(admin["id"]) (see ai_assistant).
+        return {
+            "id": -abs(int(demo_tenant_id)),
+            "admin_name": session.get("demo_tenant_name") or "Демо",
+            "employee_id": None,
+        }
     admin_id = session.get("admin_id")
     if not admin_id:
         return None
@@ -18395,6 +18445,120 @@ app.register_blueprint(
         receipt_payment_mode=lambda: _current_yookassa_excursion_payment_mode(get_db()),
     )
 )
+
+
+# =======================================================================
+# Демо-аккаунты (см. modules/demo_tenants)
+# =======================================================================
+DEMO_TENANT_DB_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "demo_tenants")
+DEMO_TENANT_LOGO_DIR = os.path.join(app.static_folder, "demo_logos")
+
+
+def _provision_demo_tenant_db(db_path):
+    """Builds a fresh, fully-migrated database for a new demo tenant, then
+    strips the bootstrap ADMIN_ACCOUNTS/INVESTOR_ACCOUNTS rows init_db()
+    unconditionally seeds into any database — those carry real production
+    names and password hashes and have no business in a tenant a prospect
+    might see. Demo tenants authenticate via demo_tenants.username instead
+    (see _active_admin_account's demo-tenant bypass), so this table being
+    empty doesn't lock anyone out."""
+    init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute("DELETE FROM admin_accounts")
+    conn.execute("DELETE FROM investors")
+    conn.commit()
+    conn.close()
+
+
+def _seed_demo_tenant_db(db_path):
+    """Populates a freshly provisioned tenant database with the same
+    fictional demo dataset the standalone seed_demo_data.py script builds —
+    reused here so a platform admin can optionally pre-fill a new demo
+    account with realistic orders/tasks/finances instead of handing over
+    an empty shell.
+
+    Runs the seeding in its own thread on purpose: this is called from
+    inside the platform admin's own request (creating the tenant), and
+    Flask only pushes a fresh app context — the thing g/get_db()'s caching
+    lives on — when the current one belongs to a different app. Since
+    seed_demo_data's test_client() calls happen on the SAME app, a nested
+    call here would reuse the outer request's already-open g.db (the
+    platform's own database, not the tenant's) instead of connecting to
+    db_path. A separate thread gets its own context stack, so it opens its
+    own g.db like any unrelated request would."""
+    import seed_demo_data
+
+    error = []
+
+    def run():
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            seed_demo_data.seed(sys.modules[__name__], conn, db_path=db_path)
+            conn.close()
+        except Exception as exc:  # noqa: BLE001 — re-raised on the caller's thread below
+            error.append(exc)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    thread.join()
+    if error:
+        raise error[0]
+
+
+app.register_blueprint(
+    create_demo_tenants_blueprint(
+        get_db=get_db,
+        admin_login_required=admin_login_required,
+        tenant_db_dir=DEMO_TENANT_DB_DIR,
+        tenant_logo_dir=DEMO_TENANT_LOGO_DIR,
+        provision_tenant_db=_provision_demo_tenant_db,
+        seed_tenant_db=_seed_demo_tenant_db,
+    )
+)
+
+
+@app.before_request
+def _demo_tenant_module_gate():
+    """A demo-tenant session (see modules/demo_tenants) is a full admin
+    session (_active_admin_account's bypass) so every route still works,
+    but it should only ever reach the modules the platform admin actually
+    turned on for that account — everything else 404s, same as if the
+    route didn't exist, rather than redirecting (which would leak that the
+    module exists at all)."""
+    tenant_id = session.get("demo_tenant_id")
+    if not tenant_id or request.endpoint in (None, "static"):
+        return None
+    if session.get("demo_tenant_seeding"):
+        # seed_demo_data.py populates every module regardless of which
+        # ones the tenant will end up showing — see its own comment.
+        return None
+    module = _demo_module_for_request(request.blueprint, request.path)
+    if module is None:
+        return None
+    enabled = {m for m in (session.get("demo_tenant_modules") or "").split(",") if m}
+    if module not in enabled:
+        abort(404)
+    return None
+
+
+@app.context_processor
+def _demo_tenant_template_context():
+    tenant_id = session.get("demo_tenant_id")
+    enabled = {m for m in (session.get("demo_tenant_modules") or "").split(",") if m} if tenant_id else None
+
+    def demo_module_enabled(module_key):
+        # No active tenant session (a real employee/admin) sees everything,
+        # same as before this feature existed.
+        return enabled is None or module_key in enabled
+
+    return {
+        "is_demo_tenant": bool(tenant_id),
+        "demo_module_enabled": demo_module_enabled,
+        "demo_tenant_company_name": session.get("demo_tenant_name") if tenant_id else None,
+        "demo_tenant_logo": session.get("demo_tenant_logo") if tenant_id else None,
+        "demo_tenant_accent_color": session.get("demo_tenant_accent_color") if tenant_id else None,
+    }
 
 
 init_db()

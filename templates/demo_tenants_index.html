@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Демо-аккаунты — Бодрый Боцман</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+</head>
+<body>
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100"><g fill="var(--brass)"><path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/><path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/><path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/></g><circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/></svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="topbar-top-row">
+      <div class="brand">{% include '_topbar_brand.html' %}</div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>
+      </button>
+    </div>
+    {% include '_admin_main_nav.html' %}
+    <div class="title-block">
+      <span class="kicker">Демо-доступ для партнёров</span>
+      <h1>Демо-аккаунты</h1>
+    </div>
+    <div class="topbar-actions">
+      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  {% if notice %}<p class="alert success">{{ notice }}</p>{% endif %}
+  {% if error %}<p class="alert">{{ error }}</p>{% endif %}
+
+  {% if credentials %}
+  <div class="panel" style="border-color: var(--success);">
+    <h2>Доступ создан</h2>
+    <p class="hint" style="margin-top:0;">Сохраните и передайте — пароль больше нигде не показывается.</p>
+    <table class="records" style="max-width:420px;">
+      <tbody>
+        <tr><td>Ссылка</td><td><code>/demo/login</code></td></tr>
+        <tr><td>Логин</td><td><code>{{ credentials.username }}</code></td></tr>
+        <tr><td>Пароль</td><td><code>{{ credentials.password }}</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <section class="panel">
+    <h2>Новый демо-аккаунт</h2>
+    <form method="post" action="{{ url_for('demo_tenants.create') }}" enctype="multipart/form-data" class="entry-form">
+      <div class="field-row-inner">
+        <div class="field">
+          <label for="company_name">Название компании</label>
+          <input type="text" id="company_name" name="company_name" required maxlength="160" placeholder="ООО «Пример»">
+        </div>
+        <div class="field">
+          <label for="accent_color">Акцентный цвет</label>
+          <input type="color" id="accent_color" name="accent_color" value="#3498db">
+        </div>
+        <div class="field">
+          <label for="logo">Логотип (необязательно)</label>
+          <input type="file" id="logo" name="logo" accept=".png,.jpg,.jpeg,.svg,.webp">
+        </div>
+      </div>
+
+      <div class="field field-wide">
+        <span>Модули</span>
+        <p class="hint" style="margin:0 0 6px;">Что показываем этой компании — остальное будет недоступно даже по прямой ссылке.</p>
+        <div class="field-row-inner">
+          {% for m in demo_modules %}
+          <label style="display:flex; align-items:center; gap:6px; font-weight:400;">
+            <input type="checkbox" name="modules" value="{{ m.key }}">
+            {{ m.label }}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="field field-wide">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;">
+          <input type="checkbox" name="seed_demo_data" value="1" checked>
+          Заполнить демо-данными (заказы, задачи, флот, финансы) — иначе аккаунт будет пустым
+        </label>
+      </div>
+
+      <div class="field field-submit">
+        <button type="submit">Создать демо-аккаунт</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel">
+    <h2>Существующие демо-аккаунты</h2>
+    {% if tenants %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th>Компания</th>
+            <th>Логин</th>
+            <th>Модули</th>
+            <th>Создан</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in tenants %}
+          <tr>
+            <td>
+              <strong>{{ t.company_name }}</strong>
+              {% if t.accent_color %}<span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:{{ t.accent_color }};margin-left:6px;vertical-align:middle;"></span>{% endif %}
+            </td>
+            <td class="muted">{{ t.username }}</td>
+            <td class="muted">
+              {% if t.modules %}
+                {% for mk in t.modules %}{{ demo_modules|selectattr('key', 'equalto', mk)|map(attribute='label')|first }}{% if not loop.last %}, {% endif %}{% endfor %}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td class="muted">{{ t.created_at }}</td>
+            <td class="row-actions">
+              <form action="{{ url_for('demo_tenants.delete', tenant_id=t.id) }}" method="post"
+                    onsubmit="return confirm('Удалить демо-аккаунт «' + {{ t.company_name|tojson }} + '» и его данные?');">
+                <button type="submit" class="icon-btn danger" title="Удалить">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 5l10 10M15 5L5 15"/>
+                  </svg>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint">Пока нет ни одного демо-аккаунта.</p>
+    {% endif %}
+  </section>
+
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+</body>
+</html>

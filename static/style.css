@@ -2047,6 +2047,9 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
    context (a bare link, no login) — give the brand a bit more presence
    there than in the internal admin/investor/team screens. */
 .brand-logo-large { height: 68px; }
+/* Demo tenants without an uploaded logo (see _topbar_brand.html) fall
+   back to their company name as plain text in the same brand slot. */
+.brand-logo-text { font-size: 20px; font-weight: 700; color: var(--brass-strong); }
 
 /* Hidden on desktop — the nav shows inline there. Only takes over as a
    burger button under the mobile breakpoint below. */

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Демо-доступ</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-logo-fallback"><img src="{{ url_for('static', filename='logo.png') }}" alt="Демо-доступ" class="brand-logo"></span>
+    </div>
+    <div class="title-block">
+      <h1>Демо-доступ</h1>
+    </div>
+  </div>
+</header>
+
+<main class="wrap login-wrap">
+  <section class="panel login-panel">
+    <h2>Вход в демо</h2>
+    {% if error %}
+    <div class="alert">{{ error }}</div>
+    {% endif %}
+    <form method="post" class="entry-form login-form">
+      <div class="field field-wide">
+        <label for="username">Логин</label>
+        <input type="text" id="username" name="username" autocomplete="username" required autofocus>
+      </div>
+      <div class="field field-wide">
+        <label for="password">Пароль</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
+      </div>
+      <div class="field field-submit field-wide">
+        <button type="submit">Войти</button>
+      </div>
+    </form>
+  </section>
+</main>
+
+</body>
+</html>
