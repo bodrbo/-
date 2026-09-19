@@ -4,7 +4,7 @@ public login those demo accounts use — see modules/demo_tenants/__init__.py.""
 import os
 import secrets
 
-from flask import Blueprint, redirect, render_template, request, session, url_for
+from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
 from . import repository, services
 from .constants import DEMO_LOGO_EXTENSIONS, DEMO_MODULES, DEMO_TOUR_STEPS
@@ -201,20 +201,43 @@ def create_blueprint(
 
     @blueprint.route("/tour/next")
     def tour_next():
-        """A plain link, not a form: advancing the tour has no server-side
-        effect besides the session counter, so there's nothing a GET here
-        could destroy — matches the "просто перейти по ссылке" feel the
-        tour is built around. Works the same for a demo tenant session and
-        a real admin/employee session — both just carry demo_tour_step."""
+        """Advancing the tour has no server-side effect besides the session
+        counter, so there's nothing a GET here could destroy. Two ways in:
+        a plain link click (no JS, or the next step is on a different page
+        — see _demo_tour.html) gets a normal redirect; the tour widget's
+        own fetch (X-Requested-With, same convention as loader.js's other
+        background requests) gets JSON back instead, so it can swap the
+        card in place without a full reload when the next step stays on
+        the SAME page. Works the same for a demo tenant session and a
+        real admin/employee session — both just carry demo_tour_step."""
+        is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+        def finished():
+            session.pop("demo_tour_step", None)
+            if is_ajax:
+                return jsonify(finished=True, redirect=url_for("index"))
+            return redirect(url_for("index"))
+
         step = session.get("demo_tour_step")
         if step is None:
-            return redirect(url_for("index"))
+            return finished()
         next_step = step + 1
         if next_step >= len(DEMO_TOUR_STEPS):
-            session.pop("demo_tour_step", None)
-            return redirect(url_for("index"))
+            return finished()
         session["demo_tour_step"] = next_step
-        return redirect(url_for(DEMO_TOUR_STEPS[next_step]["endpoint"]))
+        next_step_data = DEMO_TOUR_STEPS[next_step]
+        next_url = url_for(next_step_data["endpoint"])
+        if is_ajax:
+            return jsonify(
+                finished=False,
+                url=next_url,
+                title=next_step_data["title"],
+                text=next_step_data["text"],
+                targets=next_step_data["targets"],
+                step_number=next_step + 1,
+                total_steps=len(DEMO_TOUR_STEPS),
+            )
+        return redirect(next_url)
 
     @blueprint.route("/tour/skip")
     def tour_skip():

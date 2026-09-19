@@ -1,12 +1,12 @@
 <div class="demo-tour" data-demo-tour data-demo-tour-targets='{{ demo_tour_active_step.targets|tojson }}'>
   <div class="demo-tour-card" data-demo-tour-card>
     <span class="demo-tour-arrow" data-demo-tour-arrow aria-hidden="true"></span>
-    <div class="demo-tour-step">Шаг {{ demo_tour_step_number }} из {{ demo_tour_total_steps }}</div>
-    <h3 class="demo-tour-title">{{ demo_tour_active_step.title }}</h3>
-    <p class="demo-tour-text">{{ demo_tour_active_step.text }}</p>
+    <div class="demo-tour-step" data-demo-tour-step-label>Шаг {{ demo_tour_step_number }} из {{ demo_tour_total_steps }}</div>
+    <h3 class="demo-tour-title" data-demo-tour-title-el>{{ demo_tour_active_step.title }}</h3>
+    <p class="demo-tour-text" data-demo-tour-text-el>{{ demo_tour_active_step.text }}</p>
     <div class="demo-tour-actions">
       <a href="{{ url_for('demo_tenants.tour_skip') }}" class="demo-tour-skip">Пропустить обучение</a>
-      <a href="{{ url_for('demo_tenants.tour_next') }}" class="demo-tour-next">
+      <a href="{{ url_for('demo_tenants.tour_next') }}" class="demo-tour-next" data-demo-tour-next>
         {{ 'Готово' if demo_tour_step_number == demo_tour_total_steps else 'Далее' }}
       </a>
     </div>
@@ -29,30 +29,17 @@
   function init() {
     var card = root.querySelector('[data-demo-tour-card]');
     var arrow = root.querySelector('[data-demo-tour-arrow]');
-    var selectors = [];
-    try {
-      selectors = JSON.parse(root.getAttribute('data-demo-tour-targets') || '[]');
-    } catch (error) {}
-
-    var targets = [];
-    selectors.forEach(function (selector) {
-      var el = document.querySelector(selector);
-      if (el) targets.push(el);
-    });
-
-    if (!targets.length) {
-      // Nothing on this page matched (layout changed, module hidden,
-      // etc.) — fall back to a centered card so the tour never just
-      // silently breaks.
-      card.classList.add('demo-tour-card-centered');
-      return;
-    }
-
-    targets.forEach(function (el) { el.classList.add('demo-tour-highlight'); });
-    var anchor = targets[0];
+    var stepLabel = root.querySelector('[data-demo-tour-step-label]');
+    var titleEl = root.querySelector('[data-demo-tour-title-el]');
+    var textEl = root.querySelector('[data-demo-tour-text-el]');
+    var nextLink = root.querySelector('[data-demo-tour-next]');
+    var currentTargets = [];
+    var currentAnchor = null;
+    var busy = false;
 
     function position() {
-      var rect = anchor.getBoundingClientRect();
+      if (!currentAnchor) return;
+      var rect = currentAnchor.getBoundingClientRect();
       var cardRect = card.getBoundingClientRect();
       var margin = 14;
       var top = rect.bottom + margin;
@@ -75,15 +62,83 @@
       arrowLeft = Math.max(18, Math.min(arrowLeft, cardRect.width - 18));
       arrow.style.left = arrowLeft + 'px';
     }
-
-    // "instant" (not the default "auto") explicitly bypasses this site's
-    // global `scroll-behavior: smooth` — with a smooth scroll still in
-    // flight, position() below would read the target's PRE-scroll
-    // coordinates and place the card in the wrong spot.
-    anchor.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
-    position();
     window.addEventListener('resize', position);
     window.addEventListener('scroll', position, { passive: true });
+
+    // Re-picks the DOM target(s) for a step and (re)positions the card —
+    // used both for the step this page was rendered with and, when the
+    // next step stays on the same page, for every later step swapped in
+    // by the fetch handler below without a full reload.
+    function highlight(selectors) {
+      currentTargets.forEach(function (el) { el.classList.remove('demo-tour-highlight'); });
+      currentTargets = [];
+      currentAnchor = null;
+
+      var targets = [];
+      selectors.forEach(function (selector) {
+        var el = document.querySelector(selector);
+        if (el) targets.push(el);
+      });
+
+      if (!targets.length) {
+        // Nothing on this page matched (layout changed, module hidden,
+        // etc.) — fall back to a centered card so the tour never just
+        // silently breaks.
+        card.classList.add('demo-tour-card-centered');
+        return;
+      }
+
+      card.classList.remove('demo-tour-card-centered');
+      targets.forEach(function (el) { el.classList.add('demo-tour-highlight'); });
+      currentTargets = targets;
+      currentAnchor = targets[0];
+      // "instant" (not the default "auto") explicitly bypasses this
+      // site's global `scroll-behavior: smooth` — with a smooth scroll
+      // still in flight, position() would read the target's PRE-scroll
+      // coordinates and place the card in the wrong spot.
+      currentAnchor.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+      position();
+    }
+
+    var initialSelectors = [];
+    try {
+      initialSelectors = JSON.parse(root.getAttribute('data-demo-tour-targets') || '[]');
+    } catch (error) {}
+    highlight(initialSelectors);
+
+    nextLink.addEventListener('click', function (event) {
+      event.preventDefault();
+      if (busy) return;
+      busy = true;
+      fetch(nextLink.href, {
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      }).then(function (response) {
+        return response.json();
+      }).then(function (data) {
+        if (data.finished) {
+          window.location.href = data.redirect || '/';
+          return;
+        }
+        // The next step lives on a different page (a different section/
+        // subsection) — a real navigation, same as a plain link click.
+        // Only a step that stays on THIS page is swapped in without one.
+        if (data.url !== window.location.pathname) {
+          window.location.href = data.url;
+          return;
+        }
+        stepLabel.textContent = 'Шаг ' + data.step_number + ' из ' + data.total_steps;
+        titleEl.textContent = data.title;
+        textEl.textContent = data.text;
+        nextLink.textContent = data.step_number === data.total_steps ? 'Готово' : 'Далее';
+        highlight(data.targets);
+        busy = false;
+      }).catch(function () {
+        // Network hiccup — fall back to exactly what a plain <a> click
+        // would have done.
+        window.location.href = nextLink.href;
+      });
+    });
   }
 })();
 </script>
