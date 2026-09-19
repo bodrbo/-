@@ -865,6 +865,19 @@ body.software-request-widget-enabled main.wrap:not(.schedule-shell) {
 }
 .software-request-close:hover { border-color: var(--brass); color: var(--ink); }
 .software-request-close svg { width: 18px; height: 18px; }
+.software-request-tour-launch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--paper-alt);
+}
+.software-request-tour-launch span { color: var(--ink-soft); font-size: 12.5px; font-weight: 600; }
+.software-request-tour-launch .btn-secondary { flex: none; white-space: nowrap; }
 .software-request-intro {
   margin: 16px 0 18px;
   color: var(--muted);

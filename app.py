@@ -18781,12 +18781,17 @@ def _demo_tenant_template_context():
         # same as before this feature existed.
         return enabled is None or module_key in enabled
 
-    # Guided tour (DEMO_TOUR_STEPS): only rendered when the CURRENT page is
-    # the one the active step actually belongs to — session["demo_tour_step"]
-    # tracks progress, but a step's card only appears once the tenant has
-    # actually navigated (via the tour's own "Далее" link) to its page, not
-    # on every other page they might click into meanwhile.
-    tour_step_index = session.get("demo_tour_step") if tenant_id else None
+    # Guided tour (DEMO_TOUR_STEPS): works for any signed-in staff session,
+    # not just a demo tenant — a real admin/employee can launch it on
+    # demand via the "?" feedback widget's "Запустить обучение" link (see
+    # tour_launch in modules/demo_tenants/routes.py); only the AUTOMATIC
+    # launch on a never-seen IP is demo-only (note_login_ip). Only rendered
+    # when the CURRENT page is the one the active step actually belongs to
+    # — session["demo_tour_step"] tracks progress, but a step's card only
+    # appears once the visitor has actually navigated (via the tour's own
+    # "Далее" link) to its page, not on every other page they might click
+    # into meanwhile.
+    tour_step_index = session.get("demo_tour_step")
     tour_active_step = None
     if tour_step_index is not None and 0 <= tour_step_index < len(DEMO_TOUR_STEPS):
         step = DEMO_TOUR_STEPS[tour_step_index]

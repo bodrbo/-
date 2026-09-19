@@ -189,14 +189,23 @@ def create_blueprint(
         session.clear()
         return redirect(url_for("demo_tenants.login"))
 
-    @blueprint.route("/demo/tour/next")
+    @blueprint.route("/tour/launch")
+    def tour_launch():
+        """Manually (re)starts the guided tour from step 1 — the "Запустить
+        обучение" link in the "?" feedback widget (_software_request_widget
+        .html), available to any signed-in staff session, demo or real:
+        the automatic launch on a never-seen IP (see note_login_ip) is
+        demo-only, but walking through the tour on demand is not."""
+        session["demo_tour_step"] = 0
+        return redirect(url_for(DEMO_TOUR_STEPS[0]["endpoint"]))
+
+    @blueprint.route("/tour/next")
     def tour_next():
         """A plain link, not a form: advancing the tour has no server-side
         effect besides the session counter, so there's nothing a GET here
         could destroy — matches the "просто перейти по ссылке" feel the
-        tour is built around."""
-        if not session.get("demo_tenant_id"):
-            return redirect(url_for("demo_tenants.login"))
+        tour is built around. Works the same for a demo tenant session and
+        a real admin/employee session — both just carry demo_tour_step."""
         step = session.get("demo_tour_step")
         if step is None:
             return redirect(url_for("index"))
@@ -207,7 +216,7 @@ def create_blueprint(
         session["demo_tour_step"] = next_step
         return redirect(url_for(DEMO_TOUR_STEPS[next_step]["endpoint"]))
 
-    @blueprint.route("/demo/tour/skip")
+    @blueprint.route("/tour/skip")
     def tour_skip():
         session.pop("demo_tour_step", None)
         return redirect(request.referrer or url_for("index"))

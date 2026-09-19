@@ -1,7 +1,7 @@
 <aside class="software-request-widget" data-software-request-widget>
   <button type="button" class="software-request-launcher" data-software-request-open
-          aria-label="Сообщить об ошибке или предложить доработку"
-          title="Заявка на доработку">
+          aria-label="Сообщить об ошибке, предложить доработку или запустить обучение"
+          title="Заявка на доработку и обучение">
     <span aria-hidden="true">?</span>
   </button>
 
@@ -15,6 +15,10 @@
         <button type="button" class="software-request-close" data-software-request-close aria-label="Закрыть окно">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg>
         </button>
+      </div>
+      <div class="software-request-tour-launch">
+        <span>Хотите ещё раз пройти обучение по системе?</span>
+        <a href="{{ url_for('demo_tenants.tour_launch') }}" class="btn-secondary">Запустить обучение</a>
       </div>
       <p class="software-request-intro">Опишите ошибку, неудобство или идею. Страница, с которой отправлена заявка, сохранится автоматически.</p>
       <label class="software-request-field">
