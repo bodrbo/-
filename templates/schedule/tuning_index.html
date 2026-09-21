@@ -103,6 +103,7 @@
       <div class="tuning-orders-heading">
         <h2 style="font-size:15px;">{{ employee.name }} <span class="muted" style="font-weight:400;">— {{ employee.position_label }}</span></h2>
         <form method="post" action="{{ url_for('tuning_schedule.remove_crew_member', employee_id=employee.id) }}"
+              class="row-actions"
               onsubmit="return confirm('Убрать {{ employee.name }} из смены на {{ day_label }}?');">
           <input type="hidden" name="work_date" value="{{ day.isoformat() }}">
           <button type="submit" class="icon-btn danger" title="Убрать из смены"{{ ' disabled' if employee.has_day_task }}>
@@ -192,65 +193,72 @@
     <form method="post" action="{{ url_for('tuning_schedule.create_task') }}" class="entry-form" id="tuningScheduleTaskForm">
       <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
 
-      <fieldset class="field equipment-type-field">
-        <legend>Тип задачи</legend>
-        <div class="equipment-type-switch">
-          <label>
-            <input type="radio" name="task_kind" value="free" checked onchange="updateTuningScheduleTaskKind()">
-            <span>Свободная задача</span>
-          </label>
-          <label>
-            <input type="radio" name="task_kind" value="order" onchange="updateTuningScheduleTaskKind()">
-            <span>Из заказа</span>
-          </label>
+      <div class="field-row-inner">
+        <fieldset class="field equipment-type-field">
+          <legend>Тип задачи</legend>
+          <div class="equipment-type-switch">
+            <label>
+              <input type="radio" name="task_kind" value="free" checked onchange="updateTuningScheduleTaskKind()">
+              <span>Свободная задача</span>
+            </label>
+            <label>
+              <input type="radio" name="task_kind" value="order" onchange="updateTuningScheduleTaskKind()">
+              <span>Из заказа</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div class="field">
+          <label for="task-employee">Сотрудник</label>
+          <select id="task-employee" name="employee_name" required>
+            <option value="" disabled selected>Выберите тюнингмэна</option>
+            {% for employee in day_crew %}
+            <option value="{{ employee.name }}">{{ employee.name }}</option>
+            {% endfor %}
+          </select>
+          <span class="field-context">Только сотрудники, поставленные в смену на этот день</span>
         </div>
-      </fieldset>
-
-      <div class="field">
-        <label for="task-employee">Сотрудник</label>
-        <select id="task-employee" name="employee_name" required>
-          <option value="" disabled selected>Выберите тюнингмэна</option>
-          {% for employee in day_crew %}
-          <option value="{{ employee.name }}">{{ employee.name }}</option>
-          {% endfor %}
-        </select>
-        <span class="field-context">Только сотрудники, поставленные в смену на этот день</span>
       </div>
 
-      <div class="field" id="tuningScheduleFreeTitleField">
-        <label for="task-title">Название задачи</label>
-        <input type="text" id="task-title" name="title" placeholder="Например: уборка цеха">
+      <div class="field-row-inner" style="margin-top:16px;">
+        <div class="field" id="tuningScheduleFreeTitleField">
+          <label for="task-title">Название задачи</label>
+          <input type="text" id="task-title" name="title" placeholder="Например: уборка цеха">
+        </div>
+
+        <div class="field" id="tuningScheduleOrderField" hidden>
+          <label for="task-order">Заказ</label>
+          <select id="task-order" name="order_id" onchange="loadTuningScheduleOrderItems(this.value)">
+            <option value="" disabled selected>Выберите заказ</option>
+            {% for order in linkable_orders %}
+            <option value="{{ order.id }}">
+              №{{ order.id }} — {{ order.client_name }}
+              ({{ order.motor_model if order.equipment_type == 'motor' else order.boat_model }})
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field" id="tuningScheduleOrderItemField" hidden>
+          <label for="task-order-item">Работа в заказе</label>
+          <select id="task-order-item" name="order_item_id">
+            <option value="" disabled selected>Сначала выберите заказ</option>
+          </select>
+        </div>
+
+        <div class="field field-narrow">
+          <label for="task-rate">Ставка, ₽/ч</label>
+          <input type="text" inputmode="decimal" id="task-rate" name="rate" required>
+        </div>
       </div>
 
-      <div class="field" id="tuningScheduleOrderField" hidden>
-        <label for="task-order">Заказ</label>
-        <select id="task-order" name="order_id" onchange="loadTuningScheduleOrderItems(this.value)">
-          <option value="" disabled selected>Выберите заказ</option>
-          {% for order in linkable_orders %}
-          <option value="{{ order.id }}">
-            №{{ order.id }} — {{ order.client_name }}
-            ({{ order.motor_model if order.equipment_type == 'motor' else order.boat_model }})
-          </option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="field" id="tuningScheduleOrderItemField" hidden>
-        <label for="task-order-item">Работа в заказе</label>
-        <select id="task-order-item" name="order_item_id">
-          <option value="" disabled selected>Сначала выберите заказ</option>
-        </select>
+      <div class="field-row-inner" style="margin-top:16px;">
+        <div class="field field-wide">
+          <label for="task-comment">Комментарий</label>
+          <textarea id="task-comment" name="comment" rows="2"></textarea>
+        </div>
       </div>
 
-      <div class="field field-narrow">
-        <label for="task-rate">Ставка, ₽/ч</label>
-        <input type="text" inputmode="decimal" id="task-rate" name="rate" required>
-      </div>
-
-      <div class="field-wide">
-        <label for="task-comment">Комментарий</label>
-        <textarea id="task-comment" name="comment" rows="2"></textarea>
-      </div>
-
+      <div class="field-row-inner" style="margin-top:16px;">
       <div class="field-wide boat-motors-field" id="tuningScheduleDaysField">
         <div class="boat-motors-heading">
           <div>
@@ -290,9 +298,12 @@
           </div>
         </template>
       </div>
+      </div>
 
-      <div class="field field-submit">
-        <button type="submit">Добавить задачу</button>
+      <div class="field-row-inner" style="margin-top:16px;">
+        <div class="field field-submit">
+          <button type="submit">Добавить задачу</button>
+        </div>
       </div>
     </form>
     </div>
