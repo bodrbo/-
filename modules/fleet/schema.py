@@ -41,6 +41,34 @@ def init_schema(conn, refresh_runtime=True):
         )
         """
     )
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(fleet_vessels)")
+    }
+    # A Passenger restart can be interrupted after CREATE TABLE but before a
+    # deploy finishes.  Keep this migration additive so opening /fleet heals a
+    # partially-created table instead of returning an opaque 500 response.
+    migrations = {
+        "investor": "TEXT NOT NULL DEFAULT ''",
+        "commission_direct": "REAL NOT NULL DEFAULT 30",
+        "commission_aggregator": "REAL NOT NULL DEFAULT 30",
+        "fuel_cost": "REAL NOT NULL DEFAULT 768",
+        "mooring_cost": "REAL NOT NULL DEFAULT 1333",
+        "tank_capacity_liters": "REAL NOT NULL DEFAULT 0",
+        "group_trip_liters": "REAL NOT NULL DEFAULT 0",
+        "schedule_color": "TEXT NOT NULL DEFAULT '#607d8b'",
+        "length_m": "REAL",
+        "width_m": "REAL",
+        "specifications": "TEXT NOT NULL DEFAULT ''",
+        "sort_order": "INTEGER NOT NULL DEFAULT 0",
+        "created_at": "TEXT NOT NULL DEFAULT ''",
+        "updated_at": "TEXT NOT NULL DEFAULT ''",
+        "deleted_at": "TEXT",
+    }
+    for column, definition in migrations.items():
+        if column not in columns:
+            conn.execute(
+                f'ALTER TABLE fleet_vessels ADD COLUMN "{column}" {definition}'
+            )
     timestamp = _timestamp()
     for position, boat in enumerate(DEFAULT_BOATS):
         fuel = DEFAULT_FUEL_CONFIG.get(boat["name"], {})

@@ -1,10 +1,11 @@
 import io
 import os
+import sqlite3
 import unittest
 from unittest.mock import patch
 
 from support import TEST_DIRECTORY, application_module
-from modules.fleet.schema import refresh_runtime_fleet
+from modules.fleet.schema import init_schema as init_fleet_schema, refresh_runtime_fleet
 
 
 class FleetModuleIntegrationTests(unittest.TestCase):
@@ -28,6 +29,27 @@ class FleetModuleIntegrationTests(unittest.TestCase):
         with self.client.session_transaction() as session:
             session["admin_id"] = 1
             session["admin_name"] = "Администратор"
+
+    def test_fleet_schema_repairs_partial_deploy(self):
+        db = sqlite3.connect(":memory:")
+        try:
+            db.execute(
+                "CREATE TABLE fleet_vessels ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE)"
+            )
+            init_fleet_schema(db, refresh_runtime=False)
+            columns = {
+                row[1] for row in db.execute("PRAGMA table_info(fleet_vessels)")
+            }
+            self.assertTrue({
+                "tank_capacity_liters", "schedule_color", "length_m", "width_m",
+                "specifications", "deleted_at",
+            }.issubset(columns))
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM fleet_vessels").fetchone()[0], 3
+            )
+        finally:
+            db.close()
 
     def create_defect(self):
         with application_module.app.app_context():

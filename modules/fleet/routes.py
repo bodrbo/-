@@ -16,6 +16,7 @@ from flask import (
 )
 
 from . import fuel_services, repository, services
+from .schema import init_schema as init_fleet_schema
 from .constants import (
     BOAT_DOCUMENT_EXTENSIONS,
     BOAT_PHOTO_EXTENSIONS,
@@ -31,6 +32,15 @@ def create_fleet_blueprint(
 ):
     """Build the fleet Blueprint with the application's DB and auth adapters."""
     blueprint = Blueprint("fleet", __name__)
+
+    @blueprint.before_request
+    def ensure_fleet_schema():
+        # Normally app.init_db() has already done this.  Running the tiny,
+        # idempotent check here makes the section resilient to Passenger
+        # workers that survived a deploy or saw an interrupted migration.
+        db = get_db()
+        init_fleet_schema(db, refresh_runtime=not session.get("demo_tenant_id"))
+        db.commit()
 
     @blueprint.route("/fleet")
     @admin_login_required
