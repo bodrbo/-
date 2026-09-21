@@ -23,9 +23,14 @@ DEMO_MODULE_BLUEPRINTS = {
 
 # Monolithic (non-blueprint) sections in app.py, matched by URL path
 # prefix instead — "Морские прогулки" also covers the legacy investor
-# revenue-split pages at /trips.
+# revenue-split pages at /trips. "/schedule/tuning" is the tuning_schedule
+# blueprint (deliberately its own blueprint, not part of "schedule", so it
+# gates here by path instead of being swept into "excursions" — see
+# module_for_request in services.py, which checks DEMO_MODULE_BLUEPRINTS
+# first and only falls through to this map when the blueprint isn't
+# listed there).
 DEMO_MODULE_PATH_PREFIXES = {
-    "tuning": ("/tuning",),
+    "tuning": ("/tuning", "/schedule/tuning"),
     "fleet": ("/fleet",),
     "excursions": ("/trips",),
     "analytics": ("/analytics",),

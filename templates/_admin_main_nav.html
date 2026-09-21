@@ -52,13 +52,16 @@
     </svg>
     <span class="nav-label">Зарплаты</span>
   </a>
-  {% if demo_module_enabled('excursions') %}
-  <a href="{{ url_for('schedule.index') }}" class="{{ 'active' if active_page == 'schedule' }}">
+  {% if demo_module_enabled('excursions') or demo_module_enabled('tuning') %}
+  <a href="{{ url_for('schedule.index' if demo_module_enabled('excursions') else 'tuning_schedule.index') }}"
+     class="{{ 'active' if active_page == 'schedule' }}">
     <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
       <rect x="2.5" y="4.5" width="15" height="13" rx="2"/><path d="M6 2.5v4M14 2.5v4M2.5 8h15M6 11h2M10 11h2M14 11h.01M6 14h2M10 14h2"/>
     </svg>
     <span class="nav-label">Расписание</span>
   </a>
+  {% endif %}
+  {% if demo_module_enabled('excursions') %}
   <a href="{{ url_for('excursion_services.index') }}" class="{{ 'active' if active_page == 'services' }}">
     <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
       <path d="M3 4.5h14v11H3zM6 8h8M6 11h5"/><circle cx="14.5" cy="13.5" r="1"/>

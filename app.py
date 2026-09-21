@@ -127,6 +127,10 @@ from modules.schedule import (
     init_schema as init_schedule_schema,
 )
 from modules.schedule import services as schedule_services
+from modules.tuning_schedule import (
+    create_tuning_schedule_blueprint,
+    init_schema as init_tuning_schedule_schema,
+)
 from modules.weather import constants as weather_constants
 from modules.weather import schema as weather_schema
 from modules.weather import services as weather_services
@@ -1974,6 +1978,7 @@ def init_db(db_path=None):
     init_notification_schema(conn)
     init_excursion_services_schema(conn)
     init_schedule_schema(conn)
+    init_tuning_schedule_schema(conn)
 
     conn.execute(
         """
@@ -5209,6 +5214,33 @@ app.register_blueprint(
         phone_normalizer=lambda phone: _normalize_ru_phone(phone),
         weather_configured=lambda: weather_configured(),
         weather_sync=lambda db: _sync_weather_forecast(db),
+    )
+)
+
+
+# =======================================================================
+# Расписание тюнинга (второй подраздел «Расписание», см. modules/tuning_schedule)
+# =======================================================================
+app.register_blueprint(
+    create_tuning_schedule_blueprint(
+        get_db=get_db,
+        access_required=admin_login_required,
+        manage_required=admin_login_required,
+        avatar_url=find_avatar_url,
+        # Lambdas here (not direct references) because these three are
+        # defined later in this file (near assign_tuning_item) — same
+        # deferred-name-resolution trick the schedule registration above
+        # already relies on for e.g. _sync_weather_forecast.
+        create_order_assignment=lambda db, item, employee_name, rate, hours, comment: (
+            _create_tuning_item_assignment(db, item, employee_name, rate, hours, comment)
+        ),
+        update_order_assignment_status=lambda db, assignment_id, status: (
+            _set_tuning_item_assignment_status(db, assignment_id, status)
+        ),
+        pay_free_task=lambda db, task, total_hours: (
+            _pay_free_tuning_schedule_task(db, task, total_hours)
+        ),
+        assignment_status_choices=ASSIGNMENT_STATUSES,
     )
 )
 
@@ -9813,6 +9845,29 @@ def _pay_tuning_assignment(db, assignment):
     )
 
 
+def _pay_free_tuning_schedule_task(db, task, total_hours):
+    """Same payout as _pay_tuning_assignment, for a tuning-schedule task
+    that isn't linked to any order (modules/tuning_schedule — a general
+    shop task like cleaning or maintenance) — no tuning_order_items row to
+    read a work name or project from, so the schedule task's own `title`
+    stands in for work_type and project_id is left NULL. Guarded by
+    task["entry_id"] the same way, by modules.tuning_schedule.services.
+    set_task_status before this is ever called. Returns the new entries.id,
+    or None if already paid (defensive — the caller already checks)."""
+    if task["entry_id"]:
+        return None
+    amount = task["rate"] * total_hours
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    cur = db.execute(
+        "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at, project_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
+        (task["employee_name"], task["title"], task["rate"], total_hours,
+         amount, dt.date.today().isoformat(), now),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
 @app.route("/tuning/<int:order_id>/item/<int:item_id>/status", methods=["POST"])
 @admin_login_required
 def set_tuning_item_status(order_id, item_id):
@@ -9879,15 +9934,10 @@ def assign_tuning_item(order_id, item_id):
 
     if rows and len(comment) <= TASK_ASSIGNMENT_COMMENT_MAX_LENGTH:
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-        created_ids = []
-        for employee_name, rate, hours in rows:
-            cur = db.execute(
-                "INSERT INTO tuning_item_assignments "
-                "(item_id, employee_name, rate, norm_hours, comment, assignment_status, assigned_at) "
-                "VALUES (?, ?, ?, ?, ?, 'pending', ?)",
-                (item_id, employee_name, rate, hours, comment, now),
-            )
-            created_ids.append(cur.lastrowid)
+        created_ids = [
+            _insert_tuning_item_assignment(db, item_id, employee_name, rate, hours, comment, now)
+            for employee_name, rate, hours in rows
+        ]
         db.commit()
         for assignment_id in created_ids:
             _notify_task_assignment(db, ASSIGNMENT_TUNING, assignment_id)
@@ -9895,6 +9945,39 @@ def assign_tuning_item(order_id, item_id):
             db, item["id"], item["work_name"], item["cost_price"], item["price_pending"]
         )
     return redirect(url_for(return_endpoint, order_id=order_id))
+
+
+def _insert_tuning_item_assignment(db, item_id, employee_name, rate, hours, comment, now):
+    """Bare INSERT behind assign_tuning_item's multi-employee loop — pulled
+    out so modules/tuning_schedule can hand a work item to someone on a
+    specific day through the exact same tuning_item_assignments row shape,
+    instead of a second, diverging insert. Caller commits, notifies
+    (_notify_task_assignment) and flags budget overrun
+    (_flag_tuning_item_budget_overrun), same as assign_tuning_item does."""
+    cur = db.execute(
+        "INSERT INTO tuning_item_assignments "
+        "(item_id, employee_name, rate, norm_hours, comment, assignment_status, assigned_at) "
+        "VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+        (item_id, employee_name, rate, hours, comment, now),
+    )
+    return cur.lastrowid
+
+
+def _create_tuning_item_assignment(db, item, employee_name, rate, hours, comment):
+    """Self-contained version of the insert above (commit + notify + budget
+    flag included) — the callable injected into modules/tuning_schedule as
+    create_order_assignment, for assigning a work item to someone directly
+    from the tuning schedule rather than from the order/board."""
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    assignment_id = _insert_tuning_item_assignment(
+        db, item["id"], employee_name, rate, hours, comment, now
+    )
+    db.commit()
+    _notify_task_assignment(db, ASSIGNMENT_TUNING, assignment_id)
+    _flag_tuning_item_budget_overrun(
+        db, item["id"], item["work_name"], item["cost_price"], item["price_pending"]
+    )
+    return assignment_id
 
 
 def _flag_tuning_item_budget_overrun(db, item_id, work_name, cost_price, price_pending):
@@ -9969,19 +10052,31 @@ def set_tuning_assignment_status(assignment_id):
         return redirect(url_for("tuning_index"))
     status = request.form.get("status", "").strip()
     if status in [s["value"] for s in ASSIGNMENT_STATUSES]:
-        db.execute(
-            "UPDATE tuning_item_assignments SET assignment_status = ?, responded_at = ? WHERE id = ?",
-            (status, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), assignment_id),
-        )
-        if status == "done":
-            _pay_tuning_assignment(db, db.execute(
-                "SELECT * FROM tuning_item_assignments WHERE id = ?", (assignment_id,)
-            ).fetchone())
-        db.commit()
+        _set_tuning_item_assignment_status(db, assignment_id, status)
     return redirect(
         url_for("tuning_order_board", order_id=assignment["order_id"])
         + f"#board-work-{assignment['item_id']}"
     )
+
+
+def _set_tuning_item_assignment_status(db, assignment_id, status):
+    """Core of set_tuning_assignment_status, pulled out so
+    modules/tuning_schedule can move a linked task through the same
+    states (and trigger the same first-time-done payout) as the order
+    board/team dashboard, instead of a second status field that could
+    drift out of sync with tuning_item_assignments.assignment_status —
+    that column stays the one source of truth for a linked task's status.
+    Caller has already validated `status` is a real ASSIGNMENT_STATUSES
+    value."""
+    db.execute(
+        "UPDATE tuning_item_assignments SET assignment_status = ?, responded_at = ? WHERE id = ?",
+        (status, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), assignment_id),
+    )
+    if status == "done":
+        _pay_tuning_assignment(db, db.execute(
+            "SELECT * FROM tuning_item_assignments WHERE id = ?", (assignment_id,)
+        ).fetchone())
+    db.commit()
 
 
 @app.route("/tuning/<int:order_id>/board")

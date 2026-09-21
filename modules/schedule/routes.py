@@ -75,6 +75,7 @@ def create_schedule_blueprint(
             "schedule/index.html",
             **context,
             active_page="schedule",
+            sub_page="excursions",
             day=day,
             day_label=services.day_label(day),
             previous_day=(day - dt.timedelta(days=1)).isoformat(),

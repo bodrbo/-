@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Расписание тюнинга — Бодрый Боцман</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<meta name="theme-color" content="#3498db">
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Боцман">
+</head>
+<body>
+
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100">
+      <g fill="var(--brass)">
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/>
+      </g>
+      <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
+    </svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="topbar-top-row">
+      <div class="brand">{% include '_topbar_brand.html' %}</div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 5.5h14M3 10h14M3 14.5h14"/>
+        </svg>
+      </button>
+    </div>
+    {% include '_admin_main_nav.html' %}
+    <div class="title-block">
+      <h1>Расписание тюнинга</h1>
+      <p>Кто из тюнингмэнов работает и над чем — по дням</p>
+    </div>
+    <div class="topbar-actions">
+      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout">
+        <button type="submit">Выйти</button>
+      </form>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  {% include '_schedule_subnav.html' %}
+
+  {% if notice %}
+  <p class="alert{{ ' success' if notice.type == 'success' }}" role="status">{{ notice.message }}</p>
+  {% endif %}
+
+  <section class="panel">
+    <div class="schedule-date-controls">
+      <a class="btn-secondary" href="{{ url_for('tuning_schedule.index', date=today) }}">Сегодня</a>
+      <div class="schedule-stepper">
+        <a href="{{ url_for('tuning_schedule.index', date=previous_day) }}" aria-label="Предыдущий день">‹</a>
+        <a href="{{ url_for('tuning_schedule.index', date=next_day) }}" aria-label="Следующий день">›</a>
+      </div>
+      <label class="schedule-date-picker">
+        <span>{{ day_label }}</span>
+        <input type="date" value="{{ day.isoformat() }}" aria-label="Выбрать дату"
+               onchange='location.href = {{ url_for("tuning_schedule.index")|tojson }} + "?date=" + this.value'>
+      </label>
+    </div>
+  </section>
+
+  <details class="panel collapsible-panel" open>
+    <summary><span>Кто сегодня на смене</span><span class="chev" aria-hidden="true"></span></summary>
+    <div class="collapsible-body">
+    {% if available_crew %}
+    <form method="post" action="{{ url_for('tuning_schedule.add_crew_member') }}" class="entry-form" style="margin-bottom:16px;">
+      <input type="hidden" name="work_date" value="{{ day.isoformat() }}">
+      <div class="field">
+        <label for="crew-employee">Добавить в смену</label>
+        <select id="crew-employee" name="employee_id" required>
+          <option value="" disabled selected>Выберите тюнингмэна</option>
+          {% for employee in available_crew %}
+          <option value="{{ employee.id }}">{{ employee.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field field-submit">
+        <button type="submit">Добавить</button>
+      </div>
+    </form>
+    {% endif %}
+
+    {% if day_crew %}
+    {% for employee in day_crew %}
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="tuning-orders-heading">
+        <h2 style="font-size:15px;">{{ employee.name }} <span class="muted" style="font-weight:400;">— {{ employee.position_label }}</span></h2>
+        <form method="post" action="{{ url_for('tuning_schedule.remove_crew_member', employee_id=employee.id) }}"
+              onsubmit="return confirm('Убрать {{ employee.name }} из смены на {{ day_label }}?');">
+          <input type="hidden" name="work_date" value="{{ day.isoformat() }}">
+          <button type="submit" class="icon-btn danger" title="Убрать из смены"{{ ' disabled' if employee.has_day_task }}>
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+          </button>
+        </form>
+      </div>
+      {% if employee.tasks %}
+      <div class="table-scroll">
+        <table class="records">
+          <thead><tr><th>Задача</th><th>Часы на {{ day.day }} число</th><th>Ставка</th><th>Статус</th><th></th></tr></thead>
+          <tbody>
+            {% for task in employee.tasks %}
+            <tr>
+              <td>
+                {{ task.title }}
+                {% if task.is_linked %}
+                <div class="hint" style="margin:2px 0 0;">
+                  Заказ <a href="{{ url_for('edit_tuning_order', order_id=task.order_id) }}">№{{ task.order_id }}</a> — {{ task.equipment_label }}
+                </div>
+                {% endif %}
+              </td>
+              <td class="amount">{{ task.planned_hours|float|round(1) }} ч</td>
+              <td class="amount">{{ task.rate|money }} ₽</td>
+              <td>
+                <form method="post" action="{{ url_for('tuning_schedule.set_task_status', task_id=task.task_id) }}" class="status-select-form">
+                  <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
+                  <select name="status" onchange="this.form.submit()">
+                    {% for s in assignment_statuses %}
+                    <option value="{{ s.value }}"{{ ' selected' if task.status == s.value }}>{{ s.label }}</option>
+                    {% endfor %}
+                  </select>
+                </form>
+              </td>
+              <td class="row-actions">
+                <form method="post" action="{{ url_for('tuning_schedule.remove_task_day', task_id=task.task_id, day_id=task.day_id) }}"
+                      onsubmit="return confirm('Убрать эту задачу с {{ day_label }}?');">
+                  <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
+                  <button type="submit" class="icon-btn danger" title="Убрать с этого дня">
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+                  </button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="hint" style="margin:0;">На этот день задач не назначено.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="hint">На {{ day_label }} никто из тюнингмэнов не поставлен в смену.</p>
+    {% endif %}
+    </div>
+  </details>
+
+  {% if leftover_tasks %}
+  <details class="panel collapsible-panel" open>
+    <summary><span>Задачи без сотрудника в смене</span><span class="chev" aria-hidden="true"></span></summary>
+    <div class="collapsible-body">
+      <p class="hint">Эти задачи стоят на {{ day_label }}, но сотрудник, на которого они назначены, сейчас не в смене этого дня.</p>
+      <div class="table-scroll">
+        <table class="records">
+          <thead><tr><th>Сотрудник</th><th>Задача</th><th>Часы</th><th>Статус</th></tr></thead>
+          <tbody>
+            {% for task in leftover_tasks %}
+            <tr>
+              <td>{{ task.employee_name }}</td>
+              <td>{{ task.title }}</td>
+              <td class="amount">{{ task.planned_hours|float|round(1) }} ч</td>
+              <td>{{ assignment_statuses|selectattr('value', 'equalto', task.status)|map(attribute='label')|first }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </details>
+  {% endif %}
+
+  <details class="panel form-panel collapsible-panel" open>
+    <summary><span>Добавить задачу</span><span class="chev" aria-hidden="true"></span></summary>
+    <div class="collapsible-body">
+    <form method="post" action="{{ url_for('tuning_schedule.create_task') }}" class="entry-form" id="tuningScheduleTaskForm">
+      <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
+
+      <fieldset class="field equipment-type-field">
+        <legend>Тип задачи</legend>
+        <div class="equipment-type-switch">
+          <label>
+            <input type="radio" name="task_kind" value="free" checked onchange="updateTuningScheduleTaskKind()">
+            <span>Свободная задача</span>
+          </label>
+          <label>
+            <input type="radio" name="task_kind" value="order" onchange="updateTuningScheduleTaskKind()">
+            <span>Из заказа</span>
+          </label>
+        </div>
+      </fieldset>
+
+      <div class="field">
+        <label for="task-employee">Сотрудник</label>
+        <select id="task-employee" name="employee_name" required>
+          <option value="" disabled selected>Выберите тюнингмэна</option>
+          {% for employee in day_crew %}
+          <option value="{{ employee.name }}">{{ employee.name }}</option>
+          {% endfor %}
+        </select>
+        <span class="field-context">Только сотрудники, поставленные в смену на этот день</span>
+      </div>
+
+      <div class="field" id="tuningScheduleFreeTitleField">
+        <label for="task-title">Название задачи</label>
+        <input type="text" id="task-title" name="title" placeholder="Например: уборка цеха">
+      </div>
+
+      <div class="field" id="tuningScheduleOrderField" hidden>
+        <label for="task-order">Заказ</label>
+        <select id="task-order" name="order_id" onchange="loadTuningScheduleOrderItems(this.value)">
+          <option value="" disabled selected>Выберите заказ</option>
+          {% for order in linkable_orders %}
+          <option value="{{ order.id }}">
+            №{{ order.id }} — {{ order.client_name }}
+            ({{ order.motor_model if order.equipment_type == 'motor' else order.boat_model }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field" id="tuningScheduleOrderItemField" hidden>
+        <label for="task-order-item">Работа в заказе</label>
+        <select id="task-order-item" name="order_item_id">
+          <option value="" disabled selected>Сначала выберите заказ</option>
+        </select>
+      </div>
+
+      <div class="field field-narrow">
+        <label for="task-rate">Ставка, ₽/ч</label>
+        <input type="text" inputmode="decimal" id="task-rate" name="rate" required>
+      </div>
+
+      <div class="field-wide">
+        <label for="task-comment">Комментарий</label>
+        <textarea id="task-comment" name="comment" rows="2"></textarea>
+      </div>
+
+      <div class="field-wide boat-motors-field" id="tuningScheduleDaysField">
+        <div class="boat-motors-heading">
+          <div>
+            <span class="field-static-label">Дни выполнения</span>
+            <span class="field-context">Один день — одна строка. Для задачи на несколько дней добавьте ещё дни и укажите часы на каждый.</span>
+          </div>
+          <button type="button" class="btn-add" onclick="addTuningScheduleDayRow()">Добавить день</button>
+        </div>
+        <div id="tuningScheduleDaysContainer">
+          <div class="tuning-schedule-day-row">
+            <div class="field">
+              <label>Дата</label>
+              <input type="date" name="work_date[]" value="{{ day.isoformat() }}" required>
+            </div>
+            <div class="field field-narrow">
+              <label>Часы</label>
+              <input type="text" inputmode="decimal" name="planned_hours[]" placeholder="8" required>
+            </div>
+            <button type="button" class="icon-btn danger tuning-schedule-day-remove" onclick="removeTuningScheduleDayRow(this)" title="Убрать день">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+            </button>
+          </div>
+        </div>
+        <template id="tuningScheduleDayRowTemplate">
+          <div class="tuning-schedule-day-row">
+            <div class="field">
+              <label>Дата</label>
+              <input type="date" name="work_date[]" required>
+            </div>
+            <div class="field field-narrow">
+              <label>Часы</label>
+              <input type="text" inputmode="decimal" name="planned_hours[]" placeholder="8" required>
+            </div>
+            <button type="button" class="icon-btn danger tuning-schedule-day-remove" onclick="removeTuningScheduleDayRow(this)" title="Убрать день">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
+            </button>
+          </div>
+        </template>
+      </div>
+
+      <div class="field field-submit">
+        <button type="submit">Добавить задачу</button>
+      </div>
+    </form>
+    </div>
+  </details>
+
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+function updateTuningScheduleTaskKind() {
+  var isOrder = document.querySelector('input[name="task_kind"]:checked').value === 'order';
+  document.getElementById('tuningScheduleFreeTitleField').hidden = isOrder;
+  document.getElementById('tuningScheduleOrderField').hidden = !isOrder;
+  document.getElementById('tuningScheduleOrderItemField').hidden = !isOrder;
+  document.getElementById('task-title').required = !isOrder;
+  document.getElementById('task-order-item').required = isOrder;
+}
+
+function loadTuningScheduleOrderItems(orderId) {
+  var select = document.getElementById('task-order-item');
+  select.innerHTML = '<option value="" disabled selected>Загрузка…</option>';
+  if (!orderId) return;
+  fetch('/schedule/tuning/orders/' + orderId + '/items', {credentials: 'same-origin'})
+    .then(function (response) { return response.json(); })
+    .then(function (data) {
+      var items = (data && data.items) || [];
+      if (!items.length) {
+        select.innerHTML = '<option value="" disabled selected>В заказе нет работ</option>';
+        return;
+      }
+      select.innerHTML = '<option value="" disabled selected>Выберите работу</option>' +
+        items.map(function (item) {
+          return '<option value="' + item.id + '">' + item.work_name.replace(/</g, '&lt;') + '</option>';
+        }).join('');
+    })
+    .catch(function () {
+      select.innerHTML = '<option value="" disabled selected>Не удалось загрузить работы</option>';
+    });
+}
+
+function addTuningScheduleDayRow() {
+  var template = document.getElementById('tuningScheduleDayRowTemplate');
+  document.getElementById('tuningScheduleDaysContainer').appendChild(template.content.cloneNode(true));
+}
+
+function removeTuningScheduleDayRow(button) {
+  var container = document.getElementById('tuningScheduleDaysContainer');
+  if (container.children.length <= 1) return;
+  button.closest('.tuning-schedule-day-row').remove();
+}
+</script>
+</body>
+</html>

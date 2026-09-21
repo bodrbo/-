@@ -6691,6 +6691,9 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 #boatMotorsField[hidden],
 #motorModelField[hidden],
 #motorSerialNumberField[hidden] { display: none; }
+#tuningScheduleFreeTitleField[hidden],
+#tuningScheduleOrderField[hidden],
+#tuningScheduleOrderItemField[hidden] { display: none; }
 .boat-motors-field {
   padding: 14px;
   border: 1px solid var(--hairline);
@@ -6749,6 +6752,41 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   .boat-motor-model-field,
   .boat-motor-serial-field { grid-column: 1; }
   .boat-motor-remove { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+}
+
+/* --- tuning schedule: repeatable day-hours rows (same pattern as .boat-motor-row) --- */
+.tuning-schedule-day-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(110px, 0.6fr) 38px;
+  gap: 10px;
+  align-items: end;
+}
+.tuning-schedule-day-row + .tuning-schedule-day-row {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--hairline);
+}
+.tuning-schedule-day-row .field { min-width: 0; }
+.tuning-schedule-day-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 42px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.tuning-schedule-day-remove:hover { background: var(--danger); color: #fff8f4; border-color: var(--danger); }
+.tuning-schedule-day-remove svg { width: 16px; height: 16px; }
+@media (max-width: 700px) {
+  .tuning-schedule-day-row { grid-template-columns: minmax(0, 1fr) 38px; }
+  .tuning-schedule-day-row .field:nth-child(2) { grid-column: 1; }
+  .tuning-schedule-day-remove { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
 }
 .equipment-kind,
 .equipment-model,

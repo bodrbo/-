@@ -44,6 +44,7 @@
 </header>
 
 <main class="schedule-shell">
+  {% if not manager_view and not team_view %}{% include '_schedule_subnav.html' %}{% endif %}
   {% if notice %}
   <div class="schedule-notice {{ notice.type }}" role="status">
     <span>{{ notice.message }}</span>
