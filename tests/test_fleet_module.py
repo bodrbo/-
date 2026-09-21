@@ -90,6 +90,9 @@ class FleetModuleIntegrationTests(unittest.TestCase):
             )
             db.execute("CREATE TABLE legacy_boat_data (boat TEXT NOT NULL)")
             db.execute("INSERT INTO legacy_boat_data (boat) VALUES ('Ларус')")
+            db.execute("CREATE TABLE unique_boat_data (boat TEXT PRIMARY KEY)")
+            db.execute("INSERT INTO unique_boat_data (boat) VALUES ('Ларус')")
+            db.execute("INSERT INTO unique_boat_data (boat) VALUES ('Демо Ларус')")
             db.execute(
                 "INSERT INTO fleet_vessels "
                 "(name, sort_order, created_at, updated_at) "
@@ -106,6 +109,10 @@ class FleetModuleIntegrationTests(unittest.TestCase):
             self.assertEqual(
                 db.execute("SELECT boat FROM legacy_boat_data").fetchone()[0],
                 "Демо Ларус",
+            )
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM unique_boat_data").fetchone()[0],
+                2,
             )
             # Removing the artefact must release the unique name as well.
             db.execute(

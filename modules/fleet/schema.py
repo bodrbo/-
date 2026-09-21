@@ -1,6 +1,7 @@
 """Persistent vessel directory and compatibility views for the fleet domain."""
 
 import datetime as dt
+import sqlite3
 
 from .constants import (
     BOATS,
@@ -20,8 +21,14 @@ def _quoted_identifier(value):
     return '"' + str(value).replace('"', '""') + '"'
 
 
-def rename_vessel_references(conn, old_name, new_name):
-    """Move references between vessel names across all application tables."""
+def rename_vessel_references(conn, old_name, new_name, ignore_conflicts=False):
+    """Move references between vessel names across all application tables.
+
+    ``ignore_conflicts`` is reserved for repairing duplicate bootstrap rows
+    created by the old request-time seeder.  Some one-row-per-boat tables may
+    already contain both names; those tables are left untouched while normal
+    history tables are still repaired.  Interactive renames remain strict.
+    """
     reference_columns = {"boat", "boat_name", "source_boat", "destination_boat"}
     tables = conn.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' "
@@ -32,13 +39,29 @@ def rename_vessel_references(conn, old_name, new_name):
         columns = conn.execute(
             f"PRAGMA table_info({_quoted_identifier(table)})"
         ).fetchall()
-        for column in (row[1] for row in columns if row[1] in reference_columns):
-            conn.execute(
-                f"UPDATE {_quoted_identifier(table)} "
-                f"SET {_quoted_identifier(column)} = ? "
-                f"WHERE {_quoted_identifier(column)} = ?",
-                (new_name, old_name),
-            )
+        matched_columns = [
+            row[1] for row in columns if row[1] in reference_columns
+        ]
+        if not matched_columns:
+            continue
+        if ignore_conflicts:
+            conn.execute("SAVEPOINT fleet_reference_repair")
+        try:
+            for column in matched_columns:
+                conn.execute(
+                    f"UPDATE {_quoted_identifier(table)} "
+                    f"SET {_quoted_identifier(column)} = ? "
+                    f"WHERE {_quoted_identifier(column)} = ?",
+                    (new_name, old_name),
+                )
+        except sqlite3.IntegrityError:
+            if not ignore_conflicts:
+                raise
+            conn.execute("ROLLBACK TO fleet_reference_repair")
+            conn.execute("RELEASE fleet_reference_repair")
+        else:
+            if ignore_conflicts:
+                conn.execute("RELEASE fleet_reference_repair")
 
 
 def init_schema(conn, refresh_runtime=True):
@@ -161,7 +184,9 @@ def _remove_resurrected_defaults(conn):
             (position, duplicate[0]),
         ).fetchone()
         if older_slot is not None:
-            rename_vessel_references(conn, boat["name"], older_slot[1])
+            rename_vessel_references(
+                conn, boat["name"], older_slot[1], ignore_conflicts=True
+            )
             conn.execute(
                 "DELETE FROM fleet_vessels WHERE id = ?",
                 (duplicate[0],),
