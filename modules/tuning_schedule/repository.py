@@ -84,7 +84,7 @@ def list_day_tasks(db, day):
     its own employee_name/title/rate/status columns instead."""
     return db.execute(
         "SELECT t.id AS task_id, t.assignment_id, d.id AS day_id, "
-        "d.work_date, d.planned_hours, "
+        "d.work_date, d.start_time, d.planned_hours, "
         "COALESCE(tia.employee_name, t.employee_name) AS employee_name, "
         "COALESCE(ti.work_name, t.title) AS title, "
         "COALESCE(tia.rate, t.rate) AS rate, "
@@ -104,8 +104,8 @@ def list_day_tasks(db, day):
 
 def list_task_days(db, task_id):
     return db.execute(
-        "SELECT id, work_date, planned_hours FROM tuning_schedule_task_days "
-        "WHERE task_id = ? ORDER BY work_date",
+        "SELECT id, work_date, start_time, planned_hours FROM tuning_schedule_task_days "
+        "WHERE task_id = ? ORDER BY work_date, start_time",
         (task_id,),
     ).fetchall()
 
@@ -127,12 +127,13 @@ def create_task(db, assignment_id, employee_name, title, rate, comment, created_
     return cur.lastrowid
 
 
-def add_task_day(db, task_id, work_date, planned_hours):
+def add_task_day(db, task_id, work_date, start_time, planned_hours):
     db.execute(
-        "INSERT INTO tuning_schedule_task_days (task_id, work_date, planned_hours) "
-        "VALUES (?, ?, ?) "
-        "ON CONFLICT(task_id, work_date) DO UPDATE SET planned_hours = excluded.planned_hours",
-        (task_id, work_date, planned_hours),
+        "INSERT INTO tuning_schedule_task_days (task_id, work_date, start_time, planned_hours) "
+        "VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(task_id, work_date) DO UPDATE SET "
+        "start_time = excluded.start_time, planned_hours = excluded.planned_hours",
+        (task_id, work_date, start_time, planned_hours),
     )
     db.commit()
 

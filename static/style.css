@@ -6757,7 +6757,7 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 /* --- tuning schedule: repeatable day-hours rows (same pattern as .boat-motor-row) --- */
 .tuning-schedule-day-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(110px, 0.6fr) 38px;
+  grid-template-columns: minmax(150px, 1fr) minmax(100px, 0.55fr) minmax(90px, 0.5fr) 38px;
   gap: 10px;
   align-items: end;
 }
@@ -6785,8 +6785,9 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 .tuning-schedule-day-remove svg { width: 16px; height: 16px; }
 @media (max-width: 700px) {
   .tuning-schedule-day-row { grid-template-columns: minmax(0, 1fr) 38px; }
-  .tuning-schedule-day-row .field:nth-child(2) { grid-column: 1; }
-  .tuning-schedule-day-remove { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+  .tuning-schedule-day-row .field:nth-child(2),
+  .tuning-schedule-day-row .field:nth-child(3) { grid-column: 1; }
+  .tuning-schedule-day-remove { grid-column: 2; grid-row: 1 / span 3; align-self: center; }
 }
 .equipment-kind,
 .equipment-model,
@@ -11230,3 +11231,131 @@ button.partner-open-price-save svg {
   text-decoration: none;
 }
 .demo-tour-next:hover { background: var(--brass-strong); }
+
+/* --- tuning schedule: read-only calendar (modules/tuning_schedule) ---
+   Same minute-precision layout mechanics as .schedule-board (excursion
+   timeline: sticky corner/heads/axis, absolutely-positioned cards scaled
+   by px-per-minute), kept as its own class family rather than reusing
+   .schedule-* directly — this calendar has no drag-and-drop, no weather,
+   no participant counts, and reusing the exact same classes would either
+   drag that JS/CSS surface along or silently rely on it being absent. */
+.tuning-calendar-board {
+  display: flex;
+  flex: 1;
+  min-height: 160px;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--paper);
+}
+.tuning-calendar-board-scroll {
+  overflow: auto;
+  width: 100%;
+  max-height: 70vh;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.tuning-calendar-inner {
+  display: grid;
+  grid-template-columns: 64px minmax(calc(var(--tuning-crew-count) * 190px), 1fr);
+  grid-template-rows: 64px var(--tuning-calendar-height);
+  min-width: calc(64px + var(--tuning-crew-count) * 190px);
+}
+.tuning-calendar-corner {
+  position: sticky;
+  z-index: 8;
+  top: 0;
+  left: 0;
+  display: grid;
+  place-content: center;
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  background: #f4f8fb;
+  color: var(--muted);
+}
+.tuning-calendar-corner span { font-family: 'PT Mono', monospace; font-size: 10px; text-transform: uppercase; }
+.tuning-calendar-heads {
+  position: sticky;
+  z-index: 7;
+  top: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--tuning-crew-count), minmax(190px, 1fr));
+  border-bottom: 1px solid var(--hairline);
+  background: rgba(255,255,255,.97);
+}
+.tuning-calendar-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-right: 1px solid var(--hairline);
+}
+.tuning-calendar-head img,
+.tuning-calendar-head .schedule-avatar-fallback {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  object-fit: cover;
+}
+.tuning-calendar-head div { display: grid; min-width: 0; }
+.tuning-calendar-head strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.tuning-calendar-head small { overflow: hidden; margin-top: 2px; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.tuning-calendar-time-axis {
+  position: sticky;
+  z-index: 6;
+  left: 0;
+  border-right: 1px solid var(--hairline);
+  background: #f8fafc;
+}
+.tuning-calendar-hour-label {
+  position: absolute;
+  right: 10px;
+  color: var(--ink-soft);
+  font-family: 'PT Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  transform: translateY(-50%);
+}
+.tuning-calendar-columns {
+  display: grid;
+  grid-template-columns: repeat(var(--tuning-crew-count), minmax(190px, 1fr));
+}
+.tuning-calendar-column {
+  position: relative;
+  border-right: 1px solid var(--hairline);
+  background: linear-gradient(90deg, rgba(238,244,250,.18), rgba(255,255,255,0) 40%);
+}
+.tuning-calendar-hour-line {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: #d8e2ea;
+  pointer-events: none;
+}
+.tuning-calendar-card {
+  position: absolute;
+  z-index: 2;
+  right: 6px;
+  left: 6px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 34px;
+  padding: 6px 9px 7px 11px;
+  border-left: 4px solid currentColor;
+  border-radius: 7px;
+  background: var(--ink-soft);
+  color: #fff;
+  box-shadow: 0 8px 18px -13px rgba(15,42,53,.7);
+}
+.tuning-calendar-card.status-pending { background: #62707f; }
+.tuning-calendar-card.status-accepted { background: var(--brass); }
+.tuning-calendar-card.status-in_progress { background: var(--brass-strong); }
+.tuning-calendar-card.status-done { background: var(--success); }
+.tuning-calendar-card.status-rejected { background: var(--danger); }
+.tuning-calendar-card-time { font-family: 'PT Mono', monospace; font-size: 9.5px; font-weight: 700; opacity: .92; }
+.tuning-calendar-card strong { overflow: hidden; margin-top: 2px; font-size: 12px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.tuning-calendar-card-meta { overflow: hidden; margin-top: 2px; font-size: 10px; opacity: .9; text-overflow: ellipsis; white-space: nowrap; }

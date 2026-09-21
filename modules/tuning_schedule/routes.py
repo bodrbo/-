@@ -41,9 +41,11 @@ def create_tuning_schedule_blueprint(
         context = services.day_view(db, day)
         for employee in context["crew"]:
             employee["avatar_url"] = avatar_url(employee["name"])
+        calendar = services.calendar_view(db, day, context["day_crew"])
         return render_template(
             "schedule/tuning_index.html",
             **context,
+            **calendar,
             active_page="schedule",
             sub_page="tuning",
             day=day,
@@ -85,17 +87,21 @@ def create_tuning_schedule_blueprint(
             ]
         })
 
-    def _collect_day_hours(form):
-        """A single-day task submits work_date/planned_hours; a
-        multi-day one submits parallel work_date[]/planned_hours[] rows,
-        one per day the admin filled in."""
+    def _collect_day_rows(form):
+        """A single-day task submits work_date/start_time/planned_hours; a
+        multi-day one submits parallel work_date[]/start_time[]/
+        planned_hours[] rows, one per day the admin filled in (each day
+        of a "Период выполнения" gets its own start time)."""
         dates = form.getlist("work_date[]") or (
             [form.get("work_date")] if form.get("work_date") else []
+        )
+        start_times = form.getlist("start_time[]") or (
+            [form.get("start_time")] if form.get("start_time") else []
         )
         hours = form.getlist("planned_hours[]") or (
             [form.get("planned_hours")] if form.get("planned_hours") else []
         )
-        return list(zip(dates, hours))
+        return list(zip(dates, start_times, hours))
 
     @blueprint.route("/schedule/tuning/tasks", methods=["POST"])
     @manage_required
@@ -105,7 +111,7 @@ def create_tuning_schedule_blueprint(
         employee_name = request.form.get("employee_name", "")
         rate = request.form.get("rate", "")
         comment = request.form.get("comment", "")
-        day_hours = _collect_day_hours(request.form)
+        day_rows = _collect_day_rows(request.form)
         order_item_id = request.form.get("order_item_id", "").strip()
         order_id = request.form.get("order_id", "").strip()
 
@@ -118,13 +124,13 @@ def create_tuning_schedule_blueprint(
                 set_notice("Работа не найдена в заказе.", False)
                 return redirect_to_day(day)
             success, message, _task_id = services.create_linked_task(
-                db, item, employee_name, rate, comment, day_hours,
+                db, item, employee_name, rate, comment, day_rows,
                 create_order_assignment,
             )
         else:
             title = request.form.get("title", "")
             success, message, _task_id = services.create_free_task(
-                db, employee_name, title, rate, comment, day_hours,
+                db, employee_name, title, rate, comment, day_rows,
             )
         set_notice(message, success)
         return redirect_to_day(day)
@@ -135,7 +141,8 @@ def create_tuning_schedule_blueprint(
         day = services.parse_day(request.form.get("return_date")).isoformat()
         success, message = services.add_task_day(
             get_db(), task_id,
-            request.form.get("work_date", ""), request.form.get("planned_hours", ""),
+            request.form.get("work_date", ""), request.form.get("start_time", ""),
+            request.form.get("planned_hours", ""),
         )
         set_notice(message, success)
         return redirect_to_day(day)

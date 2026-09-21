@@ -1,33 +1,51 @@
 """Validation and view models for the tuning-center work schedule."""
 
 import datetime as dt
+import math
 
 from modules.schedule.services import current_timestamp, day_label, parse_day  # noqa: F401 (re-exported)
 
 from . import repository
+from .constants import DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR, MIN_CARD_MINUTES
 
 TASK_TITLE_MAX_LENGTH = 200
 EMPLOYEE_NAME_MAX_LENGTH = 120
 COMMENT_MAX_LENGTH = 2000
+MAX_DAY_HOURS = 16
+PX_PER_MINUTE = 1.25
 
 
 def _normalise_text(value, limit):
     return " ".join(str(value or "").strip().split())[:limit]
 
 
-def _clean_day_hours(day_hours, errors):
-    """day_hours: iterable of (raw_date, raw_hours) pairs — one "Дата
-    выполнения" pair for a single-day task, or one pair per day of a
-    "Период выполнения". Returns a de-duplicated, validated list of
-    (date_iso, hours) tuples."""
+def _parse_hhmm(raw_time):
+    try:
+        parsed = dt.datetime.strptime(str(raw_time or "").strip(), "%H:%M")
+    except ValueError:
+        return None
+    return parsed.hour, parsed.minute
+
+
+def _clean_task_days(day_rows, errors):
+    """day_rows: iterable of (raw_date, raw_start_time, raw_hours) triples
+    — one row for a single-day task ("Дата выполнения"), or one row per
+    day of a "Период выполнения", each day carrying its own start time.
+    Returns a de-duplicated, validated list of (date_iso, "HH:MM", hours)
+    tuples."""
     clean = []
     seen_dates = set()
-    for raw_date, raw_hours in day_hours:
+    for raw_date, raw_start_time, raw_hours in day_rows:
         try:
             work_date = dt.date.fromisoformat(str(raw_date or "").strip())
         except ValueError:
             errors.append("Некорректная дата в периоде выполнения.")
             continue
+        parsed_time = _parse_hhmm(raw_start_time)
+        if parsed_time is None:
+            errors.append(f"Укажите время старта на {work_date.isoformat()}.")
+            continue
+        start_time = f"{parsed_time[0]:02d}:{parsed_time[1]:02d}"
         try:
             hours = float(str(raw_hours or "").strip().replace(",", "."))
         except ValueError:
@@ -35,10 +53,16 @@ def _clean_day_hours(day_hours, errors):
         if hours <= 0:
             errors.append(f"Укажите часы на {work_date.isoformat()}.")
             continue
+        if hours > MAX_DAY_HOURS:
+            errors.append(
+                f"Слишком много часов на {work_date.isoformat()} "
+                f"— не больше {MAX_DAY_HOURS} за один день."
+            )
+            continue
         if work_date.isoformat() in seen_dates:
             continue
         seen_dates.add(work_date.isoformat())
-        clean.append((work_date.isoformat(), hours))
+        clean.append((work_date.isoformat(), start_time, hours))
     if not clean and not errors:
         errors.append("Укажите хотя бы один день выполнения.")
     return clean
@@ -116,7 +140,66 @@ def day_view(db, day):
     }
 
 
-def create_free_task(db, employee_name, title, rate, comment, day_hours):
+def calendar_view(db, day, day_crew):
+    """Pixel-positioned calendar cards for `day`, one column per employee
+    in `day_crew` (the same list day_view already built — reused so the
+    roster and the calendar always agree on who's shown). Mirrors
+    modules.schedule.services.day_view's minute-precision layout math
+    (day-bounds expansion, px_per_minute scale, hour_marks) but without
+    that module's drag/weather/participant machinery — this calendar is
+    view-only for now (see PR discussion: no drag-and-drop yet)."""
+    day_iso = day.isoformat()
+    raw_tasks = [dict(row) for row in repository.list_day_tasks(db, day_iso)]
+
+    earliest = DEFAULT_DAY_START_HOUR * 60
+    latest = DEFAULT_DAY_END_HOUR * 60
+    for task in raw_tasks:
+        parsed_time = _parse_hhmm(task["start_time"]) or (DEFAULT_DAY_START_HOUR, 0)
+        start_minutes = parsed_time[0] * 60 + parsed_time[1]
+        end_minutes = start_minutes + round(task["planned_hours"] * 60)
+        task["_start_minutes"] = start_minutes
+        task["_end_minutes"] = end_minutes
+        earliest = min(earliest, (start_minutes // 60) * 60)
+        latest = max(latest, int(math.ceil(end_minutes / 60.0)) * 60)
+    earliest = max(0, earliest)
+    latest = min(24 * 60, latest)
+    total_minutes = max(60, latest - earliest)
+
+    cards_by_employee = {employee["name"]: [] for employee in day_crew}
+    for task in raw_tasks:
+        if task["employee_name"] not in cards_by_employee:
+            continue
+        task["is_linked"] = task["assignment_id"] is not None
+        if task["is_linked"]:
+            task["equipment_label"] = (
+                (task["motor_model"] or "Мотор") if task["equipment_type"] == "motor"
+                else (task["boat_model"] or "Лодка")
+            )
+        start_minutes = task["_start_minutes"]
+        end_minutes = task["_end_minutes"]
+        task["start_label"] = f"{start_minutes // 60:02d}:{start_minutes % 60:02d}"
+        task["end_label"] = f"{end_minutes // 60:02d}:{end_minutes % 60:02d}"
+        task["top_px"] = round((start_minutes - earliest) * PX_PER_MINUTE, 2)
+        task["height_px"] = round(
+            max(MIN_CARD_MINUTES, end_minutes - start_minutes) * PX_PER_MINUTE, 2
+        )
+        cards_by_employee[task["employee_name"]].append(task)
+
+    hour_marks = []
+    for minute in range(earliest, latest + 1, 60):
+        hour_marks.append({
+            "label": f"{minute // 60:02d}:00",
+            "top_px": round((minute - earliest) * PX_PER_MINUTE, 2),
+        })
+
+    return {
+        "cards_by_employee": cards_by_employee,
+        "hour_marks": hour_marks,
+        "grid_height": round(total_minutes * PX_PER_MINUTE, 2),
+    }
+
+
+def create_free_task(db, employee_name, title, rate, comment, day_rows):
     errors = []
     employee_name = _normalise_text(employee_name, EMPLOYEE_NAME_MAX_LENGTH)
     title = _normalise_text(title, TASK_TITLE_MAX_LENGTH)
@@ -132,18 +215,18 @@ def create_free_task(db, employee_name, title, rate, comment, day_hours):
         rate = 0
     if rate <= 0:
         errors.append("Ставка должна быть больше нуля.")
-    clean_days = _clean_day_hours(day_hours, errors)
+    clean_days = _clean_task_days(day_rows, errors)
     if errors:
         return False, " ".join(errors), None
     task_id = repository.create_task(
         db, None, employee_name, title, rate, comment, current_timestamp()
     )
-    for work_date, hours in clean_days:
-        repository.add_task_day(db, task_id, work_date, hours)
+    for work_date, start_time, hours in clean_days:
+        repository.add_task_day(db, task_id, work_date, start_time, hours)
     return True, "Задача добавлена в расписание.", task_id
 
 
-def create_linked_task(db, item, employee_name, rate, comment, day_hours, create_order_assignment):
+def create_linked_task(db, item, employee_name, rate, comment, day_rows, create_order_assignment):
     """`create_order_assignment` is app.py's _create_tuning_item_assignment,
     injected so a task added here goes through the exact same
     tuning_item_assignments insert (+ notification + budget-overrun flag)
@@ -161,26 +244,26 @@ def create_linked_task(db, item, employee_name, rate, comment, day_hours, create
         rate = 0
     if rate <= 0:
         errors.append("Ставка должна быть больше нуля.")
-    clean_days = _clean_day_hours(day_hours, errors)
+    clean_days = _clean_task_days(day_rows, errors)
     if errors:
         return False, " ".join(errors), None
-    total_hours = sum(hours for _, hours in clean_days)
+    total_hours = sum(hours for _, _, hours in clean_days)
     assignment_id = create_order_assignment(db, item, employee_name, rate, total_hours, comment)
     task_id = repository.create_task(
         db, assignment_id, employee_name, item["work_name"], rate, comment, current_timestamp()
     )
-    for work_date, hours in clean_days:
-        repository.add_task_day(db, task_id, work_date, hours)
+    for work_date, start_time, hours in clean_days:
+        repository.add_task_day(db, task_id, work_date, start_time, hours)
     return True, "Задача добавлена в расписание.", task_id
 
 
-def add_task_day(db, task_id, raw_date, raw_hours):
+def add_task_day(db, task_id, raw_date, raw_start_time, raw_hours):
     errors = []
-    clean_days = _clean_day_hours([(raw_date, raw_hours)], errors)
+    clean_days = _clean_task_days([(raw_date, raw_start_time, raw_hours)], errors)
     if errors:
         return False, " ".join(errors)
-    work_date, hours = clean_days[0]
-    repository.add_task_day(db, task_id, work_date, hours)
+    work_date, start_time, hours = clean_days[0]
+    repository.add_task_day(db, task_id, work_date, start_time, hours)
     return True, "День добавлен в расписание задачи."
 
 

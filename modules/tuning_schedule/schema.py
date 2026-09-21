@@ -38,11 +38,20 @@ def init_schema(conn):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             task_id INTEGER NOT NULL,
             work_date TEXT NOT NULL,
+            start_time TEXT NOT NULL DEFAULT '09:00',
             planned_hours REAL NOT NULL,
             UNIQUE(task_id, work_date)
         )
         """
     )
+    task_day_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(tuning_schedule_task_days)")
+    }
+    if "start_time" not in task_day_columns:
+        conn.execute(
+            "ALTER TABLE tuning_schedule_task_days "
+            "ADD COLUMN start_time TEXT NOT NULL DEFAULT '09:00'"
+        )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_tuning_schedule_task_days_date "
         "ON tuning_schedule_task_days(work_date, task_id)"

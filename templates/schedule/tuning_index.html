@@ -76,6 +76,59 @@
     </div>
   </section>
 
+  <section class="panel">
+    <h2 style="margin:0 0 14px;">Календарь на {{ day_label }}</h2>
+    {% if day_crew %}
+    <div class="tuning-calendar-board">
+      <div class="tuning-calendar-board-scroll">
+        <div class="tuning-calendar-inner"
+             style="--tuning-crew-count: {{ day_crew|length }}; --tuning-calendar-height: {{ grid_height }}px;">
+          <div class="tuning-calendar-corner"><span>Время</span></div>
+          <div class="tuning-calendar-heads">
+            {% for employee in day_crew %}
+            <div class="tuning-calendar-head" title="{{ employee.name }} · {{ employee.position_label }}">
+              {% if employee.avatar_url %}
+              <img src="{{ employee.avatar_url }}" alt="">
+              {% else %}
+              <span class="schedule-avatar-fallback">{{ employee.name[0] }}</span>
+              {% endif %}
+              <div><strong>{{ employee.name }}</strong><small>{{ employee.position_label }}</small></div>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="tuning-calendar-time-axis" style="height: {{ grid_height }}px;">
+            {% for mark in hour_marks %}
+            <span class="tuning-calendar-hour-label" style="top: {{ mark.top_px }}px;">{{ mark.label }}</span>
+            {% endfor %}
+          </div>
+          <div class="tuning-calendar-columns" style="height: {{ grid_height }}px;">
+            {% for employee in day_crew %}
+            <div class="tuning-calendar-column">
+              {% for mark in hour_marks %}
+              <span class="tuning-calendar-hour-line" style="top: {{ mark.top_px }}px;"></span>
+              {% endfor %}
+              {% for card in cards_by_employee.get(employee.name, []) %}
+              <div class="tuning-calendar-card status-{{ card.status }}"
+                   style="top: {{ card.top_px }}px; height: {{ card.height_px }}px;"
+                   title="{{ card.start_label }}–{{ card.end_label }} · {{ card.title }}">
+                <span class="tuning-calendar-card-time">{{ card.start_label }}–{{ card.end_label }}</span>
+                <strong>{{ card.title }}</strong>
+                {% if card.is_linked %}
+                <span class="tuning-calendar-card-meta">№{{ card.order_id }} · {{ card.equipment_label }}</span>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <p class="hint">Добавьте тюнингмэнов в смену ниже, чтобы увидеть календарь на {{ day_label }}.</p>
+    {% endif %}
+  </section>
+
   <details class="panel collapsible-panel" open>
     <summary><span>Кто сегодня на смене</span><span class="chev" aria-hidden="true"></span></summary>
     <div class="collapsible-body">
@@ -114,7 +167,7 @@
       {% if employee.tasks %}
       <div class="table-scroll">
         <table class="records">
-          <thead><tr><th>Задача</th><th>Часы на {{ day.day }} число</th><th>Ставка</th><th>Статус</th><th></th></tr></thead>
+          <thead><tr><th>Задача</th><th>Время</th><th>Часы</th><th>Ставка</th><th>Статус</th><th></th></tr></thead>
           <tbody>
             {% for task in employee.tasks %}
             <tr>
@@ -126,6 +179,7 @@
                 </div>
                 {% endif %}
               </td>
+              <td class="amount">{{ task.start_time }}</td>
               <td class="amount">{{ task.planned_hours|float|round(1) }} ч</td>
               <td class="amount">{{ task.rate|money }} ₽</td>
               <td>
@@ -170,12 +224,13 @@
       <p class="hint">Эти задачи стоят на {{ day_label }}, но сотрудник, на которого они назначены, сейчас не в смене этого дня.</p>
       <div class="table-scroll">
         <table class="records">
-          <thead><tr><th>Сотрудник</th><th>Задача</th><th>Часы</th><th>Статус</th></tr></thead>
+          <thead><tr><th>Сотрудник</th><th>Задача</th><th>Время</th><th>Часы</th><th>Статус</th></tr></thead>
           <tbody>
             {% for task in leftover_tasks %}
             <tr>
               <td>{{ task.employee_name }}</td>
               <td>{{ task.title }}</td>
+              <td class="amount">{{ task.start_time }}</td>
               <td class="amount">{{ task.planned_hours|float|round(1) }} ч</td>
               <td>{{ assignment_statuses|selectattr('value', 'equalto', task.status)|map(attribute='label')|first }}</td>
             </tr>
@@ -263,7 +318,7 @@
         <div class="boat-motors-heading">
           <div>
             <span class="field-static-label">Дни выполнения</span>
-            <span class="field-context">Один день — одна строка. Для задачи на несколько дней добавьте ещё дни и укажите часы на каждый.</span>
+            <span class="field-context">Один день — одна строка. Для задачи на несколько дней добавьте ещё дни, у каждого своё время старта и часы.</span>
           </div>
           <button type="button" class="btn-add" onclick="addTuningScheduleDayRow()">Добавить день</button>
         </div>
@@ -272,6 +327,10 @@
             <div class="field">
               <label>Дата</label>
               <input type="date" name="work_date[]" value="{{ day.isoformat() }}" required>
+            </div>
+            <div class="field field-narrow">
+              <label>Время старта</label>
+              <input type="time" name="start_time[]" value="09:00" required>
             </div>
             <div class="field field-narrow">
               <label>Часы</label>
@@ -287,6 +346,10 @@
             <div class="field">
               <label>Дата</label>
               <input type="date" name="work_date[]" required>
+            </div>
+            <div class="field field-narrow">
+              <label>Время старта</label>
+              <input type="time" name="start_time[]" value="09:00" required>
             </div>
             <div class="field field-narrow">
               <label>Часы</label>
