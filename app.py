@@ -7205,17 +7205,57 @@ def _client_pagination_items(current_page, total_pages):
     return items
 
 
+def _available_client_segments(manager_view=False):
+    """Return client-directory segments enabled for the current account."""
+    if manager_view:
+        return {EXCURSION_SEGMENT}
+    if not session.get("demo_tenant_id"):
+        return {TUNING_SEGMENT, EXCURSION_SEGMENT}
+    enabled_modules = {
+        module
+        for module in (session.get("demo_tenant_modules") or "").split(",")
+        if module
+    }
+    available = set()
+    if "tuning" in enabled_modules:
+        available.add(TUNING_SEGMENT)
+    if "excursions" in enabled_modules:
+        available.add(EXCURSION_SEGMENT)
+    return available
+
+
+def _default_client_segment(available_segments):
+    if TUNING_SEGMENT in available_segments:
+        return TUNING_SEGMENT
+    if EXCURSION_SEGMENT in available_segments:
+        return EXCURSION_SEGMENT
+    return None
+
+
+def _client_section_for_request(raw_section, manager_view=False, strict=False):
+    available = _available_client_segments(manager_view)
+    default = _default_client_segment(available)
+    if default is None:
+        abort(404)
+    section = str(raw_section or "").strip().lower()
+    if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
+        section = default
+    if section not in available:
+        if strict:
+            abort(404)
+        section = default
+    return section
+
+
 @app.route("/admin/clients")
 @excursion_manager_or_admin_required
 def tuning_clients():
     db = get_db()
     manager_view = _is_customer_manager(db)
-    if manager_view:
-        section = EXCURSION_SEGMENT
-    else:
-        section = request.args.get("section", TUNING_SEGMENT).strip().lower()
-        if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
-            section = TUNING_SEGMENT
+    section = _client_section_for_request(
+        EXCURSION_SEGMENT if manager_view else request.args.get("section"),
+        manager_view=manager_view,
+    )
     relationship_type = request.args.get(
         "relationship", CLIENT_RELATIONSHIP_CLIENT
     ).strip().lower()
@@ -7455,13 +7495,11 @@ def tuning_clients():
 def create_client_directory_contact():
     db = get_db()
     manager_view = _is_customer_manager(db)
-    section = (
-        EXCURSION_SEGMENT
-        if manager_view
-        else request.form.get("section", TUNING_SEGMENT).strip().lower()
+    section = _client_section_for_request(
+        EXCURSION_SEGMENT if manager_view else request.form.get("section"),
+        manager_view=manager_view,
+        strict=True,
     )
-    if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
-        section = TUNING_SEGMENT
     relationship_type = request.form.get(
         "relationship", CLIENT_RELATIONSHIP_CLIENT
     ).strip().lower()
@@ -7552,24 +7590,22 @@ def create_client_directory_contact():
 @app.route("/admin/clients/<int:client_id>/status", methods=["POST"])
 @excursion_manager_or_admin_required
 def update_tuning_client_status(client_id):
+    db = get_db()
+    manager_view = _is_customer_manager(db)
+    section = _client_section_for_request(
+        EXCURSION_SEGMENT if manager_view else request.form.get("section"),
+        manager_view=manager_view,
+        strict=True,
+    )
     status = request.form.get("status", "").strip()
     allowed_statuses = {item["value"] for item in CLIENT_STATUSES}
     if status in allowed_statuses:
-        db = get_db()
-        if not _is_customer_manager(db) or db.execute(
+        if not manager_view or db.execute(
             "SELECT 1 FROM client_segments WHERE client_id = ? AND segment = ?",
             (client_id, EXCURSION_SEGMENT),
         ).fetchone() is not None:
             db.execute("UPDATE clients SET status = ? WHERE id = ?", (status, client_id))
             db.commit()
-    manager_view = _is_customer_manager()
-    section = (
-        EXCURSION_SEGMENT
-        if manager_view
-        else request.form.get("section", TUNING_SEGMENT)
-    )
-    if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
-        section = TUNING_SEGMENT
     relationship_type = request.form.get(
         "relationship", CLIENT_RELATIONSHIP_CLIENT
     )
@@ -7594,13 +7630,11 @@ def update_tuning_client_status(client_id):
 def update_client_relationship(client_id):
     db = get_db()
     manager_view = _is_customer_manager(db)
-    section = (
-        EXCURSION_SEGMENT
-        if manager_view
-        else request.form.get("section", TUNING_SEGMENT).strip().lower()
+    section = _client_section_for_request(
+        EXCURSION_SEGMENT if manager_view else request.form.get("section"),
+        manager_view=manager_view,
+        strict=True,
     )
-    if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
-        section = TUNING_SEGMENT
     current_relationship = request.form.get(
         "current_relationship", CLIENT_RELATIONSHIP_CLIENT
     ).strip().lower()
@@ -10765,14 +10799,14 @@ def admin_client_dashboard(client_id):
             EXCURSION_SEGMENT,
             excursion_membership["relationship_type"],
         )
-    client_section = request.args.get("section", TUNING_SEGMENT)
-    if client_section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
-        client_section = TUNING_SEGMENT
+    client_section = _client_section_for_request(request.args.get("section"))
     relationship_row = db.execute(
         "SELECT relationship_type FROM client_segments "
         "WHERE client_id = ? AND segment = ?",
         (client_id, client_section),
     ).fetchone()
+    if session.get("demo_tenant_id") and relationship_row is None:
+        return redirect(url_for("tuning_clients", section=client_section))
     client_relationship = (
         relationship_row["relationship_type"]
         if relationship_row is not None
@@ -10791,13 +10825,11 @@ def update_tuning_partner_profile(client_id):
     Only partner_title/partner_logo, further down, are partner-specific."""
     db = get_db()
     manager_view = _is_customer_manager(db)
-    section = (
-        EXCURSION_SEGMENT
-        if manager_view
-        else request.form.get("section", TUNING_SEGMENT).strip().lower()
+    section = _client_section_for_request(
+        EXCURSION_SEGMENT if manager_view else request.form.get("section"),
+        manager_view=manager_view,
+        strict=True,
     )
-    if section not in (TUNING_SEGMENT, EXCURSION_SEGMENT):
-        section = TUNING_SEGMENT
 
     membership = _client_segment_profile(db, client_id, section)
     client = db.execute(
@@ -11317,6 +11349,7 @@ def partner_order_estimate_pdf(token, order_id):
 @excursion_manager_or_admin_required
 def update_client_acquisition_channel(client_id):
     db = get_db()
+    _client_section_for_request(EXCURSION_SEGMENT, strict=True)
     channel = request.form.get("acquisition_channel", "").strip()
     allowed_channels = {
         item["value"] for item in CLIENT_ACQUISITION_CHANNELS
@@ -11343,6 +11376,7 @@ def update_client_acquisition_channel(client_id):
 @excursion_manager_or_admin_required
 def update_client_contact_method(client_id):
     db = get_db()
+    _client_section_for_request(EXCURSION_SEGMENT, strict=True)
     method = request.form.get("preferred_contact_method", "").strip()
     allowed_methods = {item["value"] for item in CLIENT_CONTACT_METHODS}
     is_excursion_client = db.execute(

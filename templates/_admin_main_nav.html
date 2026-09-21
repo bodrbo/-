@@ -84,13 +84,15 @@
     <span class="nav-label">Тюнинг-центр</span>
   </a>
   {% endif %}
-  <a href="{{ url_for('tuning_clients') }}" class="{{ 'active' if active_page == 'clients' }}">
+  {% if demo_module_enabled('tuning') or demo_module_enabled('excursions') %}
+  <a href="{{ url_for('tuning_clients', section='tuning' if demo_module_enabled('tuning') else 'excursion') }}" class="{{ 'active' if active_page == 'clients' }}">
     <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="6.5" cy="6.5" r="2.5"/>
       <path d="M2.3 16c.4-3.1 1.8-5 4.2-5s3.8 1.9 4.2 5M13 5h4.5M13 9h4.5M13 13h3.2"/>
     </svg>
     <span class="nav-label">Клиенты и партнеры</span>
   </a>
+  {% endif %}
   {% if demo_module_enabled('fleet') %}
   <a href="{{ url_for('fleet.index') }}" class="{{ 'active' if active_page == 'fleet' }}">
     <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">

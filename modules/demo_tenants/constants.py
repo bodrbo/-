@@ -1,7 +1,9 @@
 """The toggleable module list a platform admin picks from when branding a
 demo account, and the mapping used to gate requests against it. Anything
 not covered by either map below is treated as core and always allowed —
-Сотрудники, Настройки, Клиенты и партнеры, the home page, auth routes."""
+Сотрудники, Настройки, the home page, auth routes. The shared client
+directory is gated at segment level in app.py because its tuning and
+excursion sections live behind the same URL."""
 
 DEMO_MODULES = [
     {"key": "tuning", "label": "Тюнинг-центр"},

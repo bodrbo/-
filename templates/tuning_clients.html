@@ -59,7 +59,7 @@
 
 <main class="wrap tuning-clients-page">
   <nav class="sub-tabs client-directory-tabs" aria-label="Разделы базы клиентов и партнеров">
-    {% if not manager_view %}
+    {% if not manager_view and demo_module_enabled('tuning') %}
     <a href="{{ url_for('tuning_clients', section='tuning') }}" class="{{ 'active' if client_section == 'tuning' and client_relationship == 'client' }}">
       Клиенты тюнинга <span>{{ tuning_clients_count }}</span>
     </a>
@@ -67,12 +67,14 @@
       Партнеры тюнинга <span>{{ tuning_partners_count }}</span>
     </a>
     {% endif %}
+    {% if demo_module_enabled('excursions') %}
     <a href="{{ url_for('tuning_clients', section='excursion') }}" class="{{ 'active' if client_section == 'excursion' and client_relationship == 'client' }}">
       Клиенты экскурсий <span>{{ excursion_clients_count }}</span>
     </a>
     <a href="{{ url_for('tuning_clients', section='excursion', relationship='partner') }}" class="{{ 'active' if client_section == 'excursion' and client_relationship == 'partner' }}">
       Партнеры экскурсий <span>{{ excursion_partners_count }}</span>
     </a>
+    {% endif %}
   </nav>
 
   <section class="tuning-clients-heading" aria-labelledby="tuning-clients-title">
