@@ -8,14 +8,13 @@ from flask import url_for
 
 from . import repository
 from .constants import (
-    BOATS,
     CHECKLIST_QUESTIONS,
     DEFECT_ASSIGNABLE_POSITIONS,
     DEFECT_PLAN_STATUSES,
     DEFECT_STATUSES,
     TASK_ASSIGNMENT_COMMENT_MAX_LENGTH,
 )
-from .schema import refresh_runtime_fleet
+from .schema import boats_for_db, refresh_runtime_fleet
 
 
 DEFECT_DESCRIPTION_MAX_LENGTH = 1000
@@ -31,10 +30,11 @@ def current_timestamp():
     return dt.datetime.now().strftime("%Y-%m-%d %H:%M")
 
 
-def boat_by_index(boat_index):
+def boat_by_index(db, boat_index):
     """Resolve the ASCII index used in public fleet URLs to a vessel name."""
-    if 0 <= boat_index < len(BOATS):
-        return BOATS[boat_index]["name"]
+    boats = boats_for_db(db)
+    if 0 <= boat_index < len(boats):
+        return boats[boat_index]["name"]
     return None
 
 
@@ -51,16 +51,12 @@ def fleet_boat_cards(db, fuel_summary):
     profiles = {
         row["boat"]: row for row in repository.list_boat_profiles(db)
     }
-    vessels = {
-        row["name"]: row for row in repository.list_vessels(db)
-    }
     cards = []
-    for index, boat in enumerate(BOATS):
-        name = boat["name"]
+    for index, vessel in enumerate(repository.list_vessels(db)):
+        name = vessel["name"]
         cards.append(
             {
-                **boat,
-                **dict(vessels.get(name) or {}),
+                **dict(vessel),
                 "index": index,
                 "photo_url": boat_photo_url(profiles.get(name)),
                 "fuel": fuel_summary(db, name, 0),
@@ -128,7 +124,7 @@ def parse_vessel_form(form):
     }, errors
 
 
-def create_vessel(db, form):
+def create_vessel(db, form, refresh_runtime=False):
     data, errors = parse_vessel_form(form)
     existing = repository.get_vessel_by_name(db, data["name"]) if data["name"] else None
     if existing is not None and not existing["deleted_at"]:
@@ -139,15 +135,17 @@ def create_vessel(db, form):
         vessel_id = repository.create_vessel(db, data, current_timestamp())
     except sqlite3.IntegrityError:
         return False, "Катер с таким названием уже есть во флоте.", None
-    refresh_runtime_fleet(db)
+    if refresh_runtime:
+        refresh_runtime_fleet(db)
+    boats = boats_for_db(db)
     index = next(
-        (position for position, boat in enumerate(BOATS) if boat["name"] == data["name"]),
+        (position for position, boat in enumerate(boats) if boat["name"] == data["name"]),
         None,
     )
     return True, f"Катер «{data['name']}» добавлен во флот.", index
 
 
-def update_vessel(db, vessel_id, form):
+def update_vessel(db, vessel_id, form, refresh_runtime=False):
     vessel = repository.get_vessel(db, vessel_id)
     if vessel is None or vessel["deleted_at"]:
         return False, "Катер не найден.", None
@@ -161,22 +159,25 @@ def update_vessel(db, vessel_id, form):
         repository.update_vessel(db, vessel_id, data, current_timestamp())
     except sqlite3.IntegrityError:
         return False, "Не удалось переименовать катер: такое название уже занято.", None
-    refresh_runtime_fleet(db)
+    if refresh_runtime:
+        refresh_runtime_fleet(db)
+    boats = boats_for_db(db)
     index = next(
-        (position for position, boat in enumerate(BOATS) if boat["name"] == data["name"]),
+        (position for position, boat in enumerate(boats) if boat["name"] == data["name"]),
         None,
     )
     return True, "Параметры катера сохранены.", index
 
 
-def archive_vessel(db, vessel_id):
+def archive_vessel(db, vessel_id, refresh_runtime=False):
     vessel = repository.get_vessel(db, vessel_id)
     if vessel is None or vessel["deleted_at"]:
         return False, "Катер уже удалён или не найден."
     if len(repository.list_vessels(db)) <= 1:
         return False, "Нельзя удалить единственный катер из флота."
     repository.archive_vessel(db, vessel_id, current_timestamp())
-    refresh_runtime_fleet(db)
+    if refresh_runtime:
+        refresh_runtime_fleet(db)
     return (
         True,
         f"Катер «{vessel['name']}» убран из действующего флота. История сохранена.",
@@ -308,7 +309,7 @@ def create_manual_defect(db, boat, description, reported_by):
     Both the administrator and captain interfaces use this operation so the
     validation and initial state cannot drift between the two entry points.
     """
-    valid_boats = {item["name"] for item in BOATS}
+    valid_boats = {item["name"] for item in boats_for_db(db)}
     description = (description or "").strip()
     reported_by = (reported_by or "").strip()
 
@@ -342,7 +343,7 @@ def defect_detail_context(db, defect, viewer_role, boat_index=None):
     completed_count = sum(1 for item in plan_items if item["status"] == "done")
     return {
         "defect": defect,
-        "boats": BOATS,
+        "boats": boats_for_db(db),
         "transfer_history": repository.list_defect_transfers(db, defect["id"]),
         "plan_items": plan_items,
         "completed_count": completed_count,
@@ -355,7 +356,7 @@ def defect_detail_context(db, defect, viewer_role, boat_index=None):
 
 
 def transfer_defect(db, defect_id, source_boat, destination_boat, transferred_by):
-    valid_boats = {item["name"] for item in BOATS}
+    valid_boats = {item["name"] for item in boats_for_db(db)}
     if source_boat not in valid_boats or destination_boat not in valid_boats:
         return False, "Не удалось определить выбранный катер."
     if source_boat == destination_boat:

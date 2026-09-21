@@ -7,10 +7,11 @@ import uuid
 from . import fuel_repository as repository
 from .constants import (
     BOAT_COLORS,
-    FUEL_CONFIG,
+    FUEL_CONFIG,  # legacy public compatibility view; business logic uses the DB
     YCLIENTS_BLOCKED_SHIFT_COLOR,
     YCLIENTS_CANCELLED_COLOR,
 )
+from .schema import fuel_config_for_db
 
 
 TRANSACTION_LABELS = {
@@ -73,7 +74,7 @@ def _parse_positive_liters(raw_value):
 
 
 def fuel_summary(db, boat, history_limit=30):
-    config = FUEL_CONFIG.get(boat)
+    config = fuel_config_for_db(db).get(boat)
     state = repository.get_state(db, boat)
     activated = bool(state and state["activated_at"])
     balance = round(repository.balance_at(db, boat), 2) if activated else None
@@ -131,7 +132,7 @@ def record_refill(
     actor_name,
     operation="tank",
 ):
-    config = FUEL_CONFIG.get(boat)
+    config = fuel_config_for_db(db).get(boat)
     if config is None:
         return False, "Для этого катера не настроен топливный бак."
 
@@ -274,7 +275,8 @@ def transfer_reserve_between_boats(
     actor_name,
 ):
     """Move canister fuel between vessels as one atomic ledger operation."""
-    if source_boat not in FUEL_CONFIG or destination_boat not in FUEL_CONFIG:
+    fleet_config = fuel_config_for_db(db)
+    if source_boat not in fleet_config or destination_boat not in fleet_config:
         return False, "Не удалось определить катер для перевода резерва."
     if source_boat == destination_boat:
         return False, "Выберите другой катер для передачи резерва."
@@ -353,7 +355,7 @@ def record_individual_consumption(db, boat, event_id, raw_liters, actor_role, ac
     if liters is None:
         return False, "Укажите расход больше нуля."
 
-    config = FUEL_CONFIG.get(boat)
+    config = fuel_config_for_db(db).get(boat)
     if config is None or liters > config["capacity_liters"]:
         return False, "Расход превышает ёмкость бака."
 
@@ -574,9 +576,10 @@ def sync_yclients_records(db, records, activity_colors=None, now=None):
         "skipped": 0,
         "cancelled": cancelled,
     }
+    fleet_config = fuel_config_for_db(db)
     for source_ref, grouped_records in groups.items():
         boat = _boat_for_group(source_ref, grouped_records, activity_colors)
-        config = FUEL_CONFIG.get(boat)
+        config = fleet_config.get(boat)
         if config is None:
             stats["skipped"] += 1
             continue
@@ -645,7 +648,7 @@ def sync_yclients_records(db, records, activity_colors=None, now=None):
         repository.mark_trip_consumed(db, event["id"], liters, transaction_id)
         stats["automatic"] += 1
 
-    for boat in FUEL_CONFIG:
+    for boat in fleet_config:
         state = repository.get_state(db, boat)
         if state and state["activated_at"]:
             repository.set_last_synced_at(db, boat, synced_at)

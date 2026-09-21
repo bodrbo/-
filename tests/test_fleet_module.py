@@ -1,11 +1,16 @@
 import io
 import os
 import sqlite3
+import tempfile
 import unittest
 from unittest.mock import patch
 
 from support import TEST_DIRECTORY, application_module
-from modules.fleet.schema import init_schema as init_fleet_schema, refresh_runtime_fleet
+from modules.fleet.schema import (
+    boats_for_db,
+    init_schema as init_fleet_schema,
+    refresh_runtime_fleet,
+)
 
 
 class FleetModuleIntegrationTests(unittest.TestCase):
@@ -50,6 +55,142 @@ class FleetModuleIntegrationTests(unittest.TestCase):
             )
         finally:
             db.close()
+
+    def test_fleet_defaults_are_bootstrap_only_and_old_name_is_not_restored(self):
+        db = sqlite3.connect(":memory:")
+        try:
+            init_fleet_schema(db, refresh_runtime=False)
+            larus_id = db.execute(
+                "SELECT id FROM fleet_vessels WHERE name = 'Ларус'"
+            ).fetchone()[0]
+            db.execute(
+                "UPDATE fleet_vessels SET name = 'Демо Ларус' WHERE id = ?",
+                (larus_id,),
+            )
+
+            init_fleet_schema(db, refresh_runtime=False)
+
+            names = [boat["name"] for boat in boats_for_db(db)]
+            self.assertIn("Демо Ларус", names)
+            self.assertNotIn("Ларус", names)
+            self.assertEqual(len(names), 3)
+        finally:
+            db.close()
+
+    def test_fleet_schema_removes_default_row_resurrected_by_old_versions(self):
+        db = sqlite3.connect(":memory:")
+        try:
+            init_fleet_schema(db, refresh_runtime=False)
+            larus_id = db.execute(
+                "SELECT id FROM fleet_vessels WHERE name = 'Ларус'"
+            ).fetchone()[0]
+            db.execute(
+                "UPDATE fleet_vessels SET name = 'Демо Ларус' WHERE id = ?",
+                (larus_id,),
+            )
+            db.execute("CREATE TABLE legacy_boat_data (boat TEXT NOT NULL)")
+            db.execute("INSERT INTO legacy_boat_data (boat) VALUES ('Ларус')")
+            db.execute(
+                "INSERT INTO fleet_vessels "
+                "(name, sort_order, created_at, updated_at) "
+                "VALUES ('Ларус', 0, '2026-09-21 10:00', '2026-09-21 10:00')"
+            )
+
+            init_fleet_schema(db, refresh_runtime=False)
+
+            self.assertIsNone(
+                db.execute(
+                    "SELECT id FROM fleet_vessels WHERE name = 'Ларус'"
+                ).fetchone()
+            )
+            self.assertEqual(
+                db.execute("SELECT boat FROM legacy_boat_data").fetchone()[0],
+                "Демо Ларус",
+            )
+            # Removing the artefact must release the unique name as well.
+            db.execute(
+                "UPDATE fleet_vessels SET name = 'Ларус' WHERE id = ?",
+                (larus_id,),
+            )
+        finally:
+            db.close()
+
+    def test_demo_fleets_remain_isolated_across_alternating_requests(self):
+        with tempfile.TemporaryDirectory(dir=TEST_DIRECTORY.name) as directory:
+            first_path = os.path.join(directory, "first-demo.db")
+            second_path = os.path.join(directory, "second-demo.db")
+            application_module.init_db(first_path)
+            application_module.init_db(second_path)
+
+            first_db = sqlite3.connect(first_path)
+            first_vessel_id = first_db.execute(
+                "SELECT id FROM fleet_vessels WHERE name = 'Ларус'"
+            ).fetchone()[0]
+            first_db.close()
+
+            first_client = application_module.app.test_client()
+            second_client = application_module.app.test_client()
+            for client, tenant_id, path in (
+                (first_client, 101, first_path),
+                (second_client, 202, second_path),
+            ):
+                with client.session_transaction() as tenant_session:
+                    tenant_session["demo_tenant_id"] = tenant_id
+                    tenant_session["demo_tenant_name"] = f"Demo {tenant_id}"
+                    tenant_session["demo_tenant_db_path"] = path
+                    tenant_session["demo_tenant_modules"] = "fleet"
+
+            response = first_client.post(
+                f"/fleet/vessels/{first_vessel_id}/update",
+                data={
+                    "name": "Ларус первого демо",
+                    "tank_capacity_liters": "60",
+                    "schedule_color": "#123abc",
+                    "length_m": "6",
+                    "width_m": "2.2",
+                    "specifications": "Изолированный флот",
+                },
+            )
+            self.assertEqual(response.status_code, 302)
+
+            for _ in range(2):
+                first_page = first_client.get("/fleet").get_data(as_text=True)
+                second_page = second_client.get("/fleet").get_data(as_text=True)
+                self.assertIn(
+                    'class="fleet-card-name">Ларус первого демо</span>', first_page
+                )
+                self.assertNotIn(
+                    'class="fleet-card-name">Ларус</span>', first_page
+                )
+                self.assertIn(
+                    'class="fleet-card-name">Ларус</span>', second_page
+                )
+                self.assertNotIn(
+                    'class="fleet-card-name">Ларус первого демо</span>', second_page
+                )
+
+            main_client = application_module.app.test_client()
+            with main_client.session_transaction() as main_session:
+                main_session["admin_id"] = 1
+                main_session["admin_name"] = "Администратор"
+            main_page = main_client.get("/fleet").get_data(as_text=True)
+            self.assertIn('class="fleet-card-name">Ларус</span>', main_page)
+            self.assertNotIn(
+                'class="fleet-card-name">Ларус первого демо</span>', main_page
+            )
+
+            response = first_client.post(
+                f"/fleet/vessels/{first_vessel_id}/delete"
+            )
+            self.assertEqual(response.status_code, 302)
+            for _ in range(2):
+                first_page = first_client.get("/fleet").get_data(as_text=True)
+                self.assertNotIn(
+                    'class="fleet-card-name">Ларус первого демо</span>', first_page
+                )
+                self.assertNotIn(
+                    'class="fleet-card-name">Ларус</span>', first_page
+                )
 
     def create_defect(self):
         with application_module.app.app_context():

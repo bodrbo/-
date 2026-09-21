@@ -21,7 +21,6 @@ from .constants import (
     BOAT_DOCUMENT_EXTENSIONS,
     BOAT_PHOTO_EXTENSIONS,
     BOAT_PHOTO_MAX_BYTES,
-    BOATS,
     CHECKLIST_TYPE_LABELS,
     DEFECT_STATUSES,
 )
@@ -32,6 +31,12 @@ def create_fleet_blueprint(
 ):
     """Build the fleet Blueprint with the application's DB and auth adapters."""
     blueprint = Blueprint("fleet", __name__)
+
+    def boat_for_index(boat_index):
+        return services.boat_by_index(get_db(), boat_index)
+
+    def should_refresh_legacy_runtime():
+        return not session.get("demo_tenant_id")
 
     @blueprint.before_request
     def ensure_fleet_schema():
@@ -57,7 +62,10 @@ def create_fleet_blueprint(
     @blueprint.route("/fleet/vessels", methods=["POST"])
     @admin_login_required
     def create_vessel():
-        success, message, boat_index = services.create_vessel(get_db(), request.form)
+        success, message, boat_index = services.create_vessel(
+            get_db(), request.form,
+            refresh_runtime=should_refresh_legacy_runtime(),
+        )
         session["fleet_notice"] = {
             "type": "success" if success else "error",
             "message": message,
@@ -69,7 +77,7 @@ def create_fleet_blueprint(
     @blueprint.route("/fleet/<int:boat_index>")
     @admin_login_required
     def boat_detail(boat_index):
-        boat = services.boat_by_index(boat_index)
+        boat = boat_for_index(boat_index)
         if boat is None:
             return redirect(url_for("fleet.index"))
 
@@ -115,7 +123,7 @@ def create_fleet_blueprint(
             boat=boat,
             boat_index=boat_index,
             vessel=vessel,
-            boats=BOATS,
+            boats=services.boats_for_db(db),
             boat_photo_url=services.boat_photo_url(profile),
             boat_photo_notice=session.pop("boat_photo_notice", None),
             fleet_notice=session.pop("fleet_notice", None),
@@ -161,7 +169,8 @@ def create_fleet_blueprint(
     @admin_login_required
     def update_vessel(vessel_id):
         success, message, boat_index = services.update_vessel(
-            get_db(), vessel_id, request.form
+            get_db(), vessel_id, request.form,
+            refresh_runtime=should_refresh_legacy_runtime(),
         )
         session["fleet_notice"] = {
             "type": "success" if success else "error",
@@ -177,7 +186,10 @@ def create_fleet_blueprint(
     @blueprint.route("/fleet/vessels/<int:vessel_id>/delete", methods=["POST"])
     @admin_login_required
     def delete_vessel(vessel_id):
-        success, message = services.archive_vessel(get_db(), vessel_id)
+        success, message = services.archive_vessel(
+            get_db(), vessel_id,
+            refresh_runtime=should_refresh_legacy_runtime(),
+        )
         session["fleet_notice"] = {
             "type": "success" if success else "error",
             "message": message,
@@ -187,7 +199,7 @@ def create_fleet_blueprint(
     @blueprint.route("/fleet/<int:boat_index>/photo", methods=["POST"])
     @admin_login_required
     def upload_boat_photo(boat_index):
-        boat = services.boat_by_index(boat_index)
+        boat = boat_for_index(boat_index)
         if boat is None:
             return redirect(url_for("fleet.index"))
 
@@ -241,7 +253,7 @@ def create_fleet_blueprint(
     @blueprint.route("/fleet/<int:boat_index>/defects", methods=["POST"])
     @admin_login_required
     def create_defect(boat_index):
-        boat = services.boat_by_index(boat_index)
+        boat = boat_for_index(boat_index)
         if boat is None:
             return redirect(url_for("fleet.index"))
 
@@ -263,7 +275,7 @@ def create_fleet_blueprint(
     @blueprint.route("/fleet/<int:boat_index>/fuel/refill", methods=["POST"])
     @admin_login_required
     def add_fuel_refill(boat_index):
-        boat = services.boat_by_index(boat_index)
+        boat = boat_for_index(boat_index)
         if boat is None:
             return redirect(url_for("fleet.index"))
         operation = request.form.get("fuel_operation", "tank")
@@ -304,7 +316,7 @@ def create_fleet_blueprint(
     )
     @admin_login_required
     def set_manual_fuel_consumption(boat_index, event_id):
-        boat = services.boat_by_index(boat_index)
+        boat = boat_for_index(boat_index)
         if boat is None:
             return redirect(url_for("fleet.index"))
         success, message = fuel_services.record_individual_consumption(
@@ -327,7 +339,7 @@ def create_fleet_blueprint(
     )
     @admin_login_required
     def delete_fuel_transaction(boat_index, transaction_id):
-        boat = services.boat_by_index(boat_index)
+        boat = boat_for_index(boat_index)
         if boat is None:
             return redirect(url_for("fleet.index"))
         success, message = fuel_services.delete_transaction(
@@ -347,7 +359,7 @@ def create_fleet_blueprint(
     )
     @admin_login_required
     def defect_detail(boat_index, defect_id):
-        boat = services.boat_by_index(boat_index)
+        boat = boat_for_index(boat_index)
         if boat is None:
             return redirect(url_for("fleet.index"))
 
@@ -372,14 +384,14 @@ def create_fleet_blueprint(
     )
     @admin_login_required
     def transfer_defect(boat_index, defect_id):
-        source_boat = services.boat_by_index(boat_index)
+        source_boat = boat_for_index(boat_index)
         if source_boat is None:
             return redirect(url_for("fleet.index"))
         try:
             destination_index = int(request.form.get("destination_boat_index", ""))
         except (TypeError, ValueError):
             destination_index = -1
-        destination_boat = services.boat_by_index(destination_index)
+        destination_boat = boat_for_index(destination_index)
         success, message = services.transfer_defect(
             get_db(),
             defect_id,
@@ -405,7 +417,7 @@ def create_fleet_blueprint(
     )
     @admin_login_required
     def add_defect_plan_item(boat_index, defect_id):
-        boat = services.boat_by_index(boat_index)
+        boat = boat_for_index(boat_index)
         if boat is None:
             return redirect(url_for("fleet.index"))
         db = get_db()
@@ -421,7 +433,7 @@ def create_fleet_blueprint(
     )
     @admin_login_required
     def set_defect_plan_item_status(boat_index, defect_id, item_id):
-        boat = services.boat_by_index(boat_index)
+        boat = boat_for_index(boat_index)
         if boat is None:
             return redirect(url_for("fleet.index"))
         db = get_db()
@@ -436,7 +448,7 @@ def create_fleet_blueprint(
     @blueprint.route("/fleet/<int:boat_index>/documents", methods=["POST"])
     @admin_login_required
     def upload_document(boat_index):
-        boat = services.boat_by_index(boat_index)
+        boat = boat_for_index(boat_index)
         if boat is None:
             return redirect(url_for("fleet.index"))
 
@@ -462,7 +474,7 @@ def create_fleet_blueprint(
     @blueprint.route("/fleet/<int:boat_index>/documents/<int:document_id>")
     @admin_login_required
     def download_document(boat_index, document_id):
-        boat = services.boat_by_index(boat_index)
+        boat = boat_for_index(boat_index)
         if boat is None:
             return redirect(url_for("fleet.index"))
         document = repository.get_document(get_db(), boat, document_id)
@@ -480,7 +492,7 @@ def create_fleet_blueprint(
     )
     @admin_login_required
     def delete_document(boat_index, document_id):
-        boat = services.boat_by_index(boat_index)
+        boat = boat_for_index(boat_index)
         if boat is None:
             return redirect(url_for("fleet.index"))
         db = get_db()
@@ -502,7 +514,7 @@ def create_fleet_blueprint(
     )
     @admin_login_required
     def set_defect_status(boat_index, defect_id):
-        boat = services.boat_by_index(boat_index)
+        boat = boat_for_index(boat_index)
         if boat is None:
             return redirect(url_for("fleet.index"))
         services.change_defect_status(
@@ -515,7 +527,7 @@ def create_fleet_blueprint(
     )
     @admin_login_required
     def delete_defect(boat_index, defect_id):
-        boat = services.boat_by_index(boat_index)
+        boat = boat_for_index(boat_index)
         if boat is None:
             return redirect(url_for("fleet.index"))
         services.delete_defect(get_db(), boat, defect_id)
@@ -526,7 +538,7 @@ def create_fleet_blueprint(
     )
     @admin_login_required
     def assign_defect(boat_index, defect_id):
-        boat = services.boat_by_index(boat_index)
+        boat = boat_for_index(boat_index)
         if boat is None:
             return redirect(url_for("fleet.index"))
         db = get_db()

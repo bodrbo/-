@@ -7,10 +7,10 @@ import os
 from flask import Blueprint, current_app, jsonify, redirect, render_template, request, session, url_for
 
 from modules.fleet.constants import (
-    BOATS,
     CHECKLIST_QUESTIONS,
     CHECKLIST_TYPE_LABELS,
 )
+from modules.fleet.schema import boats_for_db
 
 from . import repository, services
 
@@ -43,10 +43,11 @@ def create_offline_blueprint(
         employee_name, allowed = captain_context()
         if not allowed:
             return redirect(url_for("team_dashboard"))
+        db = get_db()
         return render_template(
             "team_offline.html",
             employee_name=employee_name,
-            boats=BOATS,
+            boats=boats_for_db(db),
         )
 
     @blueprint.route("/api/offline/bootstrap")
@@ -56,8 +57,10 @@ def create_offline_blueprint(
         if not allowed:
             return jsonify(ok=False, error="Офлайн-режим доступен только капитанам."), 403
 
-        documents_by_boat = {boat["name"]: [] for boat in BOATS}
-        for row in repository.list_documents(get_db()):
+        db = get_db()
+        fleet = boats_for_db(db)
+        documents_by_boat = {boat["name"]: [] for boat in fleet}
+        for row in repository.list_documents(db):
             document = dict(row)
             document["url"] = url_for(
                 "team_download_boat_document", doc_id=row["id"]
@@ -66,7 +69,7 @@ def create_offline_blueprint(
             documents_by_boat.setdefault(row["boat"], []).append(document)
 
         boats = []
-        for index, boat in enumerate(BOATS):
+        for index, boat in enumerate(fleet):
             boat_name = boat["name"]
             checklists = {}
             for checklist_type, label in CHECKLIST_TYPE_LABELS.items():

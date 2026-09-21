@@ -37,6 +37,12 @@ def create_schedule_blueprint(
 ):
     blueprint = Blueprint("schedule", __name__)
 
+    def request_boats(db):
+        return boats(db) if callable(boats) else boats
+
+    def request_boat_colors(db):
+        return boat_colors(db) if callable(boat_colors) else boat_colors
+
     def redirect_to_day(day, selected_employee="all"):
         return redirect(url_for(
             "schedule.index", date=day, employee=selected_employee
@@ -65,8 +71,8 @@ def create_schedule_blueprint(
             db,
             day,
             selected_employee,
-            boats,
-            boat_colors,
+            request_boats(db),
+            request_boat_colors(db),
             avatar_url,
             include_unassigned_tripster=not team_view,
             attach_weather=weather_services.attach_forecast,
@@ -81,7 +87,7 @@ def create_schedule_blueprint(
             previous_day=(day - dt.timedelta(days=1)).isoformat(),
             next_day=(day + dt.timedelta(days=1)).isoformat(),
             today=dt.date.today().isoformat(),
-            boats=boats,
+            boats=request_boats(db),
             trip_services=service_repository.list_services(db),
             addon_products=service_repository.list_addon_products(db),
             excursion_partners=repository.list_excursion_partners(db),
@@ -147,7 +153,7 @@ def create_schedule_blueprint(
         selected_employee = request.form.get("return_employee", "all")
         db = get_db()
         success, message, item_id = services.save_item(
-            db, request.form, boats, service_repository.list_services(db),
+            db, request.form, request_boats(db), service_repository.list_services(db),
         )
         if success:
             notify_item_changes(
@@ -164,7 +170,7 @@ def create_schedule_blueprint(
         db = get_db()
         before = schedule_notifications.item_snapshot(db, item_id)
         success, message, _saved_id = services.save_item(
-            db, request.form, boats, service_repository.list_services(db),
+            db, request.form, request_boats(db), service_repository.list_services(db),
             item_id=item_id,
             keep_participants=request.form.get("keep_participants") == "1",
         )

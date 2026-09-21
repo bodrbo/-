@@ -28,6 +28,9 @@ def create_blueprint(
     blueprint = Blueprint("ai_assistant", __name__)
     capacity = threading.BoundedSemaphore(max(1, int(max_concurrent_requests)))
 
+    def request_boats(db):
+        return boats(db) if callable(boats) else boats
+
     def user_or_none():
         user = current_user()
         if not user:
@@ -200,7 +203,7 @@ def create_blueprint(
                 message,
                 model_provider(),
                 responses_client,
-                boats,
+                request_boats(db),
             )
         except OpenAIClientError as error:
             return jsonify({"ok": False, "error": error.public_message}), error.status_code

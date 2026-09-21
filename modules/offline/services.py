@@ -5,7 +5,8 @@ import os
 import re
 import sqlite3
 
-from modules.fleet.constants import BOATS, CHECKLIST_TYPE_LABELS
+from modules.fleet.constants import CHECKLIST_TYPE_LABELS
+from modules.fleet.schema import boats_for_db
 
 from . import repository
 
@@ -55,9 +56,9 @@ def _validate_operation(operation):
     return operation_id, operation_type, payload
 
 
-def _validate_boat(payload):
+def _validate_boat(db, payload):
     boat = str(payload.get("boat") or "").strip()
-    if boat not in {item["name"] for item in BOATS}:
+    if boat not in {item["name"] for item in boats_for_db(db)}:
         raise OfflineValidationError("Не удалось определить судно.")
     return boat
 
@@ -115,7 +116,7 @@ def _save_attachments(files, required_ids, photos_dir, operation_id, allowed_ext
 
 
 def _sync_defect(db, payload, employee_name, timestamp):
-    boat = _validate_boat(payload)
+    boat = _validate_boat(db, payload)
     description = _description(payload.get("description"))
     reported_at = _clean_timestamp(payload.get("reported_at"), timestamp)
     cursor = db.execute(
@@ -202,7 +203,7 @@ def _sync_checklist(
     allowed_extensions,
     upload_tracker=None,
 ):
-    boat = _validate_boat(payload)
+    boat = _validate_boat(db, payload)
     checklist_type, answers = _validated_answers(payload)
     extra_raw = payload.get("extra_defects") or []
     if not isinstance(extra_raw, list) or len(extra_raw) > MAX_EXTRA_DEFECTS:

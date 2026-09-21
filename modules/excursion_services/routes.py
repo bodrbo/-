@@ -9,6 +9,9 @@ from .constants import SERVICE_TYPES
 def create_blueprint(get_db, access_required, is_manager_view, boats):
     blueprint = Blueprint("excursion_services", __name__)
 
+    def request_boats(db):
+        return boats(db) if callable(boats) else boats
+
     def redirect_with_notice(message, success, section="group", anchor=None):
         session["excursion_services_notice"] = {
             "message": message,
@@ -42,7 +45,7 @@ def create_blueprint(get_db, access_required, is_manager_view, boats):
             },
             service_types=SERVICE_TYPES,
             section=section,
-            boats=boats,
+            boats=request_boats(db),
             notice=session.pop("excursion_services_notice", None),
             create_values=session.pop("excursion_services_create_values", {}),
             active_page="services",
@@ -56,8 +59,9 @@ def create_blueprint(get_db, access_required, is_manager_view, boats):
     @access_required
     def create_service():
         section = request.form.get("service_type", "group")
+        db = get_db()
         success, message, result = services.create_service(
-            get_db(), request.form, boats
+            db, request.form, request_boats(db)
         )
         if not success:
             session["excursion_services_create_values"] = result or {}
@@ -69,12 +73,13 @@ def create_blueprint(get_db, access_required, is_manager_view, boats):
     @blueprint.route("/services/<int:service_id>", methods=["POST"])
     @access_required
     def update_service(service_id):
-        existing = repository.get_service(get_db(), service_id)
+        db = get_db()
+        existing = repository.get_service(db, service_id)
         section = (
             existing["service_type"] if existing is not None else "group"
         )
         success, message, data = services.update_service(
-            get_db(), service_id, request.form, boats
+            db, service_id, request.form, request_boats(db)
         )
         if success and data is not None:
             section = data["service_type"]

@@ -53,7 +53,12 @@ from modules.fleet.constants import (
     YCLIENTS_BLOCKED_SHIFT_COLOR,
     YCLIENTS_CANCELLED_COLOR,
 )
-from modules.fleet.schema import init_schema as init_fleet_schema
+from modules.fleet.schema import (
+    boats_for_db as fleet_boats_for_db,
+    fuel_config_for_db as fleet_fuel_config_for_db,
+    init_schema as init_fleet_schema,
+    schedule_colors_for_db as fleet_schedule_colors_for_db,
+)
 from modules.fleet import fuel_services
 from modules.fleet.services import (
     add_defect_plan_item as _add_defect_plan_item,
@@ -1738,6 +1743,8 @@ def init_db(db_path=None):
     # Provisioning an isolated demo DB must not replace the live process-wide
     # compatibility view used by the main company's existing modules.
     init_fleet_schema(conn, refresh_runtime=db_path is None)
+    database_boats = fleet_boats_for_db(conn)
+    database_fuel_config = fleet_fuel_config_for_db(conn)
     for name in known_employee_names:
         conn.execute(
             "INSERT OR IGNORE INTO employees (name, created_at) VALUES (?, ?)",
@@ -2066,7 +2073,7 @@ def init_db(db_path=None):
         "CREATE INDEX IF NOT EXISTS idx_boat_fuel_trip_events_boat_status "
         "ON boat_fuel_trip_events (boat, status, ended_at)"
     )
-    for boat_name in FUEL_CONFIG:
+    for boat_name in database_fuel_config:
         conn.execute(
             "INSERT OR IGNORE INTO boat_fuel_state (boat, updated_at) VALUES (?, ?)",
             (boat_name, now_str),
@@ -2110,7 +2117,7 @@ def init_db(db_path=None):
         )
         # Preserve detectable historical overrides. Standard percentages are
         # still managed by YCLIENTS; non-standard ones were entered manually.
-        for boat in BOATS:
+        for boat in database_boats:
             conn.execute(
                 "UPDATE trips SET commission_is_manual = 1 "
                 "WHERE boat = ? AND ((sale_channel = 'direct' "
@@ -3612,7 +3619,7 @@ def build_month_options(db):
 
 
 def boat_lookup(name):
-    for b in BOATS:
+    for b in fleet_boats_for_db(get_db()):
         if b["name"] == name:
             return b
     return None
@@ -4445,7 +4452,7 @@ def _trips_list_context(db, selected_month=None, selected_boat="all"):
         trips=trips_list,
         months=months,
         selected_month=selected_month,
-        boats=BOATS,
+        boats=fleet_boats_for_db(db),
         selected_boat=selected_boat,
         by_boat=by_boat,
         by_investor=by_investor,
@@ -4867,7 +4874,7 @@ def add_trip_expense():
     employee = request.form.get("employee", "").strip()
 
     errors = []
-    if boat not in [b["name"] for b in BOATS]:
+    if boat not in [b["name"] for b in fleet_boats_for_db(db)]:
         errors.append("Выберите катер.")
     try:
         expense_date and dt.date.fromisoformat(expense_date)
@@ -4931,7 +4938,9 @@ def add_investor_payout():
     recorded here, into investor_distributions."""
     db = get_db()
     boat = request.form.get("boat", "").strip()
-    boat_entry = next((b for b in BOATS if b["name"] == boat), None)
+    boat_entry = next(
+        (b for b in fleet_boats_for_db(db) if b["name"] == boat), None
+    )
     if boat_entry is None:
         session["investor_payout_error"] = "Выберите катер."
         return redirect(url_for("trips_index"))
@@ -5186,7 +5195,7 @@ app.register_blueprint(
         get_db=get_db,
         access_required=excursion_manager_or_admin_required,
         is_manager_view=_is_customer_manager,
-        boats=BOATS,
+        boats=fleet_boats_for_db,
     )
 )
 
@@ -5202,8 +5211,8 @@ app.register_blueprint(
         is_manager_view=_is_customer_manager,
         is_team_view=_is_schedule_team_view,
         can_view_team_clients=_can_view_schedule_clients,
-        boats=BOATS,
-        boat_colors=SCHEDULE_BOAT_COLORS,
+        boats=fleet_boats_for_db,
+        boat_colors=fleet_schedule_colors_for_db,
         avatar_url=find_avatar_url,
         employee_notifier=lambda db, employee_name, text: (
             send_telegram_notification_to_employee(db, employee_name, text)
@@ -5282,7 +5291,7 @@ app.register_blueprint(
         current_user=_current_ai_user,
         responses_client=_openai_responses_client,
         model_provider=lambda: OPENAI_AGENT_MODEL,
-        boats=BOATS,
+        boats=fleet_boats_for_db,
         max_concurrent_requests=OPENAI_AGENT_MAX_CONCURRENT,
         requests_per_minute=OPENAI_AGENT_REQUESTS_PER_MINUTE,
     )
@@ -13347,7 +13356,7 @@ def _sync_imported_trip_labor(db, trip_id, payload):
     boat = str(payload.get("boat") or "").strip()
     trip_date = str(payload.get("trip_date") or "").strip()
     trip_time = str(payload.get("trip_time") or "00:00").strip()
-    if boat not in {item["name"] for item in BOATS}:
+    if boat not in {item["name"] for item in fleet_boats_for_db(db)}:
         return False
     try:
         dt.date.fromisoformat(trip_date)
@@ -13721,7 +13730,10 @@ def investor_logout():
 def investor_dashboard():
     db = get_db()
     investor_name = session.get("investor_name")
-    investor_boats = [b["name"] for b in BOATS if b["investor"] == investor_name]
+    investor_boats = [
+        b["name"] for b in fleet_boats_for_db(db)
+        if b["investor"] == investor_name
+    ]
     dashboard = build_investor_dashboard_data(
         db,
         investor_name,
@@ -13942,14 +13954,15 @@ def team_dashboard():
     boat_archived_defects = []
     fuel = None
     diploma_url = None
+    tenant_boats = fleet_boats_for_db(db)
     if can_access_fleet:
         try:
             boat_index = int(request.args.get("boat_index", "0"))
         except ValueError:
             boat_index = 0
-        if not (0 <= boat_index < len(BOATS)):
+        if not (0 <= boat_index < len(tenant_boats)):
             boat_index = 0
-        selected_boat = BOATS[boat_index]["name"]
+        selected_boat = tenant_boats[boat_index]["name"]
         boat_documents = db.execute(
             "SELECT * FROM boat_documents WHERE boat = ? ORDER BY uploaded_at DESC, id DESC",
             (selected_boat,),
@@ -14113,7 +14126,7 @@ def team_dashboard():
         can_request_supply=can_request_supply,
         is_paid=is_paid,
         avatar_url=find_avatar_url(session.get("team_username")),
-        boats=BOATS, boat_index=boat_index, selected_boat=selected_boat,
+        boats=tenant_boats, boat_index=boat_index, selected_boat=selected_boat,
         boat_documents=boat_documents, boat_current_defects=boat_current_defects,
         boat_archived_defects=boat_archived_defects, fuel=fuel,
         fuel_notice=session.pop("fuel_notice", None), diploma_url=diploma_url,
@@ -14145,9 +14158,10 @@ def _team_selected_boat(db):
         boat_index = int(request.form.get("boat_index", "0"))
     except ValueError:
         return None, None
-    if not (0 <= boat_index < len(BOATS)):
+    tenant_boats = fleet_boats_for_db(db)
+    if not (0 <= boat_index < len(tenant_boats)):
         return None, None
-    return boat_index, BOATS[boat_index]["name"]
+    return boat_index, tenant_boats[boat_index]["name"]
 
 
 def _team_dashboard_section_redirect(section):
@@ -14156,7 +14170,7 @@ def _team_dashboard_section_redirect(section):
     boat_index_raw = request.form.get("boat_index", "").strip()
     if boat_index_raw.isdigit():
         boat_index = int(boat_index_raw)
-        if 0 <= boat_index < len(BOATS):
+        if 0 <= boat_index < len(fleet_boats_for_db(get_db())):
             params["boat_index"] = boat_index
     return redirect(url_for("team_dashboard", **params) + f"#team-{section}")
 
@@ -14676,22 +14690,23 @@ def team_checklist_start(checklist_type):
     employee_name = session.get("team_employee_name")
     if not _employee_has_position(db, employee_name, "Капитан"):
         return redirect(url_for("team_dashboard"))
+    tenant_boats = fleet_boats_for_db(db)
 
     if request.method == "GET":
         return render_template(
             "team_checklist_start.html",
             checklist_type=checklist_type,
             checklist_label=CHECKLIST_TYPE_LABELS[checklist_type],
-            boats=[b["name"] for b in BOATS],
+            boats=[b["name"] for b in tenant_boats],
         )
 
     boat = request.form.get("boat", "").strip()
-    if boat not in [item["name"] for item in BOATS]:
+    if boat not in [item["name"] for item in tenant_boats]:
         return render_template(
             "team_checklist_start.html",
             checklist_type=checklist_type,
             checklist_label=CHECKLIST_TYPE_LABELS[checklist_type],
-            boats=[b["name"] for b in BOATS],
+            boats=[b["name"] for b in tenant_boats],
             error="Выберите катер из списка.",
         ), 400
 
@@ -14832,7 +14847,11 @@ def team_checklist_answer(checklist_id):
                 saved_photo_paths,
                 send_telegram_photo,
             )
-            boat_index = next((i for i, b in enumerate(BOATS) if b["name"] == checklist["boat"]), None)
+            boat_index = next(
+                (i for i, b in enumerate(fleet_boats_for_db(db))
+                 if b["name"] == checklist["boat"]),
+                None,
+            )
             send_push_notification(
                 f"{checklist_label} — {checklist['boat']}",
                 f"{question_label}" + (f": {comment}" if comment else ""),
@@ -14876,7 +14895,11 @@ def team_checklist_add_defects(checklist_id):
             f"Описание: {html.escape('; '.join(descriptions))}",
             send_telegram_notification,
         )
-        boat_index = next((i for i, b in enumerate(BOATS) if b["name"] == checklist["boat"]), None)
+        boat_index = next(
+            (i for i, b in enumerate(fleet_boats_for_db(db))
+             if b["name"] == checklist["boat"]),
+            None,
+        )
         send_push_notification(
             f"Неисправность вне чек-листа — {checklist['boat']}",
             "; ".join(descriptions),
@@ -18189,7 +18212,7 @@ def fuel_sync_now():
         boat_index = int(request.form.get("boat_index", "0"))
     except ValueError:
         boat_index = 0
-    if not (0 <= boat_index < len(BOATS)):
+    if not (0 <= boat_index < len(fleet_boats_for_db(get_db()))):
         boat_index = 0
 
     if not yclients_configured():
@@ -18637,11 +18660,12 @@ def push_test():
 def _notify_offline_fleet_events(events):
     """Send the same alerts as online captain forms, once after replay."""
     db = get_db()
+    tenant_boats = fleet_boats_for_db(db)
     for event in events:
         boat = event["boat"]
         employee_name = event["employee_name"]
         boat_index = next(
-            (index for index, item in enumerate(BOATS) if item["name"] == boat),
+            (index for index, item in enumerate(tenant_boats) if item["name"] == boat),
             None,
         )
         if event["kind"] == "checklist_problem":

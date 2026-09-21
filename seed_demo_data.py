@@ -342,7 +342,8 @@ def seed(appmod, db, db_path=None, client=None):
     add_transaction(today, "in", 4500, "Тестовый Клиент", "Оплата диагностики", project_d)
 
     # ---- Флот: пара неисправностей для demo пагинации/фильтра --------
-    boat_name = appmod.BOATS[0]["name"]
+    tenant_boats = appmod.fleet_boats_for_db(db)
+    boat_name = tenant_boats[0]["name"]
     boat_index = 0
     post(f"/fleet/{boat_index}/defects", {"description": "Скрип в районе транца при полном ходу"})
     post(f"/fleet/{boat_index}/defects", {"description": "Замена анода на нижней части двигателя"})
