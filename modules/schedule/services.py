@@ -947,8 +947,15 @@ def _card_ink_for(color):
 
 def _display_colors_by_boat(boat_colors):
     result = {}
-    for raw_color, boat_name in boat_colors.items():
-        color = _normalise_hex_color(raw_color)
+    for key, value in boat_colors.items():
+        # Current fleet settings use the natural ``boat -> colour`` shape.
+        # Keep accepting the legacy YCLIENTS ``colour -> boat`` dictionary so
+        # integrations and old tests remain compatible.
+        value_color = _normalise_hex_color(value)
+        if value_color:
+            boat_name, color = key, value_color
+        else:
+            boat_name, color = value, _normalise_hex_color(key)
         if color and boat_name not in result:
             result[boat_name] = color
     return result

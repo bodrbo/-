@@ -5,6 +5,117 @@ service layer owns validations and domain transitions.
 """
 
 
+def list_vessels(db, include_archived=False):
+    where = "" if include_archived else "WHERE deleted_at IS NULL"
+    return db.execute(
+        f"SELECT * FROM fleet_vessels {where} ORDER BY sort_order, id"
+    ).fetchall()
+
+
+def get_vessel(db, vessel_id):
+    return db.execute(
+        "SELECT * FROM fleet_vessels WHERE id = ?", (vessel_id,)
+    ).fetchone()
+
+
+def get_vessel_by_name(db, name):
+    return db.execute(
+        "SELECT * FROM fleet_vessels WHERE name = ? COLLATE NOCASE", (name,)
+    ).fetchone()
+
+
+def create_vessel(db, data, timestamp):
+    archived = get_vessel_by_name(db, data["name"])
+    if archived is not None and archived["deleted_at"]:
+        db.execute(
+            "UPDATE fleet_vessels SET name = ?, tank_capacity_liters = ?, "
+            "schedule_color = ?, length_m = ?, width_m = ?, specifications = ?, "
+            "sort_order = (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM fleet_vessels), "
+            "updated_at = ?, deleted_at = NULL WHERE id = ?",
+            (
+                data["name"], data["tank_capacity_liters"], data["schedule_color"],
+                data["length_m"], data["width_m"], data["specifications"],
+                timestamp, archived["id"],
+            ),
+        )
+        vessel_id = archived["id"]
+    else:
+        cursor = db.execute(
+            "INSERT INTO fleet_vessels "
+            "(name, tank_capacity_liters, schedule_color, length_m, width_m, "
+            "specifications, sort_order, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, "
+            "(SELECT COALESCE(MAX(sort_order), -1) + 1 FROM fleet_vessels), ?, ?)",
+            (
+                data["name"], data["tank_capacity_liters"], data["schedule_color"],
+                data["length_m"], data["width_m"], data["specifications"],
+                timestamp, timestamp,
+            ),
+        )
+        vessel_id = cursor.lastrowid
+    db.execute(
+        "INSERT OR IGNORE INTO boat_fuel_state (boat, updated_at) VALUES (?, ?)",
+        (data["name"], timestamp),
+    )
+    db.commit()
+    return vessel_id
+
+
+def _quoted_identifier(value):
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _rename_vessel_references(db, old_name, new_name):
+    """Update vessel identity columns while leaving tuning boat models alone."""
+    reference_columns = {"boat", "boat_name", "source_boat", "destination_boat"}
+    tables = db.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' "
+        "AND name NOT LIKE 'sqlite_%' AND name != 'fleet_vessels'"
+    ).fetchall()
+    for table_row in tables:
+        table = table_row[0]
+        columns = db.execute(
+            f"PRAGMA table_info({_quoted_identifier(table)})"
+        ).fetchall()
+        for column in (row[1] for row in columns if row[1] in reference_columns):
+            db.execute(
+                f"UPDATE {_quoted_identifier(table)} "
+                f"SET {_quoted_identifier(column)} = ? "
+                f"WHERE {_quoted_identifier(column)} = ?",
+                (new_name, old_name),
+            )
+
+
+def update_vessel(db, vessel_id, data, timestamp):
+    vessel = get_vessel(db, vessel_id)
+    if vessel is None or vessel["deleted_at"]:
+        return False
+    with db:
+        if vessel["name"] != data["name"]:
+            _rename_vessel_references(db, vessel["name"], data["name"])
+        db.execute(
+            "UPDATE fleet_vessels SET name = ?, tank_capacity_liters = ?, "
+            "schedule_color = ?, length_m = ?, width_m = ?, specifications = ?, "
+            "updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+            (
+                data["name"], data["tank_capacity_liters"], data["schedule_color"],
+                data["length_m"], data["width_m"], data["specifications"],
+                timestamp, vessel_id,
+            ),
+        )
+    return True
+
+
+def archive_vessel(db, vessel_id, timestamp):
+    cursor = db.execute(
+        "UPDATE fleet_vessels SET deleted_at = ?, updated_at = ? "
+        "WHERE id = ? AND deleted_at IS NULL",
+        (timestamp, timestamp, vessel_id),
+    )
+    db.commit()
+    return cursor.rowcount == 1
+
+
 def list_boat_profiles(db):
     return db.execute(
         "SELECT * FROM fleet_boat_profiles ORDER BY boat"

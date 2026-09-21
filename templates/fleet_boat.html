@@ -71,6 +71,12 @@
 
   <a href="{{ url_for('fleet.index') }}" class="term" style="display:inline-block; margin-bottom:14px;">← Флот</a>
 
+  {% if fleet_notice %}
+  <div class="fleet-management-notice fleet-management-notice-{{ fleet_notice.type }}" role="alert">
+    {{ fleet_notice.message }}
+  </div>
+  {% endif %}
+
   <section class="panel fleet-vessel-profile">
     <div class="fleet-vessel-photo">
       {% if boat_photo_url %}
@@ -88,7 +94,17 @@
     <div class="fleet-vessel-profile-body">
       <span class="fleet-vessel-eyebrow">Профиль судна</span>
       <h2>{{ boat }}</h2>
+      <div class="fleet-vessel-facts" aria-label="Основные параметры судна">
+        <span><i style="background: {{ vessel.schedule_color if vessel else '#607d8b' }};"></i>Цвет расписания</span>
+        <span>Бак: {{ (vessel.tank_capacity_liters|round(1)) if vessel else '—' }} л</span>
+        <span>Длина: {{ (vessel.length_m|round(2)) if vessel and vessel.length_m else '—' }} м</span>
+        <span>Ширина: {{ (vessel.width_m|round(2)) if vessel and vessel.width_m else '—' }} м</span>
+      </div>
+      {% if vessel and vessel.specifications %}
+      <p class="fleet-vessel-specifications">{{ vessel.specifications }}</p>
+      {% else %}
       <p>Фотография используется как аватар катера в общем разделе «Флот».</p>
+      {% endif %}
       {% if boat_photo_notice %}
       <div class="fleet-photo-notice fleet-photo-notice-{{ boat_photo_notice.type }}" role="alert">{{ boat_photo_notice.message }}</div>
       {% endif %}
@@ -103,6 +119,62 @@
       </form>
     </div>
   </section>
+
+  {% if vessel %}
+  <details class="panel fleet-vessel-settings" id="fleet-vessel-settings"{{ ' open' if fleet_notice and fleet_notice.type == 'error' }}>
+    <summary>
+      <span>
+        <strong>Параметры и характеристики</strong>
+        <small>Название, топливный бак и оформление рейсов</small>
+      </span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <form action="{{ url_for('fleet.update_vessel', vessel_id=vessel.id) }}" method="post" class="fleet-vessel-form">
+      <div class="fleet-vessel-form-grid">
+        <div class="field fleet-vessel-name-field">
+          <label for="vesselName">Название</label>
+          <input id="vesselName" name="name" maxlength="120" value="{{ vessel.name }}" required>
+        </div>
+        <div class="field">
+          <label for="vesselTank">Объём бака, л</label>
+          <input id="vesselTank" name="tank_capacity_liters" type="number" min="0.1" max="10000" step="0.1" value="{{ vessel.tank_capacity_liters|round(1) }}" required>
+        </div>
+        <div class="field fleet-color-field">
+          <label for="vesselColor">Цвет в расписании</label>
+          <div class="fleet-color-control">
+            <input id="vesselColor" name="schedule_color" type="color" value="{{ vessel.schedule_color }}">
+            <span>Карточки рейсов</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="vesselLength">Длина, м</label>
+          <input id="vesselLength" name="length_m" type="number" min="0.01" max="1000" step="0.01" value="{{ vessel.length_m or '' }}" placeholder="Не указана">
+        </div>
+        <div class="field">
+          <label for="vesselWidth">Ширина, м</label>
+          <input id="vesselWidth" name="width_m" type="number" min="0.01" max="1000" step="0.01" value="{{ vessel.width_m or '' }}" placeholder="Не указана">
+        </div>
+        <div class="field fleet-vessel-specs-field">
+          <label for="vesselSpecifications">Остальные характеристики</label>
+          <textarea id="vesselSpecifications" name="specifications" rows="5" maxlength="5000" placeholder="Материал корпуса, двигатель, пассажировместимость — по одной характеристике на строку">{{ vessel.specifications }}</textarea>
+        </div>
+      </div>
+      <div class="fleet-vessel-form-actions fleet-vessel-edit-actions">
+        <button type="submit">Сохранить изменения</button>
+        <span>Новое название применяется и к сохранённой истории этого катера.</span>
+      </div>
+    </form>
+    <div class="fleet-vessel-danger-zone">
+      <div>
+        <strong>Убрать катер из флота</strong>
+        <span>Катер исчезнет из выбора, но рейсы, осмотры, топливо и неисправности останутся в истории.</span>
+      </div>
+      <form action="{{ url_for('fleet.delete_vessel', vessel_id=vessel.id) }}" method="post" onsubmit="return confirm('Убрать катер «{{ vessel.name|e }}» из действующего флота? Исторические данные сохранятся.');">
+        <button type="submit" class="btn-danger">Удалить катер</button>
+      </form>
+    </div>
+  </details>
+  {% endif %}
 
   {% include '_fuel_panel.html' %}
 

@@ -4,7 +4,7 @@ BOAT_DOCUMENT_EXTENSIONS = (".pdf", ".jpg", ".jpeg", ".png", ".webp", ".doc", ".
 BOAT_PHOTO_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 BOAT_PHOTO_MAX_BYTES = 8 * 1024 * 1024
 
-BOATS = [
+DEFAULT_BOATS = (
     {
         "name": "Ларус",
         "investor": "Владимир Леонтьев",
@@ -29,7 +29,13 @@ BOATS = [
         "fuel": 768,
         "mooring": 1333,
     },
-]
+)
+
+# Kept as a mutable compatibility view because payroll, schedule, offline mode
+# and the team cabinets already consume this collection.  The fleet schema
+# refreshes it in-place from ``fleet_vessels`` so existing imports keep seeing
+# the current administrator-managed fleet.
+BOATS = [dict(boat) for boat in DEFAULT_BOATS]
 
 # YCLIENTS uses the record/activity colour as the vessel identifier.
 BOAT_COLORS = {
@@ -39,6 +45,17 @@ BOAT_COLORS = {
     "#8bc34a": "Бодрый Первый",
 }
 
+# Display colours are intentionally separate from BOAT_COLORS.  The latter is
+# an integration dictionary of historical YCLIENTS colours (including two
+# aliases for Larus), while this one is the administrator-editable colour used
+# by cards in our own schedule.
+DEFAULT_SCHEDULE_BOAT_COLORS = {
+    "Ларус": "#03a9f4",
+    "Бодрый Второй": "#673ab7",
+    "Бодрый Первый": "#8bc34a",
+}
+SCHEDULE_BOAT_COLORS = dict(DEFAULT_SCHEDULE_BOAT_COLORS)
+
 # YCLIENTS red: a trip/activity marked with this colour is cancelled. The
 # same colour is also used for staff "do not schedule" placeholders, which
 # are likewise excluded from trip import.
@@ -47,10 +64,13 @@ YCLIENTS_BLOCKED_SHIFT_COLOR = YCLIENTS_CANCELLED_COLOR
 
 # Physical tank data and the automatic debit for one completed YCLIENTS
 # group activity. Individual bookings are always reviewed manually.
-FUEL_CONFIG = {
+DEFAULT_FUEL_CONFIG = {
     "Ларус": {"capacity_liters": 60.0, "group_trip_liters": 12.0},
     "Бодрый Второй": {"capacity_liters": 250.0, "group_trip_liters": 10.0},
     "Бодрый Первый": {"capacity_liters": 100.0, "group_trip_liters": 12.0},
+}
+FUEL_CONFIG = {
+    boat: dict(config) for boat, config in DEFAULT_FUEL_CONFIG.items()
 }
 
 CHECKLIST_TYPE_LABELS = {

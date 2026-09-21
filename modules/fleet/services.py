@@ -1,6 +1,8 @@
 """Business operations shared by the fleet HTTP interfaces."""
 
 import datetime as dt
+import re
+import sqlite3
 
 from flask import url_for
 
@@ -13,10 +15,16 @@ from .constants import (
     DEFECT_STATUSES,
     TASK_ASSIGNMENT_COMMENT_MAX_LENGTH,
 )
+from .schema import refresh_runtime_fleet
 
 
 DEFECT_DESCRIPTION_MAX_LENGTH = 1000
 FLEET_ARCHIVE_PAGE_SIZE = 20
+VESSEL_NAME_MAX_LENGTH = 120
+VESSEL_SPECIFICATIONS_MAX_LENGTH = 5000
+VESSEL_DIMENSION_MAX_METERS = 1000
+VESSEL_TANK_MAX_LITERS = 10000
+DEFAULT_VESSEL_COLOR = "#607d8b"
 
 
 def current_timestamp():
@@ -43,18 +51,136 @@ def fleet_boat_cards(db, fuel_summary):
     profiles = {
         row["boat"]: row for row in repository.list_boat_profiles(db)
     }
+    vessels = {
+        row["name"]: row for row in repository.list_vessels(db)
+    }
     cards = []
     for index, boat in enumerate(BOATS):
         name = boat["name"]
         cards.append(
             {
                 **boat,
+                **dict(vessels.get(name) or {}),
                 "index": index,
                 "photo_url": boat_photo_url(profiles.get(name)),
                 "fuel": fuel_summary(db, name, 0),
             }
         )
     return cards
+
+
+def vessel_for_boat(db, boat):
+    return repository.get_vessel_by_name(db, boat)
+
+
+def _parse_positive_number(raw_value, label, errors, maximum, required=False):
+    raw_value = str(raw_value or "").strip().replace(" ", "").replace(",", ".")
+    if not raw_value:
+        if required:
+            errors.append(f"Заполните поле «{label}».")
+        return None
+    try:
+        value = float(raw_value)
+    except ValueError:
+        errors.append(f"Поле «{label}» должно быть числом.")
+        return None
+    if value <= 0 or value > maximum:
+        errors.append(f"Поле «{label}» должно быть больше нуля и не больше {maximum:g}.")
+        return None
+    return value
+
+
+def parse_vessel_form(form):
+    errors = []
+    name = " ".join(str(form.get("name") or "").strip().split())
+    if not name:
+        errors.append("Укажите название катера.")
+    elif len(name) > VESSEL_NAME_MAX_LENGTH:
+        errors.append(f"Название должно быть не длиннее {VESSEL_NAME_MAX_LENGTH} символов.")
+
+    tank_capacity = _parse_positive_number(
+        form.get("tank_capacity_liters"), "Объём бака", errors,
+        VESSEL_TANK_MAX_LITERS, required=True,
+    )
+    length_m = _parse_positive_number(
+        form.get("length_m"), "Длина", errors, VESSEL_DIMENSION_MAX_METERS,
+    )
+    width_m = _parse_positive_number(
+        form.get("width_m"), "Ширина", errors, VESSEL_DIMENSION_MAX_METERS,
+    )
+    schedule_color = str(form.get("schedule_color") or "").strip().lower()
+    if not re.fullmatch(r"#[0-9a-f]{6}", schedule_color):
+        errors.append("Выберите корректный цвет расписания.")
+        schedule_color = DEFAULT_VESSEL_COLOR
+    specifications = str(form.get("specifications") or "").strip()
+    if len(specifications) > VESSEL_SPECIFICATIONS_MAX_LENGTH:
+        errors.append(
+            f"Характеристики должны быть не длиннее "
+            f"{VESSEL_SPECIFICATIONS_MAX_LENGTH} символов."
+        )
+    return {
+        "name": name,
+        "tank_capacity_liters": tank_capacity or 0,
+        "schedule_color": schedule_color,
+        "length_m": length_m,
+        "width_m": width_m,
+        "specifications": specifications,
+    }, errors
+
+
+def create_vessel(db, form):
+    data, errors = parse_vessel_form(form)
+    existing = repository.get_vessel_by_name(db, data["name"]) if data["name"] else None
+    if existing is not None and not existing["deleted_at"]:
+        errors.append("Катер с таким названием уже есть во флоте.")
+    if errors:
+        return False, " ".join(errors), None
+    try:
+        vessel_id = repository.create_vessel(db, data, current_timestamp())
+    except sqlite3.IntegrityError:
+        return False, "Катер с таким названием уже есть во флоте.", None
+    refresh_runtime_fleet(db)
+    index = next(
+        (position for position, boat in enumerate(BOATS) if boat["name"] == data["name"]),
+        None,
+    )
+    return True, f"Катер «{data['name']}» добавлен во флот.", index
+
+
+def update_vessel(db, vessel_id, form):
+    vessel = repository.get_vessel(db, vessel_id)
+    if vessel is None or vessel["deleted_at"]:
+        return False, "Катер не найден.", None
+    data, errors = parse_vessel_form(form)
+    duplicate = repository.get_vessel_by_name(db, data["name"]) if data["name"] else None
+    if duplicate is not None and duplicate["id"] != vessel_id:
+        errors.append("Катер с таким названием уже существует.")
+    if errors:
+        return False, " ".join(errors), None
+    try:
+        repository.update_vessel(db, vessel_id, data, current_timestamp())
+    except sqlite3.IntegrityError:
+        return False, "Не удалось переименовать катер: такое название уже занято.", None
+    refresh_runtime_fleet(db)
+    index = next(
+        (position for position, boat in enumerate(BOATS) if boat["name"] == data["name"]),
+        None,
+    )
+    return True, "Параметры катера сохранены.", index
+
+
+def archive_vessel(db, vessel_id):
+    vessel = repository.get_vessel(db, vessel_id)
+    if vessel is None or vessel["deleted_at"]:
+        return False, "Катер уже удалён или не найден."
+    if len(repository.list_vessels(db)) <= 1:
+        return False, "Нельзя удалить единственный катер из флота."
+    repository.archive_vessel(db, vessel_id, current_timestamp())
+    refresh_runtime_fleet(db)
+    return (
+        True,
+        f"Катер «{vessel['name']}» убран из действующего флота. История сохранена.",
+    )
 
 
 def checklist_questions_for(checklist_type, boat):

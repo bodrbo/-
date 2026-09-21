@@ -48,10 +48,12 @@ from modules.fleet.constants import (
     DEFECT_STATUSES,
     DEFECT_TASK_WORK_TYPE,
     FUEL_CONFIG,
+    SCHEDULE_BOAT_COLORS,
     TASK_ASSIGNMENT_COMMENT_MAX_LENGTH,
     YCLIENTS_BLOCKED_SHIFT_COLOR,
     YCLIENTS_CANCELLED_COLOR,
 )
+from modules.fleet.schema import init_schema as init_fleet_schema
 from modules.fleet import fuel_services
 from modules.fleet.services import (
     add_defect_plan_item as _add_defect_plan_item,
@@ -1733,6 +1735,9 @@ def init_db(db_path=None):
         if row[0] not in known_employee_names:
             known_employee_names.append(row[0])
     now_str = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    # Provisioning an isolated demo DB must not replace the live process-wide
+    # compatibility view used by the main company's existing modules.
+    init_fleet_schema(conn, refresh_runtime=db_path is None)
     for name in known_employee_names:
         conn.execute(
             "INSERT OR IGNORE INTO employees (name, created_at) VALUES (?, ?)",
@@ -5198,7 +5203,7 @@ app.register_blueprint(
         is_team_view=_is_schedule_team_view,
         can_view_team_clients=_can_view_schedule_clients,
         boats=BOATS,
-        boat_colors=BOAT_COLORS,
+        boat_colors=SCHEDULE_BOAT_COLORS,
         avatar_url=find_avatar_url,
         employee_notifier=lambda db, employee_name, text: (
             send_telegram_notification_to_employee(db, employee_name, text)

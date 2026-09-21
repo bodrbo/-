@@ -69,6 +69,58 @@
 
 <main class="wrap">
 
+  {% if fleet_notice %}
+  <div class="fleet-management-notice fleet-management-notice-{{ fleet_notice.type }}" role="alert">
+    {{ fleet_notice.message }}
+  </div>
+  {% endif %}
+
+  <details class="panel fleet-create-panel" id="fleet-create-vessel"{{ ' open' if fleet_notice and fleet_notice.type == 'error' }}>
+    <summary>
+      <span class="fleet-create-icon" aria-hidden="true">+</span>
+      <span>
+        <strong>Добавить катер</strong>
+        <small>Создать новую карточку действующего флота</small>
+      </span>
+      <span class="chev" aria-hidden="true"></span>
+    </summary>
+    <form action="{{ url_for('fleet.create_vessel') }}" method="post" class="fleet-vessel-form">
+      <div class="fleet-vessel-form-grid">
+        <div class="field fleet-vessel-name-field">
+          <label for="newVesselName">Название</label>
+          <input id="newVesselName" name="name" maxlength="120" placeholder="Например, Бодрый Третий" required>
+        </div>
+        <div class="field">
+          <label for="newVesselTank">Объём бака, л</label>
+          <input id="newVesselTank" name="tank_capacity_liters" type="number" min="0.1" max="10000" step="0.1" placeholder="100" required>
+        </div>
+        <div class="field fleet-color-field">
+          <label for="newVesselColor">Цвет в расписании</label>
+          <div class="fleet-color-control">
+            <input id="newVesselColor" name="schedule_color" type="color" value="{{ default_vessel_color }}">
+            <span>Карточки рейсов</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="newVesselLength">Длина, м</label>
+          <input id="newVesselLength" name="length_m" type="number" min="0.01" max="1000" step="0.01" placeholder="Не указана">
+        </div>
+        <div class="field">
+          <label for="newVesselWidth">Ширина, м</label>
+          <input id="newVesselWidth" name="width_m" type="number" min="0.01" max="1000" step="0.01" placeholder="Не указана">
+        </div>
+        <div class="field fleet-vessel-specs-field">
+          <label for="newVesselSpecifications">Остальные характеристики</label>
+          <textarea id="newVesselSpecifications" name="specifications" rows="4" maxlength="5000" placeholder="Материал корпуса, двигатель, пассажировместимость — по одной характеристике на строку"></textarea>
+        </div>
+      </div>
+      <div class="fleet-vessel-form-actions">
+        <button type="submit">Добавить катер</button>
+        <span>После сохранения откроется новая карточка судна.</span>
+      </div>
+    </form>
+  </details>
+
   <section class="panel">
     <div class="fleet-grid">
       {% for boat in boats %}

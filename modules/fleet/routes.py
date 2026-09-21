@@ -39,8 +39,22 @@ def create_fleet_blueprint(
         return render_template(
             "fleet_index.html",
             boats=services.fleet_boat_cards(db, fuel_services.fuel_summary),
+            fleet_notice=session.pop("fleet_notice", None),
+            default_vessel_color=services.DEFAULT_VESSEL_COLOR,
             active_page="fleet",
         )
+
+    @blueprint.route("/fleet/vessels", methods=["POST"])
+    @admin_login_required
+    def create_vessel():
+        success, message, boat_index = services.create_vessel(get_db(), request.form)
+        session["fleet_notice"] = {
+            "type": "success" if success else "error",
+            "message": message,
+        }
+        if success and boat_index is not None:
+            return redirect(url_for("fleet.boat_detail", boat_index=boat_index))
+        return redirect(url_for("fleet.index") + "#fleet-create-vessel")
 
     @blueprint.route("/fleet/<int:boat_index>")
     @admin_login_required
@@ -50,6 +64,7 @@ def create_fleet_blueprint(
             return redirect(url_for("fleet.index"))
 
         db = get_db()
+        vessel = services.vessel_for_boat(db, boat)
         profile = repository.get_boat_profile(db, boat)
         current_defects = services.current_defects_for_boat(db, boat)
 
@@ -89,9 +104,11 @@ def create_fleet_blueprint(
             "fleet_boat.html",
             boat=boat,
             boat_index=boat_index,
+            vessel=vessel,
             boats=BOATS,
             boat_photo_url=services.boat_photo_url(profile),
             boat_photo_notice=session.pop("boat_photo_notice", None),
+            fleet_notice=session.pop("fleet_notice", None),
             checklists=checklists["items"],
             checklists_total=checklists["total"],
             checklists_page=checklists["page"],
@@ -129,6 +146,33 @@ def create_fleet_blueprint(
             viewer_role="admin",
             active_page="fleet",
         )
+
+    @blueprint.route("/fleet/vessels/<int:vessel_id>/update", methods=["POST"])
+    @admin_login_required
+    def update_vessel(vessel_id):
+        success, message, boat_index = services.update_vessel(
+            get_db(), vessel_id, request.form
+        )
+        session["fleet_notice"] = {
+            "type": "success" if success else "error",
+            "message": message,
+        }
+        if boat_index is not None:
+            return redirect(
+                url_for("fleet.boat_detail", boat_index=boat_index)
+                + "#fleet-vessel-settings"
+            )
+        return redirect(url_for("fleet.index"))
+
+    @blueprint.route("/fleet/vessels/<int:vessel_id>/delete", methods=["POST"])
+    @admin_login_required
+    def delete_vessel(vessel_id):
+        success, message = services.archive_vessel(get_db(), vessel_id)
+        session["fleet_notice"] = {
+            "type": "success" if success else "error",
+            "message": message,
+        }
+        return redirect(url_for("fleet.index"))
 
     @blueprint.route("/fleet/<int:boat_index>/photo", methods=["POST"])
     @admin_login_required

@@ -3071,6 +3071,143 @@ body.modal-open { overflow: hidden; }
 }
 .fleet-photo-form button { flex: none; padding: 9px 13px; }
 .fleet-photo-form > span { display: block; margin-top: 5px; color: var(--muted); font-size: 9px; }
+.fleet-management-notice {
+  margin: 0 0 14px;
+  padding: 11px 14px;
+  border: 1px solid rgba(47, 107, 79, .25);
+  border-radius: 9px;
+  background: rgba(47, 107, 79, .08);
+  color: var(--success);
+  font-size: 12px;
+  font-weight: 700;
+}
+.fleet-management-notice-error {
+  border-color: rgba(166, 61, 47, .25);
+  background: rgba(166, 61, 47, .07);
+  color: var(--danger);
+}
+.fleet-create-panel,
+.fleet-vessel-settings { padding: 0; overflow: hidden; }
+.fleet-create-panel { margin-bottom: 16px; border-top: 3px solid var(--brass); }
+.fleet-create-panel > summary,
+.fleet-vessel-settings > summary {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 15px 17px;
+  list-style: none;
+  cursor: pointer;
+}
+.fleet-create-panel > summary::-webkit-details-marker,
+.fleet-vessel-settings > summary::-webkit-details-marker { display: none; }
+.fleet-create-panel > summary > span:nth-child(2),
+.fleet-vessel-settings > summary > span:first-child { display: grid; gap: 2px; }
+.fleet-create-panel summary strong,
+.fleet-vessel-settings summary strong { color: var(--ink); font-size: 13px; }
+.fleet-create-panel summary small,
+.fleet-vessel-settings summary small { color: var(--muted); font-size: 10px; font-weight: 400; }
+.fleet-create-panel summary .chev,
+.fleet-vessel-settings summary .chev { margin-left: auto; }
+.fleet-create-icon {
+  display: grid;
+  width: 29px;
+  height: 29px;
+  flex: 0 0 29px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--ink);
+  color: #fff;
+  font-size: 21px;
+  font-weight: 300;
+  line-height: 1;
+}
+.fleet-vessel-form {
+  padding: 17px;
+  border-top: 1px solid var(--hairline-soft);
+  background: var(--paper-alt);
+}
+.fleet-vessel-form-grid {
+  display: grid;
+  grid-template-columns: minmax(210px, 1.5fr) minmax(150px, .75fr) minmax(170px, .8fr);
+  gap: 13px;
+}
+.fleet-vessel-form .field { margin: 0; }
+.fleet-vessel-form .field label { display: block; margin-bottom: 6px; }
+.fleet-vessel-form input:not([type="color"]),
+.fleet-vessel-form textarea { width: 100%; box-sizing: border-box; }
+.fleet-vessel-specs-field { grid-column: 1 / -1; }
+.fleet-vessel-specs-field textarea { resize: vertical; min-height: 92px; line-height: 1.5; }
+.fleet-color-control {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  gap: 9px;
+  padding: 5px 10px 5px 6px;
+  box-sizing: border-box;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.fleet-color-control input[type="color"] {
+  width: 44px;
+  height: 30px;
+  flex: 0 0 44px;
+  padding: 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.fleet-color-control span { color: var(--muted); font-size: 10px; }
+.fleet-vessel-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+.fleet-vessel-form-actions span { color: var(--muted); font-size: 10px; }
+.fleet-vessel-settings { margin-bottom: 22px; }
+.fleet-vessel-facts { display: flex; flex-wrap: wrap; gap: 7px; margin: 9px 0 13px; }
+.fleet-vessel-facts span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 999px;
+  background: var(--paper-alt);
+  color: var(--ink-soft);
+  font-size: 9px;
+  font-weight: 700;
+}
+.fleet-vessel-facts i {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border: 1px solid rgba(15, 42, 53, .16);
+  border-radius: 50%;
+}
+.fleet-vessel-profile-body > .fleet-vessel-specifications {
+  margin-bottom: 15px;
+  padding-left: 10px;
+  border-left: 2px solid var(--brass);
+  color: var(--muted);
+  white-space: pre-line;
+}
+.fleet-vessel-danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 17px;
+  border-top: 1px solid rgba(166, 61, 47, .16);
+  background: rgba(166, 61, 47, .035);
+}
+.fleet-vessel-danger-zone > div { display: grid; gap: 3px; }
+.fleet-vessel-danger-zone strong { color: var(--danger); font-size: 11px; }
+.fleet-vessel-danger-zone span { color: var(--muted); font-size: 9px; line-height: 1.45; }
+.fleet-vessel-danger-zone form { margin: 0; flex: none; }
+.fleet-vessel-danger-zone .btn-danger { padding: 8px 11px; }
 
 @media (max-width: 680px) {
   .fleet-grid { grid-template-columns: 1fr; }
@@ -3079,6 +3216,14 @@ body.modal-open { overflow: hidden; }
   .fleet-photo-form-controls { align-items: stretch; flex-direction: column; }
   .fleet-photo-form input { max-width: 100%; }
   .fleet-photo-form button { align-self: flex-start; }
+  .fleet-vessel-form-grid { grid-template-columns: 1fr 1fr; }
+  .fleet-vessel-name-field,
+  .fleet-vessel-specs-field,
+  .fleet-color-field { grid-column: 1 / -1; }
+  .fleet-vessel-form-actions,
+  .fleet-vessel-danger-zone { align-items: stretch; flex-direction: column; }
+  .fleet-vessel-form-actions button,
+  .fleet-vessel-danger-zone button { width: 100%; }
 }
 
 /* Fuel is presented as one vessel instrument, not a dashboard of abstract

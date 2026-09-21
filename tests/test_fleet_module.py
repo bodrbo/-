@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from support import TEST_DIRECTORY, application_module
+from modules.fleet.schema import refresh_runtime_fleet
 
 
 class FleetModuleIntegrationTests(unittest.TestCase):
@@ -86,6 +87,124 @@ class FleetModuleIntegrationTests(unittest.TestCase):
         response = self.client.get("/fleet/0")
         self.assertEqual(response.status_code, 200)
         self.assertIn("Ларус".encode(), response.data)
+
+    def test_admin_can_create_edit_and_archive_vessel(self):
+        original_name = "Тестовый катер флота"
+        renamed = "Тестовый катер флота — обновлён"
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM boat_documents WHERE boat IN (?, ?)", (original_name, renamed))
+            db.execute("DELETE FROM boat_fuel_state WHERE boat IN (?, ?)", (original_name, renamed))
+            db.execute("DELETE FROM fleet_vessels WHERE name IN (?, ?) COLLATE NOCASE", (original_name, renamed))
+            db.commit()
+            refresh_runtime_fleet(db)
+
+        self.log_in_as_admin()
+        response = self.client.post(
+            "/fleet/vessels",
+            data={
+                "name": original_name,
+                "tank_capacity_liters": "180,5",
+                "schedule_color": "#123abc",
+                "length_m": "7,25",
+                "width_m": "2.48",
+                "specifications": "Материал корпуса: алюминий\nПассажиров: 8",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/fleet/", response.headers["Location"])
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            vessel = db.execute(
+                "SELECT * FROM fleet_vessels WHERE name = ?", (original_name,)
+            ).fetchone()
+            self.assertIsNotNone(vessel)
+            vessel_id = vessel["id"]
+            self.assertEqual(vessel["tank_capacity_liters"], 180.5)
+            self.assertEqual(application_module.FUEL_CONFIG[original_name]["capacity_liters"], 180.5)
+            self.assertEqual(application_module.SCHEDULE_BOAT_COLORS[original_name], "#123abc")
+            db.execute(
+                "INSERT INTO boat_documents "
+                "(boat, title, filename, original_filename, uploaded_at) "
+                "VALUES (?, 'Тест', 'test.pdf', 'test.pdf', '2026-09-21 10:00')",
+                (original_name,),
+            )
+            db.commit()
+
+        detail = self.client.get(response.headers["Location"]).get_data(as_text=True)
+        self.assertIn("Материал корпуса: алюминий", detail)
+        self.assertIn("180.5", detail)
+
+        response = self.client.post(
+            f"/fleet/vessels/{vessel_id}/update",
+            data={
+                "name": renamed,
+                "tank_capacity_liters": "220",
+                "schedule_color": "#8bc34a",
+                "length_m": "7.4",
+                "width_m": "2.5",
+                "specifications": "Обновлённая характеристика",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            vessel = db.execute(
+                "SELECT * FROM fleet_vessels WHERE id = ?", (vessel_id,)
+            ).fetchone()
+            self.assertEqual(vessel["name"], renamed)
+            self.assertEqual(vessel["tank_capacity_liters"], 220)
+            self.assertIsNotNone(
+                db.execute(
+                    "SELECT 1 FROM boat_documents WHERE boat = ?", (renamed,)
+                ).fetchone()
+            )
+            self.assertIn(renamed, application_module.FUEL_CONFIG)
+            self.assertNotIn(original_name, application_module.FUEL_CONFIG)
+
+        response = self.client.post(f"/fleet/vessels/{vessel_id}/delete")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/fleet"))
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            vessel = db.execute(
+                "SELECT * FROM fleet_vessels WHERE id = ?", (vessel_id,)
+            ).fetchone()
+            self.assertIsNotNone(vessel["deleted_at"])
+            self.assertNotIn(renamed, [boat["name"] for boat in application_module.BOATS])
+            self.assertIsNotNone(
+                db.execute(
+                    "SELECT 1 FROM boat_documents WHERE boat = ?", (renamed,)
+                ).fetchone()
+            )
+            db.execute("DELETE FROM boat_documents WHERE boat = ?", (renamed,))
+            db.execute("DELETE FROM boat_fuel_state WHERE boat = ?", (renamed,))
+            db.execute("DELETE FROM fleet_vessels WHERE id = ?", (vessel_id,))
+            db.commit()
+            refresh_runtime_fleet(db)
+
+    def test_vessel_management_requires_valid_admin_input(self):
+        response = self.client.post(
+            "/fleet/vessels",
+            data={"name": "Без авторизации", "tank_capacity_liters": "100"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/admin/login"))
+
+        self.log_in_as_admin()
+        response = self.client.post(
+            "/fleet/vessels",
+            data={
+                "name": "Некорректный катер",
+                "tank_capacity_liters": "0",
+                "schedule_color": "not-a-color",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        page = self.client.get(response.headers["Location"]).get_data(as_text=True)
+        self.assertIn("Объём бака", page)
+        self.assertIn("корректный цвет", page)
 
     def test_admin_can_add_and_replace_fleet_boat_photo(self):
         with application_module.app.app_context():
