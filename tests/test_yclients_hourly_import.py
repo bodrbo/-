@@ -1198,6 +1198,103 @@ class YclientsHourlyImportTests(unittest.TestCase):
         self.assertEqual(trip_count, 1)
         self.assertEqual(stats["trips"]["imported"], 1)
 
+    def _insert_existing_trip(self, db, *, boat, trip_date, trip_time, source):
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        cur = db.execute(
+            "INSERT INTO trips (boat, trip_date, trip_time, work_type, revenue, "
+            "sale_channel, commission_pct, commission_is_manual, commission_amount, "
+            "labor_cost, fuel_cost, mooring_cost, extra_total, remainder, "
+            "investor_payout, my_share, source, needs_review, created_at) "
+            "VALUES (?, ?, ?, 'Малый тур', 10000, 'direct', 0, 0, 0, "
+            "3000, 0, 0, 0, 7000, 3500, 3500, ?, 0, ?)",
+            (boat, trip_date, trip_time, source, now),
+        )
+        db.commit()
+        return cur.lastrowid
+
+    def test_existing_schedule_auto_trip_blocks_yclients_duplicate_import(self):
+        # See the "Переход с YClients на внутреннее расписание" work: while
+        # both the auto-close job and the hourly YCLIENTS cron are live at
+        # once, the same real trip can land in `trips` from both sides.
+        # _try_auto_import_candidate must not create a second row for it.
+        records = [self.record(1, "09", activity_id=901)]
+        application_module.yclients_get_records = lambda start, end: records
+        application_module.yclients_get_activity_colors = lambda ids: {901: "8bc34a"}
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            existing_id = self._insert_existing_trip(
+                db, boat="Бодрый Первый", trip_date="2026-08-23",
+                trip_time="09:00", source="schedule_auto",
+            )
+            application_module._sync_hourly_yclients(
+                db, dt.datetime(2026, 8, 23, 12, 0),
+            )
+            trips = db.execute("SELECT * FROM trips").fetchall()
+            candidate = db.execute(
+                "SELECT summary FROM import_candidates"
+            ).fetchone()
+
+        self.assertEqual(len(trips), 1)
+        self.assertEqual(trips[0]["id"], existing_id)
+        self.assertIsNotNone(candidate)
+        self.assertIn("Похоже, рейс уже есть в системе", candidate["summary"])
+        self.assertIn("автозакрыт из расписания", candidate["summary"])
+
+    def test_existing_manual_trip_blocks_yclients_duplicate_import(self):
+        records = [self.record(1, "09", activity_id=901)]
+        application_module.yclients_get_records = lambda start, end: records
+        application_module.yclients_get_activity_colors = lambda ids: {901: "8bc34a"}
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self._insert_existing_trip(
+                db, boat="Бодрый Первый", trip_date="2026-08-23",
+                trip_time="09:00", source="manual",
+            )
+            application_module._sync_hourly_yclients(
+                db, dt.datetime(2026, 8, 23, 12, 0),
+            )
+            trip_count = db.execute(
+                "SELECT COUNT(*) AS c FROM trips"
+            ).fetchone()["c"]
+            candidate = db.execute(
+                "SELECT summary FROM import_candidates"
+            ).fetchone()
+
+        self.assertEqual(trip_count, 1)
+        self.assertIsNotNone(candidate)
+        self.assertIn("добавлен вручную", candidate["summary"])
+
+    def test_existing_trip_on_different_boat_or_time_does_not_block_import(self):
+        records = [self.record(1, "09", activity_id=901)]
+        application_module.yclients_get_records = lambda start, end: records
+        application_module.yclients_get_activity_colors = lambda ids: {901: "8bc34a"}
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            # Different boat, same date/time.
+            self._insert_existing_trip(
+                db, boat="Бодрый Второй", trip_date="2026-08-23",
+                trip_time="09:00", source="schedule_auto",
+            )
+            # Same boat/date, different time.
+            self._insert_existing_trip(
+                db, boat="Бодрый Первый", trip_date="2026-08-23",
+                trip_time="15:00", source="schedule_auto",
+            )
+            stats = application_module._sync_hourly_yclients(
+                db, dt.datetime(2026, 8, 23, 12, 0),
+            )
+            trip_count = db.execute(
+                "SELECT COUNT(*) AS c FROM trips"
+            ).fetchone()["c"]
+
+        # Both pre-existing trips plus the newly imported one - no false
+        # positive from a same-day, different-time/boat trip.
+        self.assertEqual(stats["trips"]["imported"], 1)
+        self.assertEqual(trip_count, 3)
+
 
 if __name__ == "__main__":
     unittest.main()

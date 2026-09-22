@@ -12887,6 +12887,26 @@ def _imported_trip_for_candidate_slot(db, payload):
     return rows[0]["id"] if len(rows) == 1 else None
 
 
+def _existing_non_yclients_trip_in_slot(db, boat, trip_date, trip_time):
+    """A manual or schedule-auto trip already occupying this exact boat +
+    date + time — the migration to the internal schedule can leave the same
+    real-world trip entered twice during the transition period (once by
+    hand/via modules.schedule, once via YCLIENTS), which _try_auto_import_
+    candidate must not silently duplicate into a second trips row. Matches
+    boat+date+time exactly (same granularity _imported_trip_for_candidate_
+    slot already uses for merging same-source records) rather than just
+    boat+date, since a boat can run several distinct trips per day and a
+    coarser match would false-positive on those."""
+    if not boat or not trip_date:
+        return None
+    return db.execute(
+        "SELECT id, source FROM trips WHERE boat = ? AND trip_date = ? "
+        "AND COALESCE(trip_time, '00:00') = ? AND source != 'yclients' "
+        "LIMIT 1",
+        (boat, trip_date, trip_time or "00:00"),
+    ).fetchone()
+
+
 def _known_paid_ref_moved_out_of_merged_trip(db, trip_id, payload):
     """Whether a paid YCLIENTS ref was historically merged into another boat.
 
@@ -13835,14 +13855,38 @@ def _try_auto_import_candidate(db, row):
     validation same as an empty field would in the manual form). Also
     returns False without touching anything for a needs_review candidate
     (see import_fetch) — auto-creating a trip for one would just produce a
-    duplicate of the trip it's actually about."""
+    duplicate of the trip it's actually about. Also returns False (queued,
+    flagged in its summary) if a manual or schedule-auto trip already
+    occupies this exact boat/date/time — see
+    _existing_non_yclients_trip_in_slot; this is the case that matters
+    during the internal-schedule migration, where the same real trip can
+    get entered both by hand and via YCLIENTS."""
     payload = json.loads(row["payload"])
     if payload.get("needs_review"):
+        return False
+    base_summary = row["summary"].split(" ⚠ ", 1)[0]
+    conflict = _existing_non_yclients_trip_in_slot(
+        db, payload.get("boat"), payload.get("trip_date"), payload.get("trip_time"),
+    )
+    if conflict is not None:
+        source_label = (
+            "автозакрыт из расписания" if conflict["source"] == "schedule_auto"
+            else "добавлен вручную"
+        )
+        db.execute(
+            "UPDATE import_candidates SET summary = ? WHERE id = ?",
+            (
+                f"{base_summary} ⚠ Похоже, рейс уже есть в системе "
+                f"(рейс №{conflict['id']}, {source_label}) — сверьте вручную, "
+                "не задваивая, перед подтверждением.",
+                row["id"],
+            ),
+        )
+        db.commit()
         return False
     form = _payload_to_form(payload)
     errors, data = _process_trip_form(db, form)
     if errors:
-        base_summary = row["summary"].split(" ⚠ ", 1)[0]
         reason = "; ".join(errors)
         db.execute(
             "UPDATE import_candidates SET summary = ? WHERE id = ?",
