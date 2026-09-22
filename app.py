@@ -4901,6 +4901,30 @@ def delete_trip(trip_id):
     return redirect(url_for("trips_index"))
 
 
+def _delete_trip_linked_from_schedule(db, trip_id):
+    """Injected into modules.schedule as delete_linked_trip — a schedule
+    item's card being deleted after auto-close now cascades to the trip
+    it produced (payroll entries, trip_labor, trip_expenses), instead of
+    refusing the deletion. Reuses the exact same cascade as the manual
+    "Удалить" button on /trips (_delete_trip_data), so nothing about how a
+    trip and its owned rows get cleaned up is duplicated."""
+    if _delete_trip_data(db, trip_id):
+        db.commit()
+
+
+def _update_trip_datetime_from_schedule(db, trip_id, trip_date, trip_time):
+    """Injected into modules.schedule as update_linked_trip_time — keeps a
+    trip's date/time in sync when the schedule card that produced it is
+    dragged to a new slot. Only date/time: a move never changes the
+    trip's duration (see modules.schedule.services.move_item), so hours/
+    pay in entries stay correct without recomputation."""
+    db.execute(
+        "UPDATE trips SET trip_date = ?, trip_time = ? WHERE id = ?",
+        (trip_date, trip_time, trip_id),
+    )
+    db.commit()
+
+
 @app.route("/trips/expense/add", methods=["POST"])
 @admin_login_required
 def add_trip_expense():
@@ -5274,6 +5298,12 @@ app.register_blueprint(
         get_role_rate=lambda db, role: payroll_rates_repository.get_excursion_role_rate(db, role),
         apply_minimum_shift=lambda db, start_date, end_date: (
             _apply_schedule_minimum_shift(db, start_date, end_date)
+        ),
+        delete_linked_trip=lambda db, trip_id: (
+            _delete_trip_linked_from_schedule(db, trip_id)
+        ),
+        update_linked_trip_time=lambda db, trip_id, trip_date, trip_time: (
+            _update_trip_datetime_from_schedule(db, trip_id, trip_date, trip_time)
         ),
     )
 )

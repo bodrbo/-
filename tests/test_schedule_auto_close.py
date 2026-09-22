@@ -240,6 +240,181 @@ class ScheduleAutoCloseTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("финансовым учётом", message)
 
+    def test_delete_item_cascades_to_linked_trip_when_injected(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = self.make_item(
+                db, starts_at="2026-09-20 09:00", ends_at="2026-09-20 10:00",
+            )
+            schedule_services.auto_close_schedule_items(
+                db, self.create_trip, self.get_role_rate, now=self.now,
+            )
+            item = schedule_repository.get_item(db, item_id)
+            trip_id = item["accounting_trip_id"]
+            entry_id = db.execute(
+                "SELECT entry_id FROM trip_labor WHERE trip_id = ?", (trip_id,)
+            ).fetchone()["entry_id"]
+
+            ok, message = schedule_services.delete_item(
+                db, item_id,
+                delete_linked_trip=application_module._delete_trip_linked_from_schedule,
+            )
+
+            item_after = schedule_repository.get_item(db, item_id, include_deleted=True)
+            trip_gone = db.execute(
+                "SELECT 1 FROM trips WHERE id = ?", (trip_id,)
+            ).fetchone()
+            entry_gone = db.execute(
+                "SELECT 1 FROM entries WHERE id = ?", (entry_id,)
+            ).fetchone()
+            labor_gone = db.execute(
+                "SELECT 1 FROM trip_labor WHERE trip_id = ?", (trip_id,)
+            ).fetchone()
+
+        self.assertTrue(ok, message)
+        self.assertIn("связанными записями", message)
+        self.assertIsNotNone(item_after["deleted_at"])
+        self.assertIsNone(trip_gone)
+        self.assertIsNone(entry_gone)
+        self.assertIsNone(labor_gone)
+
+    def test_delete_item_without_linked_trip_needs_no_callback(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = self.make_item(
+                db, starts_at="2026-09-21 09:00", ends_at="2026-09-21 10:00",
+            )
+            ok, message = schedule_services.delete_item(
+                db, item_id,
+                delete_linked_trip=application_module._delete_trip_linked_from_schedule,
+            )
+        self.assertTrue(ok, message)
+        self.assertEqual(message, "Рейс удалён из расписания.")
+
+    def test_move_item_syncs_linked_trip_time(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = self.make_item(
+                db, starts_at="2026-09-20 09:00", ends_at="2026-09-20 10:00",
+            )
+            schedule_services.auto_close_schedule_items(
+                db, self.create_trip, self.get_role_rate, now=self.now,
+            )
+            item = schedule_repository.get_item(db, item_id)
+            trip_id = item["accounting_trip_id"]
+            # move_item requires the target employee to already be on that
+            # day's crew roster.
+            db.execute(
+                "INSERT OR IGNORE INTO schedule_day_crew "
+                "(work_date, employee_id, created_at) VALUES (?, ?, '2026-08-01 09:00')",
+                ("2026-09-20", self.employee_id),
+            )
+            db.commit()
+
+            ok, message, result = schedule_services.move_item(
+                db, item_id, "11:30", self.employee_id, self.employee_id,
+                update_linked_trip_time=application_module._update_trip_datetime_from_schedule,
+            )
+            trip = db.execute(
+                "SELECT trip_date, trip_time FROM trips WHERE id = ?", (trip_id,)
+            ).fetchone()
+
+        self.assertTrue(ok, message)
+        self.assertEqual(result["starts_at"], "2026-09-20 11:30")
+        self.assertEqual(trip["trip_date"], "2026-09-20")
+        self.assertEqual(trip["trip_time"], "11:30")
+
+    def test_move_item_without_linked_trip_needs_no_callback(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = self.make_item(
+                db, starts_at="2026-09-21 09:00", ends_at="2026-09-21 10:00",
+            )
+            db.execute(
+                "INSERT OR IGNORE INTO schedule_day_crew "
+                "(work_date, employee_id, created_at) VALUES (?, ?, '2026-08-01 09:00')",
+                ("2026-09-21", self.employee_id),
+            )
+            db.commit()
+            ok, message, result = schedule_services.move_item(
+                db, item_id, "12:00", self.employee_id, self.employee_id,
+                update_linked_trip_time=application_module._update_trip_datetime_from_schedule,
+            )
+        self.assertTrue(ok, message)
+        self.assertEqual(result["starts_at"], "2026-09-21 12:00")
+
+    def test_delete_route_cascades_to_linked_trip(self):
+        # End-to-end through the actual HTTP route, not just the service
+        # function directly - proves the delete_linked_trip DI wiring in
+        # app.py's create_schedule_blueprint(...) call is actually correct.
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = self.make_item(
+                db, starts_at="2026-09-20 09:00", ends_at="2026-09-20 10:00",
+            )
+            schedule_services.auto_close_schedule_items(
+                db, self.create_trip, self.get_role_rate, now=self.now,
+            )
+            trip_id = schedule_repository.get_item(db, item_id)["accounting_trip_id"]
+
+        client = application_module.app.test_client()
+        with client.session_transaction() as session:
+            session["admin_id"] = 1
+            session["admin_name"] = "Администратор"
+        resp = client.post(
+            f"/schedule/items/{item_id}/delete",
+            data={"return_date": "2026-09-20", "return_employee": "all"},
+        )
+        self.assertEqual(resp.status_code, 302)
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            trip_gone = db.execute(
+                "SELECT 1 FROM trips WHERE id = ?", (trip_id,)
+            ).fetchone()
+            item_after = schedule_repository.get_item(db, item_id, include_deleted=True)
+        self.assertIsNone(trip_gone)
+        self.assertIsNotNone(item_after["deleted_at"])
+
+    def test_move_route_syncs_linked_trip_time(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = self.make_item(
+                db, starts_at="2026-09-20 09:00", ends_at="2026-09-20 10:00",
+            )
+            schedule_services.auto_close_schedule_items(
+                db, self.create_trip, self.get_role_rate, now=self.now,
+            )
+            trip_id = schedule_repository.get_item(db, item_id)["accounting_trip_id"]
+            db.execute(
+                "INSERT OR IGNORE INTO schedule_day_crew "
+                "(work_date, employee_id, created_at) VALUES (?, ?, '2026-08-01 09:00')",
+                ("2026-09-20", self.employee_id),
+            )
+            db.commit()
+
+        client = application_module.app.test_client()
+        with client.session_transaction() as session:
+            session["admin_id"] = 1
+            session["admin_name"] = "Администратор"
+        resp = client.post(
+            f"/schedule/items/{item_id}/move",
+            json={
+                "start_time": "14:00",
+                "source_employee_id": self.employee_id,
+                "target_employee_id": self.employee_id,
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json()["ok"])
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            trip = db.execute(
+                "SELECT trip_time FROM trips WHERE id = ?", (trip_id,)
+            ).fetchone()
+        self.assertEqual(trip["trip_time"], "14:00")
+
     def test_apply_minimum_shift_invoked_for_closed_dates(self):
         calls = []
 

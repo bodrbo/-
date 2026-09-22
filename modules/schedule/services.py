@@ -509,8 +509,15 @@ def _default_role_for_employee(employee):
     return "guide_captain"
 
 
-def move_item(db, item_id, start_time, source_employee_id, target_employee_id):
-    """Move a trip on its current day and replace only the dragged assignment."""
+def move_item(
+    db, item_id, start_time, source_employee_id, target_employee_id,
+    update_linked_trip_time=None,
+):
+    """Move a trip on its current day and replace only the dragged
+    assignment. update_linked_trip_time(db, trip_id, trip_date, trip_time),
+    injected from app.py, keeps the trip this item was auto-closed into
+    (if any) in sync — only date/time, since a move never changes the
+    item's duration, so hours/pay in entries need no recomputation."""
     item = repository.get_item(db, item_id)
     if item is None:
         return False, "Рейс не найден.", None
@@ -602,6 +609,11 @@ def move_item(db, item_id, start_time, source_employee_id, target_employee_id):
     )
     if not moved:
         return False, "Рейс изменился во время переноса. Обновите страницу.", None
+    if item["accounting_trip_id"] is not None and update_linked_trip_time is not None:
+        update_linked_trip_time(
+            db, item["accounting_trip_id"], new_start.strftime("%Y-%m-%d"),
+            new_start.strftime("%H:%M"),
+        )
     return True, "Рейс перенесён.", {
         "starts_at": starts_value,
         "ends_at": ends_value,
@@ -616,16 +628,30 @@ def move_item(db, item_id, start_time, source_employee_id, target_employee_id):
     }
 
 
-def delete_item(db, item_id):
+def delete_item(db, item_id, delete_linked_trip=None):
+    """delete_linked_trip(db, trip_id), injected from app.py, cascades the
+    deletion to the trip this item was auto-closed into (payroll entries,
+    trip_labor, trip_expenses — see app.py::_delete_trip_data) instead of
+    refusing to delete an already-closed item outright."""
     item = repository.get_item(db, item_id)
     if item is None:
         return False, "Рейс не найден."
-    if item["accounting_trip_id"] is not None:
-        return False, (
-            "Рейс уже связан с финансовым учётом. Сначала отвяжите его в разделе рейсов."
-        )
+    had_linked_trip = item["accounting_trip_id"] is not None
+    if had_linked_trip:
+        if delete_linked_trip is None:
+            return False, (
+                "Рейс уже связан с финансовым учётом. Сначала отвяжите его в разделе рейсов."
+            )
+        delete_linked_trip(db, item["accounting_trip_id"])
     deleted = repository.soft_delete_item(db, item_id, current_timestamp())
-    return (True, "Рейс удалён из расписания.") if deleted else (False, "Рейс не найден.")
+    if not deleted:
+        return False, "Рейс не найден."
+    message = (
+        "Рейс удалён из расписания вместе со связанными записями "
+        "(зарплата, доля инвестора)." if had_linked_trip
+        else "Рейс удалён из расписания."
+    )
+    return True, message
 
 
 AUTO_CLOSE_GRACE_MINUTES = 20

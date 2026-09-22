@@ -37,6 +37,8 @@ def create_schedule_blueprint(
     create_trip_from_schedule=None,
     get_role_rate=None,
     apply_minimum_shift=None,
+    delete_linked_trip=None,
+    update_linked_trip_time=None,
 ):
     blueprint = Blueprint("schedule", __name__)
 
@@ -198,6 +200,7 @@ def create_schedule_blueprint(
             payload.get("start_time"),
             payload.get("source_employee_id"),
             payload.get("target_employee_id"),
+            update_linked_trip_time=update_linked_trip_time,
         )
         if not success:
             return jsonify({"ok": False, "message": message}), 400
@@ -215,7 +218,9 @@ def create_schedule_blueprint(
             if item is not None
             else services.parse_day(request.form.get("return_date")).isoformat()
         )
-        success, message = services.delete_item(get_db(), item_id)
+        success, message = services.delete_item(
+            get_db(), item_id, delete_linked_trip=delete_linked_trip,
+        )
         if success:
             notify_item_changes(before, None)
         set_notice(message, success)
