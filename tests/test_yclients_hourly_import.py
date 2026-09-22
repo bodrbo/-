@@ -1146,6 +1146,58 @@ class YclientsHourlyImportTests(unittest.TestCase):
             [("13:00", "Бодрый Первый"), ("14:30", "Бодрый Первый")],
         )
 
+    def test_import_trips_false_skips_trip_import_but_still_syncs_fuel(self):
+        # Cutover switch (see the "Переход с YClients на внутреннее
+        # расписание" work): once the schedule module's own auto-close job
+        # is the live source of trips, this hourly job keeps fetching
+        # records/colors (fuel still needs them) but must stop turning them
+        # into trips/import_candidates.
+        records = [self.record(1, "09", activity_id=901)]
+        application_module.yclients_get_records = lambda start, end: records
+        application_module.yclients_get_activity_colors = lambda ids: {901: "8bc34a"}
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            with mock.patch.object(
+                application_module.fuel_services,
+                "sync_yclients_records",
+                return_value={"activated": 0, "events": 0},
+            ) as fuel_sync:
+                stats = application_module._sync_hourly_yclients(
+                    db, dt.datetime(2026, 8, 23, 12, 0), import_trips=False,
+                )
+            trip_count = db.execute(
+                "SELECT COUNT(*) AS count FROM trips"
+            ).fetchone()["count"]
+            candidate_count = db.execute(
+                "SELECT COUNT(*) AS count FROM import_candidates"
+            ).fetchone()["count"]
+
+        self.assertEqual(trip_count, 0)
+        self.assertEqual(candidate_count, 0)
+        self.assertEqual(stats["trips"]["imported"], 0)
+        fuel_sync.assert_called_once()
+        self.assertEqual(fuel_sync.call_args.args[1], records)
+
+    def test_import_trips_default_true_keeps_importing(self):
+        # Default must stay True so every existing call site (and every
+        # other test in this file) keeps behaving exactly as before.
+        records = [self.record(1, "09", activity_id=901)]
+        application_module.yclients_get_records = lambda start, end: records
+        application_module.yclients_get_activity_colors = lambda ids: {901: "8bc34a"}
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            stats = application_module._sync_hourly_yclients(
+                db, dt.datetime(2026, 8, 23, 12, 0),
+            )
+            trip_count = db.execute(
+                "SELECT COUNT(*) AS count FROM trips"
+            ).fetchone()["count"]
+
+        self.assertEqual(trip_count, 1)
+        self.assertEqual(stats["trips"]["imported"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

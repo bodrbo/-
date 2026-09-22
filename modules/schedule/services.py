@@ -628,6 +628,127 @@ def delete_item(db, item_id):
     return (True, "Рейс удалён из расписания.") if deleted else (False, "Рейс не найден.")
 
 
+def set_service_rate(db, raw_service_id, role, raw_rate):
+    """Add/update one (service, role) -> ₽/hour rate in
+    schedule_service_rates — the admin-editable replacement for app.py's
+    hardcoded WORK_TYPES, and the only way to fill in the deliberately
+    unseeded `guide` role (see DEFAULT_SERVICE_RATES)."""
+    try:
+        service_id = int(raw_service_id)
+    except (TypeError, ValueError):
+        return False, "Некорректная услуга."
+    service = service_repository.get_service(db, service_id)
+    if service is None:
+        return False, "Услуга не найдена."
+    if role not in CREW_ROLES:
+        return False, "Некорректная роль."
+    raw_rate = str(raw_rate or "").strip().replace(",", ".")
+    try:
+        rate = float(raw_rate)
+    except ValueError:
+        return False, "Ставка должна быть числом."
+    if rate < 0:
+        return False, "Ставка не может быть отрицательной."
+    repository.upsert_service_rate(db, service_id, role, rate, current_timestamp())
+    return True, f"Ставка «{service['name']}» ({CREW_ROLES[role]}) обновлена."
+
+
+AUTO_CLOSE_GRACE_MINUTES = 20
+
+
+def auto_close_schedule_items(db, create_trip, apply_minimum_shift=None, now=None):
+    """Turn every schedule item whose trip is over into a real trips row —
+    the internal-schedule replacement for the YCLIENTS import pipeline.
+    Called on a timer (see routes.cron_close_schedule_items), no admin
+    confirmation step.
+
+    `create_trip(db, payload, needs_review=False)` is injected from app.py
+    (wraps _payload_to_form/_process_trip_form/_insert_trip, the exact path
+    the manual "Добавить рейс" form and the YCLIENTS import already share)
+    — returns (errors, trip_id). `apply_minimum_shift(db, start_date,
+    end_date)`, also injected, tops up any crew member's day to the
+    guaranteed minimum shift rate once the items in that range are closed
+    (see app.py::_schedule_payroll_days, which replaces the YCLIENTS
+    staff-schedule call this used to depend on).
+
+    Idempotent: an item is only ever picked up once
+    (accounting_trip_id IS NULL), and gets accounting_trip_id set in the
+    same pass it's inserted, so a crashed/retried run never double-books
+    it. An item that fails validation (e.g. no crew assigned) is left
+    alone — it stays a candidate for the next run rather than being
+    silently dropped."""
+    now = now or dt.datetime.now()
+    cutoff = (now - dt.timedelta(minutes=AUTO_CLOSE_GRACE_MINUTES)).strftime("%Y-%m-%d %H:%M")
+    timestamp = current_timestamp()
+
+    stats = {"closed": 0, "needs_review": 0, "skipped": 0}
+    closed_dates = set()
+
+    for item in repository.list_items_ready_to_close(db, cutoff):
+        assignments = repository.list_assignments(db, item["id"])
+        if not assignments:
+            stats["skipped"] += 1
+            continue
+
+        starts = dt.datetime.strptime(item["starts_at"], "%Y-%m-%d %H:%M")
+        ends = dt.datetime.strptime(item["ends_at"], "%Y-%m-%d %H:%M")
+        hours = max((ends - starts).total_seconds() / 3600, 0)
+
+        needs_review = False
+        labor_items = []
+        for assignment in assignments:
+            role = assignment["role"]
+            rate = repository.get_service_rate(db, item["service_id"], role)
+            if rate is None and role == "guide":
+                # No standalone "guide" rate exists yet (see
+                # DEFAULT_SERVICE_RATES) — falling back to the captain rate
+                # for the same service keeps this crew member paid rather
+                # than silently zeroed, at the cost of possibly being
+                # wrong; needs_review makes that visible on /trips.
+                rate = repository.get_service_rate(db, item["service_id"], "captain")
+                needs_review = True
+            if rate is None:
+                rate = 0
+                needs_review = True
+            labor_items.append({
+                "employee": assignment["employee_name"],
+                "work_type": item["service_name"],
+                "quantity": round(hours, 2),
+                "rate": rate,
+            })
+
+        payload = {
+            "boat": item["boat"],
+            "trip_date": item["starts_at"][:10],
+            "trip_time": item["starts_at"][11:16],
+            "revenue": item["revenue"],
+            "sale_channel": (
+                "aggregator" if repository.item_has_sales_partner(db, item["id"]) else "direct"
+            ),
+            "commission_pct": 0,
+            "fuel_cost": 0,
+            "mooring_cost": 0,
+            "labor_items": labor_items,
+        }
+
+        errors, trip_id = create_trip(db, payload, needs_review=needs_review)
+        if errors:
+            stats["skipped"] += 1
+            continue
+
+        repository.set_accounting_trip_id(db, item["id"], trip_id, timestamp)
+        db.commit()
+        stats["closed"] += 1
+        if needs_review:
+            stats["needs_review"] += 1
+        closed_dates.add(item["starts_at"][:10])
+
+    if closed_dates and apply_minimum_shift:
+        apply_minimum_shift(db, min(closed_dates), max(closed_dates))
+
+    return stats
+
+
 def add_participant_addon(db, item_id, client_id, product_id, raw_quantity):
     if repository.get_item(db, item_id) is None:
         return False, "Рейс не найден.", None

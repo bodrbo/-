@@ -2130,6 +2130,11 @@ def init_db(db_path=None):
                     boat["commission_aggregator"],
                 ),
             )
+    trip_source_is_new = "source" not in trip_cols
+    if "needs_review" not in trip_cols:
+        conn.execute(
+            "ALTER TABLE trips ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0"
+        )
 
     conn.execute(
         """
@@ -2178,6 +2183,12 @@ def init_db(db_path=None):
         )
         """
     )
+    if trip_source_is_new:
+        conn.execute("ALTER TABLE trips ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+        conn.execute(
+            "UPDATE trips SET source = 'yclients' WHERE id IN "
+            "(SELECT trip_id FROM yclients_imports WHERE trip_id IS NOT NULL)"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS yclients_sync_state (
@@ -4405,7 +4416,7 @@ def _suggest_contract_number(db, today):
     return f"{prefix}-{count_today + 1}"
 
 
-def _trip_analytics_context(db, selected_month=None, selected_boat="all"):
+def _trip_analytics_context(db, selected_month=None, selected_boat="all", review_only=False):
     months, current_key = build_month_options(db)
     if not selected_month:
         selected_month = current_key
@@ -4418,6 +4429,8 @@ def _trip_analytics_context(db, selected_month=None, selected_boat="all"):
     if selected_boat != "all":
         query += " AND boat = ?"
         params.append(selected_boat)
+    if review_only:
+        query += " AND needs_review = 1"
     query += " ORDER BY trip_date DESC, id DESC"
     trip_rows = db.execute(query, params).fetchall()
 
@@ -4430,12 +4443,18 @@ def _trip_analytics_context(db, selected_month=None, selected_boat="all"):
 
     by_boat, by_investor, grand_my_share, grand_revenue = compute_trip_totals(trip_rows)
 
+    needs_review_count = db.execute(
+        "SELECT COUNT(*) AS c FROM trips WHERE needs_review = 1"
+    ).fetchone()["c"]
+
     return dict(
         trips=trips_list,
         months=months,
         selected_month=selected_month,
         boats=fleet_boats_for_db(db),
         selected_boat=selected_boat,
+        review_only=review_only,
+        needs_review_count=needs_review_count,
         by_boat=by_boat,
         by_investor=by_investor,
         grand_my_share=grand_my_share,
@@ -4443,8 +4462,8 @@ def _trip_analytics_context(db, selected_month=None, selected_boat="all"):
     )
 
 
-def _trips_list_context(db, selected_month=None, selected_boat="all"):
-    context = _trip_analytics_context(db, selected_month, selected_boat)
+def _trips_list_context(db, selected_month=None, selected_boat="all", review_only=False):
+    context = _trip_analytics_context(db, selected_month, selected_boat, review_only)
 
     today = dt.date.today()
     week_ago = today - dt.timedelta(days=7)
@@ -4649,7 +4668,8 @@ def trips_index():
     db = get_db()
     selected_month = request.args.get("month")
     selected_boat = request.args.get("boat", "all")
-    ctx = _trips_list_context(db, selected_month, selected_boat)
+    review_only = request.args.get("review") == "1"
+    ctx = _trips_list_context(db, selected_month, selected_boat, review_only)
     return render_template(
         "trips.html", **ctx, **_trips_common_kwargs(db), edit_trip=None,
         trip_expense_error=session.pop("trip_expense_error", None),
@@ -4812,7 +4832,8 @@ def edit_trip(trip_id):
         "UPDATE trips SET boat=?, trip_date=?, trip_time=?, work_type=?, entry_id=?, revenue=?, "
         "sale_channel=?, commission_pct=?, commission_is_manual=?, commission_amount=?, "
         "labor_cost=?, fuel_cost=?, "
-        "mooring_cost=?, extra_total=?, remainder=?, investor_payout=?, my_share=? WHERE id=?",
+        "mooring_cost=?, extra_total=?, remainder=?, investor_payout=?, my_share=?, "
+        "needs_review=0 WHERE id=?",
         (data["boat"], data["trip_date"], data["trip_time"], data["work_type"],
          entry_ids[0] if entry_ids else None, data["revenue"],
          data["sale_channel"], data["commission_pct"], commission_is_manual,
@@ -5236,6 +5257,14 @@ app.register_blueprint(
         phone_normalizer=lambda phone: _normalize_ru_phone(phone),
         weather_configured=lambda: weather_configured(),
         weather_sync=lambda db: _sync_weather_forecast(db),
+        # Deferred-name lambdas, same reason as tuning_schedule's below:
+        # these are defined later in this file.
+        create_trip_from_schedule=lambda db, payload, needs_review=False: (
+            _create_trip_from_schedule_payload(db, payload, needs_review=needs_review)
+        ),
+        apply_minimum_shift=lambda db, start_date, end_date: (
+            _apply_schedule_minimum_shift(db, start_date, end_date)
+        ),
     )
 )
 
@@ -12562,6 +12591,40 @@ def _yclients_payroll_schedule(db, start_date, end_date, today=None):
     }
 
 
+def _apply_schedule_minimum_shift(db, start_date, end_date):
+    """Replaces _yclients_payroll_schedule as the staffed-day source for
+    apply_minimum_shift_rate now that schedule_day_crew (the internal day
+    roster) is who's actually on shift, not YCLIENTS' staff-schedule
+    endpoint. Injected into modules.schedule as apply_minimum_shift, called
+    by the auto-close job after closing a batch of trips, for the date
+    range those trips span.
+
+    No records/blocked-days fallback (that was specific to raw YCLIENTS
+    records — "не ставить в рейсы" markers) and no partial-failure hedging
+    either: this is a local table read, always available, so every active
+    employee can be "checked" for the whole range rather than only whoever
+    YCLIENTS happened to answer for.
+    """
+    staffed_days = {
+        (row["name"], row["work_date"])
+        for row in db.execute(
+            "SELECT schedule_day_crew.work_date, employees.name "
+            "FROM schedule_day_crew JOIN employees "
+            "ON employees.id = schedule_day_crew.employee_id "
+            "WHERE schedule_day_crew.work_date BETWEEN ? AND ?",
+            (start_date, end_date),
+        ).fetchall()
+    }
+    return apply_minimum_shift_rate(
+        db,
+        records=[],
+        scheduled_staff_days=staffed_days,
+        checked_schedule_employees=_active_employee_names(db),
+        schedule_start_date=start_date,
+        schedule_end_date=end_date,
+    )
+
+
 def _is_number(value):
     if isinstance(value, (int, float)):
         return True
@@ -13656,9 +13719,15 @@ def _mark_yclients_refs_imported(db, refs, trip_id):
         )
 
 
-def _insert_trip(db, data, *, commission_is_manual=False):
+def _insert_trip(db, data, *, commission_is_manual=False, source="manual", needs_review=False):
     """Write a validated trip (as returned by _process_trip_form) plus its
-    labor entries and extra expenses. Returns the new trip id."""
+    labor entries and extra expenses. Returns the new trip id.
+
+    source/needs_review distinguish where a trip came from (manual form,
+    YCLIENTS import, or the internal-schedule auto-close job) and whether
+    that origin had to guess at a cost/rate it couldn't fill in for real —
+    see modules/schedule/services.py::auto_close_schedule_items, the only
+    caller that passes source="schedule_auto"."""
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     entry_ids = []
     for item in data["labor_items"]:
@@ -13674,14 +13743,15 @@ def _insert_trip(db, data, *, commission_is_manual=False):
         "INSERT INTO trips (boat, trip_date, trip_time, work_type, entry_id, revenue, sale_channel, "
         "commission_pct, commission_is_manual, commission_amount, labor_cost, fuel_cost, "
         "mooring_cost, extra_total, "
-        "remainder, investor_payout, my_share, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "remainder, investor_payout, my_share, source, needs_review, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (data["boat"], data["trip_date"], data["trip_time"], data["work_type"],
          entry_ids[0] if entry_ids else None,
          data["revenue"], data["sale_channel"], data["commission_pct"],
          int(bool(commission_is_manual)), data["commission_amount"],
          data["labor_cost"], data["fuel_cost"], data["mooring_cost"], data["extra_total"],
-         data["remainder"], data["investor_payout"], data["my_share"], now),
+         data["remainder"], data["investor_payout"], data["my_share"],
+         source, int(bool(needs_review)), now),
     )
     trip_id = cur2.lastrowid
     for eid in entry_ids:
@@ -13715,6 +13785,24 @@ def _payload_to_form(payload):
     return form
 
 
+def _create_trip_from_schedule_payload(db, payload, needs_review=False):
+    """Injected into modules.schedule as create_trip_from_schedule — turns
+    one auto-closed schedule item into a trips row via the same
+    _payload_to_form/_process_trip_form path the YCLIENTS import already
+    uses, so payroll/investor math stays identical no matter the source.
+    Returns (errors, trip_id) — errors is None on success. Deliberately does
+    NOT commit: the caller (auto_close_schedule_items) still has to point
+    the schedule item's accounting_trip_id at this trip, and committing
+    before that happens would let a crash in between produce a duplicate
+    trip on the next run."""
+    form = _payload_to_form(payload)
+    errors, data = _process_trip_form(db, form)
+    if errors:
+        return errors, None
+    trip_id = _insert_trip(db, data, source="schedule_auto", needs_review=needs_review)
+    return None, trip_id
+
+
 def _try_auto_import_candidate(db, row):
     """Attempt to turn one pending import candidate straight into a trip,
     with no human confirmation step. Returns True and removes the candidate
@@ -13741,7 +13829,7 @@ def _try_auto_import_candidate(db, row):
         )
         db.commit()
         return False
-    trip_id = _insert_trip(db, data)
+    trip_id = _insert_trip(db, data, source="yclients")
     _mark_yclients_refs_imported(db, [row["yclients_ref"], *payload.get("merged_refs", [])], trip_id)
     db.execute("DELETE FROM import_candidates WHERE id = ?", (row["id"],))
     db.commit()
@@ -13779,6 +13867,7 @@ def import_confirm(candidate_id):
         commission_is_manual=(
             abs(data["commission_pct"] - imported_commission) > 0.0001
         ),
+        source="yclients",
     )
     _mark_yclients_refs_imported(db, [row["yclients_ref"], *payload.get("merged_refs", [])], trip_id)
     db.execute("DELETE FROM import_candidates WHERE id = ?", (candidate_id,))
@@ -18268,8 +18357,16 @@ def _sync_fuel_from_yclients(db, now=None):
     return fuel_services.sync_yclients_records(db, records, activity_colors, now)
 
 
-def _sync_hourly_yclients(db, now=None):
-    """Synchronize completed trips/income and fuel with one YCLIENTS fetch."""
+def _sync_hourly_yclients(db, now=None, import_trips=True):
+    """Synchronize completed trips/income and fuel with one YCLIENTS fetch.
+
+    import_trips=False (used once the internal schedule's own auto-close
+    job, see modules/schedule/services.py::auto_close_schedule_items, is
+    the live source of trips/payroll) skips the trip-import and its
+    payroll-schedule lookup entirely, but keeps fetching records/colors and
+    still runs fuel sync from them — fuel tracking isn't part of this
+    cutover. /trips/import stays available for manual YCLIENTS reconciliation
+    regardless of this flag."""
     now = (now or dt.datetime.now()).replace(second=0, microsecond=0)
     start = min(_trip_sync_start_date(db, now), _fuel_sync_start_date(db, now))
     start_date = start.isoformat()
@@ -18286,39 +18383,47 @@ def _sync_hourly_yclients(db, now=None):
         "end_date": None,
     }
     schedule_error = None
-    try:
-        payroll_schedule = _yclients_payroll_schedule(
-            db, start_date, end_date, today=now.date()
-        )
-        if payroll_schedule.get("failed_employees"):
-            schedule_error = (
-                "график получен не для всех сотрудников: "
-                + ", ".join(payroll_schedule["failed_employees"])
+    if import_trips:
+        try:
+            payroll_schedule = _yclients_payroll_schedule(
+                db, start_date, end_date, today=now.date()
             )
-    except (requests.RequestException, RuntimeError, ValueError) as error:
-        # Keep income/fuel live even if the separate schedule endpoint is
-        # temporarily unavailable. Crucially, without an authoritative
-        # response we do not delete any existing minimum-rate top-ups.
-        schedule_error = str(error)
-        print(f"YCLIENTS payroll schedule sync failed: {error}", file=sys.stderr, flush=True)
+            if payroll_schedule.get("failed_employees"):
+                schedule_error = (
+                    "график получен не для всех сотрудников: "
+                    + ", ".join(payroll_schedule["failed_employees"])
+                )
+        except (requests.RequestException, RuntimeError, ValueError) as error:
+            # Keep income/fuel live even if the separate schedule endpoint is
+            # temporarily unavailable. Crucially, without an authoritative
+            # response we do not delete any existing minimum-rate top-ups.
+            schedule_error = str(error)
+            print(f"YCLIENTS payroll schedule sync failed: {error}", file=sys.stderr, flush=True)
 
-    completed_records = _yclients_completed_records(records, now)
-    trip_stats = _import_yclients_trip_records(
-        db,
-        completed_records,
-        activity_colors,
-        start_date,
-        end_date,
-        now=now,
-        prune_stale=False,
-        scheduled_staff_days=payroll_schedule["staffed_days"],
-        checked_schedule_employees=payroll_schedule["checked_employees"],
-        schedule_start_date=payroll_schedule["start_date"],
-        schedule_end_date=payroll_schedule["end_date"],
-        minimum_shift_records=records,
-        reconciliation_records=records,
-        reconcile_missing=True,
-    )
+    if import_trips:
+        completed_records = _yclients_completed_records(records, now)
+        trip_stats = _import_yclients_trip_records(
+            db,
+            completed_records,
+            activity_colors,
+            start_date,
+            end_date,
+            now=now,
+            prune_stale=False,
+            scheduled_staff_days=payroll_schedule["staffed_days"],
+            checked_schedule_employees=payroll_schedule["checked_employees"],
+            schedule_start_date=payroll_schedule["start_date"],
+            schedule_end_date=payroll_schedule["end_date"],
+            minimum_shift_records=records,
+            reconciliation_records=records,
+            reconcile_missing=True,
+        )
+    else:
+        trip_stats = {
+            "fetched": len(records), "candidates": 0, "cancelled": 0, "deleted": 0,
+            "added": 0, "merged": 0, "imported": 0, "payroll_updated": 0,
+            "pending": 0, "topups_changed": 0,
+        }
     fuel_stats = fuel_services.sync_yclients_records(
         db, records, activity_colors, now
     )

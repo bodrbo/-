@@ -34,6 +34,8 @@ def create_schedule_blueprint(
     phone_normalizer=lambda phone: phone,
     weather_configured=lambda: False,
     weather_sync=None,
+    create_trip_from_schedule=None,
+    apply_minimum_shift=None,
 ):
     blueprint = Blueprint("schedule", __name__)
 
@@ -460,6 +462,49 @@ def create_schedule_blueprint(
             f"{stats['updated']} updated, {stats['cancelled']} cancelled, "
             f"{stats['matched']} matched, {stats['pending']} pending, "
             f"{stats['invalid']} invalid",
+            200,
+        )
+
+    @blueprint.route("/schedule/rates")
+    @manage_required
+    def service_rates():
+        db = get_db()
+        return render_template(
+            "schedule/service_rates.html",
+            rates=repository.list_service_rates(db),
+            services=service_repository.list_services(db),
+            crew_roles=CREW_ROLES,
+            active_page="schedule",
+            notice=session.pop("schedule_rates_notice", None),
+        )
+
+    @blueprint.route("/schedule/rates", methods=["POST"])
+    @manage_required
+    def update_service_rate():
+        success, message = services.set_service_rate(
+            get_db(),
+            request.form.get("service_id"),
+            request.form.get("role", ""),
+            request.form.get("rate", ""),
+        )
+        session["schedule_rates_notice"] = {
+            "message": message,
+            "type": "success" if success else "error",
+        }
+        return redirect(url_for("schedule.service_rates"))
+
+    @blueprint.route("/internal/cron/close-schedule-items")
+    def cron_close_schedule_items():
+        if not cron_secret or request.args.get("token") != cron_secret:
+            return "forbidden", 403
+        if create_trip_from_schedule is None:
+            return "not configured", 503
+        stats = services.auto_close_schedule_items(
+            get_db(), create_trip_from_schedule, apply_minimum_shift=apply_minimum_shift,
+        )
+        return (
+            f"ok: {stats['closed']} closed, {stats['needs_review']} flagged, "
+            f"{stats['skipped']} skipped",
             200,
         )
 
