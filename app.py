@@ -236,6 +236,10 @@ app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 DB_PATH = os.environ.get("WORKHOURS_DB_PATH") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "workhours.db"
 )
+# Bump when an additive schema migration is introduced. Demo sessions keep
+# their own SQLite files, so unlike the shared database they need an explicit
+# signal to run init_db() again after a deploy.
+DEMO_TENANT_SCHEMA_REVISION = "2026-09-22-schedule-payments-capacity"
 
 
 def _bounded_env_int(name, default, minimum, maximum):
@@ -1635,6 +1639,18 @@ def get_db():
         db_path = DB_PATH
         if has_request_context():
             db_path = session.get("demo_tenant_db_path") or DB_PATH
+            if (
+                session.get("demo_tenant_id")
+                and session.get("demo_tenant_schema_revision")
+                != DEMO_TENANT_SCHEMA_REVISION
+            ):
+                # Existing tenant files predate some newer module schemas.
+                # Run only additive migrations and never seed the real
+                # company's bootstrap employees/admins into an isolated DB.
+                init_db(db_path, include_bootstrap_data=False)
+                session["demo_tenant_schema_revision"] = (
+                    DEMO_TENANT_SCHEMA_REVISION
+                )
         g.db = sqlite3.connect(db_path)
         g.db.row_factory = sqlite3.Row
         g.db.create_function(
@@ -1682,14 +1698,16 @@ def close_db(exception=None):
         shared_db.close()
 
 
-def init_db(db_path=None):
+def init_db(db_path=None, include_bootstrap_data=True):
     """Create the entries table if needed, and migrate older DBs that don't
     yet have the work_date column.
 
     db_path lets a caller build the exact same schema at a different file —
     used to provision a fresh, isolated SQLite database for a new demo
     tenant (see modules/demo_tenants). Left out, this builds/migrates the
-    app's own DB_PATH, same as ever."""
+    app's own DB_PATH, same as ever. include_bootstrap_data=False is the
+    upgrade path for an existing demo tenant: schema/backfills run, while
+    real company employee and account constants are never inserted."""
     conn = sqlite3.connect(db_path or DB_PATH)
     conn.execute(
         """
@@ -1746,7 +1764,7 @@ def init_db(db_path=None):
     # Backfill a row for every employee already known to the system — the
     # configured EMPLOYEES list plus any name used in entries but not in it
     # (mirrors the "known" merge in _payroll_context so nobody is missed).
-    known_employee_names = list(EMPLOYEES)
+    known_employee_names = list(EMPLOYEES) if include_bootstrap_data else []
     for row in conn.execute("SELECT DISTINCT employee FROM entries").fetchall():
         if row[0] not in known_employee_names:
             known_employee_names.append(row[0])
@@ -1764,7 +1782,7 @@ def init_db(db_path=None):
     # Positions become runtime data once the table exists: the administrator
     # interface is the source of truth, so a restart must never undo its
     # changes. Bootstrap defaults are only inserted for a brand-new database.
-    if employee_positions_is_new:
+    if employee_positions_is_new and include_bootstrap_data:
         for name, positions in INITIAL_EMPLOYEE_POSITIONS.items():
             employee_row = conn.execute(
                 "SELECT id FROM employees WHERE name = ?", (name,)
@@ -3347,45 +3365,48 @@ def init_db(db_path=None):
     # used explicitly because some hosts' Python builds lack OpenSSL scrypt
     # support in hashlib, which makes scrypt-hashed logins fail at runtime.
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    for admin_name, username, password_hash in ADMIN_ACCOUNTS:
-        conn.execute(
-            "INSERT OR IGNORE INTO admin_accounts (admin_name, username, password_hash, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (admin_name, username, password_hash, now),
-        )
-    for investor_name, username, password_hash in INVESTOR_ACCOUNTS:
-        conn.execute(
-            "INSERT OR IGNORE INTO investors (investor_name, username, password_hash, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (investor_name, username, password_hash, now),
-        )
-    for employee_name, username, password_hash in TEAM_ACCOUNTS:
-        employee_row = conn.execute(
-            "SELECT id FROM employees WHERE name = ? AND deleted_at IS NULL",
-            (employee_name,),
-        ).fetchone()
-        if employee_row is None:
-            continue
-        employee_id = employee_row[0]
-        # These constants only bootstrap missing accounts. Runtime password
-        # resets made in «Сотрудники» are the source of truth and must survive
-        # a restart, so an existing hash is deliberately never overwritten.
-        existing = conn.execute(
-            "SELECT id FROM team_accounts WHERE username = ?", (username,)
-        ).fetchone()
-        if existing is None:
+    if include_bootstrap_data:
+        for admin_name, username, password_hash in ADMIN_ACCOUNTS:
             conn.execute(
-                "INSERT INTO team_accounts "
-                "(employee_id, employee_name, username, password_hash, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (employee_id, employee_name, username, password_hash, now),
+                "INSERT OR IGNORE INTO admin_accounts "
+                "(admin_name, username, password_hash, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (admin_name, username, password_hash, now),
             )
-        else:
+        for investor_name, username, password_hash in INVESTOR_ACCOUNTS:
             conn.execute(
-                "UPDATE team_accounts SET employee_id = ?, employee_name = ? "
-                "WHERE username = ?",
-                (employee_id, employee_name, username),
+                "INSERT OR IGNORE INTO investors "
+                "(investor_name, username, password_hash, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (investor_name, username, password_hash, now),
             )
+        for employee_name, username, password_hash in TEAM_ACCOUNTS:
+            employee_row = conn.execute(
+                "SELECT id FROM employees WHERE name = ? AND deleted_at IS NULL",
+                (employee_name,),
+            ).fetchone()
+            if employee_row is None:
+                continue
+            employee_id = employee_row[0]
+            # These constants only bootstrap missing accounts. Runtime password
+            # resets made in «Сотрудники» are the source of truth and must survive
+            # a restart, so an existing hash is deliberately never overwritten.
+            existing = conn.execute(
+                "SELECT id FROM team_accounts WHERE username = ?", (username,)
+            ).fetchone()
+            if existing is None:
+                conn.execute(
+                    "INSERT INTO team_accounts "
+                    "(employee_id, employee_name, username, password_hash, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (employee_id, employee_name, username, password_hash, now),
+                )
+            else:
+                conn.execute(
+                    "UPDATE team_accounts SET employee_id = ?, employee_name = ? "
+                    "WHERE username = ?",
+                    (employee_id, employee_name, username),
+                )
 
     conn.execute(
         """
