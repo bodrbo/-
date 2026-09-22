@@ -130,6 +130,7 @@ from modules.field_diagnostics import (
     init_schema as init_field_diagnostics_schema,
 )
 from modules.schedule import (
+    create_public_booking_blueprint,
     create_schedule_blueprint,
     init_schema as init_schedule_schema,
 )
@@ -944,6 +945,11 @@ TILDA_WEBHOOK_SECRET = os.environ.get("TILDA_WEBHOOK_SECRET")
 # deliberately environment-only; without it the JSON API stays unavailable.
 # ---------------------------------------------------------------------
 TUNING_SITE_WEBHOOK_SECRET = os.environ.get("TUNING_SITE_WEBHOOK_SECRET")
+
+# Server-to-server booking API for bodrbo-fort.ru. The public site keeps the
+# same value in a PHP config file outside public_html and never exposes it to
+# the browser.
+EXCURSION_SITE_BOOKING_SECRET = os.environ.get("EXCURSION_SITE_BOOKING_SECRET")
 
 # ---------------------------------------------------------------------
 # МодульКасса — автоматическая фискализация чека при записи оплаты по
@@ -5236,6 +5242,13 @@ app.register_blueprint(
         phone_normalizer=lambda phone: _normalize_ru_phone(phone),
         weather_configured=lambda: weather_configured(),
         weather_sync=lambda db: _sync_weather_forecast(db),
+    )
+)
+
+app.register_blueprint(
+    create_public_booking_blueprint(
+        get_db=get_db,
+        secret_provider=lambda: EXCURSION_SITE_BOOKING_SECRET,
     )
 )
 

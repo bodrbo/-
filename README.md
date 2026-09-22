@@ -189,6 +189,19 @@ python3 scripts/import_yclients_clients.py
 проект и заметку с исходными данными. Реальный секрет хранится только в
 серверном `.env`.
 
+Сайт морских экскурсий `bodrbo-fort.ru` работает с внутренним расписанием
+через два server-to-server endpoint: `GET
+/api/integrations/excursion-booking/availability` возвращает только будущие
+групповые рейсы со свободными местами, а `POST
+/api/integrations/excursion-booking/bookings` создаёт участника рейса и клиента.
+Оба запроса авторизуются заголовком `Authorization: Bearer
+<EXCURSION_SITE_BOOKING_SECRET>`. Бронирование требует `request_id`,
+`schedule_item_id`, `name`, `phone`, `guests_count` и подтверждённое `consent`;
+повторный `request_id` не
+создаёт дубль. Остаток мест повторно проверяется в транзакции непосредственно
+перед записью, поэтому два одновременных запроса не могут продать одно место.
+Реальный секрет хранится только в серверных конфигурациях обоих сайтов.
+
 ### Оплаты и чеки
 
 - ручная регистрация платежей по заказу;
@@ -525,6 +538,7 @@ python app.py
 | --- | --- |
 | `TILDA_WEBHOOK_SECRET` | Проверка webhook от Tilda |
 | `TUNING_SITE_WEBHOOK_SECRET` | Server-to-server заявки с `tuning.bodrbo.ru` |
+| `EXCURSION_SITE_BOOKING_SECRET` | Доступ `bodrbo-fort.ru` к свободным рейсам и созданию бронирований |
 | `TELEGRAM_BOT_TOKEN` | Токен Telegram-бота |
 | `TELEGRAM_BOT_USERNAME` | Необязательное имя бота без `@` для ссылки из раздела сотрудников |
 | `TELEGRAM_CHAT_ID` | Основной административный чат |
@@ -645,6 +659,7 @@ YCLIENTS_COMPANY_ID=...
 TRIPSTER_API_TOKEN=...
 CRON_SECRET=...
 TUNING_SITE_WEBHOOK_SECRET=...
+EXCURSION_SITE_BOOKING_SECRET=...
 OPENAI_API_KEY=...
 OPENAI_AGENT_MODEL=gpt-5.6-luna
 YOOKASSA_SHOP_ID=...
@@ -745,6 +760,13 @@ YCLIENTS передаёт признаки оплаты (`paid_full`, `prepaid`)
 расписания имеют отдельную связь с финансовым рейсом; её можно будет
 включить после добавления процесса закрытия смены, не смешивая будущие
 бронирования с фактически проведёнными рейсами.
+
+Публичная запись с сайта не открывает само расписание в интернет. Браузер
+обращается к PHP-прокси на `bodrbo-fort.ru`, а тот авторизованным серверным
+запросом получает свободные места и создаёт бронирование. В выдачу не попадают
+клиенты, сотрудники, внутренние комментарии и отменённые события. Цена и
+остаток мест берутся из расписания в момент бронирования; источник участника
+сохраняется как `fort_site`.
 
 ### Импорт заказов Tripster
 

@@ -669,6 +669,46 @@ def add_participant(db, item_id, client_id, name, phone, guests_count, price, ti
     return participant_id
 
 
+def add_external_participant(
+    db, item_id, client_id, name, phone, guests_count, price, timestamp,
+    source, source_ref,
+):
+    """Insert one idempotent participant from a trusted external API.
+
+    The caller owns the transaction so the last-seat check and this insert
+    stay atomic.  This mirrors ``add_participant`` without committing and
+    records a stable source reference for safe retries.
+    """
+    resolved_client_id = client_id
+    if resolved_client_id is None:
+        cursor = db.execute(
+            "INSERT INTO clients (client_name, boat_model, phone, token, created_at) "
+            "VALUES (?, '', ?, ?, ?)",
+            (name, phone, secrets.token_urlsafe(16), timestamp),
+        )
+        resolved_client_id = cursor.lastrowid
+    ensure_segment(db, resolved_client_id, EXCURSION_SEGMENT, timestamp)
+    cursor = db.execute(
+        "INSERT INTO schedule_participants "
+        "(schedule_item_id, client_id, client_name, client_phone, guests_count, price, "
+        "prepayment, payment_due, created_at, source, source_ref, sales_partner_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL)",
+        (
+            item_id, resolved_client_id, name, phone, guests_count, price, price,
+            timestamp, source, source_ref,
+        ),
+    )
+    item = db.execute(
+        "SELECT service_id FROM schedule_items WHERE id = ?", (item_id,)
+    ).fetchone()
+    if item is not None:
+        _auto_add_addons_for_participant(
+            db, item_id, item["service_id"], resolved_client_id, guests_count, timestamp
+        )
+    _recompute_item_totals(db, item_id, timestamp)
+    return cursor.lastrowid
+
+
 def get_participant(db, participant_id, item_id):
     return db.execute(
         "SELECT * FROM schedule_participants WHERE id = ? AND schedule_item_id = ?",
