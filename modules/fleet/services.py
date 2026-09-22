@@ -23,6 +23,7 @@ VESSEL_NAME_MAX_LENGTH = 120
 VESSEL_SPECIFICATIONS_MAX_LENGTH = 5000
 VESSEL_DIMENSION_MAX_METERS = 1000
 VESSEL_TANK_MAX_LITERS = 10000
+VESSEL_CAPACITY_MAX_PEOPLE = 100
 DEFAULT_VESSEL_COLOR = "#607d8b"
 
 
@@ -86,6 +87,21 @@ def _parse_positive_number(raw_value, label, errors, maximum, required=False):
     return value
 
 
+def _parse_positive_int(raw_value, label, errors, maximum):
+    raw_value = str(raw_value or "").strip()
+    if not raw_value:
+        return None
+    try:
+        value = int(raw_value)
+    except ValueError:
+        errors.append(f"Поле «{label}» должно быть целым числом.")
+        return None
+    if value <= 0 or value > maximum:
+        errors.append(f"Поле «{label}» должно быть больше нуля и не больше {maximum}.")
+        return None
+    return value
+
+
 def parse_vessel_form(form):
     errors = []
     name = " ".join(str(form.get("name") or "").strip().split())
@@ -97,6 +113,9 @@ def parse_vessel_form(form):
     tank_capacity = _parse_positive_number(
         form.get("tank_capacity_liters"), "Объём бака", errors,
         VESSEL_TANK_MAX_LITERS, required=True,
+    )
+    capacity = _parse_positive_int(
+        form.get("capacity"), "Пассажировместимость", errors, VESSEL_CAPACITY_MAX_PEOPLE,
     )
     length_m = _parse_positive_number(
         form.get("length_m"), "Длина", errors, VESSEL_DIMENSION_MAX_METERS,
@@ -118,13 +137,14 @@ def parse_vessel_form(form):
         "name": name,
         "tank_capacity_liters": tank_capacity or 0,
         "schedule_color": schedule_color,
+        "capacity": capacity,
         "length_m": length_m,
         "width_m": width_m,
         "specifications": specifications,
     }, errors
 
 
-def create_vessel(db, form, refresh_runtime=False):
+def create_vessel(db, form, refresh_runtime=False, recompute_schedule_capacity=None):
     data, errors = parse_vessel_form(form)
     existing = repository.get_vessel_by_name(db, data["name"]) if data["name"] else None
     if existing is not None and not existing["deleted_at"]:
@@ -137,6 +157,8 @@ def create_vessel(db, form, refresh_runtime=False):
         return False, "Катер с таким названием уже есть во флоте.", None
     if refresh_runtime:
         refresh_runtime_fleet(db)
+    if recompute_schedule_capacity is not None:
+        recompute_schedule_capacity(db, data["name"], data["capacity"])
     boats = boats_for_db(db)
     index = next(
         (position for position, boat in enumerate(boats) if boat["name"] == data["name"]),
@@ -145,7 +167,7 @@ def create_vessel(db, form, refresh_runtime=False):
     return True, f"Катер «{data['name']}» добавлен во флот.", index
 
 
-def update_vessel(db, vessel_id, form, refresh_runtime=False):
+def update_vessel(db, vessel_id, form, refresh_runtime=False, recompute_schedule_capacity=None):
     vessel = repository.get_vessel(db, vessel_id)
     if vessel is None or vessel["deleted_at"]:
         return False, "Катер не найден.", None
@@ -161,6 +183,8 @@ def update_vessel(db, vessel_id, form, refresh_runtime=False):
         return False, "Не удалось переименовать катер: такое название уже занято.", None
     if refresh_runtime:
         refresh_runtime_fleet(db)
+    if recompute_schedule_capacity is not None:
+        recompute_schedule_capacity(db, data["name"], data["capacity"])
     boats = boats_for_db(db)
     index = next(
         (position for position, boat in enumerate(boats) if boat["name"] == data["name"]),

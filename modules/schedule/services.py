@@ -8,6 +8,7 @@ import sqlite3
 from modules.clients.constants import CLIENT_CONTACT_METHODS
 from modules.clients import yclients as yclients_clients
 from modules.excursion_services import repository as service_repository
+from modules.fleet import repository as fleet_repository
 
 from . import repository
 from .constants import (
@@ -36,6 +37,41 @@ MANUAL_PAYMENT_METHODS = {
 
 def current_timestamp():
     return dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def event_capacity_for_crew(vessel_capacity, crew_count, participants_count=0):
+    """The hard rule requested in place of a free-typed «Вместимость»: an
+    event card's guest seats are the boat's own passenger capacity (set
+    once in Флот) minus however many crew this specific card actually has
+    — e.g. 12 seats total - 2 crew (гид + капитан) = 10 guest seats.
+    Never below the guests already booked (mirrors tripster_services' own
+    bump-up rule) or below 1. Returns None when the boat has no configured
+    capacity yet, so callers can fall back to the old manual entry."""
+    if not vessel_capacity:
+        return None
+    return max(int(vessel_capacity) - int(crew_count or 0), int(participants_count or 0), 1)
+
+
+def recompute_event_capacities_for_boat(db, boat, vessel_capacity, timestamp=None):
+    """Re-derive every live event card's seat count on `boat` from Fleet's
+    own passenger capacity, whenever that capacity is saved — so existing
+    cards (made by hand, by the YCLIENTS backfill, by Tripster) stay in
+    sync without a separate migration. A boat with no capacity configured
+    is left untouched; its cards keep using the manual entry until Флот
+    is filled in for it."""
+    if not vessel_capacity:
+        return 0
+    timestamp = timestamp or current_timestamp()
+    updated = 0
+    for row in repository.list_active_event_items_for_boat(db, boat):
+        new_capacity = event_capacity_for_crew(
+            vessel_capacity, row["crew_count"], row["participants_count"]
+        )
+        if new_capacity != row["capacity"]:
+            repository.update_item_capacity(db, row["id"], new_capacity, timestamp)
+            updated += 1
+    db.commit()
+    return updated
 
 
 def parse_day(raw_day, fallback=None):
@@ -298,7 +334,8 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
     if kind not in ITEM_KINDS:
         errors.append("Выберите тип рейса.")
 
-    boat_names = {boat["name"] for boat in boats}
+    boats_by_name = {boat_item["name"]: boat_item for boat_item in boats}
+    boat_names = set(boats_by_name)
     boat = _normalise_text(form.get("boat"), 120)
     if boat not in boat_names:
         errors.append("Выберите катер.")
@@ -340,83 +377,6 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
     note = str(form.get("note") or "").strip()[:2000]
     legacy_revenue = _parse_money(form.get("revenue"), errors)
 
-    capacity = None
-    participants = []
-    participants_count = 0
-    if kind == "booking":
-        customer_name, customer_phone, participant = _validate_booking_client(
-            db, form, errors
-        )
-        if participant is not None:
-            raw_customer_price = form.get("customer_price")
-            participant["price"] = (
-                legacy_revenue
-                if raw_customer_price is None
-                else _parse_money(
-                    raw_customer_price, errors, "Стоимость для клиента"
-                )
-            )
-            source_ref = _normalise_text(form.get("customer_source_ref"), 500)
-            if source_ref.startswith("orders:"):
-                participant["source"] = "tripster"
-                participant["source_ref"] = source_ref
-                participant["prepayment"] = _parse_money(
-                    form.get("customer_prepayment"), errors,
-                    "Предоплата Tripster",
-                )
-                participant["payment_due"] = _parse_money(
-                    form.get("customer_payment_due"), errors,
-                    "Сумма к доплате",
-                )
-            else:
-                participant["source"] = "internal"
-                participant["source_ref"] = None
-                participant["prepayment"] = 0.0
-                participant["payment_due"] = participant["price"]
-            participants = [participant]
-    elif kind == "event":
-        try:
-            capacity = int(str(form.get("capacity") or "10").strip())
-        except ValueError:
-            capacity = 0
-        if not 1 <= capacity <= 100:
-            errors.append("Вместимость события должна быть от 1 до 100 человек.")
-        participants = _validate_participants(db, form, capacity, errors)
-        if participants and all(
-            participant["price"] is None for participant in participants
-        ):
-            total_guests = sum(
-                participant["guests_count"] for participant in participants
-            )
-            allocated = 0.0
-            for index, participant in enumerate(participants):
-                if index == len(participants) - 1:
-                    participant["price"] = round(legacy_revenue - allocated, 2)
-                else:
-                    share = round(
-                        legacy_revenue * participant["guests_count"] / total_guests,
-                        2,
-                    )
-                    participant["price"] = share
-                    allocated += share
-        else:
-            for participant in participants:
-                if participant["price"] is None:
-                    participant["price"] = 0.0
-        for participant in participants:
-            if participant["source"] != "tripster":
-                participant["prepayment"] = 0.0
-                participant["payment_due"] = participant["price"]
-        participants_count = sum(
-            participant["guests_count"] for participant in participants
-        )
-        customer_name = ""
-        customer_phone = ""
-
-    revenue = round(sum(
-        participant["price"] for participant in participants
-    ), 2)
-
     raw_employee_ids = form.getlist("employee_id[]")
     raw_roles = form.getlist("role[]")
     employee_ids = []
@@ -454,6 +414,86 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
         if employee_id in eligible
     ]
 
+    capacity = None
+    participants = []
+    participants_count = 0
+    if kind == "booking":
+        customer_name, customer_phone, participant = _validate_booking_client(
+            db, form, errors
+        )
+        if participant is not None:
+            raw_customer_price = form.get("customer_price")
+            participant["price"] = (
+                legacy_revenue
+                if raw_customer_price is None
+                else _parse_money(
+                    raw_customer_price, errors, "Стоимость для клиента"
+                )
+            )
+            source_ref = _normalise_text(form.get("customer_source_ref"), 500)
+            if source_ref.startswith("orders:"):
+                participant["source"] = "tripster"
+                participant["source_ref"] = source_ref
+                participant["prepayment"] = _parse_money(
+                    form.get("customer_prepayment"), errors,
+                    "Предоплата Tripster",
+                )
+                participant["payment_due"] = _parse_money(
+                    form.get("customer_payment_due"), errors,
+                    "Сумма к доплате",
+                )
+            else:
+                participant["source"] = "internal"
+                participant["source_ref"] = None
+                participant["prepayment"] = 0.0
+                participant["payment_due"] = participant["price"]
+            participants = [participant]
+    elif kind == "event":
+        vessel_capacity = boats_by_name.get(boat, {}).get("capacity")
+        capacity = event_capacity_for_crew(vessel_capacity, len(assignments))
+        if capacity is None:
+            try:
+                capacity = int(str(form.get("capacity") or "10").strip())
+            except ValueError:
+                capacity = 0
+            if not 1 <= capacity <= 100:
+                errors.append("Вместимость события должна быть от 1 до 100 человек.")
+        participants = _validate_participants(db, form, capacity, errors)
+        if participants and all(
+            participant["price"] is None for participant in participants
+        ):
+            total_guests = sum(
+                participant["guests_count"] for participant in participants
+            )
+            allocated = 0.0
+            for index, participant in enumerate(participants):
+                if index == len(participants) - 1:
+                    participant["price"] = round(legacy_revenue - allocated, 2)
+                else:
+                    share = round(
+                        legacy_revenue * participant["guests_count"] / total_guests,
+                        2,
+                    )
+                    participant["price"] = share
+                    allocated += share
+        else:
+            for participant in participants:
+                if participant["price"] is None:
+                    participant["price"] = 0.0
+        for participant in participants:
+            if participant["source"] != "tripster":
+                participant["prepayment"] = 0.0
+                participant["payment_due"] = participant["price"]
+        participants_count = sum(
+            participant["guests_count"] for participant in participants
+        )
+        customer_name = ""
+        customer_phone = ""
+
+    revenue = round(sum(
+        participant["price"] for participant in participants
+    ), 2)
+
     if starts_at and ends_at and starts_at < ends_at:
         starts_value = starts_at.strftime("%Y-%m-%d %H:%M")
         ends_value = ends_at.strftime("%Y-%m-%d %H:%M")
@@ -462,14 +502,22 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
         )
         if employee_conflicts:
             names = sorted({row["employee_name"] for row in employee_conflicts})
+            conflict = employee_conflicts[0]
             errors.append(
-                "Уже заняты в это время: " + ", ".join(names) + "."
+                "Уже заняты в это время: " + ", ".join(names) + ". "
+                f"Пересекается с «{conflict['service_name']}» "
+                f"{conflict['starts_at'][11:16]}–{conflict['ends_at'][11:16]}."
             )
         boat_conflicts = repository.find_boat_conflicts(
             db, boat, starts_value, ends_value, exclude_id
         ) if boat in boat_names else []
         if boat_conflicts:
-            errors.append(f"Катер «{boat}» уже занят в это время.")
+            conflict = boat_conflicts[0]
+            errors.append(
+                f"Катер «{boat}» уже занят в это время: «{conflict['service_name']}» "
+                f"{conflict['starts_at'][11:16]}–{conflict['ends_at'][11:16]} "
+                f"(карточка №{conflict['id']})."
+            )
 
     data = {
         "kind": kind,
@@ -733,6 +781,12 @@ def create_item_from_trip(db, trip):
     ends = starts + dt.timedelta(hours=hours)
     kind = "booking" if "аренда" in base_service_name.lower() else "event"
 
+    capacity = None
+    if kind == "event":
+        vessel = fleet_repository.get_vessel_by_name(db, trip["boat"])
+        vessel_capacity = vessel["capacity"] if vessel else None
+        capacity = event_capacity_for_crew(vessel_capacity, len(assignments))
+
     data = {
         "kind": kind,
         "boat": trip["boat"],
@@ -740,7 +794,7 @@ def create_item_from_trip(db, trip):
         "service_name": service["name"],
         "starts_at": starts.strftime("%Y-%m-%d %H:%M"),
         "ends_at": ends.strftime("%Y-%m-%d %H:%M"),
-        "capacity": None,
+        "capacity": capacity,
         "participants_count": 0,
         "customer_name": "",
         "customer_phone": "",

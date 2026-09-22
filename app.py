@@ -5187,6 +5187,7 @@ app.register_blueprint(
         get_db,
         admin_login_required,
         task_assigned_notifier=_notify_task_assignment,
+        recompute_schedule_capacity=schedule_services.recompute_event_capacities_for_boat,
     )
 )
 

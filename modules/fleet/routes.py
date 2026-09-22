@@ -27,7 +27,8 @@ from .constants import (
 
 
 def create_fleet_blueprint(
-    get_db, admin_login_required, task_assigned_notifier=None
+    get_db, admin_login_required, task_assigned_notifier=None,
+    recompute_schedule_capacity=None,
 ):
     """Build the fleet Blueprint with the application's DB and auth adapters."""
     blueprint = Blueprint("fleet", __name__)
@@ -65,6 +66,7 @@ def create_fleet_blueprint(
         success, message, boat_index = services.create_vessel(
             get_db(), request.form,
             refresh_runtime=should_refresh_legacy_runtime(),
+            recompute_schedule_capacity=recompute_schedule_capacity,
         )
         session["fleet_notice"] = {
             "type": "success" if success else "error",
@@ -171,6 +173,7 @@ def create_fleet_blueprint(
         success, message, boat_index = services.update_vessel(
             get_db(), vessel_id, request.form,
             refresh_runtime=should_refresh_legacy_runtime(),
+            recompute_schedule_capacity=recompute_schedule_capacity,
         )
         session["fleet_notice"] = {
             "type": "success" if success else "error",

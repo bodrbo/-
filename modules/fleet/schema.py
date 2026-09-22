@@ -83,6 +83,7 @@ def init_schema(conn, refresh_runtime=True):
             tank_capacity_liters REAL NOT NULL DEFAULT 0,
             group_trip_liters REAL NOT NULL DEFAULT 0,
             schedule_color TEXT NOT NULL DEFAULT '#607d8b',
+            capacity INTEGER,
             length_m REAL,
             width_m REAL,
             specifications TEXT NOT NULL DEFAULT '',
@@ -108,6 +109,7 @@ def init_schema(conn, refresh_runtime=True):
         "tank_capacity_liters": "REAL NOT NULL DEFAULT 0",
         "group_trip_liters": "REAL NOT NULL DEFAULT 0",
         "schedule_color": "TEXT NOT NULL DEFAULT '#607d8b'",
+        "capacity": "INTEGER",
         "length_m": "REAL",
         "width_m": "REAL",
         "specifications": "TEXT NOT NULL DEFAULT ''",
@@ -197,7 +199,7 @@ def boats_for_db(conn):
     """Return the active fleet owned by this exact database connection."""
     rows = conn.execute(
         "SELECT name, investor, commission_direct, commission_aggregator, "
-        "fuel_cost, mooring_cost FROM fleet_vessels "
+        "fuel_cost, mooring_cost, capacity FROM fleet_vessels "
         "WHERE deleted_at IS NULL ORDER BY sort_order, id"
     ).fetchall()
     return [
@@ -208,6 +210,7 @@ def boats_for_db(conn):
             "commission_aggregator": row[3],
             "fuel": row[4],
             "mooring": row[5],
+            "capacity": row[6],
         }
         for row in rows
     ]

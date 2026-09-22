@@ -31,12 +31,12 @@ def create_vessel(db, data, timestamp):
     if archived is not None and archived["deleted_at"]:
         db.execute(
             "UPDATE fleet_vessels SET name = ?, tank_capacity_liters = ?, "
-            "schedule_color = ?, length_m = ?, width_m = ?, specifications = ?, "
+            "schedule_color = ?, capacity = ?, length_m = ?, width_m = ?, specifications = ?, "
             "sort_order = (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM fleet_vessels), "
             "updated_at = ?, deleted_at = NULL WHERE id = ?",
             (
                 data["name"], data["tank_capacity_liters"], data["schedule_color"],
-                data["length_m"], data["width_m"], data["specifications"],
+                data["capacity"], data["length_m"], data["width_m"], data["specifications"],
                 timestamp, archived["id"],
             ),
         )
@@ -44,13 +44,13 @@ def create_vessel(db, data, timestamp):
     else:
         cursor = db.execute(
             "INSERT INTO fleet_vessels "
-            "(name, tank_capacity_liters, schedule_color, length_m, width_m, "
+            "(name, tank_capacity_liters, schedule_color, capacity, length_m, width_m, "
             "specifications, sort_order, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, "
             "(SELECT COALESCE(MAX(sort_order), -1) + 1 FROM fleet_vessels), ?, ?)",
             (
                 data["name"], data["tank_capacity_liters"], data["schedule_color"],
-                data["length_m"], data["width_m"], data["specifications"],
+                data["capacity"], data["length_m"], data["width_m"], data["specifications"],
                 timestamp, timestamp,
             ),
         )
@@ -72,11 +72,11 @@ def update_vessel(db, vessel_id, data, timestamp):
             rename_vessel_references(db, vessel["name"], data["name"])
         db.execute(
             "UPDATE fleet_vessels SET name = ?, tank_capacity_liters = ?, "
-            "schedule_color = ?, length_m = ?, width_m = ?, specifications = ?, "
+            "schedule_color = ?, capacity = ?, length_m = ?, width_m = ?, specifications = ?, "
             "updated_at = ? WHERE id = ? AND deleted_at IS NULL",
             (
                 data["name"], data["tank_capacity_liters"], data["schedule_color"],
-                data["length_m"], data["width_m"], data["specifications"],
+                data["capacity"], data["length_m"], data["width_m"], data["specifications"],
                 timestamp, vessel_id,
             ),
         )

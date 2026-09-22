@@ -6,6 +6,21 @@ from modules.schedule import repository as schedule_repository
 from modules.schedule import services as schedule_services
 
 
+class EventCapacityForCrewTests(unittest.TestCase):
+    def test_subtracts_crew_from_vessel_capacity(self):
+        self.assertEqual(schedule_services.event_capacity_for_crew(12, 2), 10)
+
+    def test_returns_none_when_vessel_capacity_not_set(self):
+        self.assertIsNone(schedule_services.event_capacity_for_crew(None, 2))
+        self.assertIsNone(schedule_services.event_capacity_for_crew(0, 2))
+
+    def test_never_below_one(self):
+        self.assertEqual(schedule_services.event_capacity_for_crew(2, 5), 1)
+
+    def test_never_below_already_booked_guests(self):
+        self.assertEqual(schedule_services.event_capacity_for_crew(10, 2, participants_count=9), 9)
+
+
 class ScheduleCardBackfillTests(unittest.TestCase):
     def setUp(self):
         application_module.init_db()
@@ -106,6 +121,44 @@ class ScheduleCardBackfillTests(unittest.TestCase):
         self.assertEqual(assignment["role"], "captain")
         self.assertEqual(assignment["employee_name"], "Карточка Тест Капитан")
         self.assertIsNotNone(day_crew)
+
+    def test_capacity_computed_from_vessel_capacity_minus_crew(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "UPDATE fleet_vessels SET capacity = 12 WHERE name = 'Бодрый Первый'"
+            )
+            db.commit()
+            try:
+                trip_id = self.make_trip(db)
+                self.add_labor(db, trip_id, "Карточка Тест Капитан", "Малый тур", quantity=1.5)
+                self.add_labor(
+                    db, trip_id, "Карточка Тест ГидКапитан", "Малый тур гид/капитан",
+                    quantity=1.5,
+                )
+                trip = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
+                ok, message, item_id = schedule_services.create_item_from_trip(db, trip)
+                item = schedule_repository.get_item(db, item_id)
+            finally:
+                db.execute(
+                    "UPDATE fleet_vessels SET capacity = NULL WHERE name = 'Бодрый Первый'"
+                )
+                db.commit()
+
+        self.assertTrue(ok, message)
+        self.assertEqual(item["capacity"], 10)
+
+    def test_capacity_left_none_when_vessel_capacity_not_configured(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            trip_id = self.make_trip(db)
+            self.add_labor(db, trip_id, "Карточка Тест Капитан", "Малый тур", quantity=1.5)
+            trip = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
+            ok, message, item_id = schedule_services.create_item_from_trip(db, trip)
+            item = schedule_repository.get_item(db, item_id)
+
+        self.assertTrue(ok, message)
+        self.assertIsNone(item["capacity"])
 
     def test_creates_card_with_guide_captain_role_from_suffix(self):
         with application_module.app.app_context():

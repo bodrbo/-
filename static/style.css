@@ -3133,6 +3133,7 @@ body.modal-open { overflow: hidden; }
 }
 .fleet-vessel-form .field { margin: 0; }
 .fleet-vessel-form .field label { display: block; margin-bottom: 6px; }
+.fleet-vessel-form .field small { display: block; margin-top: 4px; color: var(--muted); font-size: 10.5px; }
 .fleet-vessel-form input:not([type="color"]),
 .fleet-vessel-form textarea { width: 100%; box-sizing: border-box; }
 .fleet-vessel-specs-field { grid-column: 1 / -1; }

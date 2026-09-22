@@ -279,7 +279,7 @@
           <span>Катер</span>
           <select name="boat" id="scheduleBoat" required onchange="syncScheduleBoatPrice()">
             <option value="" disabled selected>Выберите катер</option>
-            {% for boat in boats %}<option value="{{ boat.name }}">{{ boat.name }}</option>{% endfor %}
+            {% for boat in boats %}<option value="{{ boat.name }}" data-capacity="{{ boat.capacity or '' }}">{{ boat.name }}</option>{% endfor %}
           </select>
         </label>
         <label class="field">
@@ -347,6 +347,7 @@
             <input type="number" name="capacity" id="scheduleCapacity" min="1" max="100" value="10" oninput="syncScheduleParticipantCount()">
           </label>
           <span class="schedule-participant-counter" id="scheduleParticipantCounter">0 из 10 мест</span>
+          <small class="hint" id="scheduleCapacityAutoHint" hidden>Вместимость катера минус экипаж рейса — считается автоматически по данным «Флота».</small>
         </div>
         <div id="scheduleParticipantSection">
           <div class="schedule-form-section-heading">
@@ -814,6 +815,7 @@
     document.getElementById('scheduleModalTitle').textContent = 'Добавить в расписание';
     renderScheduleHeaderWeather('scheduleModalWeather', null);
     document.getElementById('scheduleSubmit').textContent = 'Создать рейс';
+    scheduleUpdateEventCapacity();
     syncScheduleKind();
   }
   function openScheduleCreate(employeeId, startTime) {
@@ -2008,11 +2010,30 @@
     if (employeeId) row.querySelector('[name="employee_id[]"]').value = String(employeeId);
     row.querySelector('[name="role[]"]').value = role || 'guide_captain';
     document.getElementById('scheduleAssignments').appendChild(fragment);
+    scheduleUpdateEventCapacity();
   }
   function removeScheduleAssignment(button) {
     const rows = document.querySelectorAll('.schedule-assignment-row');
     if (rows.length === 1) return;
     button.closest('.schedule-assignment-row').remove();
+    scheduleUpdateEventCapacity();
+  }
+  function scheduleUpdateEventCapacity() {
+    const boatSelect = document.getElementById('scheduleBoat');
+    const capacityInput = document.getElementById('scheduleCapacity');
+    const hint = document.getElementById('scheduleCapacityAutoHint');
+    const selectedOption = boatSelect.selectedOptions[0];
+    const vesselCapacity = selectedOption ? parseInt(selectedOption.dataset.capacity || '', 10) : NaN;
+    if (!Number.isNaN(vesselCapacity) && vesselCapacity > 0) {
+      const crewCount = document.querySelectorAll('.schedule-assignment-row').length;
+      capacityInput.value = Math.max(vesselCapacity - crewCount, 1);
+      capacityInput.readOnly = true;
+      hint.hidden = false;
+    } else {
+      capacityInput.readOnly = false;
+      hint.hidden = true;
+    }
+    syncScheduleParticipantCount();
   }
   function closeScheduleClientResults(picker) {
     if (!picker) return;
@@ -2327,6 +2348,7 @@
     return Math.max(0, endMinutes - startMinutes) / 60;
   }
   function syncScheduleBoatPrice() {
+    scheduleUpdateEventCapacity();
     syncScheduleClientPrices(true);
   }
   function syncScheduleTimingPrice() {

@@ -354,6 +354,77 @@ class FleetModuleIntegrationTests(unittest.TestCase):
             db.commit()
             refresh_runtime_fleet(db)
 
+    def test_vessel_capacity_recomputes_existing_event_cards(self):
+        boat_name = "Тестовый катер вместимости"
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM schedule_items WHERE boat = ?", (boat_name,))
+            db.execute("DELETE FROM boat_fuel_state WHERE boat = ?", (boat_name,))
+            db.execute("DELETE FROM fleet_vessels WHERE name = ? COLLATE NOCASE", (boat_name,))
+            db.commit()
+            refresh_runtime_fleet(db)
+
+        self.log_in_as_admin()
+        response = self.client.post(
+            "/fleet/vessels",
+            data={
+                "name": boat_name, "tank_capacity_liters": "100",
+                "schedule_color": "#123abc",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            vessel_id = db.execute(
+                "SELECT id FROM fleet_vessels WHERE name = ?", (boat_name,)
+            ).fetchone()["id"]
+            now = "2026-06-10 09:00"
+            cur = db.execute(
+                "INSERT INTO schedule_items (kind, boat, service_name, starts_at, "
+                "ends_at, capacity, participants_count, customer_name, "
+                "customer_phone, revenue, note, status, source, created_at, updated_at) "
+                "VALUES ('event', ?, 'Малый тур', '2026-06-10 09:00', "
+                "'2026-06-10 10:30', NULL, 0, '', '', 0, '', 'scheduled', "
+                "'internal', ?, ?)",
+                (boat_name, now, now),
+            )
+            item_id = cur.lastrowid
+            db.execute(
+                "INSERT INTO schedule_assignments "
+                "(schedule_item_id, employee_id, employee_name, role, created_at) "
+                "VALUES (?, 1, 'Тест Капитан', 'captain', ?)",
+                (item_id, now),
+            )
+            db.commit()
+
+        # Setting the boat's passenger capacity for the first time must
+        # ripple into the already-existing card: 12 seats - 1 crew = 11.
+        response = self.client.post(
+            f"/fleet/vessels/{vessel_id}/update",
+            data={
+                "name": boat_name, "tank_capacity_liters": "100", "capacity": "12",
+                "schedule_color": "#123abc",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            vessel = db.execute(
+                "SELECT capacity FROM fleet_vessels WHERE id = ?", (vessel_id,)
+            ).fetchone()
+            self.assertEqual(vessel["capacity"], 12)
+            item = db.execute(
+                "SELECT capacity FROM schedule_items WHERE id = ?", (item_id,)
+            ).fetchone()
+            self.assertEqual(item["capacity"], 11)
+            db.execute("DELETE FROM schedule_assignments WHERE schedule_item_id = ?", (item_id,))
+            db.execute("DELETE FROM schedule_items WHERE id = ?", (item_id,))
+            db.execute("DELETE FROM boat_fuel_state WHERE boat = ?", (boat_name,))
+            db.execute("DELETE FROM fleet_vessels WHERE id = ?", (vessel_id,))
+            db.commit()
+            refresh_runtime_fleet(db)
+
     def test_vessel_management_requires_valid_admin_input(self):
         response = self.client.post(
             "/fleet/vessels",

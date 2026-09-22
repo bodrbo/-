@@ -97,6 +97,7 @@
       <div class="fleet-vessel-facts" aria-label="Основные параметры судна">
         <span><i style="background: {{ vessel.schedule_color if vessel else '#607d8b' }};"></i>Цвет расписания</span>
         <span>Бак: {{ (vessel.tank_capacity_liters|round(1)) if vessel else '—' }} л</span>
+        <span>Пассажировместимость: {{ vessel.capacity if vessel and vessel.capacity else '—' }} чел.</span>
         <span>Длина: {{ (vessel.length_m|round(2)) if vessel and vessel.length_m else '—' }} м</span>
         <span>Ширина: {{ (vessel.width_m|round(2)) if vessel and vessel.width_m else '—' }} м</span>
       </div>
@@ -138,6 +139,11 @@
         <div class="field">
           <label for="vesselTank">Объём бака, л</label>
           <input id="vesselTank" name="tank_capacity_liters" type="number" min="0.1" max="10000" step="0.1" value="{{ vessel.tank_capacity_liters|round(1) }}" required>
+        </div>
+        <div class="field">
+          <label for="vesselCapacity">Пассажировместимость, чел.</label>
+          <input id="vesselCapacity" name="capacity" type="number" min="1" max="100" step="1" value="{{ vessel.capacity or '' }}" placeholder="Не указана">
+          <small>Из неё автоматически вычитается экипаж рейса — так на карточках расписания считаются гостевые места.</small>
         </div>
         <div class="field fleet-color-field">
           <label for="vesselColor">Цвет в расписании</label>

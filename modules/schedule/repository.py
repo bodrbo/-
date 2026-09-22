@@ -177,6 +177,30 @@ def set_accounting_trip_id(db, item_id, trip_id, timestamp):
     )
 
 
+def list_active_event_items_for_boat(db, boat):
+    """Event-kind schedule_items on `boat` that are still live (not
+    soft-deleted), each with its current crew size — the target set for
+    services.recompute_event_capacities_for_boat, run whenever Fleet's own
+    passenger capacity for this boat is saved."""
+    return db.execute(
+        "SELECT schedule_items.id, schedule_items.capacity, "
+        "schedule_items.participants_count, "
+        "(SELECT COUNT(*) FROM schedule_assignments "
+        "WHERE schedule_assignments.schedule_item_id = schedule_items.id) AS crew_count "
+        "FROM schedule_items "
+        "WHERE schedule_items.kind = 'event' AND schedule_items.deleted_at IS NULL "
+        "AND schedule_items.boat = ?",
+        (boat,),
+    ).fetchall()
+
+
+def update_item_capacity(db, item_id, capacity, timestamp):
+    db.execute(
+        "UPDATE schedule_items SET capacity = ?, updated_at = ? WHERE id = ?",
+        (capacity, timestamp, item_id),
+    )
+
+
 def item_has_sales_partner(db, item_id):
     return db.execute(
         "SELECT 1 FROM schedule_participants "

@@ -560,6 +560,53 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn("Мария", directory)
         self.assertNotIn("Алия", tuning_directory)
 
+    def test_event_capacity_is_forced_by_vessel_passenger_capacity(self):
+        # When Fleet has a configured passenger capacity for the boat, the
+        # submitted "capacity" field is a hard-overridden formula (vessel
+        # capacity minus this card's own crew), not the free-typed number —
+        # here 12 total - 1 crew (Платон) = 11 guest seats, not the "99"
+        # submitted in the form.
+        self.login()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "UPDATE fleet_vessels SET capacity = 12 WHERE name = 'Бодрый Первый'"
+            )
+            db.commit()
+        try:
+            response = self.client.post(
+                "/schedule/items",
+                data=self.booking_data(
+                    kind="event",
+                    boat="Бодрый Первый",
+                    service_name="Средний тур",
+                    end_time="14:30",
+                    **{
+                        "employee_id[]": [str(self.platon_id)],
+                        "role[]": ["captain"],
+                        "capacity": "99",
+                        "participant_client_id[]": [""],
+                        "participant_name[]": ["Алия"],
+                        "participant_phone[]": ["+79998880003"],
+                        "participant_guests[]": ["3"],
+                        "customer_name": "",
+                        "customer_phone": "",
+                    },
+                ),
+            )
+            self.assertEqual(response.status_code, 302)
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                item = db.execute("SELECT * FROM schedule_items").fetchone()
+            self.assertEqual(item["capacity"], 11)
+        finally:
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                db.execute(
+                    "UPDATE fleet_vessels SET capacity = NULL WHERE name = 'Бодрый Первый'"
+                )
+                db.commit()
+
     def test_client_prices_override_legacy_trip_total(self):
         self.login()
         response = self.client.post(
