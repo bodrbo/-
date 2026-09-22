@@ -334,6 +334,45 @@ def create_schedule_blueprint(
         })
 
     @blueprint.route(
+        "/schedule/items/<int:item_id>/participants/<int:participant_id>"
+        "/manual-payments",
+        methods=["POST"],
+    )
+    @manage_required
+    def create_participant_manual_payment(item_id, participant_id):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"ok": False, "message": "Некорректный запрос."}), 400
+        db = get_db()
+        success, message, _payment_id = services.create_manual_payment(
+            db,
+            item_id,
+            participant_id,
+            payload.get("amount"),
+            payload.get("payment_method"),
+        )
+        if not success:
+            return jsonify({"ok": False, "message": message}), 400
+        return _participants_response(db, item_id, message)
+
+    @blueprint.route(
+        "/schedule/items/<int:item_id>/participants/<int:participant_id>"
+        "/manual-payments/<int:payment_id>/delete",
+        methods=["POST"],
+    )
+    @manage_required
+    def delete_participant_manual_payment(
+        item_id, participant_id, payment_id,
+    ):
+        db = get_db()
+        success, message = services.remove_manual_payment(
+            db, item_id, participant_id, payment_id
+        )
+        if not success:
+            return jsonify({"ok": False, "message": message}), 404
+        return _participants_response(db, item_id, message)
+
+    @blueprint.route(
         "/schedule/items/<int:item_id>/participants/<int:participant_id>/yookassa",
         methods=["POST"],
     )

@@ -283,6 +283,15 @@ def list_day_items(db, day):
         tuple(item_ids),
     ).fetchall():
         payments_by_participant.setdefault(row["participant_id"], []).append(dict(row))
+    manual_payments_by_participant = {}
+    for row in db.execute(
+        "SELECT * FROM schedule_manual_payments "
+        f"WHERE schedule_item_id IN ({placeholders}) ORDER BY id DESC",
+        tuple(item_ids),
+    ).fetchall():
+        manual_payments_by_participant.setdefault(
+            row["participant_id"], []
+        ).append(dict(row))
     participants_by_item = {}
     for participant in participants:
         participant = dict(participant)
@@ -290,6 +299,12 @@ def list_day_items(db, day):
             (participant["schedule_item_id"], participant["client_id"]), []
         )
         participant["payments"] = payments_by_participant.get(participant["id"], [])
+        participant["manual_payments"] = manual_payments_by_participant.get(
+            participant["id"], []
+        )
+        participant["paid_manual"] = round(sum(
+            payment["amount"] for payment in participant["manual_payments"]
+        ), 2)
         participants_by_item.setdefault(
             participant["schedule_item_id"], []
         ).append(participant)
@@ -578,11 +593,26 @@ def list_item_participants_with_addons(db, item_id):
         (item_id,),
     ).fetchall():
         payments_by_participant.setdefault(row["participant_id"], []).append(dict(row))
+    manual_payments_by_participant = {}
+    for row in db.execute(
+        "SELECT * FROM schedule_manual_payments "
+        "WHERE schedule_item_id = ? ORDER BY id DESC",
+        (item_id,),
+    ).fetchall():
+        manual_payments_by_participant.setdefault(
+            row["participant_id"], []
+        ).append(dict(row))
     result = []
     for participant in participants:
         participant = dict(participant)
         participant["addons"] = addons_by_client.get(participant["client_id"], [])
         participant["payments"] = payments_by_participant.get(participant["id"], [])
+        participant["manual_payments"] = manual_payments_by_participant.get(
+            participant["id"], []
+        )
+        participant["paid_manual"] = round(sum(
+            payment["amount"] for payment in participant["manual_payments"]
+        ), 2)
         result.append(participant)
     return result
 
@@ -681,6 +711,37 @@ def delete_yookassa_payment_row(db, payment_id, participant_id):
     cursor = db.execute(
         "DELETE FROM schedule_yookassa_payments WHERE id = ? AND participant_id = ?",
         (payment_id, participant_id),
+    )
+    db.commit()
+    return cursor.rowcount > 0
+
+
+def create_manual_payment_row(
+    db, item_id, participant_id, amount, payment_method, timestamp,
+):
+    cursor = db.execute(
+        "INSERT INTO schedule_manual_payments "
+        "(schedule_item_id, participant_id, amount, payment_method, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (item_id, participant_id, amount, payment_method, timestamp),
+    )
+    db.commit()
+    return cursor.lastrowid
+
+
+def get_manual_payment(db, payment_id, participant_id, item_id):
+    return db.execute(
+        "SELECT * FROM schedule_manual_payments "
+        "WHERE id = ? AND participant_id = ? AND schedule_item_id = ?",
+        (payment_id, participant_id, item_id),
+    ).fetchone()
+
+
+def delete_manual_payment(db, payment_id, participant_id, item_id):
+    cursor = db.execute(
+        "DELETE FROM schedule_manual_payments "
+        "WHERE id = ? AND participant_id = ? AND schedule_item_id = ?",
+        (payment_id, participant_id, item_id),
     )
     db.commit()
     return cursor.rowcount > 0

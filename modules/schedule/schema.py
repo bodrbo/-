@@ -168,6 +168,22 @@ def init_schema(conn):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS schedule_manual_payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            schedule_item_id INTEGER NOT NULL,
+            participant_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            payment_method TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schedule_manual_payments_participant "
+        "ON schedule_manual_payments(participant_id)"
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS schedule_day_crew (
             work_date TEXT NOT NULL,
             employee_id INTEGER NOT NULL,

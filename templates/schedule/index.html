@@ -1076,7 +1076,8 @@
     const addonsTotal = (participant.addons || []).reduce(
       (sum, addon) => sum + addon.quantity * addon.unit_price, 0
     );
-    const due = (participant.payment_due || 0) + addonsTotal - (participant.paid_online || 0);
+    const due = (participant.payment_due || 0) + addonsTotal
+      - (participant.paid_online || 0) - (participant.paid_manual || 0);
     return Math.max(0, due);
   }
   function openScheduleDetail(itemId) {
@@ -1296,84 +1297,183 @@
     return view;
   }
   function buildScheduleDetailClientPayments(item, participant) {
-    const payments = participant.payments || [];
-    if (!scheduleYookassaConfigured && !payments.length) return null;
-
+    const onlinePayments = participant.payments || [];
+    const manualPayments = participant.manual_payments || [];
+    const dueTotal = scheduleParticipantAmountDue(participant);
     const block = document.createElement('div');
     block.className = 'schedule-detail-client-payments';
-    const title = document.createElement('p');
-    title.innerHTML = '<b>Оплата по ссылке (ЮKassa)</b>';
-    block.appendChild(title);
+    const heading = document.createElement('div');
+    heading.className = 'schedule-payment-heading';
+    heading.innerHTML = `<b>Платежи</b><span>${dueTotal > 0 ? `К доплате ${dueTotal.toFixed(0)} ₽` : 'Оплачено полностью'}</span>`;
+    block.appendChild(heading);
 
-    const list = document.createElement('ul');
-    list.className = 'schedule-yookassa-list';
-    payments.forEach(payment => {
+    const manualTitle = document.createElement('p');
+    manualTitle.className = 'schedule-payment-subtitle';
+    manualTitle.textContent = 'Принято вручную';
+    block.appendChild(manualTitle);
+    const manualList = document.createElement('ul');
+    manualList.className = 'schedule-manual-payment-list';
+    manualPayments.forEach(payment => {
       const li = document.createElement('li');
-      li.className = `schedule-yookassa-item status-${payment.status}`;
-      const amount = document.createElement('span');
+      li.className = 'schedule-manual-payment-item';
+      const amount = document.createElement('strong');
       amount.textContent = `${Number(payment.amount).toFixed(0)} ₽`;
       const badge = document.createElement('b');
-      badge.className = 'schedule-yookassa-badge';
-      badge.textContent = scheduleYookassaStatusLabels[payment.status] || payment.status;
-      li.append(amount, badge);
-      if (payment.status !== 'succeeded' && payment.status !== 'canceled') {
-        const link = document.createElement('a');
-        link.href = payment.confirmation_url;
-        link.target = '_blank';
-        link.rel = 'noopener';
-        link.textContent = 'Открыть ссылку';
-        li.appendChild(link);
-        const checkBtn = document.createElement('button');
-        checkBtn.type = 'button';
-        checkBtn.className = 'btn-secondary';
-        checkBtn.textContent = 'Проверить';
-        checkBtn.addEventListener('click', () => checkScheduleParticipantPayment(item.id, participant.id, payment.id));
-        li.appendChild(checkBtn);
-      }
-      if (payment.status !== 'succeeded') {
-        const removePaymentBtn = document.createElement('button');
-        removePaymentBtn.type = 'button';
-        removePaymentBtn.className = 'icon-btn danger';
-        removePaymentBtn.title = 'Удалить ссылку';
-        removePaymentBtn.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 5l10 10M15 5L5 15"/></svg>';
-        removePaymentBtn.addEventListener('click', () => deleteScheduleParticipantPayment(item.id, participant.id, payment.id));
-        li.appendChild(removePaymentBtn);
-      }
-      list.appendChild(li);
+      badge.className = `schedule-manual-payment-badge method-${payment.payment_method}`;
+      badge.textContent = payment.payment_method === 'cash' ? 'Наличные' : 'Безналичные';
+      const date = document.createElement('span');
+      const rawDate = String(payment.created_at || '');
+      date.textContent = rawDate.length >= 16
+        ? `${rawDate.slice(8, 10)}.${rawDate.slice(5, 7)} · ${rawDate.slice(11, 16)}`
+        : rawDate;
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'icon-btn danger';
+      removeBtn.title = 'Удалить ручной платёж';
+      removeBtn.setAttribute('aria-label', 'Удалить ручной платёж');
+      removeBtn.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 5l10 10M15 5L5 15"/></svg>';
+      removeBtn.addEventListener('click', () => deleteScheduleManualPayment(item.id, participant.id, payment.id));
+      li.append(amount, badge, date, removeBtn);
+      manualList.appendChild(li);
     });
-    if (!payments.length) {
+    if (!manualPayments.length) {
       const li = document.createElement('li');
       li.className = 'schedule-addon-empty';
-      li.textContent = 'Ссылок пока нет';
-      list.appendChild(li);
+      li.textContent = 'Ручных платежей пока нет';
+      manualList.appendChild(li);
     }
-    block.appendChild(list);
+    block.appendChild(manualList);
 
-    if (scheduleYookassaConfigured) {
-      const dueTotal = scheduleParticipantAmountDue(participant);
-      const form = document.createElement('form');
-      form.className = 'schedule-yookassa-create-form';
-      form.innerHTML = `
-        <input type="number" min="1" max="100" placeholder="% от суммы" class="schedule-yookassa-percent" aria-label="Процент от суммы">
-        <input type="text" inputmode="decimal" value="${dueTotal ? dueTotal.toFixed(0) : ''}" placeholder="Сумма, ₽" class="schedule-yookassa-amount" aria-label="Сумма к оплате">
-        <button type="submit" class="btn-add">Сформировать ссылку</button>
+    if (dueTotal > 0) {
+      const manualForm = document.createElement('form');
+      manualForm.className = 'schedule-manual-payment-form';
+      manualForm.innerHTML = `
+        <div class="schedule-payment-methods" role="radiogroup" aria-label="Способ оплаты">
+          <label><input type="radio" name="payment_method" value="cash" checked><span>Наличные</span></label>
+          <label><input type="radio" name="payment_method" value="cashless"><span>Безналичные</span></label>
+        </div>
+        <input type="text" inputmode="decimal" value="${dueTotal.toFixed(0)}" placeholder="Сумма, ₽" aria-label="Сумма ручного платежа">
+        <button type="submit" class="btn-add">Записать оплату</button>
       `;
-      const percentInput = form.querySelector('.schedule-yookassa-percent');
-      const amountInput = form.querySelector('.schedule-yookassa-amount');
-      percentInput.addEventListener('input', () => {
-        const percent = parseFloat(percentInput.value);
-        if (!(percent > 0)) return;
-        amountInput.value = (dueTotal * percent / 100).toFixed(2);
-      });
-      form.addEventListener('submit', event => {
+      manualForm.addEventListener('submit', event => {
         event.preventDefault();
-        const amount = amountInput.value;
-        const submitBtn = form.querySelector('button[type="submit"]');
-        createScheduleParticipantPayment(item.id, participant.id, amount, submitBtn);
+        const amount = manualForm.querySelector('input[type="text"]').value;
+        const method = manualForm.querySelector('input[name="payment_method"]:checked').value;
+        const submitBtn = manualForm.querySelector('button[type="submit"]');
+        createScheduleManualPayment(item.id, participant.id, amount, method, submitBtn);
       });
-      block.appendChild(form);
+      block.appendChild(manualForm);
+    }
+
+    if (scheduleYookassaConfigured || onlinePayments.length) {
+      const onlineSection = document.createElement('div');
+      onlineSection.className = 'schedule-online-payment-section';
+      const onlineTitle = document.createElement('p');
+      onlineTitle.className = 'schedule-payment-subtitle';
+      onlineTitle.textContent = 'Оплата по ссылке · ЮKassa';
+      onlineSection.appendChild(onlineTitle);
+      const list = document.createElement('ul');
+      list.className = 'schedule-yookassa-list';
+      onlinePayments.forEach(payment => {
+        const li = document.createElement('li');
+        li.className = `schedule-yookassa-item status-${payment.status}`;
+        const amount = document.createElement('span');
+        amount.textContent = `${Number(payment.amount).toFixed(0)} ₽`;
+        const badge = document.createElement('b');
+        badge.className = 'schedule-yookassa-badge';
+        badge.textContent = scheduleYookassaStatusLabels[payment.status] || payment.status;
+        li.append(amount, badge);
+        if (payment.status !== 'succeeded' && payment.status !== 'canceled') {
+          const link = document.createElement('a');
+          link.href = payment.confirmation_url;
+          link.target = '_blank';
+          link.rel = 'noopener';
+          link.textContent = 'Открыть ссылку';
+          li.appendChild(link);
+          const checkBtn = document.createElement('button');
+          checkBtn.type = 'button';
+          checkBtn.className = 'btn-secondary';
+          checkBtn.textContent = 'Проверить';
+          checkBtn.addEventListener('click', () => checkScheduleParticipantPayment(item.id, participant.id, payment.id));
+          li.appendChild(checkBtn);
+        }
+        if (payment.status !== 'succeeded') {
+          const removePaymentBtn = document.createElement('button');
+          removePaymentBtn.type = 'button';
+          removePaymentBtn.className = 'icon-btn danger';
+          removePaymentBtn.title = 'Удалить ссылку';
+          removePaymentBtn.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 5l10 10M15 5L5 15"/></svg>';
+          removePaymentBtn.addEventListener('click', () => deleteScheduleParticipantPayment(item.id, participant.id, payment.id));
+          li.appendChild(removePaymentBtn);
+        }
+        list.appendChild(li);
+      });
+      if (!onlinePayments.length) {
+        const li = document.createElement('li');
+        li.className = 'schedule-addon-empty';
+        li.textContent = 'Ссылок пока нет';
+        list.appendChild(li);
+      }
+      onlineSection.appendChild(list);
+
+      if (scheduleYookassaConfigured && dueTotal > 0) {
+        const form = document.createElement('form');
+        form.className = 'schedule-yookassa-create-form';
+        form.innerHTML = `
+          <input type="number" min="1" max="100" placeholder="% от суммы" class="schedule-yookassa-percent" aria-label="Процент от суммы">
+          <input type="text" inputmode="decimal" value="${dueTotal ? dueTotal.toFixed(0) : ''}" placeholder="Сумма, ₽" class="schedule-yookassa-amount" aria-label="Сумма к оплате">
+          <button type="submit" class="btn-add">Сформировать ссылку</button>
+        `;
+        const percentInput = form.querySelector('.schedule-yookassa-percent');
+        const amountInput = form.querySelector('.schedule-yookassa-amount');
+        percentInput.addEventListener('input', () => {
+          const percent = parseFloat(percentInput.value);
+          if (!(percent > 0)) return;
+          amountInput.value = (dueTotal * percent / 100).toFixed(2);
+        });
+        form.addEventListener('submit', event => {
+          event.preventDefault();
+          const amount = amountInput.value;
+          const submitBtn = form.querySelector('button[type="submit"]');
+          createScheduleParticipantPayment(item.id, participant.id, amount, submitBtn);
+        });
+        onlineSection.appendChild(form);
+      }
+      block.appendChild(onlineSection);
     }
     return block;
+  }
+
+  function createScheduleManualPayment(itemId, participantId, amount, paymentMethod, submitBtn) {
+    submitBtn.disabled = true;
+    const originalText = submitBtn.textContent;
+    submitBtn.textContent = 'Сохраняем…';
+    fetch(`${scheduleCreateUrl}/${itemId}/participants/${participantId}/manual-payments`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({amount, payment_method: paymentMethod}),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (!data.ok) { alert(data.message || 'Не удалось записать оплату.'); return; }
+        scheduleDetailApplyUpdate(data);
+      })
+      .catch(() => alert('Не удалось записать оплату. Попробуйте ещё раз.'))
+      .finally(() => {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+      });
+  }
+
+  function deleteScheduleManualPayment(itemId, participantId, paymentId) {
+    if (!confirm('Удалить этот ручной платёж? Остаток к доплате увеличится.')) return;
+    fetch(`${scheduleCreateUrl}/${itemId}/participants/${participantId}/manual-payments/${paymentId}/delete`, {method: 'POST'})
+      .then(r => r.json())
+      .then(data => {
+        if (!data.ok) { alert(data.message || 'Не удалось удалить платёж.'); return; }
+        scheduleDetailApplyUpdate(data);
+      })
+      .catch(() => alert('Не удалось удалить платёж. Попробуйте ещё раз.'));
   }
   function scheduleCopyToClipboard(text) {
     if (navigator.clipboard && navigator.clipboard.writeText) {

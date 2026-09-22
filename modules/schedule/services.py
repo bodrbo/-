@@ -26,6 +26,10 @@ WEEKDAYS = (
     "понедельник", "вторник", "среда", "четверг",
     "пятница", "суббота", "воскресенье",
 )
+MANUAL_PAYMENT_METHODS = {
+    "cash": "наличными",
+    "cashless": "безналично",
+}
 
 
 def current_timestamp():
@@ -972,6 +976,72 @@ def delete_participant_payment(db, record, yookassa_request):
             return False, f"Не удалось отменить оплату в ЮKassa: {error}"
     repository.delete_yookassa_payment_row(db, record["id"], record["participant_id"])
     return True, "Ссылка на оплату удалена."
+
+
+def _participant_amount_due(participant):
+    addons_total = sum(
+        float(addon["quantity"] or 0) * float(addon["unit_price"] or 0)
+        for addon in participant.get("addons", [])
+    )
+    due = (
+        float(participant.get("payment_due") or 0)
+        + addons_total
+        - float(participant.get("paid_online") or 0)
+        - float(participant.get("paid_manual") or 0)
+    )
+    return max(0.0, round(due, 2))
+
+
+def create_manual_payment(
+    db, item_id, participant_id, raw_amount, payment_method,
+):
+    """Record money received outside ЮKassa and keep an auditable ledger."""
+    if repository.get_item(db, item_id) is None:
+        return False, "Рейс не найден.", None
+    if repository.get_participant(db, participant_id, item_id) is None:
+        return False, "Клиент не найден в этом рейсе.", None
+    method = str(payment_method or "").strip()
+    if method not in MANUAL_PAYMENT_METHODS:
+        return False, "Выберите способ оплаты: наличные или безналичные.", None
+    errors = []
+    amount = _parse_money(raw_amount, errors, "Сумма")
+    if not errors and amount <= 0:
+        errors.append("Сумма должна быть больше нуля.")
+    participant = next(
+        (
+            row for row in repository.list_item_participants_with_addons(db, item_id)
+            if row["id"] == participant_id
+        ),
+        None,
+    )
+    if participant is None:
+        return False, "Клиент не найден в этом рейсе.", None
+    amount_due = _participant_amount_due(participant)
+    if not errors and amount_due <= 0:
+        errors.append("У клиента нет суммы к доплате.")
+    if not errors and amount > amount_due:
+        errors.append(
+            f"Сумма платежа не может превышать остаток {amount_due:.2f} ₽."
+        )
+    if errors:
+        return False, " ".join(errors), None
+    payment_id = repository.create_manual_payment_row(
+        db, item_id, participant_id, amount, method, current_timestamp()
+    )
+    return (
+        True,
+        f"Оплата {amount:.2f} ₽ записана {MANUAL_PAYMENT_METHODS[method]}.",
+        payment_id,
+    )
+
+
+def remove_manual_payment(db, item_id, participant_id, payment_id):
+    if repository.get_manual_payment(
+        db, payment_id, participant_id, item_id
+    ) is None:
+        return False, "Ручной платёж не найден."
+    repository.delete_manual_payment(db, payment_id, participant_id, item_id)
+    return True, "Ручной платёж удалён."
 
 
 def _resolve_client_for_participant(db, raw_client_id, phone, errors):
