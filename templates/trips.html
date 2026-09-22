@@ -109,21 +109,21 @@
     <b aria-hidden="true">Открыть →</b>
   </a>
 
+  {% if edit_trip or import_candidate %}
   {% if errors %}
-    <div class="alert">
-      <strong>Не удалось сохранить рейс:</strong>
-      <ul>
-        {% for err in errors %}<li>{{ err }}</li>{% endfor %}
-      </ul>
-    </div>
+  <div class="alert">
+    <strong>Не удалось сохранить рейс:</strong>
+    <ul>
+      {% for err in errors %}<li>{{ err }}</li>{% endfor %}
+    </ul>
+  </div>
   {% endif %}
 
-  <details class="panel collapsible-panel"{{ ' open' if edit_trip or import_candidate or errors }}>
+  <details class="panel collapsible-panel" open>
     <summary>
       <span>
         {% if import_candidate %}Подтвердить рейс из Yclients
-        {% elif edit_trip %}Редактировать рейс
-        {% else %}Добавить рейс{% endif %}
+        {% else %}Редактировать рейс{% endif %}
       </span>
       <span class="chev" aria-hidden="true"></span>
     </summary>
@@ -132,7 +132,7 @@
     <p class="hint import-note">Комментарий из Yclients (похоже на канал продажи): «{{ import_note }}»</p>
     {% endif %}
     <form action="{{ url_for('import_confirm', candidate_id=import_candidate.id) if import_candidate
-                    else (url_for('edit_trip', trip_id=edit_trip.id) if edit_trip else url_for('add_trip')) }}"
+                    else url_for('edit_trip', trip_id=edit_trip.id) }}"
           method="post" class="entry-form" id="trip-form">
 
       <div class="form-group">
@@ -242,8 +242,7 @@
       <div class="field field-submit">
         <button type="submit">
           {% if import_candidate %}Подтвердить и создать рейс
-          {% elif edit_trip %}Сохранить изменения
-          {% else %}Добавить рейс{% endif %}
+          {% else %}Сохранить изменения{% endif %}
         </button>
         {% if edit_trip %}
         <a href="{{ url_for('trips_index') }}" class="btn-cancel">Отмена</a>
@@ -255,6 +254,7 @@
     <p class="hint">Выбор катера подставит топливо/стоянку/комиссию, вид рейса — ставку и часы. Все значения можно поправить вручную перед сохранением.</p>
     </div>
   </details>
+  {% endif %}
 
   <details class="panel import-panel"{{ ' open' if open_import }}>
     <summary>
@@ -641,7 +641,7 @@
         <div class="empty-state">
           {% include '_empty_state_logo.html' %}
           <div class="t">За выбранный период рейсов нет</div>
-          <div class="s">Добавьте рейс через форму выше или смените период/катер в фильтре.</div>
+          <div class="s">Рейсы появятся после завершения карточек в расписании. Также можно сменить период или катер в фильтре.</div>
         </div>
         {% endif %}
       </div>
@@ -709,7 +709,7 @@
         <div class="empty-state">
           {% include '_empty_state_logo.html' %}
           <div class="t">За выбранный период записей нет</div>
-          <div class="s">Добавьте рейс через форму выше или смените период/катер в фильтре.</div>
+          <div class="s">Рейсы появятся после завершения карточек в расписании. Также можно сменить период или катер в фильтре.</div>
         </div>
         {% endif %}
       </div>

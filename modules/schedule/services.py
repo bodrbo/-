@@ -829,7 +829,7 @@ def auto_close_schedule_items(db, create_trip, get_role_rate, apply_minimum_shif
 
     `create_trip(db, payload, needs_review=False)` is injected from app.py
     (wraps _payload_to_form/_process_trip_form/_insert_trip, the exact path
-    the manual "Добавить рейс" form and the YCLIENTS import already share)
+    used by the trip editor and the YCLIENTS import)
     — returns (errors, trip_id). `get_role_rate(db, role)` is injected from
     modules.payroll_rates (Зарплаты -> Ставки -> Ставки экскурсий) — one
     ₽/hour rate per crew role, not per trip type. `apply_minimum_shift(db,

@@ -57,12 +57,22 @@ class TripEditModalTests(unittest.TestCase):
         return MultiDict(values.items())
 
     def _create_trip(self):
-        response = self.client.post("/trips/add", data=self.trip_form())
-        self.assertEqual(response.status_code, 302)
         with application_module.app.app_context():
-            return application_module.get_db().execute(
-                "SELECT id FROM trips ORDER BY id DESC LIMIT 1"
-            ).fetchone()["id"]
+            db = application_module.get_db()
+            errors, data = application_module._process_trip_form(db, self.trip_form())
+            self.assertFalse(errors)
+            trip_id = application_module._insert_trip(db, data, source="test")
+            db.commit()
+            return trip_id
+
+    def test_manual_trip_creation_is_removed(self):
+        response = self.client.get("/trips")
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Добавить рейс", html)
+        self.assertNotIn('/trips/add', html)
+        self.assertEqual(self.client.post("/trips/add", data=self.trip_form()).status_code, 404)
 
     def test_trip_list_opens_editing_in_modal(self):
         response = self.client.get("/trips?month=2026-09&boat=Ларус")

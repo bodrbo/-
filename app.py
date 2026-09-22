@@ -4696,55 +4696,6 @@ def trips_index():
     )
 
 
-@app.route("/trips/add", methods=["POST"])
-@admin_login_required
-def add_trip():
-    db = get_db()
-    errors, data = _process_trip_form(db, request.form)
-    if errors:
-        ctx = _trips_list_context(db)
-        return render_template(
-            "trips.html", **ctx, **_trips_common_kwargs(db),
-            edit_trip=None, errors=errors, form_values=request.form,
-        ), 400
-
-    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-
-    entry_ids = []
-    for item in data["labor_items"]:
-        cur = db.execute(
-            "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (item["employee"], item["work_type"], item["rate"], item["quantity"],
-             item["amount"], data["trip_date"], now),
-        )
-        entry_ids.append(cur.lastrowid)
-
-    cur2 = db.execute(
-        "INSERT INTO trips (boat, trip_date, trip_time, work_type, entry_id, revenue, sale_channel, "
-        "commission_pct, commission_amount, labor_cost, fuel_cost, mooring_cost, extra_total, "
-        "remainder, investor_payout, my_share, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (data["boat"], data["trip_date"], data["trip_time"], data["work_type"],
-         entry_ids[0] if entry_ids else None,
-         data["revenue"], data["sale_channel"], data["commission_pct"], data["commission_amount"],
-         data["labor_cost"], data["fuel_cost"], data["mooring_cost"], data["extra_total"],
-         data["remainder"], data["investor_payout"], data["my_share"], now),
-    )
-    trip_id = cur2.lastrowid
-    for eid in entry_ids:
-        db.execute(
-            "INSERT INTO trip_labor (trip_id, entry_id) VALUES (?, ?)", (trip_id, eid)
-        )
-    for desc, amt in data["expenses"]:
-        db.execute(
-            "INSERT INTO trip_expenses (trip_id, description, amount) VALUES (?, ?, ?)",
-            (trip_id, desc, amt),
-        )
-    db.commit()
-    return redirect(url_for("trips_index"))
-
-
 @app.route("/trips/edit/<int:trip_id>", methods=["GET", "POST"])
 @admin_login_required
 def edit_trip(trip_id):
@@ -13252,8 +13203,9 @@ def _import_yclients_trip_records(
 ):
     """Import one already-fetched YCLIENTS window, safely on repeated runs.
 
-    The manual form and the hourly cron intentionally share this path so
-    both create identical trips, payroll entries and investor calculations.
+    Manual import confirmation and the hourly cron intentionally share this
+    path so both create identical trips, payroll entries and investor
+    calculations.
     Invalid or ambiguous records remain in ``import_candidates`` for an
     administrator instead of being discarded by the background job.
     """
@@ -13807,11 +13759,11 @@ def _insert_trip(db, data, *, commission_is_manual=False, source="manual", needs
     """Write a validated trip (as returned by _process_trip_form) plus its
     labor entries and extra expenses. Returns the new trip id.
 
-    source/needs_review distinguish where a trip came from (manual form,
-    YCLIENTS import, or the internal-schedule auto-close job) and whether
-    that origin had to guess at a cost/rate it couldn't fill in for real —
-    see modules/schedule/services.py::auto_close_schedule_items, the only
-    caller that passes source="schedule_auto"."""
+    source/needs_review distinguish where a trip came from (a legacy manual
+    record, YCLIENTS import, or the internal-schedule auto-close job) and
+    whether that origin had to guess at a cost/rate it couldn't fill in for
+    real — see modules/schedule/services.py::auto_close_schedule_items, the
+    only caller that passes source="schedule_auto"."""
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     entry_ids = []
     for item in data["labor_items"]:
@@ -13851,7 +13803,7 @@ def _insert_trip(db, data, *, commission_is_manual=False, source="manual", needs
 def _payload_to_form(payload):
     """Turn a stored import-candidate payload back into a form-like
     MultiDict so it can go through the same _process_trip_form validation
-    that the manual "Добавить рейс" form uses."""
+    used by trip editing and import confirmation."""
     form = MultiDict()
     form["boat"] = payload.get("boat", "")
     form["trip_date"] = payload.get("trip_date", "")
@@ -13895,7 +13847,7 @@ def _try_auto_import_candidate(db, row):
     doesn't validate — most commonly an unresolved boat color or a Yclients
     service name that isn't in YCLIENTS_SERVICE_TO_WORK_TYPE yet (missing
     вид рейса means the hours/rate can't be filled in, which fails
-    validation same as an empty field would in the manual form). Also
+    validation same as an empty field would in the confirmation form). Also
     returns False without touching anything for a needs_review candidate
     (see import_fetch) — auto-creating a trip for one would just produce a
     duplicate of the trip it's actually about. Also returns False (queued,
