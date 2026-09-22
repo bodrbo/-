@@ -425,14 +425,29 @@ def save_item(db, item_id, data, assignments, participants, timestamp, keep_part
         # keeps a manually removed auto-added product from reappearing the
         # next time someone re-saves the trip for an unrelated reason.
         existing_client_ids = set()
+        reusable_booking_participant = None
         if item_id is not None:
-            existing_client_ids = {
-                row["client_id"] for row in db.execute(
-                    "SELECT client_id FROM schedule_participants "
-                    "WHERE schedule_item_id = ?",
-                    (item_id,),
-                ).fetchall()
-            }
+            existing_participants = db.execute(
+                "SELECT id, client_id FROM schedule_participants "
+                "WHERE schedule_item_id = ? ORDER BY id",
+                (item_id,),
+            ).fetchall()
+            existing_client_ids = {row["client_id"] for row in existing_participants}
+            existing_item = db.execute(
+                "SELECT kind FROM schedule_items WHERE id = ?", (item_id,)
+            ).fetchone()
+            # An individual booking has exactly one participant. Keep that
+            # row stable while its client details or price are edited so
+            # manual/ЮKassa payments remain attached to the booking.
+            if (
+                not keep_participants
+                and data["kind"] == "booking"
+                and existing_item is not None
+                and existing_item["kind"] == "booking"
+                and len(existing_participants) == 1
+                and len(participants) == 1
+            ):
+                reusable_booking_participant = existing_participants[0]
         if item_id is None:
             cursor = db.execute(
                 "INSERT INTO schedule_items "
@@ -479,10 +494,17 @@ def save_item(db, item_id, data, assignments, participants, timestamp, keep_part
                 (item_id,),
             )
             if not keep_participants:
-                db.execute(
-                    "DELETE FROM schedule_participants WHERE schedule_item_id = ?",
-                    (item_id,),
-                )
+                if reusable_booking_participant is None:
+                    db.execute(
+                        "DELETE FROM schedule_participants WHERE schedule_item_id = ?",
+                        (item_id,),
+                    )
+                else:
+                    db.execute(
+                        "DELETE FROM schedule_participants "
+                        "WHERE schedule_item_id = ? AND id != ?",
+                        (item_id, reusable_booking_participant["id"]),
+                    )
         for assignment in assignments:
             db.execute(
                 "INSERT INTO schedule_assignments "
@@ -502,7 +524,9 @@ def save_item(db, item_id, data, assignments, participants, timestamp, keep_part
             "SELECT id FROM excursion_addon_products WHERE auto_add_service_id = ?",
             (data["service_id"],),
         ).fetchall() if data.get("service_id") is not None and not keep_participants else []
-        for participant in ([] if keep_participants else participants):
+        for participant_index, participant in enumerate(
+            [] if keep_participants else participants
+        ):
             client_id = participant["client_id"]
             if client_id is None:
                 cursor = db.execute(
@@ -516,22 +540,47 @@ def save_item(db, item_id, data, assignments, participants, timestamp, keep_part
                 )
                 client_id = cursor.lastrowid
             ensure_segment(db, client_id, EXCURSION_SEGMENT, timestamp)
-            db.execute(
-                "INSERT INTO schedule_participants "
-                "(schedule_item_id, client_id, client_name, client_phone, "
-                "guests_count, price, prepayment, payment_due, created_at, "
-                "source, source_ref, sales_partner_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    item_id, client_id, participant["client_name"],
-                    participant["client_phone"], participant["guests_count"],
-                    participant["price"], participant.get("prepayment", 0),
-                    participant.get("payment_due", participant["price"]), timestamp,
-                    participant.get("source", "internal"),
-                    participant.get("source_ref"),
-                    participant.get("sales_partner_id"),
-                ),
-            )
+            if reusable_booking_participant is not None and participant_index == 0:
+                old_client_id = reusable_booking_participant["client_id"]
+                db.execute(
+                    "UPDATE schedule_participants SET client_id = ?, client_name = ?, "
+                    "client_phone = ?, guests_count = ?, price = ?, prepayment = ?, "
+                    "payment_due = ?, source = ?, source_ref = ?, sales_partner_id = ? "
+                    "WHERE id = ? AND schedule_item_id = ?",
+                    (
+                        client_id, participant["client_name"],
+                        participant["client_phone"], participant["guests_count"],
+                        participant["price"], participant.get("prepayment", 0),
+                        participant.get("payment_due", participant["price"]),
+                        participant.get("source", "internal"),
+                        participant.get("source_ref"),
+                        participant.get("sales_partner_id"),
+                        reusable_booking_participant["id"], item_id,
+                    ),
+                )
+                if old_client_id != client_id:
+                    db.execute(
+                        "UPDATE schedule_participant_addons SET client_id = ? "
+                        "WHERE schedule_item_id = ? AND client_id = ?",
+                        (client_id, item_id, old_client_id),
+                    )
+            else:
+                db.execute(
+                    "INSERT INTO schedule_participants "
+                    "(schedule_item_id, client_id, client_name, client_phone, "
+                    "guests_count, price, prepayment, payment_due, created_at, "
+                    "source, source_ref, sales_partner_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        item_id, client_id, participant["client_name"],
+                        participant["client_phone"], participant["guests_count"],
+                        participant["price"], participant.get("prepayment", 0),
+                        participant.get("payment_due", participant["price"]), timestamp,
+                        participant.get("source", "internal"),
+                        participant.get("source_ref"),
+                        participant.get("sales_partner_id"),
+                    ),
+                )
             if auto_add_products and client_id not in existing_client_ids:
                 for product in auto_add_products:
                     db.execute(

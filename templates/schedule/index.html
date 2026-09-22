@@ -338,6 +338,7 @@
           <div><span>Предоплата на Tripster</span><strong data-payment-prepayment>0 ₽</strong></div>
           <div><span>Сумма к доплате</span><strong data-payment-due>0 ₽</strong></div>
         </div>
+        <div class="schedule-booking-payments schedule-field-wide" id="scheduleBookingPayments" hidden></div>
       </div>
 
       <div class="schedule-event-fields" id="scheduleEventFields" hidden>
@@ -671,6 +672,7 @@
     canceled: 'Отменён',
   };
   let scheduleDetailItemId = null;
+  let scheduleEditingItemId = null;
   const scheduleDetailExpandedIds = new Set();
   const scheduleClientTimers = new WeakMap();
   const scheduleClientRequests = new WeakMap();
@@ -796,6 +798,10 @@
     document.getElementById('scheduleCustomerPrepayment').value = '0';
     document.getElementById('scheduleCustomerPaymentDue').value = '0';
     document.getElementById('scheduleBookingPaymentBreakdown').hidden = true;
+    const bookingPayments = document.getElementById('scheduleBookingPayments');
+    bookingPayments.hidden = true;
+    bookingPayments.replaceChildren();
+    scheduleEditingItemId = null;
     document.getElementById('scheduleAssignments').innerHTML = '';
     document.getElementById('scheduleParticipantRows').innerHTML = '';
     document.getElementById('scheduleLegacyParticipants').hidden = true;
@@ -836,6 +842,7 @@
     resetScheduleForm();
     const item = scheduleItems.find(candidate => candidate.id === itemId);
     if (!item) return;
+    scheduleEditingItemId = item.id;
     if (tripInfoOnly) {
       document.getElementById('scheduleParticipantSection').hidden = true;
       document.getElementById('scheduleParticipantSectionHint').hidden = false;
@@ -914,6 +921,7 @@
       renderScheduleAddons(item);
     }
     syncScheduleKind();
+    renderScheduleBookingPayments(item);
     setScheduleModalOpen(true);
   }
   function scheduleAddonProductOptions(selectedId) {
@@ -1008,6 +1016,7 @@
     if (!item) return;
     item.participants = participants;
     renderScheduleAddons(item);
+    renderScheduleBookingPayments(item);
   }
   function addScheduleAddon(itemId, clientId, productId, quantity) {
     fetch(`${scheduleCreateUrl}/${itemId}/addons`, {
@@ -1446,6 +1455,21 @@
     return block;
   }
 
+  function renderScheduleBookingPayments(item) {
+    const container = document.getElementById('scheduleBookingPayments');
+    if (!container) return;
+    container.replaceChildren();
+    const participant = item && item.kind === 'booking'
+      ? (item.participants || [])[0]
+      : null;
+    if (!participant || scheduleEditingItemId !== item.id) {
+      container.hidden = true;
+      return;
+    }
+    container.appendChild(buildScheduleDetailClientPayments(item, participant));
+    container.hidden = false;
+  }
+
   function createScheduleManualPayment(itemId, participantId, amount, paymentMethod, submitBtn) {
     submitBtn.disabled = true;
     const originalText = submitBtn.textContent;
@@ -1458,7 +1482,7 @@
       .then(r => r.json())
       .then(data => {
         if (!data.ok) { alert(data.message || 'Не удалось записать оплату.'); return; }
-        scheduleDetailApplyUpdate(data);
+        scheduleApplyParticipantUpdate(itemId, data);
       })
       .catch(() => alert('Не удалось записать оплату. Попробуйте ещё раз.'))
       .finally(() => {
@@ -1473,7 +1497,7 @@
       .then(r => r.json())
       .then(data => {
         if (!data.ok) { alert(data.message || 'Не удалось удалить платёж.'); return; }
-        scheduleDetailApplyUpdate(data);
+        scheduleApplyParticipantUpdate(itemId, data);
       })
       .catch(() => alert('Не удалось удалить платёж. Попробуйте ещё раз.'));
   }
@@ -1502,7 +1526,7 @@
         if (!data.ok) { alert(data.message || 'Не удалось создать ссылку на оплату.'); return; }
         const participant = (data.participants || []).find(p => p.id === participantId);
         const payment = participant && participant.payments && participant.payments[0];
-        const finish = () => scheduleDetailApplyUpdate(data);
+        const finish = () => scheduleApplyParticipantUpdate(itemId, data);
         if (!payment || !payment.confirmation_url) { finish(); return; }
         scheduleCopyToClipboard(payment.confirmation_url).then(() => {
           if (submitBtn) {
@@ -1520,7 +1544,7 @@
       .then(r => r.json())
       .then(data => {
         if (!data.ok) { alert(data.message || 'Не удалось проверить оплату.'); return; }
-        scheduleDetailApplyUpdate(data);
+        scheduleApplyParticipantUpdate(itemId, data);
       })
       .catch(() => alert('Не удалось проверить оплату. Попробуйте ещё раз.'));
   }
@@ -1530,7 +1554,7 @@
       .then(r => r.json())
       .then(data => {
         if (!data.ok) { alert(data.message || 'Не удалось удалить ссылку.'); return; }
-        scheduleDetailApplyUpdate(data);
+        scheduleApplyParticipantUpdate(itemId, data);
       })
       .catch(() => alert('Не удалось удалить ссылку. Попробуйте ещё раз.'));
   }
@@ -1585,13 +1609,19 @@
     });
     return form;
   }
-  function scheduleDetailApplyUpdate(data) {
-    const item = scheduleItems.find(candidate => candidate.id === scheduleDetailItemId);
+  function scheduleApplyParticipantUpdate(itemId, data) {
+    const item = scheduleItems.find(candidate => candidate.id === itemId);
     if (!item) return;
     item.participants = data.participants;
     item.participants_count = data.participants_count;
     if (data.capacity != null) item.capacity = data.capacity;
-    renderScheduleDetailClients(item);
+    renderScheduleAddons(item);
+    renderScheduleBookingPayments(item);
+    if (scheduleDetailItemId === itemId) renderScheduleDetailClients(item);
+  }
+  function scheduleDetailApplyUpdate(data) {
+    if (scheduleDetailItemId == null) return;
+    scheduleApplyParticipantUpdate(scheduleDetailItemId, data);
   }
   function submitScheduleQuickAdd(event) {
     event.preventDefault();

@@ -14,6 +14,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         with application_module.app.app_context():
             db = application_module.get_db()
             db.execute("DELETE FROM schedule_day_crew")
+            db.execute("DELETE FROM schedule_manual_payments")
             db.execute("DELETE FROM schedule_participants")
             db.execute("DELETE FROM schedule_assignments")
             db.execute("DELETE FROM schedule_items")
@@ -317,6 +318,49 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             f'data-move-url="/schedule/items/{item["id"]}/move"', page
         )
         self.assertIn('onpointerdown="startScheduleDrag(event, this)"', page)
+        self.assertIn('id="scheduleBookingPayments"', page)
+
+    def test_individual_booking_keeps_manual_payment_when_edited(self):
+        self.login()
+        self.assertEqual(self.create_booking().status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item = db.execute("SELECT id FROM schedule_items").fetchone()
+            participant = db.execute(
+                "SELECT id FROM schedule_participants WHERE schedule_item_id = ?",
+                (item["id"],),
+            ).fetchone()
+            item_id = item["id"]
+            participant_id = participant["id"]
+
+        payment_response = self.client.post(
+            f"/schedule/items/{item_id}/participants/{participant_id}/manual-payments",
+            json={"amount": "5000", "payment_method": "cashless"},
+        )
+        self.assertEqual(payment_response.status_code, 200)
+
+        update_response = self.client.post(
+            f"/schedule/items/{item_id}",
+            data=self.booking_data(customer_price="19000", note="Детали уточнены"),
+        )
+        self.assertEqual(update_response.status_code, 302)
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            updated_participant = db.execute(
+                "SELECT id, price FROM schedule_participants WHERE schedule_item_id = ?",
+                (item_id,),
+            ).fetchone()
+            payment = db.execute(
+                "SELECT participant_id, amount, payment_method "
+                "FROM schedule_manual_payments WHERE schedule_item_id = ?",
+                (item_id,),
+            ).fetchone()
+        self.assertEqual(updated_participant["id"], participant_id)
+        self.assertEqual(updated_participant["price"], 19000)
+        self.assertEqual(payment["participant_id"], participant_id)
+        self.assertEqual(payment["amount"], 5000)
+        self.assertEqual(payment["payment_method"], "cashless")
 
     def test_schedule_routes_notify_on_assignment_change_and_deletion(self):
         self.login()
