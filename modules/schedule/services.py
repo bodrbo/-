@@ -417,7 +417,17 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
     capacity = None
     participants = []
     participants_count = 0
+    booking_guests_count = None
     if kind == "booking":
+        raw_booking_guests = str(form.get("guests_count") or "").strip()
+        if raw_booking_guests:
+            try:
+                booking_guests_count = int(raw_booking_guests)
+            except ValueError:
+                errors.append("Количество гостей должно быть целым числом.")
+            else:
+                if not 1 <= booking_guests_count <= 1000:
+                    errors.append("Количество гостей должно быть от 1 до 1000.")
         customer_name, customer_phone, participant = _validate_booking_client(
             db, form, errors
         )
@@ -530,6 +540,7 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
         "participants_count": participants_count,
         "customer_name": customer_name,
         "customer_phone": customer_phone,
+        "guests_count": booking_guests_count,
         "revenue": revenue,
         "note": note,
     }
@@ -1423,6 +1434,7 @@ def readonly_item_details(items):
             "start_time": item["start_time"],
             "end_time": item["end_time"],
             "capacity": item["capacity"],
+            "guests_count": item["guests_count"],
             "participants_count": participant_total or item["participants_count"],
             "participants": participants,
             "assignments": [

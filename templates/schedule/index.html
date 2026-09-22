@@ -196,7 +196,7 @@
               {% if card.kind == 'event' %}
               <span class="schedule-card-meta"><span class="schedule-card-event-count">{{ card.participants_count }}/{{ card.capacity }} мест</span><span class="schedule-card-role"> · {{ card.assignment_role }}</span></span>
               {% else %}
-              <span class="schedule-card-meta">{{ card.customer_name }}{% if card.customer_phone %} · {{ card.customer_phone }}{% endif %}</span>
+              <span class="schedule-card-meta">{{ card.customer_name }}{% if card.customer_phone %} · {{ card.customer_phone }}{% endif %} · {{ card.guests_count ~ ' гостей' if card.guests_count else 'Количество гостей неизвестно' }}</span>
               {% endif %}
               {% if card.weather %}
               <span class="schedule-card-weather{{ ' is-bad' if card.weather.is_bad }}">
@@ -329,6 +329,10 @@
                    oninput="markScheduleClientPriceManual(this)">
             <b>₽</b>
           </span>
+        </label>
+        <label class="field">
+          <span>Количество гостей</span>
+          <input type="number" name="guests_count" id="scheduleBookingGuestsCount" min="1" max="1000" placeholder="Необязательно">
         </label>
         <input type="hidden" name="customer_source_ref" id="scheduleCustomerSourceRef">
         <input type="hidden" name="customer_prepayment" id="scheduleCustomerPrepayment" value="0">
@@ -893,6 +897,7 @@
         bookingParticipant.payment_due || 0,
       );
     }
+    document.getElementById('scheduleBookingGuestsCount').value = item.guests_count || '';
     document.getElementById('scheduleCapacity').value = item.capacity || 10;
     if (item.kind === 'event' && !tripInfoOnly) {
       (item.participants || []).forEach(participant => addScheduleParticipant(
@@ -1948,7 +1953,9 @@
     }
     const total = Number(item.participants_count || 0);
     document.getElementById('scheduleViewGuestTotal').textContent =
-      item.capacity ? `${total} из ${item.capacity} мест` : scheduleGuestLabel(total);
+      item.kind === 'event'
+        ? (item.capacity ? `${total} из ${item.capacity} мест` : scheduleGuestLabel(total))
+        : (item.guests_count ? scheduleGuestLabel(item.guests_count) : 'Количество гостей неизвестно');
     modal.hidden = false;
     document.body.classList.add('schedule-modal-open');
     const header = document.querySelector('.schedule-topbar');

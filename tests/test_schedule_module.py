@@ -320,6 +320,41 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn('onpointerdown="startScheduleDrag(event, this)"', page)
         self.assertIn('id="scheduleBookingPayments"', page)
 
+    def test_individual_booking_guests_count_is_optional_and_saved(self):
+        self.login()
+        response = self.create_booking(guests_count="5")
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item = db.execute("SELECT * FROM schedule_items").fetchone()
+        self.assertEqual(item["guests_count"], 5)
+
+        page = self.client.get("/schedule?date=2026-09-05").get_data(as_text=True)
+        self.assertIn("Алия · +79118115476 · 5 гостей", page)
+
+    def test_individual_booking_shows_unknown_guests_count_when_blank(self):
+        self.login()
+        response = self.create_booking(guests_count="")
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item = db.execute("SELECT * FROM schedule_items").fetchone()
+        self.assertIsNone(item["guests_count"])
+
+        page = self.client.get("/schedule?date=2026-09-05").get_data(as_text=True)
+        self.assertIn("Алия · +79118115476 · Количество гостей неизвестно", page)
+
+    def test_individual_booking_rejects_invalid_guests_count(self):
+        self.login()
+        response = self.create_booking(guests_count="0")
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_count = db.execute(
+                "SELECT COUNT(*) AS c FROM schedule_items"
+            ).fetchone()["c"]
+        self.assertEqual(item_count, 0)
+
     def test_individual_booking_keeps_manual_payment_when_edited(self):
         self.login()
         self.assertEqual(self.create_booking().status_code, 302)

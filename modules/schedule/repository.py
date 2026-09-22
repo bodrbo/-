@@ -452,15 +452,16 @@ def save_item(db, item_id, data, assignments, participants, timestamp, keep_part
             cursor = db.execute(
                 "INSERT INTO schedule_items "
                 "(kind, boat, service_id, service_name, starts_at, ends_at, capacity, "
-                "participants_count, customer_name, customer_phone, revenue, "
-                "note, status, source, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', "
+                "participants_count, customer_name, customer_phone, guests_count, "
+                "revenue, note, status, source, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', "
                 "'internal', ?, ?)",
                 (
                     data["kind"], data["boat"], data["service_id"], data["service_name"],
                     data["starts_at"], data["ends_at"], data["capacity"],
                     data["participants_count"], data["customer_name"],
-                    data["customer_phone"], data["revenue"], data["note"],
+                    data["customer_phone"], data.get("guests_count"),
+                    data["revenue"], data["note"],
                     timestamp, timestamp,
                 ),
             )
@@ -479,13 +480,13 @@ def save_item(db, item_id, data, assignments, participants, timestamp, keep_part
             db.execute(
                 "UPDATE schedule_items SET kind = ?, boat = ?, service_id = ?, service_name = ?, "
                 "starts_at = ?, ends_at = ?, capacity = ?, participants_count = ?, "
-                "customer_name = ?, customer_phone = ?, revenue = ?, note = ?, "
+                "customer_name = ?, customer_phone = ?, guests_count = ?, revenue = ?, note = ?, "
                 "updated_at = ? WHERE id = ? AND deleted_at IS NULL",
                 (
                     data["kind"], data["boat"], data["service_id"], data["service_name"],
                     data["starts_at"], data["ends_at"], data["capacity"],
                     participants_count, data["customer_name"],
-                    data["customer_phone"], revenue, data["note"],
+                    data["customer_phone"], data.get("guests_count"), revenue, data["note"],
                     timestamp, item_id,
                 ),
             )

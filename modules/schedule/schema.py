@@ -35,6 +35,11 @@ def init_schema(conn):
         conn.execute("ALTER TABLE schedule_items ADD COLUMN source_updated_at TEXT")
     if "service_id" not in item_columns:
         conn.execute("ALTER TABLE schedule_items ADD COLUMN service_id INTEGER")
+    if "guests_count" not in item_columns:
+        # Individual bookings only — a plain optional headcount, not the
+        # group-event participant/guest tracking (schedule_participants).
+        # NULL means "not recorded", shown as "Количество гостей неизвестно".
+        conn.execute("ALTER TABLE schedule_items ADD COLUMN guests_count INTEGER")
     conn.execute(
         "UPDATE schedule_items SET service_id = ("
         "SELECT excursion_services.id FROM excursion_services "
