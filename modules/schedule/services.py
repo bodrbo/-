@@ -737,9 +737,11 @@ def create_item_from_trip(db, trip):
 
     Deliberately conservative: skips (does not guess) whenever the
     source data is ambiguous — no crew rows, a work_type that doesn't
-    match any excursion_services entry, or an employee name that doesn't
-    match anyone in the employees table — rather than creating a card
-    with missing or wrong crew/service data. Returns (success, message,
+    match any excursion_services entry, an employee name that doesn't
+    match anyone in the employees table, or the boat/time slot is
+    already occupied by a card from some other source (Tripster sync,
+    a manual entry) — rather than creating a card with missing/wrong
+    data or a silent boat-double-booking. Returns (success, message,
     item_id)."""
     labor_rows = repository.get_trip_labor(db, trip["id"])
     if not labor_rows:
@@ -779,6 +781,27 @@ def create_item_from_trip(db, trip):
         f"{trip['trip_date']} {trip['trip_time'] or '00:00'}", "%Y-%m-%d %H:%M"
     )
     ends = starts + dt.timedelta(hours=hours)
+    starts_value = starts.strftime("%Y-%m-%d %H:%M")
+    ends_value = ends.strftime("%Y-%m-%d %H:%M")
+
+    # A card for this same physical trip can already exist from a source
+    # this function never looks at — e.g. Tripster's own sync (source=
+    # 'tripster'), whose card gets its boat/crew filled in by hand and so
+    # never carries an accounting_trip_id for list_trips_without_schedule_card
+    # to notice. Reuse the exact conflict check validate_item_form runs on
+    # every manual save instead of blindly creating a second card that then
+    # makes editing either one fail with a boat/crew conflict.
+    boat_conflicts = repository.find_boat_conflicts(db, trip["boat"], starts_value, ends_value)
+    if boat_conflicts:
+        conflict = boat_conflicts[0]
+        return False, (
+            f"Катер «{trip['boat']}» на это время уже занят карточкой "
+            f"«{conflict['service_name']}» №{conflict['id']} "
+            f"({conflict['starts_at'][11:16]}–{conflict['ends_at'][11:16]}) — "
+            "похоже, этот рейс уже есть в расписании из другого источника. "
+            "Карточка не создана."
+        ), None
+
     kind = "booking" if "аренда" in base_service_name.lower() else "event"
 
     capacity = None
@@ -792,8 +815,8 @@ def create_item_from_trip(db, trip):
         "boat": trip["boat"],
         "service_id": service["id"],
         "service_name": service["name"],
-        "starts_at": starts.strftime("%Y-%m-%d %H:%M"),
-        "ends_at": ends.strftime("%Y-%m-%d %H:%M"),
+        "starts_at": starts_value,
+        "ends_at": ends_value,
         "capacity": capacity,
         "participants_count": 0,
         "customer_name": "",

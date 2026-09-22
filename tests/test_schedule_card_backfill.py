@@ -207,6 +207,43 @@ class ScheduleCardBackfillTests(unittest.TestCase):
         self.assertIn("сотрудник", message.lower())
         self.assertEqual(item_count, 0)
 
+    def test_skips_trip_when_another_card_already_occupies_the_slot(self):
+        # Reproduces the real production case (schedule card №1438 vs
+        # №1931): a Tripster-sourced card already sits on this boat/time
+        # (boat/crew assigned by hand, so it carries no accounting_trip_id
+        # for list_trips_without_schedule_card to notice), and the backfill
+        # tries to reconstruct the same physical trip from its own YCLIENTS
+        # trips row — must skip instead of double-booking the boat.
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+            db.execute(
+                "INSERT INTO schedule_items (kind, boat, service_name, starts_at, "
+                "ends_at, capacity, participants_count, customer_name, "
+                "customer_phone, revenue, note, status, source, created_at, "
+                "updated_at) "
+                "VALUES ('event', 'Бодрый Первый', 'Малый тур', "
+                "'2026-06-10 09:00', '2026-06-10 10:30', 10, 8, '', '', 29600, "
+                "'', 'scheduled', 'tripster', ?, ?)",
+                (now, now),
+            )
+            db.commit()
+
+            trip_id = self.make_trip(db)
+            self.add_labor(db, trip_id, "Карточка Тест Капитан", "Малый тур", quantity=1.5)
+            trip = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
+
+            ok, message, item_id = schedule_services.create_item_from_trip(db, trip)
+            item_count = db.execute(
+                "SELECT COUNT(*) AS c FROM schedule_items"
+            ).fetchone()["c"]
+
+        self.assertFalse(ok)
+        self.assertIsNone(item_id)
+        self.assertIn("уже занят", message)
+        self.assertIn("Малый тур", message)
+        self.assertEqual(item_count, 1)
+
     def test_skips_trip_with_unmapped_work_type(self):
         with application_module.app.app_context():
             db = application_module.get_db()
