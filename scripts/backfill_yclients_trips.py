@@ -24,15 +24,27 @@ real trip can get entered twice during the migration — once by hand/via
 the schedule, once via YCLIENTS — and both pipelines are live at once
 right now (the hourly YCLIENTS cron hasn't been cut over yet).
 
+Deliberately covers not-yet-happened bookings too (default range runs
+past today) — records are NOT pre-filtered to "already finished" the way
+the hourly cron filters them (see _yclients_completed_records); this
+matches the existing manual "/trips/import" admin page, which has always
+imported whatever date range is asked for, past or future. A future
+booking becomes a real trips row (payroll entries, investor split) right
+away, same as a completed one — if it later gets cancelled or moved in
+YCLIENTS, that needs a manual look on /trips (or a re-run of this script
+for that month, which will catch the cancellation via the same
+_remove_cancelled_imported_trips path the cron already relies on).
+
 Usage:
     python3 scripts/backfill_yclients_trips.py [--start YYYY-MM-DD] [--end YYYY-MM-DD]
 
-Default range is 2026-04-01 through today — trips before that date are
-out of scope for this backfill by business decision. After this finishes,
-check /trips "Ожидают подтверждения" for anything that didn't import
-cleanly (unmapped work type, unresolved boat color, a likely duplicate
-against an existing trip, etc.) — those need a manual look, same as any
-other YCLIENTS import candidate.
+Default range is 2026-04-01 through 2026-10-31 — both boundaries are a
+business decision (trips before 04-01 are out of scope for this backfill;
+trips are wanted through 10-31, including ones not yet run). After this
+finishes, check /trips "Ожидают подтверждения" for anything that didn't
+import cleanly (unmapped work type, unresolved boat color, a likely
+duplicate against an existing trip, etc.) — those need a manual look,
+same as any other YCLIENTS import candidate.
 """
 
 import argparse
@@ -83,7 +95,7 @@ def month_chunks(start_date, end_date):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start", default="2026-04-01", help="YYYY-MM-DD, default 2026-04-01")
-    parser.add_argument("--end", default=None, help="YYYY-MM-DD, default today")
+    parser.add_argument("--end", default="2026-10-31", help="YYYY-MM-DD, default 2026-10-31")
     args = parser.parse_args()
 
     if not application_module.yclients_configured():
@@ -93,7 +105,7 @@ def main():
         )
 
     start_date = dt.date.fromisoformat(args.start)
-    end_date = dt.date.fromisoformat(args.end) if args.end else dt.date.today()
+    end_date = dt.date.fromisoformat(args.end)
     if start_date > end_date:
         raise SystemExit("--start должен быть не позже --end.")
 
@@ -104,23 +116,28 @@ def main():
     }
     last_pending = 0
 
+    today = dt.date.today()
     with application_module.app.app_context():
         db = application_module.get_db()
         now = dt.datetime.now()
         for chunk_start, chunk_end in month_chunks(start_date, end_date):
             chunk_start_iso = chunk_start.isoformat()
             chunk_end_iso = chunk_end.isoformat()
-            print(f"[{chunk_start_iso} .. {chunk_end_iso}] запрашиваю YCLIENTS…", flush=True)
+            when = " (будущие рейсы)" if chunk_start > today else ""
+            print(f"[{chunk_start_iso} .. {chunk_end_iso}]{when} запрашиваю YCLIENTS…", flush=True)
             records = application_module.yclients_get_records(chunk_start_iso, chunk_end_iso)
             activity_ids = {
                 r["activity_id"] for r in records if r.get("activity_id")
             }
             activity_colors = application_module.yclients_get_activity_colors(activity_ids)
-            completed_records = application_module._yclients_completed_records(records, now)
 
+            # Not filtered to "already finished" (unlike the hourly cron) —
+            # this range deliberately includes bookings that haven't
+            # happened yet, matching how the manual /trips/import page has
+            # always handled an arbitrary date range.
             stats = application_module._import_yclients_trip_records(
                 db,
-                completed_records,
+                records,
                 activity_colors,
                 chunk_start_iso,
                 chunk_end_iso,
