@@ -272,3 +272,9 @@ def init_schema(conn):
         )
         """
     )
+
+    # schedule_service_rates (₽/hour by service + crew role) briefly lived
+    # here before the pay-rate model moved to a simpler per-role-only rate
+    # owned by modules.payroll_rates (Зарплаты -> Ставки -> Ставки
+    # экскурсий). Drop it if an earlier deploy already created it.
+    conn.execute("DROP TABLE IF EXISTS schedule_service_rates")

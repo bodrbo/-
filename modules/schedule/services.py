@@ -509,8 +509,15 @@ def _default_role_for_employee(employee):
     return "guide_captain"
 
 
-def move_item(db, item_id, start_time, source_employee_id, target_employee_id):
-    """Move a trip on its current day and replace only the dragged assignment."""
+def move_item(
+    db, item_id, start_time, source_employee_id, target_employee_id,
+    update_linked_trip_time=None,
+):
+    """Move a trip on its current day and replace only the dragged
+    assignment. update_linked_trip_time(db, trip_id, trip_date, trip_time),
+    injected from app.py, keeps the trip this item was auto-closed into
+    (if any) in sync — only date/time, since a move never changes the
+    item's duration, so hours/pay in entries need no recomputation."""
     item = repository.get_item(db, item_id)
     if item is None:
         return False, "Рейс не найден.", None
@@ -602,6 +609,11 @@ def move_item(db, item_id, start_time, source_employee_id, target_employee_id):
     )
     if not moved:
         return False, "Рейс изменился во время переноса. Обновите страницу.", None
+    if item["accounting_trip_id"] is not None and update_linked_trip_time is not None:
+        update_linked_trip_time(
+            db, item["accounting_trip_id"], new_start.strftime("%Y-%m-%d"),
+            new_start.strftime("%H:%M"),
+        )
     return True, "Рейс перенесён.", {
         "starts_at": starts_value,
         "ends_at": ends_value,
@@ -616,16 +628,222 @@ def move_item(db, item_id, start_time, source_employee_id, target_employee_id):
     }
 
 
-def delete_item(db, item_id):
+def delete_item(db, item_id, delete_linked_trip=None):
+    """delete_linked_trip(db, trip_id), injected from app.py, cascades the
+    deletion to the trip this item was auto-closed into (payroll entries,
+    trip_labor, trip_expenses — see app.py::_delete_trip_data) instead of
+    refusing to delete an already-closed item outright."""
     item = repository.get_item(db, item_id)
     if item is None:
         return False, "Рейс не найден."
-    if item["accounting_trip_id"] is not None:
-        return False, (
-            "Рейс уже связан с финансовым учётом. Сначала отвяжите его в разделе рейсов."
-        )
+    had_linked_trip = item["accounting_trip_id"] is not None
+    if had_linked_trip:
+        if delete_linked_trip is None:
+            return False, (
+                "Рейс уже связан с финансовым учётом. Сначала отвяжите его в разделе рейсов."
+            )
+        delete_linked_trip(db, item["accounting_trip_id"])
     deleted = repository.soft_delete_item(db, item_id, current_timestamp())
-    return (True, "Рейс удалён из расписания.") if deleted else (False, "Рейс не найден.")
+    if not deleted:
+        return False, "Рейс не найден."
+    message = (
+        "Рейс удалён из расписания вместе со связанными записями "
+        "(зарплата, доля инвестора)." if had_linked_trip
+        else "Рейс удалён из расписания."
+    )
+    return True, message
+
+
+_ROLE_SUFFIXES = (
+    (" гид/капитан", "guide_captain"),
+    (" гид-капитан", "guide_captain"),
+)
+
+
+def _split_role_from_work_type(work_type):
+    """A historical entries.work_type is a WORK_TYPES name, optionally
+    suffixed to mark the combined guide+captain rate (see
+    modules.payroll_rates — the suffix convention predates that module and
+    still lives in old entries rows). Returns (base_service_name, role)."""
+    text = str(work_type or "").strip()
+    lowered = text.lower()
+    for suffix, role in _ROLE_SUFFIXES:
+        if lowered.endswith(suffix):
+            return text[: -len(suffix)].strip(), role
+    return text, "captain"
+
+
+def create_item_from_trip(db, trip):
+    """Reconstruct a schedule_items card (+ assignments) for a trip that
+    was never entered through the schedule module — the historical-
+    backfill counterpart to auto_close_schedule_items, which links a
+    schedule card forward into a trip; this links a trip backward into a
+    schedule card. Used by scripts/backfill_yclients_trips.py so old
+    YCLIENTS trips show up on the calendar, not just in /trips.
+
+    Deliberately conservative: skips (does not guess) whenever the
+    source data is ambiguous — no crew rows, a work_type that doesn't
+    match any excursion_services entry, or an employee name that doesn't
+    match anyone in the employees table — rather than creating a card
+    with missing or wrong crew/service data. Returns (success, message,
+    item_id)."""
+    labor_rows = repository.get_trip_labor(db, trip["id"])
+    if not labor_rows:
+        return False, "Нет данных о сотрудниках рейса — карточка не создана.", None
+
+    base_service_name, _role = _split_role_from_work_type(labor_rows[0]["work_type"])
+    service = service_repository.get_service_by_name(db, base_service_name)
+    if service is None:
+        return False, (
+            f"Вид рейса «{base_service_name}» не сопоставлен ни с одной "
+            "услугой — карточка не создана."
+        ), None
+
+    assignments = []
+    hours = 0.0
+    for row in labor_rows:
+        employee_id = repository.get_employee_id_by_name(db, row["employee"])
+        if employee_id is None:
+            return False, (
+                f"Сотрудник «{row['employee']}» не найден в справочнике "
+                "сотрудников — карточка не создана."
+            ), None
+        _base, role = _split_role_from_work_type(row["work_type"])
+        assignments.append({
+            "employee_id": employee_id,
+            "employee_name": row["employee"],
+            "role": role,
+        })
+        hours = max(hours, float(row["quantity"] or 0))
+
+    if hours <= 0:
+        return False, "Не удалось определить длительность рейса — карточка не создана.", None
+    if not trip["trip_date"]:
+        return False, "У рейса не указана дата — карточка не создана.", None
+
+    starts = dt.datetime.strptime(
+        f"{trip['trip_date']} {trip['trip_time'] or '00:00'}", "%Y-%m-%d %H:%M"
+    )
+    ends = starts + dt.timedelta(hours=hours)
+    kind = "booking" if "аренда" in base_service_name.lower() else "event"
+
+    data = {
+        "kind": kind,
+        "boat": trip["boat"],
+        "service_id": service["id"],
+        "service_name": service["name"],
+        "starts_at": starts.strftime("%Y-%m-%d %H:%M"),
+        "ends_at": ends.strftime("%Y-%m-%d %H:%M"),
+        "capacity": None,
+        "participants_count": 0,
+        "customer_name": "",
+        "customer_phone": "",
+        "revenue": trip["revenue"],
+        "note": "Восстановлено из YCLIENTS при переходе на внутреннее расписание.",
+    }
+    timestamp = current_timestamp()
+    item_id = repository.save_item(db, None, data, assignments, [], timestamp)
+    repository.set_accounting_trip_id(db, item_id, trip["id"], timestamp)
+    db.commit()
+    return True, "Карточка создана.", item_id
+
+
+AUTO_CLOSE_GRACE_MINUTES = 20
+
+
+def auto_close_schedule_items(db, create_trip, get_role_rate, apply_minimum_shift=None, now=None):
+    """Turn every schedule item whose trip is over into a real trips row —
+    the internal-schedule replacement for the YCLIENTS import pipeline.
+    Called on a timer (see routes.cron_close_schedule_items), no admin
+    confirmation step.
+
+    `create_trip(db, payload, needs_review=False)` is injected from app.py
+    (wraps _payload_to_form/_process_trip_form/_insert_trip, the exact path
+    the manual "Добавить рейс" form and the YCLIENTS import already share)
+    — returns (errors, trip_id). `get_role_rate(db, role)` is injected from
+    modules.payroll_rates (Зарплаты -> Ставки -> Ставки экскурсий) — one
+    ₽/hour rate per crew role, not per trip type. `apply_minimum_shift(db,
+    start_date, end_date)`, also injected, tops up any crew member's day to
+    the guaranteed minimum shift rate once the items in that range are
+    closed (see app.py::_schedule_payroll_days, which replaces the YCLIENTS
+    staff-schedule call this used to depend on).
+
+    Idempotent: an item is only ever picked up once
+    (accounting_trip_id IS NULL), and gets accounting_trip_id set in the
+    same pass it's inserted, so a crashed/retried run never double-books
+    it. An item that fails validation (e.g. no crew assigned) is left
+    alone — it stays a candidate for the next run rather than being
+    silently dropped."""
+    now = now or dt.datetime.now()
+    cutoff = (now - dt.timedelta(minutes=AUTO_CLOSE_GRACE_MINUTES)).strftime("%Y-%m-%d %H:%M")
+    timestamp = current_timestamp()
+
+    stats = {"closed": 0, "needs_review": 0, "skipped": 0}
+    closed_dates = set()
+
+    for item in repository.list_items_ready_to_close(db, cutoff):
+        assignments = repository.list_assignments(db, item["id"])
+        if not assignments:
+            stats["skipped"] += 1
+            continue
+
+        starts = dt.datetime.strptime(item["starts_at"], "%Y-%m-%d %H:%M")
+        ends = dt.datetime.strptime(item["ends_at"], "%Y-%m-%d %H:%M")
+        hours = max((ends - starts).total_seconds() / 3600, 0)
+
+        needs_review = False
+        labor_items = []
+        for assignment in assignments:
+            role = assignment["role"]
+            rate = get_role_rate(db, role)
+            if not rate and role == "guide":
+                # No "guide" rate configured yet at Зарплаты -> Ставки ->
+                # Ставки экскурсий — falling back to the captain rate keeps
+                # this crew member paid rather than silently zeroed, at the
+                # cost of possibly being wrong; needs_review makes that
+                # visible on /trips.
+                rate = get_role_rate(db, "captain")
+                needs_review = True
+            if not rate:
+                rate = 0
+                needs_review = True
+            labor_items.append({
+                "employee": assignment["employee_name"],
+                "work_type": item["service_name"],
+                "quantity": round(hours, 2),
+                "rate": rate,
+            })
+
+        payload = {
+            "boat": item["boat"],
+            "trip_date": item["starts_at"][:10],
+            "trip_time": item["starts_at"][11:16],
+            "revenue": item["revenue"],
+            "sale_channel": (
+                "aggregator" if repository.item_has_sales_partner(db, item["id"]) else "direct"
+            ),
+            "commission_pct": 0,
+            "fuel_cost": 0,
+            "mooring_cost": 0,
+            "labor_items": labor_items,
+        }
+
+        errors, trip_id = create_trip(db, payload, needs_review=needs_review)
+        if errors:
+            stats["skipped"] += 1
+            continue
+
+        repository.set_accounting_trip_id(db, item["id"], trip_id, timestamp)
+        db.commit()
+        stats["closed"] += 1
+        if needs_review:
+            stats["needs_review"] += 1
+        closed_dates.add(item["starts_at"][:10])
+
+    if closed_dates and apply_minimum_shift:
+        apply_minimum_shift(db, min(closed_dates), max(closed_dates))
+
+    return stats
 
 
 def add_participant_addon(db, item_id, client_id, product_id, raw_quantity):

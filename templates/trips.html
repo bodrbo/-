@@ -545,6 +545,17 @@
             {% endfor %}
           </select>
         </div>
+        {% if needs_review_count %}
+        <div class="field field-narrow">
+          <label for="review-filter">&nbsp;</label>
+          <label class="trip-review-filter" for="review-filter">
+            <input type="checkbox" id="review-filter" name="review" value="1"
+                   {{ 'checked' if review_only }} onchange="this.form.submit()">
+            Требуют проверки
+            <span class="status-badge status-cancelled">{{ needs_review_count }}</span>
+          </label>
+        </div>
+        {% endif %}
       </form>
 
       <div>
@@ -652,7 +663,8 @@
                 <td class="muted">{{ t.trip_date|ru_date }}{% if not t.is_expense %} · {{ t.trip_time or '00:00' }}{% endif %}</td>
                 <td>{{ t.boat }}</td>
                 <td>
-                  {% if t.is_expense %}<span class="status-badge status-cancelled">Расход</span> {% endif %}{{ t.work_type }}
+                  {% if t.is_expense %}<span class="status-badge status-cancelled">Расход</span> {% endif %}
+                  {% if t.needs_review %}<span class="status-badge status-cancelled" title="Автозакрыт из расписания без ставки/комиссии/топлива — проверьте и сохраните.">Требует проверки</span> {% endif %}{{ t.work_type }}
                 </td>
                 {% if t.is_expense %}
                 <td class="muted">—</td>
@@ -764,7 +776,7 @@
     </header>
     <form method="post" class="entry-form trip-edit-modal-form" id="tripEditForm">
       <input type="hidden" name="return_url"
-             value="{{ url_for('trips_index', month=selected_month, boat=selected_boat) }}">
+             value="{{ url_for('trips_index', month=selected_month, boat=selected_boat, review=(1 if review_only else None)) }}">
       <div class="alert hidden" id="tripEditErrors" role="alert"></div>
 
       <div class="form-group">

@@ -34,6 +34,11 @@ def create_schedule_blueprint(
     phone_normalizer=lambda phone: phone,
     weather_configured=lambda: False,
     weather_sync=None,
+    create_trip_from_schedule=None,
+    get_role_rate=None,
+    apply_minimum_shift=None,
+    delete_linked_trip=None,
+    update_linked_trip_time=None,
 ):
     blueprint = Blueprint("schedule", __name__)
 
@@ -195,6 +200,7 @@ def create_schedule_blueprint(
             payload.get("start_time"),
             payload.get("source_employee_id"),
             payload.get("target_employee_id"),
+            update_linked_trip_time=update_linked_trip_time,
         )
         if not success:
             return jsonify({"ok": False, "message": message}), 400
@@ -212,7 +218,9 @@ def create_schedule_blueprint(
             if item is not None
             else services.parse_day(request.form.get("return_date")).isoformat()
         )
-        success, message = services.delete_item(get_db(), item_id)
+        success, message = services.delete_item(
+            get_db(), item_id, delete_linked_trip=delete_linked_trip,
+        )
         if success:
             notify_item_changes(before, None)
         set_notice(message, success)
@@ -460,6 +468,22 @@ def create_schedule_blueprint(
             f"{stats['updated']} updated, {stats['cancelled']} cancelled, "
             f"{stats['matched']} matched, {stats['pending']} pending, "
             f"{stats['invalid']} invalid",
+            200,
+        )
+
+    @blueprint.route("/internal/cron/close-schedule-items")
+    def cron_close_schedule_items():
+        if not cron_secret or request.args.get("token") != cron_secret:
+            return "forbidden", 403
+        if create_trip_from_schedule is None or get_role_rate is None:
+            return "not configured", 503
+        stats = services.auto_close_schedule_items(
+            get_db(), create_trip_from_schedule, get_role_rate,
+            apply_minimum_shift=apply_minimum_shift,
+        )
+        return (
+            f"ok: {stats['closed']} closed, {stats['needs_review']} flagged, "
+            f"{stats['skipped']} skipped",
             200,
         )
 

@@ -8315,6 +8315,8 @@ table.records tr.row-expense td { background: rgba(179, 64, 44, 0.06); }
 table.records tr.row-expense:hover td { background: rgba(179, 64, 44, 0.12); }
 table.records tr.row-expense td.amount { color: var(--danger); }
 
+.trip-review-filter { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+
 .empty { color: var(--muted); font-style: italic; }
 
 /* --- empty state (with icon) --- */
