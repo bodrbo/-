@@ -41,6 +41,20 @@ def list_crew_employees(db):
     return list(employees.values())
 
 
+def get_employee_id_by_name(db, name):
+    """Used by services.create_item_from_trip to resolve a historical
+    trip's entries.employee (a plain name string) back to a real
+    employee_id. Not filtered to active positions or deleted_at — a
+    historical card should still reflect who actually worked the trip,
+    even if they've since left; an active match wins on a name collision."""
+    row = db.execute(
+        "SELECT id FROM employees WHERE name = ? "
+        "ORDER BY deleted_at IS NULL DESC LIMIT 1",
+        (name,),
+    ).fetchone()
+    return row["id"] if row else None
+
+
 def list_day_crew_ids(db, day):
     return [
         row["employee_id"]
@@ -169,6 +183,49 @@ def item_has_sales_partner(db, item_id):
         "WHERE schedule_item_id = ? AND sales_partner_id IS NOT NULL LIMIT 1",
         (item_id,),
     ).fetchone() is not None
+
+
+def list_trips_without_schedule_card(db, start_date, end_date):
+    """YCLIENTS-sourced trips rows in this date range that don't yet
+    have a schedule_items card pointing at them — the backfill target for
+    services.create_item_from_trip. `trips`/`entries`/`trip_labor` are
+    owned by app.py, not this module, but modules.schedule already reads
+    across module boundaries elsewhere (excursion_services, clients) —
+    same convention."""
+    return db.execute(
+        "SELECT * FROM trips WHERE source = 'yclients' "
+        "AND trip_date BETWEEN ? AND ? "
+        "AND id NOT IN ("
+        "SELECT accounting_trip_id FROM schedule_items "
+        "WHERE accounting_trip_id IS NOT NULL"
+        ") ORDER BY trip_date, trip_time",
+        (start_date, end_date),
+    ).fetchall()
+
+
+def get_trip_labor(db, trip_id):
+    """Per-employee work_type/quantity(hours) for a trip, the source data
+    for reconstructing schedule_assignments. Falls back to the legacy
+    single trips.entry_id the same way app.py's own trip-edit screen does,
+    for a trip old enough to predate multi-employee trip_labor rows."""
+    rows = db.execute(
+        "SELECT entries.employee, entries.work_type, entries.quantity "
+        "FROM trip_labor JOIN entries ON entries.id = trip_labor.entry_id "
+        "WHERE trip_labor.trip_id = ?",
+        (trip_id,),
+    ).fetchall()
+    if rows:
+        return rows
+    trip = db.execute(
+        "SELECT entry_id FROM trips WHERE id = ?", (trip_id,)
+    ).fetchone()
+    if trip is None or not trip["entry_id"]:
+        return []
+    row = db.execute(
+        "SELECT employee, work_type, quantity FROM entries WHERE id = ?",
+        (trip["entry_id"],),
+    ).fetchone()
+    return [row] if row else []
 
 
 def list_day_items(db, day):

@@ -45,6 +45,17 @@ finishes, check /trips "Ожидают подтверждения" for anything 
 import cleanly (unmapped work type, unresolved boat color, a likely
 duplicate against an existing trip, etc.) — those need a manual look,
 same as any other YCLIENTS import candidate.
+
+Second phase: after trips are imported/reconciled, reconstructs a
+schedule_items card (+ crew assignments) for every YCLIENTS trip in the
+range that doesn't have one yet, via
+modules.schedule.services.create_item_from_trip — this runs over ALL
+matching trips in the date range regardless of when they were originally
+imported (including ones the hourly cron already created before this
+script ever ran), not just ones touched in this pass. Skips (and reports)
+a trip it can't confidently reconstruct — no crew rows, an unmapped work
+type, or an employee name with no match in the employees table — rather
+than guessing.
 """
 
 import argparse
@@ -75,6 +86,8 @@ load_env_file(PROJECT_ROOT.parent / ".env")
 load_env_file(PROJECT_ROOT / ".env")
 
 import app as application_module  # noqa: E402
+from modules.schedule import repository as schedule_repository  # noqa: E402
+from modules.schedule import services as schedule_services  # noqa: E402
 
 
 def month_chunks(start_date, end_date):
@@ -185,6 +198,29 @@ def main():
             f"{last_pending} записей (включая дубликаты выше, если есть) — "
             "разберите их вручную перед тем как считать бэкфилл завершённым."
         )
+
+    print("\nСоздаю карточки в расписании для рейсов без карточки…", flush=True)
+    created = 0
+    skip_reasons = {}
+    with application_module.app.app_context():
+        db = application_module.get_db()
+        trips = schedule_repository.list_trips_without_schedule_card(
+            db, start_date.isoformat(), end_date.isoformat(),
+        )
+        for trip in trips:
+            ok, message, _item_id = schedule_services.create_item_from_trip(db, trip)
+            if ok:
+                created += 1
+            else:
+                skip_reasons[message] = skip_reasons.get(message, 0) + 1
+    print(
+        f"Карточек создано: {created} из {len(trips)} рейсов без карточки "
+        f"в этом диапазоне."
+    )
+    if skip_reasons:
+        print("Пропущено (карточка не создана) по причинам:")
+        for reason, count in sorted(skip_reasons.items(), key=lambda kv: -kv[1]):
+            print(f"  {count:4d}  {reason}")
 
 
 if __name__ == "__main__":

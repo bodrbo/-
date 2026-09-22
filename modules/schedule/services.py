@@ -654,6 +654,100 @@ def delete_item(db, item_id, delete_linked_trip=None):
     return True, message
 
 
+_ROLE_SUFFIXES = (
+    (" гид/капитан", "guide_captain"),
+    (" гид-капитан", "guide_captain"),
+)
+
+
+def _split_role_from_work_type(work_type):
+    """A historical entries.work_type is a WORK_TYPES name, optionally
+    suffixed to mark the combined guide+captain rate (see
+    modules.payroll_rates — the suffix convention predates that module and
+    still lives in old entries rows). Returns (base_service_name, role)."""
+    text = str(work_type or "").strip()
+    lowered = text.lower()
+    for suffix, role in _ROLE_SUFFIXES:
+        if lowered.endswith(suffix):
+            return text[: -len(suffix)].strip(), role
+    return text, "captain"
+
+
+def create_item_from_trip(db, trip):
+    """Reconstruct a schedule_items card (+ assignments) for a trip that
+    was never entered through the schedule module — the historical-
+    backfill counterpart to auto_close_schedule_items, which links a
+    schedule card forward into a trip; this links a trip backward into a
+    schedule card. Used by scripts/backfill_yclients_trips.py so old
+    YCLIENTS trips show up on the calendar, not just in /trips.
+
+    Deliberately conservative: skips (does not guess) whenever the
+    source data is ambiguous — no crew rows, a work_type that doesn't
+    match any excursion_services entry, or an employee name that doesn't
+    match anyone in the employees table — rather than creating a card
+    with missing or wrong crew/service data. Returns (success, message,
+    item_id)."""
+    labor_rows = repository.get_trip_labor(db, trip["id"])
+    if not labor_rows:
+        return False, "Нет данных о сотрудниках рейса — карточка не создана.", None
+
+    base_service_name, _role = _split_role_from_work_type(labor_rows[0]["work_type"])
+    service = service_repository.get_service_by_name(db, base_service_name)
+    if service is None:
+        return False, (
+            f"Вид рейса «{base_service_name}» не сопоставлен ни с одной "
+            "услугой — карточка не создана."
+        ), None
+
+    assignments = []
+    hours = 0.0
+    for row in labor_rows:
+        employee_id = repository.get_employee_id_by_name(db, row["employee"])
+        if employee_id is None:
+            return False, (
+                f"Сотрудник «{row['employee']}» не найден в справочнике "
+                "сотрудников — карточка не создана."
+            ), None
+        _base, role = _split_role_from_work_type(row["work_type"])
+        assignments.append({
+            "employee_id": employee_id,
+            "employee_name": row["employee"],
+            "role": role,
+        })
+        hours = max(hours, float(row["quantity"] or 0))
+
+    if hours <= 0:
+        return False, "Не удалось определить длительность рейса — карточка не создана.", None
+    if not trip["trip_date"]:
+        return False, "У рейса не указана дата — карточка не создана.", None
+
+    starts = dt.datetime.strptime(
+        f"{trip['trip_date']} {trip['trip_time'] or '00:00'}", "%Y-%m-%d %H:%M"
+    )
+    ends = starts + dt.timedelta(hours=hours)
+    kind = "booking" if "аренда" in base_service_name.lower() else "event"
+
+    data = {
+        "kind": kind,
+        "boat": trip["boat"],
+        "service_id": service["id"],
+        "service_name": service["name"],
+        "starts_at": starts.strftime("%Y-%m-%d %H:%M"),
+        "ends_at": ends.strftime("%Y-%m-%d %H:%M"),
+        "capacity": None,
+        "participants_count": 0,
+        "customer_name": "",
+        "customer_phone": "",
+        "revenue": trip["revenue"],
+        "note": "Восстановлено из YCLIENTS при переходе на внутреннее расписание.",
+    }
+    timestamp = current_timestamp()
+    item_id = repository.save_item(db, None, data, assignments, [], timestamp)
+    repository.set_accounting_trip_id(db, item_id, trip["id"], timestamp)
+    db.commit()
+    return True, "Карточка создана.", item_id
+
+
 AUTO_CLOSE_GRACE_MINUTES = 20
 
 
