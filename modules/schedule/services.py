@@ -628,35 +628,10 @@ def delete_item(db, item_id):
     return (True, "Рейс удалён из расписания.") if deleted else (False, "Рейс не найден.")
 
 
-def set_service_rate(db, raw_service_id, role, raw_rate):
-    """Add/update one (service, role) -> ₽/hour rate in
-    schedule_service_rates — the admin-editable replacement for app.py's
-    hardcoded WORK_TYPES, and the only way to fill in the deliberately
-    unseeded `guide` role (see DEFAULT_SERVICE_RATES)."""
-    try:
-        service_id = int(raw_service_id)
-    except (TypeError, ValueError):
-        return False, "Некорректная услуга."
-    service = service_repository.get_service(db, service_id)
-    if service is None:
-        return False, "Услуга не найдена."
-    if role not in CREW_ROLES:
-        return False, "Некорректная роль."
-    raw_rate = str(raw_rate or "").strip().replace(",", ".")
-    try:
-        rate = float(raw_rate)
-    except ValueError:
-        return False, "Ставка должна быть числом."
-    if rate < 0:
-        return False, "Ставка не может быть отрицательной."
-    repository.upsert_service_rate(db, service_id, role, rate, current_timestamp())
-    return True, f"Ставка «{service['name']}» ({CREW_ROLES[role]}) обновлена."
-
-
 AUTO_CLOSE_GRACE_MINUTES = 20
 
 
-def auto_close_schedule_items(db, create_trip, apply_minimum_shift=None, now=None):
+def auto_close_schedule_items(db, create_trip, get_role_rate, apply_minimum_shift=None, now=None):
     """Turn every schedule item whose trip is over into a real trips row —
     the internal-schedule replacement for the YCLIENTS import pipeline.
     Called on a timer (see routes.cron_close_schedule_items), no admin
@@ -665,10 +640,12 @@ def auto_close_schedule_items(db, create_trip, apply_minimum_shift=None, now=Non
     `create_trip(db, payload, needs_review=False)` is injected from app.py
     (wraps _payload_to_form/_process_trip_form/_insert_trip, the exact path
     the manual "Добавить рейс" form and the YCLIENTS import already share)
-    — returns (errors, trip_id). `apply_minimum_shift(db, start_date,
-    end_date)`, also injected, tops up any crew member's day to the
-    guaranteed minimum shift rate once the items in that range are closed
-    (see app.py::_schedule_payroll_days, which replaces the YCLIENTS
+    — returns (errors, trip_id). `get_role_rate(db, role)` is injected from
+    modules.payroll_rates (Зарплаты -> Ставки -> Ставки экскурсий) — one
+    ₽/hour rate per crew role, not per trip type. `apply_minimum_shift(db,
+    start_date, end_date)`, also injected, tops up any crew member's day to
+    the guaranteed minimum shift rate once the items in that range are
+    closed (see app.py::_schedule_payroll_days, which replaces the YCLIENTS
     staff-schedule call this used to depend on).
 
     Idempotent: an item is only ever picked up once
@@ -698,16 +675,16 @@ def auto_close_schedule_items(db, create_trip, apply_minimum_shift=None, now=Non
         labor_items = []
         for assignment in assignments:
             role = assignment["role"]
-            rate = repository.get_service_rate(db, item["service_id"], role)
-            if rate is None and role == "guide":
-                # No standalone "guide" rate exists yet (see
-                # DEFAULT_SERVICE_RATES) — falling back to the captain rate
-                # for the same service keeps this crew member paid rather
-                # than silently zeroed, at the cost of possibly being
-                # wrong; needs_review makes that visible on /trips.
-                rate = repository.get_service_rate(db, item["service_id"], "captain")
+            rate = get_role_rate(db, role)
+            if not rate and role == "guide":
+                # No "guide" rate configured yet at Зарплаты -> Ставки ->
+                # Ставки экскурсий — falling back to the captain rate keeps
+                # this crew member paid rather than silently zeroed, at the
+                # cost of possibly being wrong; needs_review makes that
+                # visible on /trips.
+                rate = get_role_rate(db, "captain")
                 needs_review = True
-            if rate is None:
+            if not rate:
                 rate = 0
                 needs_review = True
             labor_items.append({

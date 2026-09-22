@@ -97,8 +97,6 @@
         <span>Состав</span>
         <b>{{ day_crew|length }}</b>
       </button>
-      <a class="btn-secondary" href="{{ url_for('schedule.service_rates') }}"
-         title="Ставки оплаты капитанов и гидов по видам рейсов — используются при автозакрытии рейса в расписании">Ставки</a>
       <div class="schedule-day-total" title="Стоимость клиентов по рейсам за день">
         <span>{{ items|length }} рейс{{ '' if items|length == 1 else 'а' if items|length in [2, 3, 4] else 'ов' }}</span>
         <strong>{{ '{:,.0f}'.format(items|sum(attribute='revenue')).replace(',', ' ') }} ₽</strong>

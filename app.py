@@ -138,6 +138,11 @@ from modules.tuning_schedule import (
     create_tuning_schedule_blueprint,
     init_schema as init_tuning_schedule_schema,
 )
+from modules.payroll_rates import (
+    create_payroll_rates_blueprint,
+    init_schema as init_payroll_rates_schema,
+)
+from modules.payroll_rates import repository as payroll_rates_repository
 from modules.weather import constants as weather_constants
 from modules.weather import schema as weather_schema
 from modules.weather import services as weather_services
@@ -1991,6 +1996,7 @@ def init_db(db_path=None):
     init_excursion_services_schema(conn)
     init_schedule_schema(conn)
     init_tuning_schedule_schema(conn)
+    init_payroll_rates_schema(conn)
 
     conn.execute(
         """
@@ -4171,6 +4177,7 @@ def index():
         custom_value=CUSTOM_VALUE,
         today=dt.date.today().isoformat(),
         active_page="payroll",
+        sub_page="entries",
     )
 
 
@@ -4311,6 +4318,7 @@ def add_entry():
             errors=errors,
             form_values=request.form,
             active_page="payroll",
+            sub_page="entries",
         ), 400
 
     amount = rate * quantity
@@ -4367,6 +4375,7 @@ def add_manager_fee():
             manager_errors=errors,
             manager_form_values=request.form,
             active_page="payroll",
+            sub_page="entries",
         ), 400
 
     sunday = monday + dt.timedelta(days=6)
@@ -5262,6 +5271,7 @@ app.register_blueprint(
         create_trip_from_schedule=lambda db, payload, needs_review=False: (
             _create_trip_from_schedule_payload(db, payload, needs_review=needs_review)
         ),
+        get_role_rate=lambda db, role: payroll_rates_repository.get_excursion_role_rate(db, role),
         apply_minimum_shift=lambda db, start_date, end_date: (
             _apply_schedule_minimum_shift(db, start_date, end_date)
         ),
@@ -5292,6 +5302,17 @@ app.register_blueprint(
             _pay_free_tuning_schedule_task(db, task, total_hours)
         ),
         assignment_status_choices=ASSIGNMENT_STATUSES,
+    )
+)
+
+
+# =======================================================================
+# Ставки оплаты (Зарплаты -> Ставки, см. modules/payroll_rates)
+# =======================================================================
+app.register_blueprint(
+    create_payroll_rates_blueprint(
+        get_db=get_db,
+        access_required=admin_login_required,
     )
 )
 

@@ -1,0 +1,4 @@
+<nav class="sub-tabs" aria-label="Разделы зарплат">
+  <a href="{{ url_for('index') }}" class="{{ 'active' if sub_page == 'entries' }}">Зарплаты</a>
+  <a href="{{ url_for('payroll_rates.excursions') }}" class="{{ 'active' if sub_page == 'rates' }}">Ставки</a>
+</nav>

@@ -2,6 +2,8 @@ import datetime as dt
 import unittest
 
 from support import application_module
+from modules.payroll_rates import repository as payroll_rates_repository
+from modules.payroll_rates.constants import DEFAULT_EXCURSION_ROLE_RATES, EXCURSION_ROLES
 from modules.schedule import repository as schedule_repository
 from modules.schedule import services as schedule_services
 
@@ -18,7 +20,13 @@ class ScheduleAutoCloseTests(unittest.TestCase):
             db.execute("DELETE FROM schedule_assignments")
             db.execute("DELETE FROM schedule_items")
             db.execute("DELETE FROM schedule_day_crew")
-            db.execute("DELETE FROM schedule_service_rates WHERE role = 'guide'")
+            # Rate tests elsewhere in the suite mutate these rows - reset to
+            # defaults (0 = "guide" not configured, the case under test).
+            for role in EXCURSION_ROLES:
+                db.execute(
+                    "UPDATE excursion_role_rates SET rate = ? WHERE role = ?",
+                    (DEFAULT_EXCURSION_ROLE_RATES.get(role, 0), role),
+                )
             self.employee_id = self.ensure_employee(db, "Автозакрытие Тест", "Капитан")
             self.service_id = db.execute(
                 "SELECT id FROM excursion_services WHERE name = ?", ("Малый тур",)
@@ -80,6 +88,10 @@ class ScheduleAutoCloseTests(unittest.TestCase):
             db, payload, needs_review=needs_review
         )
 
+    @staticmethod
+    def get_role_rate(db, role):
+        return payroll_rates_repository.get_excursion_role_rate(db, role)
+
     def test_ended_item_closes_into_trip_with_payroll_entry(self):
         with application_module.app.app_context():
             db = application_module.get_db()
@@ -90,7 +102,7 @@ class ScheduleAutoCloseTests(unittest.TestCase):
                 revenue=5000,
             )
             stats = schedule_services.auto_close_schedule_items(
-                db, self.create_trip, now=self.now,
+                db, self.create_trip, self.get_role_rate, now=self.now,
             )
             item = schedule_repository.get_item(db, item_id)
             trip = db.execute(
@@ -119,10 +131,10 @@ class ScheduleAutoCloseTests(unittest.TestCase):
                 db, starts_at="2026-09-20 09:00", ends_at="2026-09-20 10:00",
             )
             first = schedule_services.auto_close_schedule_items(
-                db, self.create_trip, now=self.now,
+                db, self.create_trip, self.get_role_rate, now=self.now,
             )
             second = schedule_services.auto_close_schedule_items(
-                db, self.create_trip, now=self.now,
+                db, self.create_trip, self.get_role_rate, now=self.now,
             )
             trip_count = db.execute("SELECT COUNT(*) AS c FROM trips").fetchone()["c"]
 
@@ -138,7 +150,7 @@ class ScheduleAutoCloseTests(unittest.TestCase):
                 deleted_at="2026-09-19 08:00",
             )
             stats = schedule_services.auto_close_schedule_items(
-                db, self.create_trip, now=self.now,
+                db, self.create_trip, self.get_role_rate, now=self.now,
             )
             item = schedule_repository.get_item(db, item_id, include_deleted=True)
             trip_count = db.execute("SELECT COUNT(*) AS c FROM trips").fetchone()["c"]
@@ -156,7 +168,7 @@ class ScheduleAutoCloseTests(unittest.TestCase):
                 db, starts_at="2026-09-20 11:00", ends_at="2026-09-20 11:50",
             )
             stats = schedule_services.auto_close_schedule_items(
-                db, self.create_trip, now=self.now,
+                db, self.create_trip, self.get_role_rate, now=self.now,
             )
         self.assertEqual(stats["closed"], 0)
         self.assertEqual(stats["skipped"], 0)
@@ -168,7 +180,7 @@ class ScheduleAutoCloseTests(unittest.TestCase):
                 db, starts_at="2026-09-21 09:00", ends_at="2026-09-21 10:00",
             )
             stats = schedule_services.auto_close_schedule_items(
-                db, self.create_trip, now=self.now,
+                db, self.create_trip, self.get_role_rate, now=self.now,
             )
         self.assertEqual(stats["closed"], 0)
 
@@ -182,7 +194,7 @@ class ScheduleAutoCloseTests(unittest.TestCase):
                 role="guide", employee_id=guide_id,
             )
             stats = schedule_services.auto_close_schedule_items(
-                db, self.create_trip, now=self.now,
+                db, self.create_trip, self.get_role_rate, now=self.now,
             )
             item = schedule_repository.get_item(db, item_id)
             trip = db.execute(
@@ -206,7 +218,7 @@ class ScheduleAutoCloseTests(unittest.TestCase):
                 assign=False,
             )
             stats = schedule_services.auto_close_schedule_items(
-                db, self.create_trip, now=self.now,
+                db, self.create_trip, self.get_role_rate, now=self.now,
             )
             item = schedule_repository.get_item(db, item_id)
 
@@ -221,7 +233,7 @@ class ScheduleAutoCloseTests(unittest.TestCase):
                 db, starts_at="2026-09-20 09:00", ends_at="2026-09-20 10:00",
             )
             schedule_services.auto_close_schedule_items(
-                db, self.create_trip, now=self.now,
+                db, self.create_trip, self.get_role_rate, now=self.now,
             )
             ok, message = schedule_services.delete_item(db, item_id)
 
@@ -240,7 +252,7 @@ class ScheduleAutoCloseTests(unittest.TestCase):
                 db, starts_at="2026-09-20 09:00", ends_at="2026-09-20 10:00",
             )
             schedule_services.auto_close_schedule_items(
-                db, self.create_trip,
+                db, self.create_trip, self.get_role_rate,
                 apply_minimum_shift=fake_apply_minimum_shift, now=self.now,
             )
 
@@ -255,7 +267,7 @@ class ScheduleAutoCloseTests(unittest.TestCase):
         with application_module.app.app_context():
             db = application_module.get_db()
             schedule_services.auto_close_schedule_items(
-                db, self.create_trip,
+                db, self.create_trip, self.get_role_rate,
                 apply_minimum_shift=fake_apply_minimum_shift, now=self.now,
             )
 

@@ -171,36 +171,6 @@ def item_has_sales_partner(db, item_id):
     ).fetchone() is not None
 
 
-def get_service_rate(db, service_id, role):
-    if service_id is None:
-        return None
-    row = db.execute(
-        "SELECT rate FROM schedule_service_rates WHERE service_id = ? AND role = ?",
-        (service_id, role),
-    ).fetchone()
-    return row["rate"] if row else None
-
-
-def list_service_rates(db):
-    return db.execute(
-        "SELECT schedule_service_rates.*, excursion_services.name AS service_name "
-        "FROM schedule_service_rates "
-        "JOIN excursion_services ON excursion_services.id = schedule_service_rates.service_id "
-        "ORDER BY excursion_services.name, schedule_service_rates.role"
-    ).fetchall()
-
-
-def upsert_service_rate(db, service_id, role, rate, timestamp):
-    db.execute(
-        "INSERT INTO schedule_service_rates (service_id, role, rate, updated_at) "
-        "VALUES (?, ?, ?, ?) "
-        "ON CONFLICT(service_id, role) DO UPDATE SET "
-        "rate = excluded.rate, updated_at = excluded.updated_at",
-        (service_id, role, rate, timestamp),
-    )
-    db.commit()
-
-
 def list_day_items(db, day):
     items = db.execute(
         "SELECT * FROM schedule_items "

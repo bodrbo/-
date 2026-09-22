@@ -1,9 +1,5 @@
 """SQLite schema for the internal operational schedule."""
 
-import datetime as dt
-
-from .constants import DEFAULT_SERVICE_RATES
-
 
 def init_schema(conn):
     conn.execute(
@@ -277,40 +273,8 @@ def init_schema(conn):
         """
     )
 
-    # Pay rate (₽/hour) by service + crew role — the internal-schedule
-    # equivalent of app.py's WORK_TYPES, needed so a schedule item can be
-    # auto-closed into a payroll-bearing trip without a human filling in a
-    # rate. See DEFAULT_SERVICE_RATES for what's seeded and why "guide" is
-    # deliberately left unseeded.
-    rates_is_new = conn.execute(
-        "SELECT 1 FROM sqlite_master "
-        "WHERE type = 'table' AND name = 'schedule_service_rates'"
-    ).fetchone() is None
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS schedule_service_rates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            service_id INTEGER NOT NULL REFERENCES excursion_services(id),
-            role TEXT NOT NULL,
-            rate REAL NOT NULL DEFAULT 0,
-            updated_at TEXT NOT NULL,
-            UNIQUE(service_id, role)
-        )
-        """
-    )
-    if rates_is_new:
-        timestamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-        conn.executemany(
-            "INSERT OR IGNORE INTO schedule_service_rates "
-            "(service_id, role, rate, updated_at) "
-            "SELECT excursion_services.id, ?, ?, ? FROM excursion_services "
-            "WHERE excursion_services.name = ? COLLATE NOCASE",
-            [
-                (role, rate, timestamp, service_name)
-                for service_name, role, rate in DEFAULT_SERVICE_RATES
-            ],
-        )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_schedule_service_rates_service "
-        "ON schedule_service_rates(service_id)"
-    )
+    # schedule_service_rates (₽/hour by service + crew role) briefly lived
+    # here before the pay-rate model moved to a simpler per-role-only rate
+    # owned by modules.payroll_rates (Зарплаты -> Ставки -> Ставки
+    # экскурсий). Drop it if an earlier deploy already created it.
+    conn.execute("DROP TABLE IF EXISTS schedule_service_rates")

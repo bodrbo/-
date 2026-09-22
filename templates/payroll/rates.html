@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ставки — Бодрый Боцман</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<meta name="theme-color" content="#3498db">
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Боцман">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="topbar-top-row">
+      <div class="brand">{% include '_topbar_brand.html' %}</div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 5.5h14M3 10h14M3 14.5h14"/>
+        </svg>
+      </button>
+    </div>
+    {% include '_admin_main_nav.html' %}
+    <div class="title-block">
+      <h1>Ставки оплаты</h1>
+      <p>Используются при автоматических начислениях зарплаты</p>
+    </div>
+    <div class="topbar-actions">
+      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout">
+        <button type="submit">Выйти</button>
+      </form>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  {% include '_payroll_subnav.html' %}
+
+  <nav class="sub-tabs" aria-label="Разделы ставок">
+    <a href="{{ url_for('payroll_rates.excursions') }}" class="{{ 'active' if section == 'excursions' }}">Ставки экскурсий</a>
+    <a href="{{ url_for('payroll_rates.tuning') }}" class="{{ 'active' if section == 'tuning' }}">Ставки тюнинга</a>
+  </nav>
+
+  {% if notice %}
+  <div class="alert{{ ' alert-success' if notice.type == 'success' }}" role="status">{{ notice.message }}</div>
+  {% endif %}
+
+  {% if section == 'excursions' %}
+  <section class="panel">
+    <h2 style="margin:0 0 6px;">Ставки экскурсий</h2>
+    <p class="hint">₽/час по должности — одна ставка на всех рейсах, без деления по видам рейса. Используется, когда рейс из расписания автоматически закрывается в зарплату.</p>
+    <div class="table-scroll">
+      <table class="records">
+        <thead><tr><th>Должность</th><th>Ставка, ₽/час</th><th></th></tr></thead>
+        <tbody>
+          {% for r in rates %}
+          <tr>
+            <td>{{ roles.get(r.role, r.role) }}</td>
+            <td class="amount">{{ r.rate|money }}{% if not r.rate %} <span class="hint">не задано</span>{% endif %}</td>
+            <td class="row-actions">
+              <form method="post" action="{{ url_for('payroll_rates.update_excursion_rate') }}" class="entry-form" style="align-items:center;">
+                <input type="hidden" name="role" value="{{ r.role }}">
+                <input type="text" inputmode="decimal" name="rate" value="{{ r.rate }}" style="width:100px;" required>
+                <button type="submit" class="btn-secondary">Сохранить</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% else %}
+  <section class="panel">
+    <h2 style="margin:0 0 6px;">Ставки тюнинга</h2>
+    <p class="hint">Пока не настраивается здесь — тюнинг-центр использует ставку, указанную вручную при поручении каждой задачи.</p>
+  </section>
+  {% endif %}
+
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+</body>
+</html>
