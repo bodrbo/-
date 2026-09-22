@@ -4405,7 +4405,7 @@ def _suggest_contract_number(db, today):
     return f"{prefix}-{count_today + 1}"
 
 
-def _trips_list_context(db, selected_month=None, selected_boat="all"):
+def _trip_analytics_context(db, selected_month=None, selected_boat="all"):
     months, current_key = build_month_options(db)
     if not selected_month:
         selected_month = current_key
@@ -4430,6 +4430,22 @@ def _trips_list_context(db, selected_month=None, selected_boat="all"):
 
     by_boat, by_investor, grand_my_share, grand_revenue = compute_trip_totals(trip_rows)
 
+    return dict(
+        trips=trips_list,
+        months=months,
+        selected_month=selected_month,
+        boats=fleet_boats_for_db(db),
+        selected_boat=selected_boat,
+        by_boat=by_boat,
+        by_investor=by_investor,
+        grand_my_share=grand_my_share,
+        grand_revenue=grand_revenue,
+    )
+
+
+def _trips_list_context(db, selected_month=None, selected_boat="all"):
+    context = _trip_analytics_context(db, selected_month, selected_boat)
+
     today = dt.date.today()
     week_ago = today - dt.timedelta(days=7)
     import_candidates = db.execute(
@@ -4448,16 +4464,7 @@ def _trips_list_context(db, selected_month=None, selected_boat="all"):
         "SELECT * FROM investor_distributions ORDER BY payout_date DESC, id DESC"
     ).fetchall()
 
-    return dict(
-        trips=trips_list,
-        months=months,
-        selected_month=selected_month,
-        boats=fleet_boats_for_db(db),
-        selected_boat=selected_boat,
-        by_boat=by_boat,
-        by_investor=by_investor,
-        grand_my_share=grand_my_share,
-        grand_revenue=grand_revenue,
+    context.update(
         import_candidates=import_candidates,
         import_configured=yclients_configured(),
         import_default_start=week_ago.isoformat(),
@@ -4466,6 +4473,7 @@ def _trips_list_context(db, selected_month=None, selected_boat="all"):
         contract_number_suggestion=_suggest_contract_number(db, today),
         investor_payouts=investor_payouts,
     )
+    return context
 
 
 def _trips_common_kwargs(db):
@@ -15640,6 +15648,22 @@ def analytics_index():
     )
 
 
+@app.route("/analytics/trips")
+@admin_login_required
+def analytics_trips():
+    """Read-only trip economics moved out of the demo operations area."""
+    db = get_db()
+    selected_month = request.args.get("month")
+    selected_boat = request.args.get("boat", "all")
+    context = _trip_analytics_context(db, selected_month, selected_boat)
+    return render_template(
+        "analytics_trips.html",
+        active_page="analytics",
+        sub_page="trips",
+        **context,
+    )
+
+
 @app.route("/analytics/transactions-fragment")
 @admin_login_required
 def analytics_transactions_fragment():
@@ -18981,7 +19005,16 @@ def _demo_tenant_module_gate():
         # seed_demo_data.py populates every module regardless of which
         # ones the tenant will end up showing — see its own comment.
         return None
-    module = _demo_module_for_request(request.blueprint, request.path)
+    # Demo accounts use the schedule as the operational source of trips.
+    # Keep the legacy trips/investor workspace (including all mutations)
+    # private, and expose only its read-only analytics page below.
+    if request.path == "/trips" or request.path.startswith("/trips/"):
+        abort(404)
+    module = (
+        "excursions"
+        if request.endpoint == "analytics_trips"
+        else _demo_module_for_request(request.blueprint, request.path)
+    )
     if module is None:
         return None
     enabled = {m for m in (session.get("demo_tenant_modules") or "").split(",") if m}

@@ -24,8 +24,10 @@ DEMO_MODULE_BLUEPRINTS = {
 }
 
 # Monolithic (non-blueprint) sections in app.py, matched by URL path
-# prefix instead — "Морские прогулки" also covers the legacy investor
-# revenue-split pages at /trips. "/schedule/tuning" is the tuning_schedule
+# prefix instead. The legacy /trips workspace is classified as excursions
+# here for completeness, but demo sessions are blocked from that operational
+# workspace in app.py and receive its read-only data at /analytics/trips.
+# "/schedule/tuning" is the tuning_schedule
 # blueprint (deliberately its own blueprint, not part of "schedule", so it
 # gates here by path instead of being swept into "excursions" — see
 # module_for_request in services.py, which checks DEMO_MODULE_BLUEPRINTS

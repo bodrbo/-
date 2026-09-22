@@ -68,10 +68,7 @@
 
 <main class="wrap">
 
-  <nav class="sub-tabs">
-    <a href="{{ url_for('analytics_index') }}" class="{{ 'active' if sub_page == 'transactions' }}">Транзакции</a>
-    <a href="{{ url_for('analytics_projects') }}" class="{{ 'active' if sub_page == 'projects' }}">Проекты</a>
-  </nav>
+  {% include '_analytics_subnav.html' %}
 
   <a href="{{ url_for('analytics_projects') }}" class="term" style="display:inline-block; margin-bottom:14px;">← Ко всем проектам</a>
 

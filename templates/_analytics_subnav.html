@@ -1,0 +1,9 @@
+<nav class="sub-tabs" aria-label="Разделы аналитики">
+  {% if demo_module_enabled('analytics') %}
+  <a href="{{ url_for('analytics_index') }}" class="{{ 'active' if sub_page == 'transactions' }}">Транзакции</a>
+  <a href="{{ url_for('analytics_projects') }}" class="{{ 'active' if sub_page == 'projects' }}">Проекты</a>
+  {% endif %}
+  {% if is_demo_tenant and demo_module_enabled('excursions') %}
+  <a href="{{ url_for('analytics_trips') }}" class="{{ 'active' if sub_page == 'trips' }}">Аналитика по рейсам</a>
+  {% endif %}
+</nav>

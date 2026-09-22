@@ -68,6 +68,7 @@
     </svg>
     <span class="nav-label">Услуги</span>
   </a>
+  {% if not is_demo_tenant %}
   <a href="{{ url_for('trips_index') }}" class="{{ 'active' if active_page == 'trips' }}">
     <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="10" cy="3.8" r="1.6"/>
@@ -75,6 +76,7 @@
     </svg>
     <span class="nav-label">Рейсы и инвесторы</span>
   </a>
+  {% endif %}
   {% endif %}
   {% if demo_module_enabled('tuning') %}
   <a href="{{ url_for('tuning_index') }}" class="{{ 'active' if active_page == 'tuning' }}" data-tour-target="nav-tuning">
@@ -109,8 +111,8 @@
     </svg>
     <span class="nav-label">Сотрудники</span>
   </a>
-  {% if demo_module_enabled('analytics') %}
-  <a href="{{ url_for('analytics_index') }}" class="{{ 'active' if active_page == 'analytics' }}">
+  {% if demo_module_enabled('analytics') or demo_module_enabled('excursions') %}
+  <a href="{{ url_for('analytics_index') if demo_module_enabled('analytics') else url_for('analytics_trips') }}" class="{{ 'active' if active_page == 'analytics' }}">
     <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
       <path d="M2.5 16.5h15M5.5 16V10.5M10 16V4M14.5 16V11.5"/>
     </svg>
