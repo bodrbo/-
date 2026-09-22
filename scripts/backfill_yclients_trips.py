@@ -56,6 +56,13 @@ script ever ran), not just ones touched in this pass. Skips (and reports)
 a trip it can't confidently reconstruct — no crew rows, an unmapped work
 type, or an employee name with no match in the employees table — rather
 than guessing.
+
+Third phase: fills in real customers on every card (new or pre-existing)
+that still has none, via modules.schedule.services.attach_participant_from_record
+— reusing the very same raw YCLIENTS records fetched in phase one (kept
+in memory across the whole run, indexed by record id and by activity_id)
+rather than a second round of API calls. `trips`/`entries` stay untouched
+on purpose; this only ever writes to the schedule module's own tables.
 """
 
 import argparse
@@ -129,6 +136,14 @@ def main():
     }
     last_pending = 0
 
+    # Accumulated across every month chunk so phase three can resolve a
+    # trip's original attendee record(s) without a second round-trip to
+    # YCLIENTS — keyed the same two ways yclients_imports.yclients_ref
+    # already is: "record:<id>" for an individual booking, "activity:<id>"
+    # for a group event (every attendee record for that activity_id).
+    records_by_ref = {}
+    records_by_activity = {}
+
     today = dt.date.today()
     with application_module.app.app_context():
         db = application_module.get_db()
@@ -139,6 +154,13 @@ def main():
             when = " (будущие рейсы)" if chunk_start > today else ""
             print(f"[{chunk_start_iso} .. {chunk_end_iso}]{when} запрашиваю YCLIENTS…", flush=True)
             records = application_module.yclients_get_records(chunk_start_iso, chunk_end_iso)
+            for record in records:
+                record_id = record.get("id")
+                if record_id not in (None, ""):
+                    records_by_ref[f"record:{record_id}"] = record
+                activity_id = record.get("activity_id")
+                if activity_id:
+                    records_by_activity.setdefault(f"activity:{activity_id}", []).append(record)
             activity_ids = {
                 r["activity_id"] for r in records if r.get("activity_id")
             }
@@ -220,6 +242,52 @@ def main():
     if skip_reasons:
         print("Пропущено (карточка не создана) по причинам:")
         for reason, count in sorted(skip_reasons.items(), key=lambda kv: -kv[1]):
+            print(f"  {count:4d}  {reason}")
+
+    print("\nЗаполняю клиентов в карточках без участников…", flush=True)
+    attached = 0
+    attach_skip_reasons = {}
+    with application_module.app.app_context():
+        db = application_module.get_db()
+        items = schedule_repository.list_items_needing_participants(
+            db, start_date.isoformat(), end_date.isoformat(),
+        )
+        for item in items:
+            refs = [
+                row["yclients_ref"] for row in db.execute(
+                    "SELECT yclients_ref FROM yclients_imports WHERE trip_id = ?",
+                    (item["accounting_trip_id"],),
+                ).fetchall()
+            ]
+            matched_records = []
+            for ref in refs:
+                if ref.startswith("activity:"):
+                    matched_records.extend(records_by_activity.get(ref, []))
+                elif ref in records_by_ref:
+                    matched_records.append(records_by_ref[ref])
+            if not matched_records:
+                attach_skip_reasons["Исходная запись YCLIENTS не найдена (вне запрошенных месяцев)."] = (
+                    attach_skip_reasons.get(
+                        "Исходная запись YCLIENTS не найдена (вне запрошенных месяцев).", 0
+                    ) + 1
+                )
+                continue
+            item_attached = False
+            for record in matched_records:
+                now_str = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+                ok, message = schedule_services.attach_participant_from_record(
+                    db, item["id"], record, now_str,
+                )
+                if ok and message == "Клиент добавлен.":
+                    item_attached = True
+                elif not ok:
+                    attach_skip_reasons[message] = attach_skip_reasons.get(message, 0) + 1
+            if item_attached:
+                attached += 1
+    print(f"Карточек с добавленными клиентами: {attached} из {len(items)}.")
+    if attach_skip_reasons:
+        print("Не удалось добавить клиента по причинам:")
+        for reason, count in sorted(attach_skip_reasons.items(), key=lambda kv: -kv[1]):
             print(f"  {count:4d}  {reason}")
 
 

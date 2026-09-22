@@ -209,5 +209,250 @@ class ScheduleCardBackfillTests(unittest.TestCase):
         self.assertEqual(listed_ids, {trip_needs_card})
 
 
+class ListItemsNeedingParticipantsTests(unittest.TestCase):
+    def setUp(self):
+        application_module.init_db()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM schedule_participants")
+            db.execute("DELETE FROM schedule_assignments")
+            db.execute("DELETE FROM schedule_items")
+            db.execute("DELETE FROM trip_expenses")
+            db.execute("DELETE FROM trip_labor")
+            db.execute("DELETE FROM trips")
+            db.execute("DELETE FROM entries")
+            db.commit()
+
+    @staticmethod
+    def make_trip(db, *, trip_date="2026-06-10", source="yclients"):
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        cur = db.execute(
+            "INSERT INTO trips (boat, trip_date, trip_time, work_type, revenue, "
+            "sale_channel, commission_pct, commission_is_manual, commission_amount, "
+            "labor_cost, fuel_cost, mooring_cost, extra_total, remainder, "
+            "investor_payout, my_share, source, needs_review, created_at) "
+            "VALUES ('Бодрый Первый', ?, '09:00', 'Малый тур', 5000, 'direct', "
+            "30, 0, 0, 1100, 0, 0, 0, 0, 0, 0, ?, 0, ?)",
+            (trip_date, source, now),
+        )
+        return cur.lastrowid
+
+    @staticmethod
+    def make_item(db, *, trip_id=None, with_participant=False, starts_at="2026-06-10 09:00"):
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        cur = db.execute(
+            "INSERT INTO schedule_items (kind, boat, service_name, starts_at, "
+            "ends_at, capacity, participants_count, customer_name, "
+            "customer_phone, revenue, note, accounting_trip_id, created_at, "
+            "updated_at) "
+            "VALUES ('event', 'Бодрый Первый', 'Малый тур', ?, "
+            "'2026-06-10 10:30', NULL, 0, '', '', 0, '', ?, ?, ?)",
+            (starts_at, trip_id, now, now),
+        )
+        item_id = cur.lastrowid
+        if with_participant:
+            cur2 = db.execute(
+                "INSERT INTO clients (client_name, boat_model, phone, token, created_at) "
+                "VALUES ('Тест Клиент', '', '79110000000', 'tok-' || ?, ?)",
+                (item_id, now),
+            )
+            client_id = cur2.lastrowid
+            db.execute(
+                "INSERT INTO schedule_participants (schedule_item_id, client_id, "
+                "client_name, client_phone, guests_count, price, prepayment, "
+                "payment_due, created_at) "
+                "VALUES (?, ?, 'Тест Клиент', '79110000000', 1, 1000, 0, 1000, ?)",
+                (item_id, client_id, now),
+            )
+        return item_id
+
+    def test_lists_only_yclients_linked_items_with_no_participants(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            trip_yclients = self.make_trip(db, source="yclients")
+            trip_manual = self.make_trip(db, source="manual")
+            needs = self.make_item(db, trip_id=trip_yclients)
+            has_participant = self.make_item(db, trip_id=self.make_trip(db, source="yclients"), with_participant=True)
+            manual_item = self.make_item(db, trip_id=trip_manual)
+            unlinked_item = self.make_item(db, trip_id=None)
+            db.commit()
+
+            listed_ids = {
+                row["id"] for row in schedule_repository.list_items_needing_participants(
+                    db, "2026-06-01", "2026-06-30",
+                )
+            }
+
+        self.assertIn(needs, listed_ids)
+        self.assertNotIn(has_participant, listed_ids)
+        self.assertNotIn(manual_item, listed_ids)
+        self.assertNotIn(unlinked_item, listed_ids)
+
+    def test_respects_date_range(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            trip_id = self.make_trip(db, trip_date="2026-07-01", source="yclients")
+            outside = self.make_item(db, trip_id=trip_id, starts_at="2026-07-01 09:00")
+            db.commit()
+
+            listed_ids = {
+                row["id"] for row in schedule_repository.list_items_needing_participants(
+                    db, "2026-06-01", "2026-06-30",
+                )
+            }
+
+        self.assertNotIn(outside, listed_ids)
+
+
+class AttachParticipantFromRecordTests(unittest.TestCase):
+    def setUp(self):
+        application_module.init_db()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM schedule_participants")
+            db.execute("DELETE FROM schedule_assignments")
+            db.execute("DELETE FROM schedule_items")
+            db.execute("DELETE FROM clients WHERE yclients_client_id IS NOT NULL")
+            db.commit()
+            self.item_id = self._make_item(db)
+            db.commit()
+
+    @staticmethod
+    def _make_item(db):
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        cur = db.execute(
+            "INSERT INTO schedule_items (kind, boat, service_name, starts_at, "
+            "ends_at, capacity, participants_count, customer_name, "
+            "customer_phone, revenue, note, created_at, updated_at) "
+            "VALUES ('event', 'Бодрый Первый', 'Малый тур', '2026-06-10 09:00', "
+            "'2026-06-10 10:30', NULL, 0, '', '', 0, '', ?, ?)",
+            (now, now),
+        )
+        return cur.lastrowid
+
+    @staticmethod
+    def make_record(*, record_id=1001, client_id=555, name="Александра",
+                     phone="79113810382", clients_count=4, cost=9000, comment=""):
+        return {
+            "id": record_id,
+            "client": {
+                "id": client_id,
+                "name": name,
+                "display_name": name,
+                "phone": phone,
+            },
+            "clients_count": clients_count,
+            "services": [{"cost": cost}],
+            "comment": comment,
+        }
+
+    def test_attaches_client_and_fills_customer_fields(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            record = self.make_record()
+            ok, message = schedule_services.attach_participant_from_record(
+                db, self.item_id, record, "2026-06-01 12:00",
+            )
+            item = schedule_repository.get_item(db, self.item_id)
+            participant = db.execute(
+                "SELECT * FROM schedule_participants WHERE schedule_item_id = ?",
+                (self.item_id,),
+            ).fetchone()
+            client = db.execute(
+                "SELECT * FROM clients WHERE yclients_client_id = 555"
+            ).fetchone()
+
+        self.assertTrue(ok, message)
+        self.assertIsNotNone(participant)
+        self.assertEqual(participant["client_id"], client["id"])
+        self.assertEqual(participant["guests_count"], 4)
+        self.assertEqual(participant["price"], 9000)
+        self.assertEqual(participant["source"], "yclients")
+        self.assertEqual(participant["source_ref"], "record:1001")
+        self.assertEqual(item["customer_name"], "Александра")
+        self.assertEqual(item["customer_phone"], "79113810382")
+        self.assertEqual(item["revenue"], 9000)
+        self.assertEqual(item["participants_count"], 4)
+
+    def test_rerun_does_not_duplicate_participant(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            record = self.make_record()
+            schedule_services.attach_participant_from_record(
+                db, self.item_id, record, "2026-06-01 12:00",
+            )
+            ok, message = schedule_services.attach_participant_from_record(
+                db, self.item_id, record, "2026-06-01 12:05",
+            )
+            count = db.execute(
+                "SELECT COUNT(*) AS c FROM schedule_participants "
+                "WHERE schedule_item_id = ?",
+                (self.item_id,),
+            ).fetchone()["c"]
+
+        self.assertTrue(ok, message)
+        self.assertEqual(count, 1)
+
+    def test_group_event_multiple_attendees_sum_to_group_revenue(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            record_a = self.make_record(record_id=2001, client_id=601, name="Гость Раз",
+                                         phone="79110000001", clients_count=2, cost=4000)
+            record_b = self.make_record(record_id=2002, client_id=602, name="Гость Два",
+                                         phone="79110000002", clients_count=3, cost=6000)
+            schedule_services.attach_participant_from_record(
+                db, self.item_id, record_a, "2026-06-01 12:00",
+            )
+            schedule_services.attach_participant_from_record(
+                db, self.item_id, record_b, "2026-06-01 12:00",
+            )
+            item = schedule_repository.get_item(db, self.item_id)
+
+        self.assertEqual(item["revenue"], 10000)
+        self.assertEqual(item["participants_count"], 5)
+
+    def test_skips_record_with_no_client(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            record = {"id": 3001, "client": {}, "clients_count": 1, "services": []}
+            ok, message = schedule_services.attach_participant_from_record(
+                db, self.item_id, record, "2026-06-01 12:00",
+            )
+            count = db.execute(
+                "SELECT COUNT(*) AS c FROM schedule_participants"
+            ).fetchone()["c"]
+
+        self.assertFalse(ok)
+        self.assertEqual(count, 0)
+
+    def test_same_client_on_two_records_collapses_to_one_participant(self):
+        # schedule_participants has UNIQUE(schedule_item_id, client_id) —
+        # if the same real person turns up on two raw YCLIENTS records for
+        # one card (e.g. a duplicate booking), the second attach must not
+        # error out, but also can't create a second row.
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            first = self.make_record(record_id=4001, client_id=701)
+            second = self.make_record(record_id=4002, client_id=701, cost=9500)
+            ok1, _ = schedule_services.attach_participant_from_record(
+                db, self.item_id, first, "2026-06-01 12:00",
+            )
+            ok2, _ = schedule_services.attach_participant_from_record(
+                db, self.item_id, second, "2026-06-01 12:05",
+            )
+            client_count = db.execute(
+                "SELECT COUNT(*) AS c FROM clients WHERE yclients_client_id = 701"
+            ).fetchone()["c"]
+            participant_count = db.execute(
+                "SELECT COUNT(*) AS c FROM schedule_participants "
+                "WHERE schedule_item_id = ?", (self.item_id,),
+            ).fetchone()["c"]
+
+        self.assertTrue(ok1)
+        self.assertTrue(ok2)
+        self.assertEqual(client_count, 1)
+        self.assertEqual(participant_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

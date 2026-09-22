@@ -3,8 +3,10 @@
 import datetime as dt
 import math
 import secrets
+import sqlite3
 
 from modules.clients.constants import CLIENT_CONTACT_METHODS
+from modules.clients import yclients as yclients_clients
 from modules.excursion_services import repository as service_repository
 
 from . import repository
@@ -750,6 +752,70 @@ def create_item_from_trip(db, trip):
     repository.set_accounting_trip_id(db, item_id, trip["id"], timestamp)
     db.commit()
     return True, "Карточка создана.", item_id
+
+
+def attach_participant_from_record(db, item_id, record, timestamp):
+    """Populate one schedule_participants row on a reconstructed card
+    straight from the raw YCLIENTS record's own embedded `client` — the
+    backfill script's counterpart to create_item_from_trip, so a card
+    (especially a future one) doesn't sit with no customer until someone
+    fills it in by hand. Deliberately keeps `trips` untouched: this reads
+    the same already-fetched records the trip import used, and writes
+    only to the schedule module's own tables.
+
+    Reuses modules.clients.yclients.import_clients for client upsert (the
+    exact dedup-by-yclients_id-then-phone logic the client directory sync
+    already relies on) and repository.add_external_participant for the
+    insert, keyed by the YCLIENTS record id via the same source/source_ref
+    idempotency the public booking API uses — so re-running the backfill
+    never double-adds an attendee. Skips (does not guess) a record with no
+    usable client identity. Returns (success, message)."""
+    remote_client = record.get("client") or {}
+    try:
+        remote_client_id = int(remote_client.get("id"))
+    except (TypeError, ValueError):
+        remote_client_id = None
+    if remote_client_id is None:
+        return False, "В записи YCLIENTS нет данных о клиенте."
+
+    record_id = record.get("id")
+    if record_id in (None, ""):
+        return False, "У записи YCLIENTS нет идентификатора."
+    source_ref = f"record:{record_id}"
+
+    already = db.execute(
+        "SELECT 1 FROM schedule_participants WHERE source = 'yclients' "
+        "AND source_ref = ?",
+        (source_ref,),
+    ).fetchone()
+    if already is not None:
+        return True, "Клиент уже добавлен."
+
+    yclients_clients.import_clients(db, [remote_client], timestamp)
+    client = db.execute(
+        "SELECT id, client_name, phone FROM clients WHERE yclients_client_id = ?",
+        (remote_client_id,),
+    ).fetchone()
+    if client is None:
+        return False, "Не удалось сопоставить клиента YCLIENTS с локальной записью."
+
+    guests_count = int(record.get("clients_count") or 1)
+    price = sum(float(s.get("cost") or 0) for s in (record.get("services") or []))
+
+    try:
+        repository.add_external_participant(
+            db, item_id, client["id"], client["client_name"], client["phone"],
+            guests_count, price, timestamp,
+            source="yclients", source_ref=source_ref,
+        )
+    except sqlite3.IntegrityError:
+        db.rollback()
+        return True, "Клиент уже добавлен."
+    repository.fill_blank_customer_contact(
+        db, item_id, client["client_name"], client["phone"], timestamp
+    )
+    db.commit()
+    return True, "Клиент добавлен."
 
 
 AUTO_CLOSE_GRACE_MINUTES = 20

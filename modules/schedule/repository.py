@@ -203,6 +203,42 @@ def list_trips_without_schedule_card(db, start_date, end_date):
     ).fetchall()
 
 
+def list_items_needing_participants(db, start_date, end_date):
+    """schedule_items linked to a YCLIENTS-sourced trip, in this date
+    range, that still have zero schedule_participants rows — the target
+    for services.attach_participant_from_record. Re-scans the whole range
+    on every run (not just cards made this run) so a card created before
+    this feature existed, or one a previous run's raw records didn't
+    cover, still gets topped up."""
+    return db.execute(
+        "SELECT schedule_items.* FROM schedule_items "
+        "JOIN trips ON trips.id = schedule_items.accounting_trip_id "
+        "WHERE trips.source = 'yclients' "
+        "AND schedule_items.deleted_at IS NULL "
+        "AND schedule_items.starts_at BETWEEN ? AND ? "
+        "AND NOT EXISTS ("
+        "SELECT 1 FROM schedule_participants "
+        "WHERE schedule_participants.schedule_item_id = schedule_items.id"
+        ") ORDER BY schedule_items.starts_at",
+        (f"{start_date} 00:00", f"{end_date} 23:59"),
+    ).fetchall()
+
+
+def fill_blank_customer_contact(db, item_id, name, phone, timestamp):
+    """Backfill the card's flat customer_name/customer_phone display
+    fields the first time a real participant is attached — only when
+    still blank, so a manually-edited value is never clobbered."""
+    db.execute(
+        "UPDATE schedule_items SET "
+        "customer_name = CASE WHEN TRIM(COALESCE(customer_name, '')) = '' "
+        "THEN ? ELSE customer_name END, "
+        "customer_phone = CASE WHEN TRIM(COALESCE(customer_phone, '')) = '' "
+        "THEN ? ELSE customer_phone END, "
+        "updated_at = ? WHERE id = ?",
+        (name, phone, timestamp, item_id),
+    )
+
+
 def get_trip_labor(db, trip_id):
     """Per-employee work_type/quantity(hours) for a trip, the source data
     for reconstructing schedule_assignments. Falls back to the legacy
