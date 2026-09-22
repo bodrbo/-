@@ -436,9 +436,15 @@
     </div>
   </details>
 
-  <details class="panel collapsible-panel" open>
+  <details class="panel collapsible-panel" id="goods" open>
     <summary><span>Товары</span><span class="chev" aria-hidden="true"></span></summary>
     <div class="collapsible-body">
+    {% if goods_error %}
+    <div class="alert" role="alert">{{ goods_error }}</div>
+    {% endif %}
+    {% if goods_notice %}
+    <div class="alert alert-success" role="status">{{ goods_notice }}</div>
+    {% endif %}
     {% if goods %}
     <div class="table-scroll">
       <table class="records">
@@ -481,7 +487,10 @@
                placeholder="Начните вводить название или артикул…" autocomplete="off">
         <input type="hidden" name="product_id" data-combo-value>
         <div class="combo-dropdown hidden" data-combo-dropdown>
-          <p class="combo-empty hidden" data-combo-empty>Ничего не найдено.</p>
+          <div class="combo-empty hidden" data-combo-empty>
+            <p>Ничего не найдено.</p>
+            <button type="button" class="btn-add" onclick="openCreateProductModal()">+ Создать товар в каталоге</button>
+          </div>
           {% for p in catalog_products %}
           <div class="combo-option" data-value="{{ p.id }}"
                data-label="{{ p.name }}{{ ' (' ~ p.sku ~ ')' if p.sku }}"
@@ -1124,6 +1133,56 @@
     </div>
   </div>
 
+  {% if edit_order %}
+  <div id="create-product-modal" class="photo-modal hidden" onclick="if (event.target === this) closeCreateProductModal();">
+    <div class="photo-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closeCreateProductModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <form id="create-product-form" method="post" class="assign-modal-card"
+            action="{{ url_for('create_tuning_order_product', order_id=edit_order.id) }}">
+        <h3>Новый товар в каталоге</h3>
+        <p class="hint">Товар сразу попадёт в общий каталог склада и добавится в этот заказ.</p>
+        <div class="field">
+          <label for="create-product-name">Название</label>
+          <input type="text" id="create-product-name" name="name" required>
+        </div>
+        <div class="field">
+          <label for="create-product-sku">Артикул</label>
+          <input type="text" id="create-product-sku" name="sku">
+        </div>
+        <div class="field-row-inner">
+          <div class="field field-narrow">
+            <label for="create-product-cost-price">Себестоимость, ₽</label>
+            <input type="text" inputmode="decimal" id="create-product-cost-price" name="cost_price" required>
+          </div>
+          <div class="field field-narrow">
+            <label for="create-product-cost-unit">Единица</label>
+            <select id="create-product-cost-unit" name="cost_unit" required>
+              {% for u in cost_units %}
+              <option value="{{ u.value }}">{{ u.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="field-row-inner">
+          <div class="field field-narrow">
+            <label for="create-product-sale-price">Цена продажи, ₽</label>
+            <input type="text" inputmode="decimal" id="create-product-sale-price" name="sale_price" required>
+          </div>
+          <div class="field field-narrow">
+            <label for="create-product-quantity">Количество в заказ</label>
+            <input type="text" inputmode="decimal" id="create-product-quantity" name="quantity" required>
+          </div>
+        </div>
+        <button type="submit" class="btn-primary">Создать и добавить в заказ</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
 </main>
 
 <script>
@@ -1147,6 +1206,24 @@ function openAssignModal(actionUrl, description) {
 
 function closeAssignModal() {
   document.getElementById('assign-modal').classList.add('hidden');
+}
+
+function openCreateProductModal() {
+  var modal = document.getElementById('create-product-modal');
+  if (!modal) return;
+  var search = document.getElementById('product_search');
+  var quantity = document.getElementById('product_quantity');
+  document.getElementById('create-product-name').value = search ? search.value.trim() : '';
+  document.getElementById('create-product-sku').value = '';
+  document.getElementById('create-product-cost-price').value = '';
+  document.getElementById('create-product-sale-price').value = '';
+  document.getElementById('create-product-quantity').value = (quantity && quantity.value.trim()) || '1';
+  modal.classList.remove('hidden');
+}
+
+function closeCreateProductModal() {
+  var modal = document.getElementById('create-product-modal');
+  if (modal) modal.classList.add('hidden');
 }
 
 function addAssignEmployeeRow() {
@@ -1231,6 +1308,7 @@ document.addEventListener('keydown', function (e) {
     closePhotoModal();
     closePhotoUploadModal();
     closeAssignModal();
+    closeCreateProductModal();
   }
 });
 

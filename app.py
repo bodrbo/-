@@ -9553,6 +9553,8 @@ def edit_tuning_order(order_id):
             goods=goods, goods_subtotal=goods_subtotal, work_subtotal=work_subtotal,
             catalog_products=catalog_products,
             cost_units=SUPPLY_COST_UNITS,
+            goods_error=session.pop("tuning_goods_error", None),
+            goods_notice=session.pop("tuning_goods_notice", None),
             notes=notes, reminder_recipients=reminder_recipients,
             boat_profile_id=boat_profile_id,
             motor_profile_id=motor_profile_id,
@@ -10480,6 +10482,84 @@ def add_tuning_order_product(order_id):
         _auto_writeoff_order_product(db, order_id, product_id, quantity, cur.lastrowid)
         _recompute_order_totals(db, order_id)
     return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
+@app.route("/tuning/<int:order_id>/products/create", methods=["POST"])
+@admin_login_required
+def create_tuning_order_product(order_id):
+    """Catalog search inside the order's "Товары" panel comes up empty ->
+    the admin creates the missing supply_products row right there (modal,
+    not a trip to /supply/catalog) and it's added to the order in the same
+    request. Deliberately a trimmed subset of add_supply_product's fields
+    (no sku/category/min_stock/photo) — those can be filled in later from
+    the full catalog if the admin cares; the quick-add modal only asks for
+    what's needed to price the order line and track stock value."""
+    db = get_db()
+    order = db.execute("SELECT id FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None:
+        return redirect(url_for("tuning_index"))
+
+    name = request.form.get("name", "").strip()
+    sku = request.form.get("sku", "").strip()
+    cost_price_raw = request.form.get("cost_price", "").strip().replace(",", ".")
+    cost_unit = request.form.get("cost_unit", "").strip()
+    sale_price_raw = request.form.get("sale_price", "").strip().replace(",", ".")
+    quantity_raw = request.form.get("quantity", "").strip().replace(",", ".")
+
+    errors = []
+    if not name:
+        errors.append("Укажите название товара.")
+    if cost_unit not in [u["value"] for u in SUPPLY_COST_UNITS]:
+        errors.append("Укажите единицу измерения.")
+
+    cost_price = None
+    try:
+        cost_price = float(cost_price_raw)
+        if cost_price < 0:
+            errors.append("Себестоимость не может быть отрицательной.")
+    except ValueError:
+        errors.append("Себестоимость должна быть числом.")
+
+    sale_price = None
+    try:
+        sale_price = float(sale_price_raw)
+        if sale_price < 0:
+            errors.append("Цена продажи не может быть отрицательной.")
+    except ValueError:
+        errors.append("Цена продажи должна быть числом.")
+
+    quantity = None
+    try:
+        quantity = float(quantity_raw)
+        if quantity <= 0:
+            errors.append("Количество должно быть больше нуля.")
+    except ValueError:
+        errors.append("Количество должно быть числом.")
+
+    if errors:
+        session["tuning_goods_error"] = " ".join(errors)
+        return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    cur = db.execute(
+        "INSERT INTO supply_products (name, sku, description, supplier, photo_filename, "
+        "cost_price, cost_unit, sale_price, min_stock, category_id, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (name, sku or None, None, None, None, cost_price, cost_unit, sale_price, None, None, now),
+    )
+    product_id = cur.lastrowid
+    db.commit()
+
+    cur = db.execute(
+        "INSERT INTO tuning_order_products (order_id, product_id, product_name, quantity, "
+        "unit_price, cost_price, unit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (order_id, product_id, name, quantity, sale_price, cost_price, cost_unit, now),
+    )
+    db.commit()
+    _auto_writeoff_order_product(db, order_id, product_id, quantity, cur.lastrowid)
+    _recompute_order_totals(db, order_id)
+    session["tuning_goods_notice"] = f"Товар «{name}» создан в каталоге и добавлен в заказ."
+    return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
 
 
 @app.route("/tuning/<int:order_id>/products/<int:row_id>/remove", methods=["POST"])
