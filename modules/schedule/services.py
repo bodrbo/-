@@ -1458,10 +1458,13 @@ def day_view(
     boat_colors,
     avatar_url,
     include_unassigned_tripster=True,
+    include_tripster=True,
     attach_weather=None,
 ):
     crew = repository.list_crew_employees(db)
     raw_items = repository.list_day_items(db, day.isoformat())
+    if not include_tripster:
+        raw_items = [item for item in raw_items if item["source"] != "tripster"]
     if not include_unassigned_tripster:
         raw_items = [
             item for item in raw_items

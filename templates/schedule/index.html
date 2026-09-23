@@ -76,14 +76,14 @@
           {% endfor %}
         </select>
       </label>
-      {% if can_manage %}<form method="post" action="{{ url_for('schedule.sync_tripster') }}" class="schedule-tripster-form" onsubmit="showScheduleTripsterLoader(this)">
+      {% if can_manage %}{% if not is_demo_tenant %}<form method="post" action="{{ url_for('schedule.sync_tripster') }}" class="schedule-tripster-form" onsubmit="showScheduleTripsterLoader(this)">
         <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
         <input type="hidden" name="return_employee" value="{{ selected_employee }}">
         <button type="submit" class="schedule-tripster-button" {{ 'disabled' if not tripster_configured }} title="{{ 'Полностью сверить заказы, услуги и количество гостей с Tripster' if tripster_configured else 'Токен Tripster не настроен' }}">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 8A6.8 6.8 0 1 0 17 12"/><path d="M13 4h3.5v4"/></svg>
           <span>Tripster</span>
         </button>
-      </form>
+      </form>{% endif %}
       <form method="post" action="{{ url_for('schedule.sync_weather') }}" class="schedule-weather-form" onsubmit="showScheduleWeatherLoader(this)">
         <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
         <input type="hidden" name="return_employee" value="{{ selected_employee }}">
@@ -338,11 +338,11 @@
         <input type="hidden" name="customer_source_ref" id="scheduleCustomerSourceRef">
         <input type="hidden" name="customer_prepayment" id="scheduleCustomerPrepayment" value="0">
         <input type="hidden" name="customer_payment_due" id="scheduleCustomerPaymentDue" value="0">
-        <div class="schedule-tripster-payment" id="scheduleBookingPaymentBreakdown" hidden>
+        {% if not is_demo_tenant %}<div class="schedule-tripster-payment" id="scheduleBookingPaymentBreakdown" hidden>
           <div><span>Общая сумма заказа</span><strong data-payment-total>0 ₽</strong></div>
           <div><span>Предоплата на Tripster</span><strong data-payment-prepayment>0 ₽</strong></div>
           <div><span>Сумма к доплате</span><strong data-payment-due>0 ₽</strong></div>
-        </div>
+        </div>{% endif %}
         <div class="schedule-booking-payments schedule-field-wide" id="scheduleBookingPayments" hidden></div>
       </div>
 
@@ -616,11 +616,11 @@
         {% endfor %}
       </select>
     </label>
-    <div class="schedule-tripster-payment" data-payment-breakdown hidden>
+    {% if not is_demo_tenant %}<div class="schedule-tripster-payment" data-payment-breakdown hidden>
       <div><span>Общая сумма заказа</span><strong data-payment-total>0 ₽</strong></div>
       <div><span>Предоплата на Tripster</span><strong data-payment-prepayment>0 ₽</strong></div>
       <div><span>Сумма к доплате</span><strong data-payment-due>0 ₽</strong></div>
-    </div>
+    </div>{% endif %}
   </div>
 </template>
 {% elif can_view_clients %}
@@ -690,7 +690,7 @@
   const scheduleDraggedCards = new WeakSet();
   let scheduleScrollSync = false;
 
-  function showScheduleTripsterLoader(form) {
+  {% if not is_demo_tenant %}function showScheduleTripsterLoader(form) {
     const button = form.querySelector('button[type="submit"]');
     if (button) {
       button.disabled = true;
@@ -703,7 +703,7 @@
     const label = loader.querySelector('.loader-label');
     if (label) label.textContent = 'Переимпорт рейсов…';
     loader.classList.remove('hidden');
-  }
+  }{% endif %}
 
   function showScheduleWeatherLoader(form) {
     const button = form.querySelector('button[type="submit"]');
@@ -802,7 +802,8 @@
     document.getElementById('scheduleCustomerSourceRef').value = '';
     document.getElementById('scheduleCustomerPrepayment').value = '0';
     document.getElementById('scheduleCustomerPaymentDue').value = '0';
-    document.getElementById('scheduleBookingPaymentBreakdown').hidden = true;
+    const bookingPaymentBreakdown = document.getElementById('scheduleBookingPaymentBreakdown');
+    if (bookingPaymentBreakdown) bookingPaymentBreakdown.hidden = true;
     const bookingPayments = document.getElementById('scheduleBookingPayments');
     bookingPayments.hidden = true;
     bookingPayments.replaceChildren();

@@ -60,8 +60,12 @@ def create_blueprint(get_db, access_required, is_manager_view, boats):
     def create_service():
         section = request.form.get("service_type", "group")
         db = get_db()
+        submitted_form = request.form
+        if session.get("demo_tenant_id"):
+            submitted_form = request.form.copy()
+            submitted_form.pop("tripster_id", None)
         success, message, result = services.create_service(
-            db, request.form, request_boats(db)
+            db, submitted_form, request_boats(db)
         )
         if not success:
             session["excursion_services_create_values"] = result or {}
@@ -78,8 +82,14 @@ def create_blueprint(get_db, access_required, is_manager_view, boats):
         section = (
             existing["service_type"] if existing is not None else "group"
         )
+        submitted_form = request.form
+        if session.get("demo_tenant_id"):
+            submitted_form = request.form.copy()
+            submitted_form["tripster_id"] = (
+                existing["tripster_id"] if existing is not None else ""
+            ) or ""
         success, message, data = services.update_service(
-            db, service_id, request.form, request_boats(db)
+            db, service_id, submitted_form, request_boats(db)
         )
         if success and data is not None:
             section = data["service_type"]

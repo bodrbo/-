@@ -146,7 +146,7 @@
       <p>Итоговая стоимость считается по длительности экскурсии и часовому тарифу выбранного катера.</p>
       {% endif %}
     </div>
-    <form action="{{ url_for('excursion_services.create_service') }}" method="post" class="excursion-service-form excursion-service-create-form {{ 'is-individual' if section == 'individual' }}">
+    <form action="{{ url_for('excursion_services.create_service') }}" method="post" class="excursion-service-form excursion-service-create-form {{ 'is-individual' if section == 'individual' }} {{ 'is-demo' if is_demo_tenant }}">
       <input type="hidden" name="service_type" value="{{ section }}">
       <label class="excursion-service-name">
         <span>Название</span>
@@ -163,10 +163,10 @@
           <input type="number" name="duration_minutes" min="0" max="59" step="1" inputmode="numeric" value="{{ create_values.get('duration_minutes', 0) }}" required>
         </label>
       </fieldset>
-      <label class="excursion-service-tripster-id">
+      {% if not is_demo_tenant %}<label class="excursion-service-tripster-id">
         <span>Tripster ID</span>
         <input type="number" name="tripster_id" min="1" step="1" inputmode="numeric" value="{{ create_values.get('tripster_id') or '' }}" placeholder="Не указан" aria-label="ID экскурсии в Tripster">
-      </label>
+      </label>{% endif %}
       {% if section == 'group' %}
       <label>
         <span>Цена за гостя, ₽</span>
@@ -206,7 +206,7 @@
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 13.5h14l-2.2 3H5.2l-2.2-3zM6 13.5V8h7l2 5.5M8 8V5h4v3"/></svg>
         {% endif %}
       </div>
-      <form action="{{ url_for('excursion_services.update_service', service_id=service.id) }}" method="post" class="excursion-service-form excursion-service-edit-form {{ 'is-individual' if section == 'individual' }}" data-service-form>
+      <form action="{{ url_for('excursion_services.update_service', service_id=service.id) }}" method="post" class="excursion-service-form excursion-service-edit-form {{ 'is-individual' if section == 'individual' }} {{ 'is-demo' if is_demo_tenant }}" data-service-form>
         <label class="excursion-service-name">
           <span>Название</span>
           <input name="name" maxlength="180" value="{{ service.name }}" required>
@@ -230,10 +230,10 @@
             <input type="number" name="duration_minutes" min="0" max="59" step="1" inputmode="numeric" value="{{ service.duration_minutes }}" required>
           </label>
         </fieldset>
-        <label class="excursion-service-tripster-id">
+        {% if not is_demo_tenant %}<label class="excursion-service-tripster-id">
           <span>Tripster ID</span>
           <input type="number" name="tripster_id" min="1" step="1" inputmode="numeric" value="{{ service.tripster_id or '' }}" placeholder="Не указан" aria-label="ID экскурсии Tripster для {{ service.name }}">
-        </label>
+        </label>{% endif %}
         <label class="excursion-service-price excursion-service-pricing" data-pricing-type="group" {{ 'hidden' if service.service_type != 'group' }}>
           <span>Цена за гостя, ₽</span>
           <span class="excursion-service-price-input"><input type="number" name="price" min="0" max="10000000" step="1" value="{{ service.price|round(2) }}" {{ 'required' if service.service_type == 'group' else 'disabled' }}><b>₽</b></span>

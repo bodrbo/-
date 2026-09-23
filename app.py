@@ -195,6 +195,7 @@ from modules.clients.constants import (
     CLIENT_RELATIONSHIP_PARTNER,
     CLIENT_RELATIONSHIP_TYPES,
     EXCURSION_SEGMENT,
+    TRIPSTER_CHANNEL,
     TUNING_SEGMENT,
 )
 from modules.tuning_boat_specs import (
@@ -10885,7 +10886,13 @@ def _render_client_dashboard(
             if orders else (client["boat_model"] or "—")
         ),
         work_photos_by_item=work_photos_by_item, cost_units=SUPPLY_COST_UNITS,
-        client_acquisition_channels=CLIENT_ACQUISITION_CHANNELS,
+        client_acquisition_channels=[
+            channel for channel in CLIENT_ACQUISITION_CHANNELS
+            if not (
+                session.get("demo_tenant_id")
+                and channel["value"] == TRIPSTER_CHANNEL
+            )
+        ],
         client_contact_methods=CLIENT_CONTACT_METHODS,
         viewer_role=viewer_role,
         client_section=client_section,
@@ -11512,7 +11519,14 @@ def update_client_acquisition_channel(client_id):
         "SELECT 1 FROM client_segments WHERE client_id = ? AND segment = ?",
         (client_id, EXCURSION_SEGMENT),
     ).fetchone() is not None
-    if is_excursion_client and (not channel or channel in allowed_channels):
+    channel_allowed_for_viewer = not (
+        session.get("demo_tenant_id") and channel == TRIPSTER_CHANNEL
+    )
+    if (
+        is_excursion_client
+        and channel_allowed_for_viewer
+        and (not channel or channel in allowed_channels)
+    ):
         db.execute(
             "UPDATE clients SET acquisition_channel = ? WHERE id = ?",
             (channel, client_id),

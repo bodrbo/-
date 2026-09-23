@@ -130,6 +130,44 @@ class DemoClientModuleVisibilityTests(unittest.TestCase):
         self.assertEqual(acquisition_response.status_code, 404)
         self.assertEqual(contact_response.status_code, 404)
 
+    def test_excursion_demo_hides_and_rejects_tripster_sales_channel(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            client = db.execute(
+                "INSERT INTO clients "
+                "(client_name, boat_model, phone, token, status, "
+                "acquisition_channel, created_at) "
+                "VALUES (?, '', '', 'demo-tripster-hidden-token', 'neutral', "
+                "'', '2026-09-23 12:00')",
+                (self.CONTACT_NAME,),
+            )
+            client_id = client.lastrowid
+            db.execute(
+                "INSERT INTO client_segments "
+                "(client_id, segment, created_at) VALUES (?, 'excursion', ?)",
+                (client_id, "2026-09-23 12:00"),
+            )
+            db.commit()
+        self.log_in_demo(["excursions"])
+
+        response = self.client.get(
+            f"/admin/clients/{client_id}/cabinet?section=excursion"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('<option value="tripster"', response.get_data(as_text=True))
+
+        update = self.client.post(
+            f"/admin/clients/{client_id}/acquisition-channel",
+            data={"acquisition_channel": "tripster"},
+        )
+        self.assertEqual(update.status_code, 302)
+        with application_module.app.app_context():
+            channel = application_module.get_db().execute(
+                "SELECT acquisition_channel FROM clients WHERE id = ?",
+                (client_id,),
+            ).fetchone()["acquisition_channel"]
+        self.assertEqual(channel, "")
+
 
 if __name__ == "__main__":
     unittest.main()

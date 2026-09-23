@@ -30,6 +30,10 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
                 "WHERE name = 'Средний тур'"
             )
             db.execute(
+                "DELETE FROM schedule_items WHERE source_ref = ?",
+                ("demo-tripster-hidden",),
+            )
+            db.execute(
                 "DELETE FROM excursion_service_boat_prices WHERE service_id IN ("
                 "SELECT id FROM excursion_services WHERE name = 'Средний тур')"
             )
@@ -56,6 +60,10 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
                 "WHERE name = 'Средний тур'"
             )
             db.execute(
+                "DELETE FROM schedule_items WHERE source_ref = ?",
+                ("demo-tripster-hidden",),
+            )
+            db.execute(
                 "DELETE FROM excursion_service_boat_prices WHERE service_id IN ("
                 "SELECT id FROM excursion_services WHERE name = 'Средний тур')"
             )
@@ -66,9 +74,66 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
             session["admin_id"] = 1
             session["admin_name"] = "Администратор"
 
+    def login_demo(self):
+        with self.client.session_transaction() as demo_session:
+            demo_session.clear()
+            demo_session["demo_tenant_id"] = 905
+            demo_session["demo_tenant_name"] = "Демо без агрегаторов"
+            demo_session["demo_tenant_db_path"] = application_module.DB_PATH
+            demo_session["demo_tenant_modules"] = "excursions"
+
     def test_services_require_admin_login(self):
         self.assertEqual(self.client.get("/services").status_code, 302)
         self.assertEqual(self.client.post("/services", data={}).status_code, 302)
+
+    def test_demo_hides_tripster_and_ignores_submitted_tripster_id(self):
+        self.login_demo()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO schedule_items "
+                "(kind, boat, service_name, starts_at, ends_at, capacity, "
+                "participants_count, customer_name, customer_phone, revenue, "
+                "note, status, source, source_ref, created_at, updated_at) "
+                "VALUES ('event', '', 'Скрытая заявка Tripster', "
+                "'2026-09-12 13:00', '2026-09-12 14:00', 10, 1, '', '', "
+                "0, '', 'scheduled', 'tripster', ?, "
+                "'2026-09-23 12:00', '2026-09-23 12:00')",
+                ("demo-tripster-hidden",),
+            )
+            db.commit()
+
+        services_html = self.client.get("/services").get_data(as_text=True)
+        schedule_html = self.client.get(
+            "/schedule?date=2026-09-12"
+        ).get_data(as_text=True)
+        self.assertNotIn("Tripster", services_html)
+        self.assertNotIn("Tripster", schedule_html)
+        self.assertNotIn("schedule-tripster-button", schedule_html)
+        self.assertEqual(
+            self.client.post("/schedule/tripster/sync", data={}).status_code,
+            404,
+        )
+
+        response = self.client.post(
+            "/services",
+            data={
+                "name": "Ночной тестовый маршрут",
+                "service_type": "group",
+                "duration_hours": "1",
+                "duration_minutes": "20",
+                "price": "2500",
+                "tripster_id": "998877",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            service = application_module.get_db().execute(
+                "SELECT tripster_id FROM excursion_services WHERE name = ?",
+                ("Ночной тестовый маршрут",),
+            ).fetchone()
+        self.assertIsNotNone(service)
+        self.assertIsNone(service["tripster_id"])
 
     def test_bootstrap_catalog_is_visible(self):
         self.login()

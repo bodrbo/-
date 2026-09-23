@@ -2,7 +2,7 @@
 
 import datetime as dt
 
-from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, jsonify, redirect, render_template, request, session, url_for
 
 from modules.clients.constants import CLIENT_CONTACT_METHODS
 from modules.excursion_services import repository as service_repository
@@ -71,6 +71,7 @@ def create_schedule_blueprint(
         day = services.parse_day(request.args.get("date"))
         selected_employee = request.args.get("employee", "all")
         team_view = is_team_view()
+        demo_view = bool(session.get("demo_tenant_id"))
         can_view_clients = team_view and can_view_team_clients()
         context = services.day_view(
             db,
@@ -80,6 +81,7 @@ def create_schedule_blueprint(
             request_boat_colors(db),
             avatar_url,
             include_unassigned_tripster=not team_view,
+            include_tripster=not demo_view,
             attach_weather=weather_services.attach_forecast,
         )
         return render_template(
@@ -110,7 +112,7 @@ def create_schedule_blueprint(
                 else [] if team_view
                 else context["items"]
             ),
-            tripster_configured=tripster_configured(),
+            tripster_configured=not demo_view and tripster_configured(),
             yookassa_configured=yookassa_configured(),
             weather_configured=weather_configured(),
         )
@@ -435,13 +437,12 @@ def create_schedule_blueprint(
     @blueprint.route("/schedule/tripster/sync", methods=["POST"])
     @manage_required
     def sync_tripster():
-        day = services.parse_day(request.form.get("return_date")).isoformat()
-        selected_employee = request.form.get("return_employee", "all")
         if session.get("demo_tenant_id"):
             # Real Tripster bookings must never land in a demo tenant's
             # own database — see no_real_data_for_demo_tenant in app.py.
-            set_notice("Синхронизация с Tripster недоступна в демо-режиме.", False)
-            return redirect_to_day(day, selected_employee)
+            abort(404)
+        day = services.parse_day(request.form.get("return_date")).isoformat()
+        selected_employee = request.form.get("return_employee", "all")
         if not tripster_configured() or tripster_fetcher is None:
             set_notice("Токен Tripster не настроен на сервере.", False)
             return redirect_to_day(day, selected_employee)
@@ -491,6 +492,8 @@ def create_schedule_blueprint(
 
     @blueprint.route("/internal/cron/sync-tripster")
     def cron_sync_tripster():
+        if session.get("demo_tenant_id"):
+            abort(404)
         if not cron_secret or request.args.get("token") != cron_secret:
             return "forbidden", 403
         if not tripster_configured() or tripster_fetcher is None:
