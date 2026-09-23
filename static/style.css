@@ -11742,3 +11742,22 @@ button.partner-open-price-save svg {
 
 .goods-price-form{display:flex;align-items:center;justify-content:flex-end;gap:4px;margin:0}
 .goods-price-input{width:96px;text-align:right;padding:4px 6px}
+/* Not inside ".row-actions", so the unified icon-button look is repeated here. */
+.goods-price-form .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 27px;
+  height: 27px;
+  margin: 0;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.goods-price-form .icon-btn svg { width: 13px; height: 13px; }
+.goods-price-form .icon-btn.approve:hover { background: var(--success); color: #fff8f4; border-color: var(--success); }
+.goods-price-input { width: 84px; height: 27px; padding: 0 6px; font-size: 13px; }
