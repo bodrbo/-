@@ -1,8 +1,6 @@
+{% if demo_module_enabled('excursions') and demo_module_enabled('tuning') %}
 <nav class="sub-tabs">
-  {% if demo_module_enabled('excursions') %}
   <a href="{{ url_for('schedule.index') }}" class="{{ 'active' if sub_page == 'excursions' }}">Экскурсии</a>
-  {% endif %}
-  {% if demo_module_enabled('tuning') %}
   <a href="{{ url_for('tuning_schedule.index') }}" class="{{ 'active' if sub_page == 'tuning' }}">Тюнинг</a>
-  {% endif %}
 </nav>
+{% endif %}

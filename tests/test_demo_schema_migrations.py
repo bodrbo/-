@@ -40,9 +40,12 @@ class DemoSchemaMigrationTests(unittest.TestCase):
 
     def test_schedule_request_migrates_existing_demo_database(self):
         response = self.client.get("/schedule?date=2026-09-22")
+        html = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Расписание рейсов", response.get_data(as_text=True))
+        self.assertIn("Расписание рейсов", html)
+        self.assertNotIn('<nav class="sub-tabs">', html)
+        self.assertNotIn(">Экскурсии</a>", html)
         with self.client.session_transaction() as demo_session:
             self.assertEqual(
                 demo_session.get("demo_tenant_schema_revision"),
@@ -73,6 +76,18 @@ class DemoSchemaMigrationTests(unittest.TestCase):
         self.assertEqual(employees, {"Демо Капитан"})
         self.assertEqual(admin_count, 0)
         self.assertEqual(investor_count, 0)
+
+    def test_schedule_subnav_is_visible_when_demo_has_both_modules(self):
+        with self.client.session_transaction() as demo_session:
+            demo_session["demo_tenant_modules"] = "excursions,tuning"
+
+        response = self.client.get("/schedule?date=2026-09-22")
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('<nav class="sub-tabs">', html)
+        self.assertIn(">Экскурсии</a>", html)
+        self.assertIn(">Тюнинг</a>", html)
 
 
 if __name__ == "__main__":
