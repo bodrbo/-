@@ -14,6 +14,9 @@ def list_services(db):
     by_id = {service["id"]: service for service in services}
     for service in services:
         service["boat_prices"] = {}
+        total_minutes = int(round(float(service["hours"] or 0) * 60))
+        service["duration_hours"] = total_minutes // 60
+        service["duration_minutes"] = total_minutes % 60
     for row in db.execute(
         "SELECT service_id, boat, hourly_price "
         "FROM excursion_service_boat_prices ORDER BY service_id, boat"

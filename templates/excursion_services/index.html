@@ -152,10 +152,17 @@
         <span>Название</span>
         <input name="name" maxlength="180" value="{{ create_values.get('name', '') }}" placeholder="Например, Экскурсия по фортам" required>
       </label>
-      <label>
-        <span>Длительность, ч</span>
-        <input type="number" name="hours" min="0.5" max="24" step="0.5" value="{{ create_values.get('hours', '1') }}" required>
-      </label>
+      <fieldset class="excursion-service-duration">
+        <legend>Длительность</legend>
+        <label>
+          <span>Часы</span>
+          <input type="number" name="duration_hours" min="0" max="24" step="1" inputmode="numeric" value="{{ create_values.get('duration_hours', 1) }}" required>
+        </label>
+        <label>
+          <span>Минуты</span>
+          <input type="number" name="duration_minutes" min="0" max="59" step="1" inputmode="numeric" value="{{ create_values.get('duration_minutes', 0) }}" required>
+        </label>
+      </fieldset>
       <label class="excursion-service-tripster-id">
         <span>Tripster ID</span>
         <input type="number" name="tripster_id" min="1" step="1" inputmode="numeric" value="{{ create_values.get('tripster_id') or '' }}" placeholder="Не указан" aria-label="ID экскурсии в Tripster">
@@ -212,10 +219,17 @@
             {% endfor %}
           </select>
         </label>
-        <label>
-          <span>Длительность, ч</span>
-          <input type="number" name="hours" min="0.5" max="24" step="0.5" value="{{ service.hours|round(2) }}" required>
-        </label>
+        <fieldset class="excursion-service-duration">
+          <legend>Длительность</legend>
+          <label>
+            <span>Часы</span>
+            <input type="number" name="duration_hours" min="0" max="24" step="1" inputmode="numeric" value="{{ service.duration_hours }}" required>
+          </label>
+          <label>
+            <span>Минуты</span>
+            <input type="number" name="duration_minutes" min="0" max="59" step="1" inputmode="numeric" value="{{ service.duration_minutes }}" required>
+          </label>
+        </fieldset>
         <label class="excursion-service-tripster-id">
           <span>Tripster ID</span>
           <input type="number" name="tripster_id" min="1" step="1" inputmode="numeric" value="{{ service.tripster_id or '' }}" placeholder="Не указан" aria-label="ID экскурсии Tripster для {{ service.name }}">

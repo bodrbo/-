@@ -1485,6 +1485,23 @@ body.software-request-widget-enabled main.wrap:not(.schedule-shell) {
   letter-spacing: .07em;
   text-transform: uppercase;
 }
+.excursion-service-duration {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.excursion-service-duration legend {
+  margin-bottom: 6px;
+  padding: 0;
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 700;
+}
+.excursion-service-duration label > span:first-child { font-size: 9px; }
 .excursion-boat-rates label > span:first-child { font-size: 10px; }
 .excursion-boat-rates .excursion-service-price-input input { padding-right: 48px; background: var(--paper); }
 .excursion-boat-rates .excursion-service-price-input b { font-size: 10px; }

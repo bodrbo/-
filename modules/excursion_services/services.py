@@ -27,6 +27,41 @@ def _parse_number(raw_value, label, minimum, maximum, errors):
     return value
 
 
+def _parse_duration(form, errors):
+    """Return duration as hours while accepting the former single-field form.
+
+    Existing integrations and old browser tabs may still submit ``hours``;
+    the catalog UI now submits separate whole-hour and minute fields.
+    """
+    if "duration_hours" not in form and "duration_minutes" not in form:
+        hours = _parse_number(
+            form.get("hours"), "Длительность", 0.5, 24, errors
+        )
+        total_minutes = int(round(hours * 60))
+        return hours, total_minutes // 60, total_minutes % 60
+
+    values = []
+    for field_name, label, maximum in (
+        ("duration_hours", "Часы", 24),
+        ("duration_minutes", "Минуты", 59),
+    ):
+        raw_value = str(form.get(field_name) or "").strip()
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            errors.append(f"{label} должны быть целым числом.")
+            value = 0
+        if value < 0 or value > maximum:
+            errors.append(f"{label} должны быть от 0 до {maximum}.")
+        values.append(value)
+
+    whole_hours, minutes = values
+    total_minutes = whole_hours * 60 + minutes
+    if total_minutes < 30 or total_minutes > 24 * 60:
+        errors.append("Длительность должна быть от 30 минут до 24 часов.")
+    return total_minutes / 60, whole_hours, minutes
+
+
 def _parse_tripster_id(raw_value, errors):
     value_text = str(raw_value or "").strip()
     if not value_text:
@@ -67,9 +102,7 @@ def validate_form(db, form, boats, service_id=None):
     name = _normalise_name(form.get("name"))
     if len(name) < 2:
         errors.append("Укажите название услуги.")
-    hours = _parse_number(
-        form.get("hours"), "Длительность", 0.5, 24, errors
-    )
+    hours, duration_hours, duration_minutes = _parse_duration(form, errors)
     service_type = str(form.get("service_type") or "group").strip()
     if service_type not in SERVICE_TYPES:
         errors.append("Выберите категорию услуги.")
@@ -95,6 +128,8 @@ def validate_form(db, form, boats, service_id=None):
         "service_type": service_type,
         "tripster_id": tripster_id,
         "hours": hours,
+        "duration_hours": duration_hours,
+        "duration_minutes": duration_minutes,
         "price": price,
         "boat_prices": boat_prices,
     }

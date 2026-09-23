@@ -83,6 +83,9 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
         self.assertIn("Индивидуальная экскурсия", html)
         self.assertIn('name="service_type"', html)
         self.assertIn('name="tripster_id"', html)
+        self.assertIn('name="duration_hours"', html)
+        self.assertIn('name="duration_minutes"', html)
+        self.assertNotIn('name="hours"', html)
         self.assertIn("Tripster ID", html)
         self.assertIn('data-pricing-type="group"', html)
         self.assertIn('data-pricing-type="individual"', html)
@@ -142,7 +145,8 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
             data={
                 "name": "Ночной тестовый маршрут",
                 "service_type": "group",
-                "hours": "2,5",
+                "duration_hours": "2",
+                "duration_minutes": "35",
                 "price": "3 500",
                 "tripster_id": "987654",
             },
@@ -154,7 +158,7 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
                 "WHERE name = 'Ночной тестовый маршрут'"
             ).fetchone()
         self.assertIsNotNone(service)
-        self.assertEqual(service["duration_hours"], 2.5)
+        self.assertAlmostEqual(service["duration_hours"], 2 + 35 / 60)
         self.assertEqual(service["price"], 3500)
         self.assertEqual(service["tripster_id"], 987654)
 
@@ -163,7 +167,8 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
             data={
                 "name": "Ночной тестовый маршрут",
                 "service_type": "group",
-                "hours": "3",
+                "duration_hours": "3",
+                "duration_minutes": "17",
                 "price": "4200",
                 "tripster_id": "987655",
             },
@@ -173,7 +178,7 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
             updated = application_module.get_db().execute(
                 "SELECT * FROM excursion_services WHERE id = ?", (service["id"],)
             ).fetchone()
-        self.assertEqual(updated["duration_hours"], 3)
+        self.assertAlmostEqual(updated["duration_hours"], 3 + 17 / 60)
         self.assertEqual(updated["price"], 4200)
         self.assertEqual(updated["tripster_id"], 987655)
 
@@ -290,6 +295,36 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
         invalid_html = invalid.get_data(as_text=True)
         self.assertIn("Длительность должна быть от", invalid_html)
         self.assertIn("Цена должна быть от", invalid_html)
+
+        invalid_minutes = self.client.post(
+            "/services",
+            data={
+                "name": "Ночной тестовый маршрут",
+                "service_type": "group",
+                "duration_hours": "0",
+                "duration_minutes": "75",
+                "price": "1000",
+            },
+            follow_redirects=True,
+        )
+        invalid_minutes_html = invalid_minutes.get_data(as_text=True)
+        self.assertIn("Минуты должны быть от 0 до 59", invalid_minutes_html)
+
+        too_short = self.client.post(
+            "/services",
+            data={
+                "name": "Ночной тестовый маршрут",
+                "service_type": "group",
+                "duration_hours": "0",
+                "duration_minutes": "15",
+                "price": "1000",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(
+            "Длительность должна быть от 30 минут",
+            too_short.get_data(as_text=True),
+        )
 
     def test_duplicate_and_invalid_tripster_ids_are_rejected(self):
         self.login()
