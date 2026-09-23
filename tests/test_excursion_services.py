@@ -17,12 +17,16 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
                 "SELECT id FROM excursion_services WHERE name IN "
                 "('Ночной тестовый маршрут', 'ночной тестовый маршрут', "
                 "'Тестовая индивидуальная экскурсия', "
+                "'Пешеходная групповая экскурсия', "
+                "'Индивидуальная прогулка по центру', "
                 "'Экскурсия с повторным Tripster ID'))"
             )
             db.execute(
                 "DELETE FROM excursion_services WHERE name IN "
                 "('Ночной тестовый маршрут', 'ночной тестовый маршрут', "
                 "'средний тур', 'Тестовая индивидуальная экскурсия', "
+                "'Пешеходная групповая экскурсия', "
+                "'Индивидуальная прогулка по центру', "
                 "'Экскурсия с повторным Tripster ID')"
             )
             db.execute(
@@ -47,12 +51,16 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
                 "SELECT id FROM excursion_services WHERE name IN "
                 "('Ночной тестовый маршрут', 'ночной тестовый маршрут', "
                 "'Тестовая индивидуальная экскурсия', "
+                "'Пешеходная групповая экскурсия', "
+                "'Индивидуальная прогулка по центру', "
                 "'Экскурсия с повторным Tripster ID'))"
             )
             db.execute(
                 "DELETE FROM excursion_services WHERE name IN "
                 "('Ночной тестовый маршрут', 'ночной тестовый маршрут', "
                 "'средний тур', 'Тестовая индивидуальная экскурсия', "
+                "'Пешеходная групповая экскурсия', "
+                "'Индивидуальная прогулка по центру', "
                 "'Экскурсия с повторным Tripster ID')"
             )
             db.execute(
@@ -147,13 +155,16 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
         self.assertIn("Групповая экскурсия", html)
         self.assertIn("Индивидуальная экскурсия", html)
         self.assertIn('name="service_type"', html)
+        self.assertIn('name="activity_type"', html)
+        self.assertIn("Морская прогулка", html)
+        self.assertIn("Экскурсия по городу", html)
         self.assertIn('name="tripster_id"', html)
         self.assertIn('name="duration_hours"', html)
         self.assertIn('name="duration_minutes"', html)
         self.assertNotIn('name="hours"', html)
         self.assertIn("Tripster ID", html)
-        self.assertIn('data-pricing-type="group"', html)
-        self.assertIn('data-pricing-type="individual"', html)
+        self.assertIn('data-pricing-mode="fixed"', html)
+        self.assertIn('data-pricing-mode="boat"', html)
         self.assertIn('class="active"', html)
         individual_html = self.client.get(
             "/services?section=individual"
@@ -196,12 +207,15 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
             ],
         )
         init_schema(connection)
-        types = dict(connection.execute(
-            "SELECT name, service_type FROM excursion_services"
-        ).fetchall())
+        rows = connection.execute(
+            "SELECT name, service_type, activity_type FROM excursion_services"
+        ).fetchall()
         connection.close()
-        self.assertEqual(types["Средний тур"], "group")
-        self.assertEqual(types["Индивидуальная аренда 2 часа"], "individual")
+        types = {name: (service_type, activity_type) for name, service_type, activity_type in rows}
+        self.assertEqual(types["Средний тур"], ("group", "boat"))
+        self.assertEqual(
+            types["Индивидуальная аренда 2 часа"], ("individual", "boat")
+        )
 
     def test_admin_can_create_and_update_service(self):
         self.login()
@@ -279,6 +293,71 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
         self.assertEqual(service["service_type"], "individual")
         self.assertEqual(service["price"], 0)
         self.assertEqual(prices, dict(zip(boat_names, [4000, 5500, 6200])))
+
+    def test_admin_can_create_city_services_with_fixed_prices(self):
+        self.login()
+        group_response = self.client.post(
+            "/services",
+            data={
+                "name": "Пешеходная групповая экскурсия",
+                "service_type": "group",
+                "activity_type": "city",
+                "duration_hours": "1",
+                "duration_minutes": "30",
+                "price": "1800",
+                "boat_name[]": ["Подставной катер"],
+                "boat_price[]": ["999999"],
+            },
+        )
+        individual_response = self.client.post(
+            "/services",
+            data={
+                "name": "Индивидуальная прогулка по центру",
+                "service_type": "individual",
+                "activity_type": "city",
+                "duration_hours": "2",
+                "duration_minutes": "15",
+                "price": "7500",
+                "boat_name[]": ["Подставной катер"],
+                "boat_price[]": ["999999"],
+            },
+        )
+
+        self.assertEqual(group_response.status_code, 302)
+        self.assertEqual(individual_response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            rows = {
+                row["name"]: row
+                for row in db.execute(
+                    "SELECT id, name, service_type, activity_type, "
+                    "duration_hours, price FROM excursion_services "
+                    "WHERE name IN (?, ?)",
+                    (
+                        "Пешеходная групповая экскурсия",
+                        "Индивидуальная прогулка по центру",
+                    ),
+                ).fetchall()
+            }
+            price_rows = db.execute(
+                "SELECT COUNT(*) FROM excursion_service_boat_prices "
+                "WHERE service_id IN (?, ?)",
+                (
+                    rows["Пешеходная групповая экскурсия"]["id"],
+                    rows["Индивидуальная прогулка по центру"]["id"],
+                ),
+            ).fetchone()[0]
+        group = rows["Пешеходная групповая экскурсия"]
+        individual = rows["Индивидуальная прогулка по центру"]
+        self.assertEqual((group["service_type"], group["activity_type"]), ("group", "city"))
+        self.assertEqual(group["price"], 1800)
+        self.assertEqual(
+            (individual["service_type"], individual["activity_type"]),
+            ("individual", "city"),
+        )
+        self.assertAlmostEqual(individual["duration_hours"], 2.25)
+        self.assertEqual(individual["price"], 7500)
+        self.assertEqual(price_rows, 0)
 
     def test_admin_can_change_service_type_in_both_directions(self):
         self.login()
@@ -449,8 +528,10 @@ class ExcursionServicesIntegrationTests(unittest.TestCase):
         html = self.client.get("/schedule?date=2026-09-12").get_data(as_text=True)
         self.assertIn('data-name="Средний тур"', html)
         self.assertIn('data-service-type="group"', html)
+        self.assertIn('data-activity-type="boat"', html)
         self.assertIn('data-price="2750.0"', html)
         self.assertIn("selected.dataset.serviceType === 'group'", html)
+        self.assertIn("selected.dataset.activityType === 'city'", html)
         self.assertIn("scheduleSelectedHours()", html)
         self.assertIn("data-boat-prices=", html)
 

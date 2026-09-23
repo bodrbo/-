@@ -16,6 +16,7 @@ def init_schema(conn):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL COLLATE NOCASE UNIQUE,
             service_type TEXT NOT NULL DEFAULT 'group',
+            activity_type TEXT NOT NULL DEFAULT 'boat',
             tripster_id INTEGER,
             duration_hours REAL NOT NULL,
             price REAL NOT NULL DEFAULT 0,
@@ -42,12 +43,19 @@ def init_schema(conn):
         conn.execute(
             "ALTER TABLE excursion_services ADD COLUMN tripster_id INTEGER"
         )
+    if "activity_type" not in columns:
+        # Every product created before city tours existed describes the
+        # current boat-based business and keeps its former pricing rules.
+        conn.execute(
+            "ALTER TABLE excursion_services "
+            "ADD COLUMN activity_type TEXT NOT NULL DEFAULT 'boat'"
+        )
     if catalog_is_new:
         timestamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
         conn.executemany(
             "INSERT INTO excursion_services "
-            "(name, duration_hours, service_type, price, created_at, updated_at) "
-            "VALUES (?, ?, ?, 0, ?, ?)",
+            "(name, duration_hours, service_type, activity_type, price, "
+            "created_at, updated_at) VALUES (?, ?, ?, 'boat', 0, ?, ?)",
             [
                 (name, duration_hours, service_type, timestamp, timestamp)
                 for name, duration_hours, service_type in DEFAULT_SERVICES
@@ -71,6 +79,10 @@ def init_schema(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_excursion_services_type "
         "ON excursion_services(service_type, name COLLATE NOCASE)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_excursion_services_activity_type "
+        "ON excursion_services(activity_type, service_type, name COLLATE NOCASE)"
     )
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_excursion_services_tripster_id "

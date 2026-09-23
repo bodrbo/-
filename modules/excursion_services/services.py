@@ -4,7 +4,7 @@ import datetime as dt
 import sqlite3
 
 from . import repository
-from .constants import SERVICE_TYPES
+from .constants import ACTIVITY_TYPES, SERVICE_TYPES
 
 
 def current_timestamp():
@@ -107,7 +107,12 @@ def validate_form(db, form, boats, service_id=None):
     if service_type not in SERVICE_TYPES:
         errors.append("Выберите категорию услуги.")
         service_type = "group"
-    if service_type == "group":
+    activity_type = str(form.get("activity_type") or "boat").strip()
+    if activity_type not in ACTIVITY_TYPES:
+        errors.append("Выберите тип услуги.")
+        activity_type = "boat"
+    uses_fixed_price = service_type == "group" or activity_type == "city"
+    if uses_fixed_price:
         price = _parse_number(form.get("price"), "Цена", 0, 10_000_000, errors)
         boat_prices = {}
     else:
@@ -126,6 +131,7 @@ def validate_form(db, form, boats, service_id=None):
     return errors, {
         "name": name,
         "service_type": service_type,
+        "activity_type": activity_type,
         "tripster_id": tripster_id,
         "hours": hours,
         "duration_hours": duration_hours,

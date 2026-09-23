@@ -5,7 +5,7 @@ def list_services(db):
     services = [
         dict(row)
         for row in db.execute(
-            "SELECT id, name, service_type, tripster_id, "
+            "SELECT id, name, service_type, activity_type, tripster_id, "
             "duration_hours AS hours, price, "
             "created_at, updated_at FROM excursion_services "
             "ORDER BY name COLLATE NOCASE, id"
@@ -61,11 +61,12 @@ def create_service(db, data, timestamp):
     try:
         cursor = db.execute(
             "INSERT INTO excursion_services "
-            "(name, service_type, tripster_id, duration_hours, price, "
-            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(name, service_type, activity_type, tripster_id, duration_hours, "
+            "price, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                data["name"], data["service_type"], data["tripster_id"],
-                data["hours"], data["price"], timestamp, timestamp,
+                data["name"], data["service_type"], data["activity_type"],
+                data["tripster_id"], data["hours"], data["price"],
+                timestamp, timestamp,
             ),
         )
         for boat, hourly_price in data["boat_prices"].items():
@@ -139,11 +140,13 @@ def update_service(db, service_id, data, timestamp):
     try:
         cursor = db.execute(
             "UPDATE excursion_services SET name = ?, service_type = ?, "
-            "tripster_id = ?, duration_hours = ?, price = ?, updated_at = ? "
+            "activity_type = ?, tripster_id = ?, duration_hours = ?, "
+            "price = ?, updated_at = ? "
             "WHERE id = ?",
             (
-                data["name"], data["service_type"], data["tripster_id"],
-                data["hours"], data["price"], timestamp, service_id,
+                data["name"], data["service_type"], data["activity_type"],
+                data["tripster_id"], data["hours"], data["price"], timestamp,
+                service_id,
             ),
         )
         db.execute(

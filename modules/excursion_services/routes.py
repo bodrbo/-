@@ -3,7 +3,7 @@
 from flask import Blueprint, redirect, render_template, request, session, url_for
 
 from . import repository, services
-from .constants import SERVICE_TYPES
+from .constants import ACTIVITY_TYPES, SERVICE_TYPES
 
 
 def create_blueprint(get_db, access_required, is_manager_view, boats):
@@ -44,6 +44,7 @@ def create_blueprint(get_db, access_required, is_manager_view, boats):
                 for service_type in SERVICE_TYPES
             },
             service_types=SERVICE_TYPES,
+            activity_types=ACTIVITY_TYPES,
             section=section,
             boats=request_boats(db),
             notice=session.pop("excursion_services_notice", None),

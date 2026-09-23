@@ -276,7 +276,7 @@
           <select name="service_id" id="scheduleService" required onchange="applyScheduleService()">
             <option value="" disabled selected>Выберите услугу</option>
             {% for service in trip_services %}
-            <option value="{{ service.id }}" data-name="{{ service.name }}" data-service-type="{{ service.service_type }}" data-hours="{{ service.hours }}" data-price="{{ service.price }}" data-boat-prices='{{ service.boat_prices|tojson }}'>{{ service.name }}</option>
+            <option value="{{ service.id }}" data-name="{{ service.name }}" data-service-type="{{ service.service_type }}" data-activity-type="{{ service.activity_type }}" data-hours="{{ service.hours }}" data-price="{{ service.price }}" data-boat-prices='{{ service.boat_prices|tojson }}'>{{ service.name }}</option>
             {% endfor %}
           </select>
         </label>
@@ -2349,7 +2349,10 @@
   }
   function scheduleServicePriceForBooking(selected) {
     if (!selected || !selected.value) return 0;
-    if (selected.dataset.serviceType === 'group') {
+    if (
+      selected.dataset.serviceType === 'group'
+      || selected.dataset.activityType === 'city'
+    ) {
       return Number(selected.dataset.price || 0);
     }
     const boat = document.getElementById('scheduleBoat').value;

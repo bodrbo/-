@@ -1396,33 +1396,31 @@ body.software-request-widget-enabled main.wrap:not(.schedule-shell) {
   gap: 14px;
 }
 .excursion-service-create-form {
-  grid-template-columns: minmax(250px, 1.7fr) minmax(125px, .55fr) minmax(130px, .58fr) minmax(175px, .75fr) auto;
+  grid-template-columns: minmax(210px, 1.5fr) minmax(150px, .8fr) minmax(120px, .55fr) minmax(120px, .55fr) minmax(145px, .7fr) auto;
 }
 .excursion-service-edit-form {
-  grid-template-columns: minmax(210px, 1.35fr) minmax(165px, .85fr) minmax(110px, .45fr) minmax(125px, .52fr) minmax(160px, .7fr) auto;
+  grid-template-columns: minmax(190px, 1.25fr) minmax(145px, .75fr) minmax(145px, .75fr) minmax(110px, .5fr) minmax(120px, .5fr) minmax(145px, .65fr) auto;
 }
 .excursion-service-create-form.is-individual {
-  grid-template-columns: minmax(260px, 1.7fr) minmax(135px, .55fr) minmax(140px, .58fr) auto;
+  grid-template-columns: minmax(220px, 1.5fr) minmax(160px, .8fr) minmax(125px, .55fr) minmax(130px, .58fr) minmax(160px, .7fr) auto;
 }
 .excursion-service-edit-form.is-individual {
-  grid-template-columns: minmax(220px, 1.35fr) minmax(170px, .85fr) minmax(120px, .5fr) minmax(135px, .55fr) auto;
+  grid-template-columns: minmax(190px, 1.25fr) minmax(145px, .75fr) minmax(145px, .75fr) minmax(110px, .5fr) minmax(125px, .55fr) minmax(150px, .65fr) auto;
 }
 .excursion-service-create-form.is-demo {
-  grid-template-columns: minmax(250px, 1.7fr) minmax(125px, .55fr) minmax(175px, .75fr) auto;
+  grid-template-columns: minmax(220px, 1.5fr) minmax(155px, .8fr) minmax(125px, .55fr) minmax(155px, .7fr) auto;
 }
 .excursion-service-edit-form.is-demo {
-  grid-template-columns: minmax(210px, 1.35fr) minmax(165px, .85fr) minmax(110px, .45fr) minmax(160px, .7fr) auto;
+  grid-template-columns: minmax(190px, 1.25fr) minmax(140px, .7fr) minmax(145px, .75fr) minmax(110px, .5fr) minmax(145px, .65fr) auto;
 }
 .excursion-service-create-form.is-individual.is-demo {
-  grid-template-columns: minmax(260px, 1.7fr) minmax(135px, .55fr) auto;
+  grid-template-columns: minmax(220px, 1.5fr) minmax(155px, .8fr) minmax(125px, .55fr) auto;
 }
 .excursion-service-edit-form.is-individual.is-demo {
-  grid-template-columns: minmax(220px, 1.35fr) minmax(170px, .85fr) minmax(120px, .5fr) auto;
+  grid-template-columns: minmax(190px, 1.25fr) minmax(140px, .7fr) minmax(145px, .75fr) minmax(110px, .5fr) auto;
 }
-.excursion-service-create-form.is-individual > button { grid-column: 4; grid-row: 1; }
-.excursion-service-edit-form.is-individual > button { grid-column: 5; grid-row: 1; }
-.excursion-service-create-form.is-individual.is-demo > button { grid-column: 3; }
-.excursion-service-edit-form.is-individual.is-demo > button { grid-column: 4; }
+.excursion-service-create-form.uses-boat-rates > button,
+.excursion-service-edit-form.uses-boat-rates > button { grid-row: 1; }
 .excursion-service-form label,
 .excursion-service-form label > span:first-child { min-width: 0; }
 .excursion-service-form label > span:first-child {
