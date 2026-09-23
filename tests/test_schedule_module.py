@@ -333,7 +333,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         ).get_data(as_text=True)
         self.assertIn("--schedule-card-color: #673ab7", page)
         self.assertIn("--schedule-card-ink: #ffffff", page)
-        self.assertIn("Аренда катера", page)
+        self.assertIn("Индивидуальная экскурсия", page)
         self.assertIn(
             f'data-move-url="/schedule/items/{item["id"]}/move"', page
         )
@@ -351,6 +351,50 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
 
         page = self.client.get("/schedule?date=2026-09-05").get_data(as_text=True)
         self.assertIn('<span class="schedule-card-meta">5 гостей</span>', page)
+
+    def test_city_excursion_is_created_without_boat(self):
+        self.login()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            row = db.execute(
+                "SELECT id FROM excursion_services WHERE name = ?",
+                ("Индивидуальная прогулка по городу",),
+            ).fetchone()
+            if row is None:
+                service_id = db.execute(
+                    "INSERT INTO excursion_services "
+                    "(name, service_type, activity_type, duration_hours, price, "
+                    "created_at, updated_at) VALUES (?, 'individual', 'city', 2, "
+                    "7000, '2026-09-01 10:00', '2026-09-01 10:00')",
+                    ("Индивидуальная прогулка по городу",),
+                ).lastrowid
+                db.commit()
+            else:
+                service_id = row["id"]
+
+        response = self.create_booking(
+            service_id=str(service_id),
+            boat="Бодрый Второй",
+            start_time="16:00",
+            end_time="18:00",
+        )
+
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            item = application_module.get_db().execute(
+                "SELECT * FROM schedule_items WHERE service_id = ?",
+                (service_id,),
+            ).fetchone()
+        self.assertIsNotNone(item)
+        self.assertEqual(item["boat"], "")
+
+        page = self.client.get(
+            "/schedule?date=2026-09-05"
+        ).get_data(as_text=True)
+        self.assertIn("Индивидуальная прогулка по городу", page)
+        self.assertIn("Не требуется", page)
+        self.assertIn('id="scheduleBoatField" hidden', page)
+        self.assertIn("selected.dataset.activityType === 'boat'", page)
 
     def test_individual_booking_shows_unknown_guests_count_when_blank(self):
         self.login()

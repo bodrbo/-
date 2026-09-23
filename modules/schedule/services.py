@@ -335,12 +335,6 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
     if kind not in ITEM_KINDS:
         errors.append("Выберите тип рейса.")
 
-    boats_by_name = {boat_item["name"]: boat_item for boat_item in boats}
-    boat_names = set(boats_by_name)
-    boat = _normalise_text(form.get("boat"), 120)
-    if boat not in boat_names:
-        errors.append("Выберите катер.")
-
     services_by_id = {service["id"]: service for service in services}
     services_by_name = {
         service["name"].casefold(): service for service in services
@@ -360,6 +354,16 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
     else:
         service_id = selected_service["id"]
         service_name = selected_service["name"]
+
+    boats_by_name = {boat_item["name"]: boat_item for boat_item in boats}
+    boat_names = set(boats_by_name)
+    requires_boat = (
+        selected_service is None
+        or (selected_service.get("activity_type") or "boat") == "boat"
+    )
+    boat = _normalise_text(form.get("boat"), 120) if requires_boat else ""
+    if requires_boat and boat not in boat_names:
+        errors.append("Выберите катер.")
 
     day_raw = str(form.get("trip_date") or "").strip()
     start_time = str(form.get("start_time") or "").strip()
@@ -659,7 +663,7 @@ def move_item(
     if employee_conflicts:
         names = sorted({row["employee_name"] for row in employee_conflicts})
         return False, "Уже заняты в это время: " + ", ".join(names) + ".", None
-    if repository.find_boat_conflicts(
+    if item["boat"] and repository.find_boat_conflicts(
         db, item["boat"], starts_value, ends_value, item_id
     ):
         return False, f"Катер «{item['boat']}» уже занят в это время.", None
@@ -1441,6 +1445,8 @@ def readonly_item_details(items):
             "kind_label": item["kind_label"],
             "service_name": item["service_name"],
             "boat": item["boat"],
+            "boat_label": item["boat_label"],
+            "activity_type": item["activity_type"],
             "trip_date": item["trip_date"],
             "start_time": item["start_time"],
             "end_time": item["end_time"],
@@ -1523,6 +1529,10 @@ def day_view(
         employee["has_day_assignment"] = employee["id"] in assigned_today_ids
 
     colors_by_boat = _display_colors_by_boat(boat_colors)
+    activity_by_service_id = {
+        service["id"]: service["activity_type"]
+        for service in service_repository.list_services(db)
+    }
     items = []
     earliest = DEFAULT_DAY_START_HOUR * 60
     latest = DEFAULT_DAY_END_HOUR * 60
@@ -1537,6 +1547,17 @@ def day_view(
         item["end_time"] = ends.strftime("%H:%M")
         item["trip_date"] = day.isoformat()
         item["kind_label"] = ITEM_KINDS[item["kind"]]
+        item["activity_type"] = activity_by_service_id.get(
+            item["service_id"], "boat"
+        )
+        item["boat_label"] = (
+            item["boat"]
+            or (
+                "Не требуется"
+                if item["activity_type"] == "city"
+                else "Не назначен"
+            )
+        )
         item["assignment_ids"] = [
             assignment["employee_id"] for assignment in item["assignments"]
         ]

@@ -186,14 +186,14 @@
                     data-assignment-employee-id="{{ employee.id }}"
                     {% if can_manage %}data-move-url="{{ url_for('schedule.move_item', item_id=card.id) }}"{% endif %}
                     style="top: {{ card.top_px }}px; height: {{ card.height_px }}px; --schedule-card-color: {{ card.boat_color }}; --schedule-card-ink: {{ card.boat_ink }}"
-                    title="{{ card.start_time }}–{{ card.end_time }} · {{ card.service_name }} · {{ card.boat }}{% if card.weather and card.weather.is_bad %} · Неблагоприятный прогноз: {{ card.weather.reasons|join(', ') }}{% endif %}"
+                    title="{{ card.start_time }}–{{ card.end_time }} · {{ card.service_name }}{% if card.activity_type == 'boat' %} · {{ card.boat_label }}{% endif %}{% if card.weather and card.weather.is_bad %} · Неблагоприятный прогноз: {{ card.weather.reasons|join(', ') }}{% endif %}"
                     {% if can_manage %}onpointerdown="startScheduleDrag(event, this)" onclick="handleScheduleCardClick(event, {{ card.id }})"{% elif can_view_clients %}onclick="event.stopPropagation(); openScheduleView({{ card.id }})"{% endif %}>
               <span class="schedule-card-main">
                 <strong>{{ card.service_name }}</strong>
-                <span class="schedule-card-boat">
+                {% if card.activity_type == 'boat' %}<span class="schedule-card-boat">
                   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 14h14l-2 3H5l-2-3zM6 14V8h7l2 6M8 8V5h4v3"/></svg>
-                  {{ card.boat }}
-                </span>
+                  {{ card.boat_label }}
+                </span>{% endif %}
                 {% if card.kind == 'event' %}
                 <span class="schedule-card-meta"><span class="schedule-card-event-count">{{ card.participants_count }}/{{ card.capacity }} мест</span><span class="schedule-card-role"> · {{ card.assignment_role }}</span></span>
                 {% else %}
@@ -280,9 +280,9 @@
             {% endfor %}
           </select>
         </label>
-        <label class="field">
+        <label class="field" id="scheduleBoatField" hidden>
           <span>Катер</span>
-          <select name="boat" id="scheduleBoat" required onchange="syncScheduleBoatPrice()">
+          <select name="boat" id="scheduleBoat" disabled onchange="syncScheduleBoatPrice()">
             <option value="" disabled selected>Выберите катер</option>
             {% for boat in boats %}<option value="{{ boat.name }}" data-capacity="{{ boat.capacity or '' }}">{{ boat.name }}</option>{% endfor %}
           </select>
@@ -871,7 +871,6 @@
     form.action = scheduleCreateUrl + '/' + item.id;
     form.dataset.editing = 'true';
     form.querySelector(`input[name="kind"][value="${item.kind}"]`).checked = true;
-    document.getElementById('scheduleBoat').value = item.boat;
     const serviceSelect = document.getElementById('scheduleService');
     serviceSelect.value = item.service_id ? String(item.service_id) : '';
     if (!serviceSelect.value) {
@@ -880,6 +879,9 @@
       );
       if (matchingOption) serviceSelect.value = matchingOption.value;
     }
+    syncScheduleBoatField();
+    document.getElementById('scheduleBoat').value = item.boat || '';
+    scheduleUpdateEventCapacity();
     document.getElementById('scheduleDate').value = item.trip_date;
     document.getElementById('scheduleStart').value = item.start_time;
     document.getElementById('scheduleEnd').value = item.end_time;
@@ -1120,7 +1122,7 @@
     document.getElementById('scheduleDetailEyebrow').textContent = item.kind_label;
     document.getElementById('scheduleDetailTitle').textContent = item.service_name;
     renderScheduleHeaderWeather('scheduleDetailWeather', item.weather);
-    document.getElementById('scheduleDetailBoat').textContent = item.boat;
+    document.getElementById('scheduleDetailBoat').textContent = item.boat_label || item.boat || 'Не требуется';
     const crewNames = (item.assignments || []).map(a => a.employee_name);
     document.getElementById('scheduleDetailCrew').textContent =
       crewNames.length ? crewNames.join(', ') : 'Не назначен';
@@ -1797,7 +1799,8 @@
       card.style.top = `${top}px`;
       const time = card.querySelector('.schedule-card-time');
       if (time) time.textContent = `${item.start_time}–${item.end_time}`;
-      card.title = `${item.start_time}–${item.end_time} · ${item.service_name} · ${item.boat}`;
+      card.title = `${item.start_time}–${item.end_time} · ${item.service_name}`
+        + (item.activity_type === 'boat' ? ` · ${item.boat_label || item.boat || 'Не назначен'}` : '');
     });
     if (
       state.targetEmployeeId !== null
@@ -1953,7 +1956,7 @@
     document.getElementById('scheduleViewTitle').textContent = item.service_name;
     document.getElementById('scheduleViewTime').textContent =
       `${scheduleViewDate(item)}, ${item.start_time}–${item.end_time}`;
-    document.getElementById('scheduleViewBoat').textContent = item.boat;
+    document.getElementById('scheduleViewBoat').textContent = item.boat_label || item.boat || 'Не требуется';
     const crew = document.getElementById('scheduleViewCrew');
     crew.replaceChildren();
     item.assignments.forEach(assignment => {
@@ -2047,6 +2050,7 @@
     syncScheduleServiceOptions(
       !userInitiated && document.getElementById('scheduleItemForm').dataset.editing === 'true'
     );
+    syncScheduleBoatField();
     if (kind === 'event' && !document.querySelector('.schedule-participant-row')) {
       addScheduleParticipant();
     }
@@ -2420,11 +2424,26 @@
     scheduleUpdateEventCapacity();
     syncScheduleClientPrices(true);
   }
+  function syncScheduleBoatField() {
+    const service = document.getElementById('scheduleService');
+    const selected = service.selectedOptions[0];
+    const needsBoat = Boolean(
+      selected && selected.value && selected.dataset.activityType === 'boat'
+    );
+    const field = document.getElementById('scheduleBoatField');
+    const select = document.getElementById('scheduleBoat');
+    field.hidden = !needsBoat;
+    select.disabled = !needsBoat;
+    select.required = needsBoat;
+    if (!needsBoat) select.value = '';
+    scheduleUpdateEventCapacity();
+  }
   function syncScheduleTimingPrice() {
     syncScheduleClientPrices(true);
   }
   function applyScheduleService() {
     markAllSchedulePricesAuto();
+    syncScheduleBoatField();
     applyScheduleDuration();
     syncScheduleParticipantCount();
   }

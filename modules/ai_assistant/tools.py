@@ -33,7 +33,7 @@ CLIENT_STATUS_LABELS = {
     "blacklisted": "Чёрный список",
 }
 SCHEDULE_KIND_LABELS = {
-    "booking": "Аренда катера",
+    "booking": "Индивидуальная экскурсия",
     "event": "Групповая экскурсия",
 }
 EQUIPMENT_TYPE_LABELS = {"boat": "Лодки", "motor": "Моторы"}
