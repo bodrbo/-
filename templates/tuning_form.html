@@ -459,7 +459,19 @@
               {% endif %}
             </td>
             <td class="amount">{{ g.quantity|float|round(2) }} {{ cost_units|selectattr('value', 'equalto', g.unit)|map(attribute='label')|first }}</td>
-            <td class="amount">{{ g.unit_price|money }}</td>
+            <td class="amount">
+              <form action="{{ url_for('set_tuning_order_product_price', order_id=edit_order.id, row_id=g.id) }}"
+                    method="post" class="goods-price-form">
+                <input type="text" inputmode="decimal" name="unit_price" value="{{ g.unit_price|float|round(2) }}"
+                       class="goods-price-input" aria-label="Цена, ₽" title="Цена действует только в этом заказе"
+                       required>
+                <button type="submit" class="icon-btn approve" title="Сохранить цену">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 10.5l4 4 8-9"/>
+                  </svg>
+                </button>
+              </form>
+            </td>
             <td class="amount">{{ (g.quantity * g.unit_price)|money }}</td>
             <td class="row-actions">
               <form action="{{ url_for('remove_tuning_order_product', order_id=edit_order.id, row_id=g.id) }}" method="post"
@@ -494,7 +506,8 @@
           {% for p in catalog_products %}
           <div class="combo-option" data-value="{{ p.id }}"
                data-label="{{ p.name }}{{ ' (' ~ p.sku ~ ')' if p.sku }}"
-               data-search="{{ (p.name ~ ' ' ~ (p.sku or ''))|lower }}">
+               data-search="{{ (p.name ~ ' ' ~ (p.sku or ''))|lower }}"
+               data-price="{{ p.sale_price|float|round(2) }}">
             <span class="combo-option-name">{{ p.name }}</span>
             {% if p.sku %}<span class="combo-option-sku">{{ p.sku }}</span>{% endif %}
             <span class="combo-option-price">{{ p.sale_price|money }} ₽ / {{ cost_units|selectattr('value', 'equalto', p.cost_unit)|map(attribute='label')|first }}</span>
@@ -506,6 +519,11 @@
       <div class="field field-narrow">
         <label for="product_quantity">Количество</label>
         <input type="text" inputmode="decimal" id="product_quantity" name="quantity" required>
+      </div>
+      <div class="field field-narrow">
+        <label for="product_unit_price">Цена, ₽</label>
+        <input type="text" inputmode="decimal" id="product_unit_price" name="unit_price" placeholder="Из каталога">
+        <span class="field-context">Можно изменить — только для этого заказа</span>
       </div>
       <div class="field field-submit">
         <button type="submit">Добавить товар</button>
@@ -1400,6 +1418,22 @@ function updateOrderTotal() {
   document.getElementById('order-discount-amount').textContent = discountAmount.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
   document.getElementById('order-total').textContent = total.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
 }
+
+// Picking a catalog product prefills its catalog price; the admin may
+// overwrite it — the value is stored on the order line only.
+document.addEventListener('DOMContentLoaded', function () {
+  var priceInput = document.getElementById('product_unit_price');
+  if (!priceInput) return;
+  document.querySelectorAll('#goods .combo-option').forEach(function (option) {
+    option.addEventListener('click', function () {
+      priceInput.value = option.getAttribute('data-price') || '';
+    });
+  });
+  var search = document.getElementById('product_search');
+  if (search) search.addEventListener('input', function () {
+    if (search.value !== search.dataset.selectedLabel) priceInput.value = '';
+  });
+});
 
 function updateEquipmentFields() {
   var selected = document.querySelector('input[name="equipment_type"]:checked');

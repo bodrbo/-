@@ -10875,13 +10875,29 @@ def add_tuning_order_product(order_id):
     except ValueError:
         pass
 
+    # The price is copied onto the order line, so an override typed here
+    # (or edited later, see set_tuning_order_product_price) applies to this
+    # order only — the catalog price is never touched.
+    unit_price = product["sale_price"] if product is not None else None
+    price_raw = request.form.get("unit_price", "").strip().replace(",", ".")
+    if price_raw:
+        try:
+            unit_price = float(price_raw)
+        except ValueError:
+            unit_price = None
+        if unit_price is not None and unit_price < 0:
+            unit_price = None
+        if unit_price is None:
+            session["tuning_goods_error"] = "Цена должна быть числом не меньше нуля."
+            return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
+
     if product is not None and quantity is not None and quantity > 0:
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
         cur = db.execute(
             "INSERT INTO tuning_order_products (order_id, product_id, product_name, quantity, "
             "unit_price, cost_price, unit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (order_id, product_id, product["name"], quantity,
-             product["sale_price"], product["cost_price"], product["cost_unit"], now),
+             unit_price, product["cost_price"], product["cost_unit"], now),
         )
         db.commit()
         _auto_writeoff_order_product(db, order_id, product_id, quantity, cur.lastrowid)
@@ -10964,6 +10980,35 @@ def create_tuning_order_product(order_id):
     _auto_writeoff_order_product(db, order_id, product_id, quantity, cur.lastrowid)
     _recompute_order_totals(db, order_id)
     session["tuning_goods_notice"] = f"Товар «{name}» создан в каталоге и добавлен в заказ."
+    return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
+
+
+@app.route("/tuning/<int:order_id>/products/<int:row_id>/price", methods=["POST"])
+@admin_login_required
+def set_tuning_order_product_price(order_id, row_id):
+    """Changes the sale price of one goods line inside this order only —
+    tuning_order_products.unit_price is a per-order copy of the catalog
+    price, so the catalog and other orders are unaffected."""
+    db = get_db()
+    row = db.execute(
+        "SELECT id FROM tuning_order_products WHERE id = ? AND order_id = ?", (row_id, order_id)
+    ).fetchone()
+    if row is None:
+        return redirect(url_for("edit_tuning_order", order_id=order_id))
+    price_raw = request.form.get("unit_price", "").strip().replace(",", ".").replace(" ", "")
+    try:
+        unit_price = float(price_raw)
+        if unit_price < 0 or unit_price != unit_price or unit_price == float("inf"):
+            raise ValueError
+    except ValueError:
+        session["tuning_goods_error"] = "Цена должна быть числом не меньше нуля."
+        return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
+    db.execute(
+        "UPDATE tuning_order_products SET unit_price = ? WHERE id = ?", (unit_price, row_id)
+    )
+    db.commit()
+    _recompute_order_totals(db, order_id)
+    session["tuning_goods_notice"] = "Цена товара в заказе обновлена."
     return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
 
 

@@ -11739,3 +11739,6 @@ button.partner-open-price-save svg {
 .shop-timeline-events li.arrival{color:#1e8e4e}
 .shop-timeline-events li.departure{color:#c0392b}
 .shop-timeline-events a{color:inherit;font-weight:600}
+
+.goods-price-form{display:flex;align-items:center;justify-content:flex-end;gap:4px;margin:0}
+.goods-price-input{width:96px;text-align:right;padding:4px 6px}
