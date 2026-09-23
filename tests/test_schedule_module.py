@@ -76,6 +76,23 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             session["admin_id"] = 1
             session["admin_name"] = "Администратор"
 
+    @staticmethod
+    def create_excursion_partner(db):
+        partner_id = db.execute(
+            "INSERT INTO clients "
+            "(client_name, boat_model, phone, token, created_at) "
+            "VALUES ('Партнёр расписания', '', '+79998880003', "
+            "'schedule-sales-partner', '2026-09-01 10:00')"
+        ).lastrowid
+        db.execute(
+            "INSERT INTO client_segments "
+            "(client_id, segment, relationship_type, created_at) "
+            "VALUES (?, 'excursion', 'partner', '2026-09-01 10:00')",
+            (partner_id,),
+        )
+        db.commit()
+        return partner_id
+
     def booking_data(self, **overrides):
         data = {
             "kind": "booking",
@@ -843,6 +860,66 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn("Канал связи", html)
         self.assertIn("is-preferred", html)
         self.assertIn('{"label": "\\u0421\\u041c\\u0421", "value": "sms"}', html)
+
+    def test_individual_client_card_saves_contact_and_sales_channels(self):
+        self.login()
+        with application_module.app.app_context():
+            partner_id = self.create_excursion_partner(application_module.get_db())
+
+        response = self.create_booking(
+            customer_name="Ирина Канальная",
+            customer_phone="+79998880004",
+            customer_sales_partner_id=str(partner_id),
+            customer_preferred_contact_method="telegram",
+        )
+
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            participant = db.execute(
+                "SELECT sales_partner_id, client_id FROM schedule_participants"
+            ).fetchone()
+            client = db.execute(
+                "SELECT preferred_contact_method FROM clients WHERE id = ?",
+                (participant["client_id"],),
+            ).fetchone()
+        self.assertEqual(participant["sales_partner_id"], partner_id)
+        self.assertEqual(client["preferred_contact_method"], "telegram")
+
+        html = self.client.get(
+            "/schedule?date=2026-09-05"
+        ).get_data(as_text=True)
+        self.assertIn('name="customer_sales_partner_id"', html)
+        self.assertIn('name="customer_preferred_contact_method"', html)
+        self.assertIn('name="participant_preferred_contact_method[]"', html)
+
+    def test_group_client_card_saves_preferred_contact_method(self):
+        self.login()
+        response = self.client.post(
+            "/schedule/items",
+            data=self.booking_data(
+                kind="event",
+                capacity="10",
+                customer_name="",
+                **{
+                    "participant_client_id[]": [""],
+                    "participant_name[]": ["Мария Канальная"],
+                    "participant_phone[]": ["+79998880004"],
+                    "participant_guests[]": ["2"],
+                    "participant_preferred_contact_method[]": ["whatsapp"],
+                },
+            ),
+        )
+
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            client = db.execute(
+                "SELECT clients.preferred_contact_method "
+                "FROM clients JOIN schedule_participants "
+                "ON schedule_participants.client_id = clients.id"
+            ).fetchone()
+        self.assertEqual(client["preferred_contact_method"], "whatsapp")
 
     def test_price_migration_preserves_historical_trip_total(self):
         connection = sqlite3.connect(":memory:")

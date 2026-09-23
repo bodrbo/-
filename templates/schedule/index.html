@@ -307,7 +307,7 @@
         <button type="button" class="schedule-add-assignment" onclick="addScheduleAssignment()">+ Добавить сотрудника</button>
       </div>
 
-      <div class="schedule-form-grid schedule-booking-fields" id="scheduleBookingFields">
+      <div class="schedule-form-grid schedule-booking-fields schedule-client-form-card" id="scheduleBookingFields">
         <label class="field">
           <span>Имя клиента</span>
           <span class="schedule-client-picker" data-client-picker data-picker-kind="booking">
@@ -338,6 +338,24 @@
         <label class="field">
           <span>Количество гостей</span>
           <input type="number" name="guests_count" id="scheduleBookingGuestsCount" min="1" max="1000" placeholder="Необязательно">
+        </label>
+        <label class="field">
+          <span>Канал продаж</span>
+          <select name="customer_sales_partner_id" id="scheduleCustomerSalesPartner">
+            <option value="">Не указан</option>
+            {% for partner in excursion_partners %}
+            <option value="{{ partner.id }}">{{ partner.client_name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Канал связи</span>
+          <select name="customer_preferred_contact_method" id="scheduleCustomerContactMethod">
+            <option value="">Не указан</option>
+            {% for method in client_contact_methods %}
+            <option value="{{ method.value }}">{{ method.label }}</option>
+            {% endfor %}
+          </select>
         </label>
         <input type="hidden" name="customer_source_ref" id="scheduleCustomerSourceRef">
         <input type="hidden" name="customer_prepayment" id="scheduleCustomerPrepayment" value="0">
@@ -617,6 +635,15 @@
         <option value="">Не указан</option>
         {% for partner in excursion_partners %}
         <option value="{{ partner.id }}">{{ partner.client_name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field schedule-participant-contact">
+      <span>Канал связи</span>
+      <select name="participant_preferred_contact_method[]">
+        <option value="">Не указан</option>
+        {% for method in client_contact_methods %}
+        <option value="{{ method.value }}">{{ method.label }}</option>
         {% endfor %}
       </select>
     </label>
@@ -915,13 +942,18 @@
       );
     }
     document.getElementById('scheduleBookingGuestsCount').value = item.guests_count || '';
+    document.getElementById('scheduleCustomerSalesPartner').value = bookingParticipant
+      ? String(bookingParticipant.sales_partner_id || '') : '';
+    document.getElementById('scheduleCustomerContactMethod').value = bookingParticipant
+      ? (bookingParticipant.preferred_contact_method || '') : '';
     document.getElementById('scheduleCapacity').value = item.capacity || 10;
     if (item.kind === 'event' && !tripInfoOnly) {
       (item.participants || []).forEach(participant => addScheduleParticipant(
         participant.client_id, participant.client_name, participant.client_phone,
         participant.guests_count || 1, false, participant.price ?? 0,
         participant.source_ref || '', participant.prepayment || 0,
-        participant.payment_due || 0, participant.sales_partner_id || ''
+        participant.payment_due || 0, participant.sales_partner_id || '',
+        participant.preferred_contact_method || ''
       ));
     }
     const legacyParticipants = document.getElementById('scheduleLegacyParticipants');
@@ -2194,12 +2226,17 @@
     picker.dataset.selectedPhone = client.phone || '';
     if (picker.dataset.pickerKind === 'participant') {
       picker.querySelector('[data-client-name]').value = client.client_name || '';
-      picker.closest('.schedule-participant-row').querySelector('[name="participant_phone[]"]').value = client.phone || '';
+      const row = picker.closest('.schedule-participant-row');
+      row.querySelector('[name="participant_phone[]"]').value = client.phone || '';
+      row.querySelector('[name="participant_preferred_contact_method[]"]').value =
+        client.preferred_contact_method || '';
       syncScheduleParticipantCount();
     } else if (picker.dataset.pickerKind === 'quickadd') {
       document.getElementById('scheduleQuickAddPhone').value = client.phone || '';
     } else {
       document.getElementById('schedulePhone').value = client.phone || '';
+      document.getElementById('scheduleCustomerContactMethod').value =
+        client.preferred_contact_method || '';
     }
     if (closeResults !== false) closeScheduleClientResults(picker);
   }
@@ -2240,7 +2277,7 @@
       picker.querySelector('[data-client-id]').value = '';
     }
   }
-  function addScheduleParticipant(clientId, clientName, clientPhone, guestsCount, focusNew, price, sourceRef, prepayment, paymentDue, salesPartnerId) {
+  function addScheduleParticipant(clientId, clientName, clientPhone, guestsCount, focusNew, price, sourceRef, prepayment, paymentDue, salesPartnerId, preferredContactMethod) {
     const fragment = document.getElementById('scheduleParticipantTemplate').content.cloneNode(true);
     const row = fragment.querySelector('.schedule-participant-row');
     const picker = row.querySelector('[data-client-picker]');
@@ -2251,6 +2288,7 @@
     row.querySelector('[name="participant_phone[]"]').value = clientPhone || '';
     row.querySelector('[name="participant_guests[]"]').value = guestsCount || 1;
     row.querySelector('[name="participant_sales_partner_id[]"]').value = salesPartnerId || '';
+    row.querySelector('[name="participant_preferred_contact_method[]"]').value = preferredContactMethod || '';
     row.querySelector('[data-participant-source-ref]').value = sourceRef || '';
     row.querySelector('[data-participant-prepayment]').value = prepayment || 0;
     row.querySelector('[data-participant-payment-due]').value = paymentDue || 0;

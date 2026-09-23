@@ -13,13 +13,17 @@ from modules.clients.services import ensure_segment
 def list_excursion_partners(db):
     """Clients in «Клиенты и Партнёры» -> «Партнёры экскурсий» — the choices
     for a participant's «Канал продаж» in the trip form."""
-    return db.execute(
-        "SELECT clients.id, clients.client_name FROM clients "
-        "JOIN client_segments ON client_segments.client_id = clients.id "
-        "AND client_segments.segment = ? AND client_segments.relationship_type = ? "
-        "ORDER BY clients.client_name COLLATE NOCASE",
-        (EXCURSION_SEGMENT, CLIENT_RELATIONSHIP_PARTNER),
-    ).fetchall()
+    return [
+        dict(row)
+        for row in db.execute(
+            "SELECT clients.id, clients.client_name FROM clients "
+            "JOIN client_segments ON client_segments.client_id = clients.id "
+            "AND client_segments.segment = ? "
+            "AND client_segments.relationship_type = ? "
+            "ORDER BY clients.client_name COLLATE NOCASE",
+            (EXCURSION_SEGMENT, CLIENT_RELATIONSHIP_PARTNER),
+        ).fetchall()
+    ]
 
 
 def list_crew_employees(db):
@@ -105,7 +109,8 @@ def search_clients(db, query, limit=20):
     if not words:
         return []
     rows = db.execute(
-        "SELECT clients.id, clients.client_name, clients.phone, clients.status "
+        "SELECT clients.id, clients.client_name, clients.phone, clients.status, "
+        "clients.preferred_contact_method "
         "FROM clients JOIN client_segments "
         "ON client_segments.client_id = clients.id "
         "AND client_segments.segment = ? "
@@ -136,7 +141,8 @@ def list_all_clients(db):
     return [
         dict(row)
         for row in db.execute(
-            "SELECT id, client_name, phone, status FROM clients "
+            "SELECT id, client_name, phone, status, preferred_contact_method "
+            "FROM clients "
             "ORDER BY client_name COLLATE NOCASE, phone, id"
         ).fetchall()
     ]
@@ -532,15 +538,20 @@ def save_item(db, item_id, data, assignments, participants, timestamp, keep_part
             if client_id is None:
                 cursor = db.execute(
                     "INSERT INTO clients "
-                    "(client_name, boat_model, phone, token, created_at) "
-                    "VALUES (?, '', ?, ?, ?)",
+                    "(client_name, boat_model, phone, token, created_at, "
+                    "preferred_contact_method) VALUES (?, '', ?, ?, ?, ?)",
                     (
                         participant["client_name"], participant["client_phone"],
                         participant["client_token"], timestamp,
+                        participant.get("preferred_contact_method", ""),
                     ),
                 )
                 client_id = cursor.lastrowid
             ensure_segment(db, client_id, EXCURSION_SEGMENT, timestamp)
+            db.execute(
+                "UPDATE clients SET preferred_contact_method = ? WHERE id = ?",
+                (participant.get("preferred_contact_method", ""), client_id),
+            )
             if reusable_booking_participant is not None and participant_index == 0:
                 old_client_id = reusable_booking_participant["client_id"]
                 db.execute(
