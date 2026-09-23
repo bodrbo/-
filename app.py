@@ -19206,6 +19206,10 @@ def _demo_tenant_module_gate():
         # demo may still have the general analytics module enabled, but should
         # neither advertise nor expose the tuning-specific project workspace.
         abort(404)
+    if request.endpoint == "payroll_rates.tuning" and "tuning" not in enabled:
+        # Payroll itself is a core demo workspace, while this subsection is
+        # meaningful only for tenants that have the tuning module enabled.
+        abort(404)
     module = (
         "excursions"
         if request.endpoint == "analytics_trips"

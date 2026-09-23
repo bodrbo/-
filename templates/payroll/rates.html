@@ -45,7 +45,9 @@
 
   <nav class="sub-tabs" aria-label="Разделы ставок">
     <a href="{{ url_for('payroll_rates.excursions') }}" class="{{ 'active' if section == 'excursions' }}">Ставки экскурсий</a>
+    {% if demo_module_enabled('tuning') %}
     <a href="{{ url_for('payroll_rates.tuning') }}" class="{{ 'active' if section == 'tuning' }}">Ставки тюнинга</a>
+    {% endif %}
   </nav>
 
   {% if notice %}

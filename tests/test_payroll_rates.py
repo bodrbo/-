@@ -108,6 +108,33 @@ class PayrollRatesTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn("Ставки тюнинга".encode(), resp.data)
 
+    def test_demo_without_tuning_hides_and_blocks_tuning_rates(self):
+        with self.client.session_transaction() as demo_session:
+            demo_session.clear()
+            demo_session["demo_tenant_id"] = 903
+            demo_session["demo_tenant_name"] = "Демо морских прогулок"
+            demo_session["demo_tenant_db_path"] = application_module.DB_PATH
+            demo_session["demo_tenant_modules"] = "excursions"
+
+        resp = self.client.get("/payroll/rates/excursions")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Ставки экскурсий".encode(), resp.data)
+        self.assertNotIn('href="/payroll/rates/tuning"'.encode(), resp.data)
+        self.assertEqual(self.client.get("/payroll/rates/tuning").status_code, 404)
+
+    def test_demo_with_tuning_keeps_tuning_rates(self):
+        with self.client.session_transaction() as demo_session:
+            demo_session.clear()
+            demo_session["demo_tenant_id"] = 904
+            demo_session["demo_tenant_name"] = "Демо тюнинга"
+            demo_session["demo_tenant_db_path"] = application_module.DB_PATH
+            demo_session["demo_tenant_modules"] = "tuning"
+
+        resp = self.client.get("/payroll/rates/excursions")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('href="/payroll/rates/tuning"'.encode(), resp.data)
+        self.assertEqual(self.client.get("/payroll/rates/tuning").status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()
