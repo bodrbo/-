@@ -70,11 +70,56 @@
 
   {% include '_tuning_subnav.html' %}
 
+  <section class="panel shop-timeline">
+    <div class="shop-timeline-head">
+      <div>
+        <p class="boat-catalog-eyebrow">Лента времени</p>
+        <h2>{{ selected_date|ru_date }}{% if selected_date == today_iso %} · сегодня{% endif %}</h2>
+      </div>
+      <form method="get" class="shop-timeline-nav">
+        <a class="shop-timeline-btn" href="{{ url_for('tuning_shop_map', date=prev_week) }}" title="Неделя назад">«</a>
+        <a class="shop-timeline-btn" href="{{ url_for('tuning_shop_map', date=prev_day) }}" title="День назад">‹</a>
+        <input type="date" name="date" value="{{ selected_date }}" onchange="this.form.submit()" aria-label="Дата">
+        <a class="shop-timeline-btn" href="{{ url_for('tuning_shop_map', date=next_day) }}" title="День вперёд">›</a>
+        <a class="shop-timeline-btn" href="{{ url_for('tuning_shop_map', date=next_week) }}" title="Неделя вперёд">»</a>
+        {% if selected_date != today_iso %}
+        <a class="shop-timeline-btn shop-timeline-today" href="{{ url_for('tuning_shop_map') }}">Сегодня</a>
+        {% endif %}
+      </form>
+    </div>
+    <div class="shop-timeline-strip" id="shopTimelineStrip">
+      {% for day in timeline_days %}
+      <a class="shop-timeline-day{{ ' is-selected' if day.is_selected }}{{ ' is-today' if day.is_today }}{{ ' is-weekend' if day.weekend }}"
+         href="{{ url_for('tuning_shop_map', date=day.iso) }}"
+         title="{{ day.iso|ru_date }}: в цеху {{ day.present }}, приходит {{ day.arrivals }}, уходит {{ day.departures }}">
+        <span class="shop-timeline-wd">{{ day.weekday }}</span>
+        <span class="shop-timeline-num">{{ day.day }}{% if day.first_of_month %}<small>.{{ '%02d'|format(day.month) }}</small>{% endif %}</span>
+        <span class="shop-timeline-count">{{ day.present }}</span>
+        <span class="shop-timeline-flow">
+          {% if day.arrivals %}<span class="in">▲{{ day.arrivals }}</span>{% endif %}
+          {% if day.departures %}<span class="out">▼{{ day.departures }}</span>{% endif %}
+        </span>
+      </a>
+      {% endfor %}
+    </div>
+    <p class="hint shop-timeline-legend">Число под датой — лодок в цеху в этот день; <span class="in">▲</span> приходят (дата приемки), <span class="out">▼</span> уходят (срок исполнения).</p>
+    {% if timeline_events %}
+    <ul class="shop-timeline-events">
+      {% for ev in timeline_events %}
+      <li class="{{ ev.kind }}">
+        {{ '▲ Приходит' if ev.kind == 'arrival' else '▼ Уходит' }}:
+        <a href="{{ url_for('edit_tuning_order', order_id=ev.boat.order_id) }}">{{ ev.boat.client_name }} — {{ ev.boat.boat_model }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+
   <section class="panel shop-map-panel">
     <div class="shop-map-heading">
       <div>
         <p class="boat-catalog-eyebrow">Цех тюнинг-центра</p>
-        <h2>{{ room.length_m|float|round(2) }} × {{ room.width_m|float|round(2) }} м</h2>
+        <h2>{{ room.length_m|float|round(2) }} × {{ room.width_m|float|round(2) }} м <span class="muted" style="font-size:.6em;font-weight:400;">на {{ selected_date|ru_date }}</span></h2>
       </div>
       <details class="shop-map-room-editor">
         <summary>Изменить размеры</summary>
@@ -197,9 +242,9 @@
   </section>
 
   <section class="panel">
-    <h2>Лодки в цеху</h2>
+    <h2>Лодки в цеху на {{ selected_date|ru_date }}</h2>
     <p class="hint">Лодку можно перетащить на карте, чтобы переместить, и повернуть на любой угол — потяните за кружок у носа. Зоны и другие объекты цеха непроходимы, а между лодками всегда остаётся зазор не меньше 0,5 м.</p>
-    <p class="hint">Лодка попадает сюда автоматически, когда статус её заказа меняется на «В работе». Размер на карте — реальные длина и ширина из профиля лодки.</p>
+    <p class="hint">Лодка появляется в цеху в дату приемки из заказа и уходит в дату срока исполнения (у выполненного заказа — в фактическую дату завершения). Заказ без даты приемки попадает на карту, когда переходит в «В работе». Положение лодки одно на весь период стоянки; места лодок, которые в эти даты в цеху не стоят, свободны. Размер на карте — реальные длина и ширина из профиля лодки.</p>
     {% if boat_error %}
     <div class="alert"><strong>Не удалось сохранить:</strong> {{ boat_error }}</div>
     {% endif %}
@@ -218,6 +263,8 @@
           <tr>
             <th>Заказ</th>
             <th>Лодка</th>
+            <th>Приход</th>
+            <th>Уход</th>
             <th>Длина × Ширина, м</th>
             <th>От левой стены, м</th>
             <th>От верхней стены, м</th>
@@ -230,6 +277,8 @@
           <tr>
             <td><a href="{{ url_for('edit_tuning_order', order_id=boat.order_id) }}">{{ boat.client_name }}</a></td>
             <td class="muted">{{ boat.boat_model }}</td>
+            <td class="muted">{{ boat.present_start|ru_date }}</td>
+            <td class="muted">{{ boat.present_end|ru_date if boat.present_end else '—' }}</td>
             <td class="muted">{{ boat.length_m|float|round(2) }} × {{ boat.width_m|float|round(2) }}</td>
             <td>
               <input type="text" inputmode="decimal" name="x_m" value="{{ boat.x_m|float|round(2) }}" form="{{ boat_form_id }}"
@@ -247,6 +296,7 @@
               </button>
               <form action="{{ url_for('remove_shop_map_boat', boat_id=boat.id) }}" method="post"
                     onsubmit="return confirm('Убрать эту лодку с карты?');">
+                <input type="hidden" name="date" value="{{ selected_date }}">
                 <button type="submit" class="icon-btn danger" title="Убрать с карты">
                   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M5 5l10 10M15 5L5 15"/>
@@ -260,10 +310,10 @@
       </table>
     </div>
     {% for boat in boats_on_map %}
-    <form id="shopMapBoatMove{{ boat.id }}" action="{{ url_for('update_shop_map_boat_position', boat_id=boat.id) }}" method="post" class="hidden"></form>
+    <form id="shopMapBoatMove{{ boat.id }}" action="{{ url_for('update_shop_map_boat_position', boat_id=boat.id) }}" method="post" class="hidden"><input type="hidden" name="date" value="{{ selected_date }}"></form>
     {% endfor %}
     {% elif not boats_missing_dimensions %}
-    <p class="hint">Пока ни одна лодка не в работе.</p>
+    <p class="hint">В этот день в цеху нет лодок.</p>
     {% endif %}
   </section>
 
@@ -389,6 +439,13 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+  (function () {
+    var strip = document.getElementById("shopTimelineStrip");
+    var sel = strip && strip.querySelector(".is-selected");
+    if (sel) strip.scrollLeft = sel.offsetLeft - strip.clientWidth / 2 + sel.clientWidth / 2;
+  })();
+</script>
 <script>
 (function () {
   var SCALE = {{ scale }};

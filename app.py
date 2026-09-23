@@ -3503,9 +3503,11 @@ def init_db(db_path=None, include_bootstrap_data=True):
         """
     )
     # Boats placed on Карта цеха — one row per order, added automatically
-    # when its status enters "В работе" (see _auto_place_boat_on_shop_map)
-    # and removed automatically once it reaches "Выполнен, передан"
-    # (see _auto_remove_boat_from_shop_map). Only the position lives here;
+    # when an acceptance date is set or its status enters "В работе" (see
+    # _auto_place_boat_on_shop_map). The row is never removed on hand-over:
+    # when the boat is in the shop comes from the order's acceptance date /
+    # deadline (see _shop_map_presence), which drives the map's timeline.
+    # Only the position lives here;
     # length/width are read live from the
     # boat's own catalog profile every time the map renders, never copied,
     # so an edit to the profile's dimensions is reflected immediately.
@@ -8355,20 +8357,61 @@ SHOP_MAP_BOAT_GAP_M = 0.5  # minimum clearance required between two boats' hulls
 SHOP_MAP_ROTATE_HANDLE_GAP_PX = 12  # distance from the bow tip to the rotate handle
 
 
-def _shop_map_boats(db):
-    """Boats currently on Карта цеха, one row per order. Position (x_m/y_m)
-    is the only thing stored here — length/width are read live from the
-    boat's own catalog profile via the same model_key lookup the boat
-    catalog itself uses, so an edit to the profile's dimensions shows up
-    on the map immediately without needing to touch this table."""
+SHOP_MAP_PRESENT_STATUSES = ("in_progress", "qc", "done", "handed_over")
+
+
+def _shop_map_presence(order):
+    """(start, end) ISO dates the order's boat occupies the shop, either
+    may be None. The boat arrives on the planned acceptance date and leaves
+    on the deadline ("срок исполнения"); once the order is actually
+    finished, the real completion date wins over the planned deadline so
+    the past timeline stays truthful. Without an acceptance date only an
+    order that has already started counts (from its order_date). start is
+    None -> never shown; end None -> still there, no leave date known."""
+    status = order["status"]
+    if status == "cancelled":
+        return None, None
+    start = (order["acceptance_date"] or "").strip() or None
+    if start is None and status in SHOP_MAP_PRESENT_STATUSES:
+        start = (order["order_date"] or "").strip() or None
+    end = (order["deadline_date"] or "").strip() or None
+    if status in TUNING_DONE_STATUSES and (order["completed_at"] or "").strip():
+        end = order["completed_at"].strip()[:10]
+    if start and end and end < start:
+        end = start
+    return start, end
+
+
+def _shop_map_intervals_overlap(a_start, a_end, b_start, b_end):
+    if a_start is None or b_start is None:
+        return False
+    return (a_end is None or b_start <= a_end) and (b_end is None or a_start <= b_end)
+
+
+def _shop_map_boats(db, on_date=None):
+    """Boats placed on Карта цеха, one row per order. Position (x_m/y_m)
+    is the only thing stored in shop_map_boats — length/width are read live
+    from the boat's own catalog profile via the same model_key lookup the
+    boat catalog itself uses. Presence in time comes from the order
+    (see _shop_map_presence); with on_date only boats standing in the shop
+    that day are returned, otherwise every placed boat with its interval."""
     rows = db.execute(
-        "SELECT b.*, o.client_name, o.boat_model, o.status AS order_status "
+        "SELECT b.*, o.client_name, o.boat_model, o.status AS order_status, "
+        "o.status, o.acceptance_date, o.order_date, o.deadline_date, o.completed_at "
         "FROM shop_map_boats b JOIN tuning_orders o ON o.id = b.order_id "
         "ORDER BY b.id"
     ).fetchall()
     boats = []
     for row in rows:
         boat = dict(row)
+        boat["present_start"], boat["present_end"] = _shop_map_presence(row)
+        if boat["present_start"] is None:
+            continue
+        if on_date is not None and not (
+            boat["present_start"] <= on_date
+            and (boat["present_end"] is None or on_date <= boat["present_end"])
+        ):
+            continue
         profile = db.execute(
             "SELECT length_m, width_m FROM tuning_boat_profiles "
             "WHERE equipment_type = 'boat' AND model_key = ?",
@@ -8422,7 +8465,7 @@ def _shop_map_obb_overlap(ax, ay, a_half_l, a_half_w, a_angle, bx, by, b_half_l,
     return True
 
 
-def _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, rotation_deg, exclude_boat_id=None):
+def _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, rotation_deg, exclude_boat_id=None, interval=None):
     """Shared by the manual position form, drag, and rotate routes — a
     boat may not stick out of the room, overlap any fixed zone/element, or
     come within SHOP_MAP_BOAT_GAP_M of another boat already on the map, at
@@ -8446,10 +8489,20 @@ def _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, rotati
             el_cx, el_cy, el["width_m"] / 2, el["height_m"] / 2, 0,
         ):
             return f"Лодка пересекается с зоной «{el['name']}»."
-    for boat in _shop_map_boats(db):
+    all_boats = _shop_map_boats(db)
+    if interval is None and exclude_boat_id is not None:
+        own = next((b for b in all_boats if b["id"] == exclude_boat_id), None)
+        interval = (own["present_start"], own["present_end"]) if own else None
+    for boat in all_boats:
         if boat["id"] == exclude_boat_id:
             continue
         if not boat["length_m"] or not boat["width_m"]:
+            continue
+        # A boat only blocks the spot while both are in the shop at once —
+        # one that leaves before this one arrives frees the place.
+        if interval is not None and not _shop_map_intervals_overlap(
+            interval[0], interval[1], boat["present_start"], boat["present_end"]
+        ):
             continue
         other_w, other_h = _shop_map_boat_footprint(boat["length_m"], boat["width_m"], boat["rotation_deg"])
         other_cx = boat["x_m"] + other_w / 2
@@ -8483,48 +8536,116 @@ def _shop_map_boat_with_profile(db, boat_id):
 
 
 def _auto_place_boat_on_shop_map(db, order):
-    """When a boat order enters "В работе", the boat should show up on
-    Карта цеха on its own — this is the hook set_tuning_order_status calls.
-    Best-effort and idempotent: a missing/incomplete profile never blocks
-    the status change (the map just shows it under "нет размеров" until
-    someone fills in length/width there), and calling this again for an
-    order that's already on the map (e.g. status toggled back and forth)
-    does nothing. Position is a simple staggered default — there's no
-    collision-avoidance with zones or other boats yet, so an admin may
-    still need to drag... for now, retype the coordinates afterward."""
-    if order["equipment_type"] != "boat" or not (order["boat_model"] or "").strip():
+    """Puts the order's boat on Карта цеха — called when the order enters
+    "В работе" and when an acceptance date is set. Best-effort and
+    idempotent: a missing/incomplete profile never blocks the caller (the
+    map lists it under "нет размеров" until length/width are filled in),
+    and an order already placed is left alone. The spot is the first
+    collision-free one, scanning the room in 0.5 m steps against the boats
+    present at the same time; if nothing fits it falls back to a staggered
+    default an admin can adjust. The row stays after the boat leaves —
+    presence in time comes from the order's dates, so the timeline keeps
+    its history."""
+    order_id = order["id"]
+    order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None or order["equipment_type"] != "boat" or not (order["boat_model"] or "").strip():
         return
-    existing = db.execute(
-        "SELECT id FROM shop_map_boats WHERE order_id = ?", (order["id"],)
+    start, end = _shop_map_presence(order)
+    if start is None:
+        return
+    if db.execute("SELECT id FROM shop_map_boats WHERE order_id = ?", (order_id,)).fetchone():
+        return
+    x_m = y_m = None
+    profile = db.execute(
+        "SELECT length_m, width_m FROM tuning_boat_profiles "
+        "WHERE equipment_type = 'boat' AND model_key = ?",
+        (_tuning_equipment_profile_key("boat", order["boat_model"]),),
     ).fetchone()
-    if existing is not None:
-        return
-    count = db.execute("SELECT COUNT(*) FROM shop_map_boats").fetchone()[0]
-    x_m = 1.0 + (count % 5) * 3.0
-    y_m = 3.0 + (count // 5) * 3.0
+    room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+    if profile and profile["length_m"] and profile["width_m"] and room is not None:
+        length_m, width_m = profile["length_m"], profile["width_m"]
+        y = 0.0
+        while x_m is None and y + width_m <= room["width_m"] + 0.001:
+            x = 0.0
+            while x + length_m <= room["length_m"] + 0.001:
+                if _shop_map_boat_placement_error(
+                    db, room, x, y, length_m, width_m, 0, interval=(start, end)
+                ) is None:
+                    x_m, y_m = x, y
+                    break
+                x += 0.5
+            y += 0.5
+    if x_m is None:
+        count = db.execute("SELECT COUNT(*) FROM shop_map_boats").fetchone()[0]
+        x_m = 1.0 + (count % 5) * 3.0
+        y_m = 3.0 + (count // 5) * 3.0
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
         "INSERT INTO shop_map_boats (order_id, x_m, y_m, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?)",
-        (order["id"], x_m, y_m, now, now),
+        (order_id, x_m, y_m, now, now),
     )
     db.commit()
 
 
-def _auto_remove_boat_from_shop_map(db, order):
-    """Mirror of _auto_place_boat_on_shop_map: once an order is marked
-    "Выполнен, передан", the boat has left the shop, so it should stop
-    occupying space on Карта цеха without staff having to remember to
-    drag it off manually. No-op if it was never placed (or already
-    removed) — status can be toggled back and forth freely."""
-    db.execute("DELETE FROM shop_map_boats WHERE order_id = ?", (order["id"],))
-    db.commit()
+def _parse_shop_map_date(raw, default):
+    try:
+        return dt.date.fromisoformat((raw or "").strip()).isoformat()
+    except ValueError:
+        return default
+
+
+def _shop_map_redirect():
+    """Back to the map, keeping the date the admin was looking at."""
+    selected = _parse_shop_map_date(request.form.get("date"), None)
+    if selected:
+        return redirect(url_for("tuning_shop_map", date=selected))
+    return redirect(url_for("tuning_shop_map"))
+
+
+def _shop_map_timeline(db, selected, span_before=10, span_after=20):
+    """Day strip around the selected date: per day how many boats stand in
+    the shop and how many arrive / leave that day (all placed boats with
+    a known start, dimensions or not)."""
+    boats = _shop_map_boats(db)
+    selected_day = dt.date.fromisoformat(selected)
+    days = []
+    for offset in range(-span_before, span_after + 1):
+        day = selected_day + dt.timedelta(days=offset)
+        iso = day.isoformat()
+        present = arrivals = departures = 0
+        for boat in boats:
+            if boat["present_start"] <= iso and (boat["present_end"] is None or iso <= boat["present_end"]):
+                present += 1
+            if boat["present_start"] == iso:
+                arrivals += 1
+            if boat["present_end"] == iso:
+                departures += 1
+        days.append({
+            "iso": iso, "day": day.day, "month": day.month,
+            "weekday": ("пн", "вт", "ср", "чт", "пт", "сб", "вс")[day.weekday()],
+            "weekend": day.weekday() >= 5, "present": present,
+            "arrivals": arrivals, "departures": departures,
+            "is_selected": iso == selected,
+            "is_today": iso == dt.date.today().isoformat(),
+            "first_of_month": day.day == 1 or offset == -span_before,
+        })
+    events = [
+        {"kind": "arrival", "boat": boat} for boat in boats if boat["present_start"] == selected
+    ] + [
+        {"kind": "departure", "boat": boat} for boat in boats if boat["present_end"] == selected
+    ]
+    return days, events
 
 
 @app.route("/tuning/shop-map")
 @admin_login_required
 def tuning_shop_map():
     db = get_db()
+    today_iso = dt.date.today().isoformat()
+    selected_date = _parse_shop_map_date(request.args.get("date"), today_iso)
+    selected_day = dt.date.fromisoformat(selected_date)
+    timeline_days, timeline_events = _shop_map_timeline(db, selected_date)
     room_row = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
     room = dict(room_row)
     room["room_w_px"] = room["length_m"] * SHOP_MAP_SCALE
@@ -8548,7 +8669,7 @@ def tuning_shop_map():
     # the map instead of being drawn at some made-up size.
     boats_on_map = []
     boats_missing_dimensions = []
-    for boat in _shop_map_boats(db):
+    for boat in _shop_map_boats(db, on_date=selected_date):
         if boat["length_m"] and boat["width_m"]:
             boat["x_px"] = SHOP_MAP_PADDING + boat["x_m"] * SHOP_MAP_SCALE
             boat["y_px"] = SHOP_MAP_PADDING + boat["y_m"] * SHOP_MAP_SCALE
@@ -8598,6 +8719,12 @@ def tuning_shop_map():
         room=room, scale=SHOP_MAP_SCALE, padding=SHOP_MAP_PADDING,
         elements=elements,
         boats_on_map=boats_on_map, boats_missing_dimensions=boats_missing_dimensions,
+        selected_date=selected_date, today_iso=today_iso,
+        prev_day=(selected_day - dt.timedelta(days=1)).isoformat(),
+        next_day=(selected_day + dt.timedelta(days=1)).isoformat(),
+        prev_week=(selected_day - dt.timedelta(days=7)).isoformat(),
+        next_week=(selected_day + dt.timedelta(days=7)).isoformat(),
+        timeline_days=timeline_days, timeline_events=timeline_events,
         room_error=session.pop("shop_map_room_error", None),
         element_error=session.pop("shop_map_element_error", None),
         element_notice=session.pop("shop_map_element_notice", None),
@@ -8810,7 +8937,7 @@ def update_shop_map_boat_position(boat_id):
         (boat_id,),
     ).fetchone()
     if boat_row is None:
-        return redirect(url_for("tuning_shop_map"))
+        return _shop_map_redirect()
     profile = db.execute(
         "SELECT length_m, width_m FROM tuning_boat_profiles "
         "WHERE equipment_type = 'boat' AND model_key = ?",
@@ -8845,7 +8972,7 @@ def update_shop_map_boat_position(boat_id):
 
     if errors:
         session["shop_map_boat_error"] = " ".join(errors)
-        return redirect(url_for("tuning_shop_map"))
+        return _shop_map_redirect()
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
@@ -8853,7 +8980,7 @@ def update_shop_map_boat_position(boat_id):
         (x_m, y_m, now, boat_id),
     )
     db.commit()
-    return redirect(url_for("tuning_shop_map"))
+    return _shop_map_redirect()
 
 
 @app.route("/tuning/shop-map/boats/<int:boat_id>/drag", methods=["POST"])
@@ -8943,7 +9070,7 @@ def remove_shop_map_boat(boat_id):
     db = get_db()
     db.execute("DELETE FROM shop_map_boats WHERE id = ?", (boat_id,))
     db.commit()
-    return redirect(url_for("tuning_shop_map"))
+    return _shop_map_redirect()
 
 
 @app.route("/tuning/diagnostics/hull")
@@ -9177,6 +9304,8 @@ def add_tuning_order():
     )
     _sync_tuning_boat_profiles(db)
     db.commit()
+    if data["acceptance_date"]:
+        _auto_place_boat_on_shop_map(db, {"id": order_id})
     return redirect(url_for("tuning_index"))
 
 
@@ -9758,6 +9887,10 @@ def edit_tuning_order(order_id):
     # _process_tuning_form knows about) — fold in any goods added via the
     # separate "Товары" mini-form now that the new work rows are saved.
     _recompute_order_totals(db, order_id)
+    if data["acceptance_date"] and data["acceptance_date"] != (order["acceptance_date"] or ""):
+        # Only when the date was just set/changed — an admin who removed
+        # the boat from the map by hand isn't overruled on every later save.
+        _auto_place_boat_on_shop_map(db, {"id": order_id})
     return redirect(url_for(
         "tuning_subcontracts" if is_subcontract else "tuning_index"
     ))
@@ -9883,6 +10016,10 @@ def bulk_edit_tuning_orders():
             "UPDATE tuning_orders SET status = ? WHERE id = ?",
             [(new_status, order_id) for order_id in order_ids],
         )
+        if new_status == "in_progress":
+            db.commit()
+            for order_id in order_ids:
+                _auto_place_boat_on_shop_map(db, {"id": order_id})
         status_label = next(
             item["label"] for item in ORDER_STATUSES
             if item["value"] == new_status
@@ -9970,8 +10107,6 @@ def set_tuning_order_status(order_id):
         db.commit()
         if status == "in_progress":
             _auto_place_boat_on_shop_map(db, order)
-        elif status == "handed_over":
-            _auto_remove_boat_from_shop_map(db, order)
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
