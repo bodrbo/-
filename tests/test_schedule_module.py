@@ -330,7 +330,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertEqual(item["guests_count"], 5)
 
         page = self.client.get("/schedule?date=2026-09-05").get_data(as_text=True)
-        self.assertIn("Алия · +79118115476 · 5 гостей", page)
+        self.assertIn('<span class="schedule-card-meta">5 гостей</span>', page)
 
     def test_individual_booking_shows_unknown_guests_count_when_blank(self):
         self.login()
@@ -342,7 +342,9 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIsNone(item["guests_count"])
 
         page = self.client.get("/schedule?date=2026-09-05").get_data(as_text=True)
-        self.assertIn("Алия · +79118115476 · Количество гостей неизвестно", page)
+        self.assertIn(
+            '<span class="schedule-card-meta">Количество гостей неизвестно</span>', page
+        )
 
     def test_individual_booking_rejects_invalid_guests_count(self):
         self.login()

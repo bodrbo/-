@@ -5095,8 +5095,10 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   right: 7px;
   left: 7px;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
   overflow: hidden;
   min-height: 37px;
   padding: 8px 10px 9px 13px;
@@ -5139,15 +5141,27 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-card.event { border-left-style: double; border-left-width: 6px; }
 .schedule-card.has-bad-weather { box-shadow: inset 0 0 0 1.5px var(--danger), 0 8px 18px -13px rgba(15,42,53,.7); }
 .schedule-card.has-bad-weather:hover { box-shadow: inset 0 0 0 1.5px var(--danger), 0 12px 24px -14px rgba(15,42,53,.82); }
+.schedule-card-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+.schedule-card-side {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  max-width: 42%;
+  gap: 3px;
+  text-align: right;
+}
 .schedule-card-weather {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 3px 9px;
-  width: 100%;
-  margin-top: auto;
-  padding-top: 5px;
-  font-size: 12px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 11px;
   font-weight: 700;
   line-height: 1.2;
   opacity: .92;
@@ -5158,19 +5172,9 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   gap: 3px;
   white-space: nowrap;
 }
-.schedule-card-weather-item svg { flex: 0 0 14px; width: 14px; height: 14px; }
+.schedule-card-weather-item svg { flex: 0 0 13px; width: 13px; height: 13px; }
 .schedule-card-weather.is-bad { color: var(--danger); opacity: 1; }
 .schedule-card.is-compact .schedule-card-weather { display: none; }
-.schedule-card.is-medium .schedule-card-weather { font-size: 11px; }
-.schedule-card.is-medium .schedule-card-weather-item svg { flex-basis: 12px; width: 12px; height: 12px; }
-.schedule-card-topline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  width: 100%;
-}
-.schedule-card-time { font-family: 'PT Mono', monospace; font-size: 10px; font-weight: 700; opacity: .94; }
 .schedule-card-kind {
   overflow: hidden;
   padding: 1px 4px;
@@ -5187,7 +5191,6 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-card strong {
   display: -webkit-box;
   overflow: hidden;
-  margin-top: 3px;
   font-size: 13px;
   line-height: 1.25;
   -webkit-box-orient: vertical;
@@ -5206,36 +5209,35 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-card-boat { display: flex; align-items: center; gap: 4px; font-weight: 700; }
 .schedule-card-boat svg { flex: 0 0 13px; width: 13px; height: 13px; }
 .schedule-card.is-medium { padding-top: 6px; padding-bottom: 6px; }
-.schedule-card.is-medium .schedule-card-kind,
-.schedule-card.is-medium .schedule-card-meta { display: none; }
 .schedule-card.is-medium strong {
   overflow: hidden;
   width: 100%;
+  font-size: 12px;
   white-space: nowrap;
   text-overflow: ellipsis;
   -webkit-line-clamp: 1;
 }
-.schedule-card.is-medium .schedule-card-boat { margin-top: 2px; }
+.schedule-card.is-medium .schedule-card-boat,
+.schedule-card.is-medium .schedule-card-meta { margin-top: 2px; font-size: 10px; }
+.schedule-card.is-medium .schedule-card-side { gap: 2px; }
 .schedule-card.is-compact {
-  justify-content: center;
-  gap: 1px;
+  align-items: center;
   min-height: 30px;
-  padding: 3px 7px 3px 9px;
+  padding: 3px 9px;
 }
-.schedule-card.is-compact .schedule-card-topline { display: block; line-height: 1; }
-.schedule-card.is-compact .schedule-card-kind,
+.schedule-card.is-compact .schedule-card-main,
+.schedule-card.is-compact .schedule-card-side { flex-direction: row; align-items: center; }
 .schedule-card.is-compact .schedule-card-boat,
 .schedule-card.is-compact .schedule-card-meta { display: none; }
-.schedule-card.is-compact .schedule-card-time { display: block; font-size: 8px; line-height: 1; }
 .schedule-card.is-compact strong {
   display: block;
   overflow: hidden;
   width: 100%;
-  margin-top: 1px;
   font-size: 10px;
   line-height: 1.1;
   text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-line-clamp: 1;
 }
 .schedule-board-hint { flex: none; margin: 5px 4px 0; color: var(--muted); font-size: 11px; }
 .schedule-view-mode {
@@ -6174,19 +6176,23 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   .schedule-card {
     right: 3px;
     left: 3px;
+    flex-direction: column;
     min-width: 0;
     padding: 5px 4px 6px 7px;
     border-left-width: 3px;
     border-radius: 6px;
   }
   .schedule-card.event { border-left-width: 4px; }
-  .schedule-card-topline { display: block; line-height: 1; }
-  .schedule-card-time { display: block; font-size: 8px; line-height: 1.1; white-space: nowrap; }
+  .schedule-card-side {
+    order: -1;
+    max-width: 100%;
+    align-items: flex-start;
+    text-align: left;
+  }
   .schedule-card-kind {
     display: block;
     width: fit-content;
     max-width: 100%;
-    margin-top: 2px;
     padding: 1px 3px;
     font-size: 6.5px;
     line-height: 1.15;
@@ -6194,8 +6200,8 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
     white-space: normal;
   }
   .schedule-card-boat,
-  .schedule-card.booking .schedule-card-meta { display: none; }
-  .schedule-card.event .schedule-card-meta {
+  .schedule-card-weather { display: none; }
+  .schedule-card-meta {
     display: block;
     margin-top: 2px;
     font-size: 7.5px;
@@ -6213,12 +6219,10 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
     -webkit-line-clamp: 3;
   }
   .schedule-card.is-medium { padding: 5px 4px 5px 7px; }
-  .schedule-card.is-medium .schedule-card-kind { display: block; }
   .schedule-card.is-compact .schedule-card-kind,
   .schedule-card.is-compact .schedule-card-meta { display: none; }
   .schedule-card.is-medium strong { white-space: normal; text-overflow: clip; -webkit-line-clamp: 2; }
   .schedule-card.is-compact { padding: 3px 3px 3px 6px; }
-  .schedule-card.is-compact .schedule-card-time { font-size: 7px; }
   .schedule-card.is-compact strong { font-size: 8px; }
   .schedule-modal { align-items: end; padding: 0; }
   .schedule-modal-card { width: 100%; max-height: 94vh; border-radius: 18px 18px 0 0; }
