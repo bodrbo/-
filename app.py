@@ -19197,6 +19197,15 @@ def _demo_tenant_module_gate():
     # private, and expose only its read-only analytics page below.
     if request.path == "/trips" or request.path.startswith("/trips/"):
         abort(404)
+    enabled = {m for m in (session.get("demo_tenant_modules") or "").split(",") if m}
+    if (
+        request.path == "/analytics/projects"
+        or request.path.startswith("/analytics/projects/")
+    ) and "excursions" in enabled and "tuning" not in enabled:
+        # Financial projects are built around tuning orders.  An excursion-only
+        # demo may still have the general analytics module enabled, but should
+        # neither advertise nor expose the tuning-specific project workspace.
+        abort(404)
     module = (
         "excursions"
         if request.endpoint == "analytics_trips"
@@ -19204,7 +19213,6 @@ def _demo_tenant_module_gate():
     )
     if module is None:
         return None
-    enabled = {m for m in (session.get("demo_tenant_modules") or "").split(",") if m}
     if module not in enabled:
         abort(404)
     return None
@@ -19239,6 +19247,13 @@ def _demo_tenant_template_context():
         # same as before this feature existed.
         return enabled is None or module_key in enabled
 
+    def demo_analytics_projects_enabled():
+        # Real accounts retain the existing unrestricted navigation.  Only an
+        # excursion-only demo loses this tuning-specific subsection.
+        return enabled is None or not (
+            "excursions" in enabled and "tuning" not in enabled
+        )
+
     # Guided tour (DEMO_TOUR_STEPS): works for any signed-in staff session,
     # not just a demo tenant — a real admin/employee can launch it on
     # demand via the "?" feedback widget's "Запустить обучение" link (see
@@ -19259,6 +19274,7 @@ def _demo_tenant_template_context():
     return {
         "is_demo_tenant": bool(tenant_id),
         "demo_module_enabled": demo_module_enabled,
+        "demo_analytics_projects_enabled": demo_analytics_projects_enabled,
         "demo_tenant_company_name": session.get("demo_tenant_name") if tenant_id else None,
         "demo_tenant_logo": session.get("demo_tenant_logo") if tenant_id else None,
         "demo_tenant_empty_state_logo": session.get("demo_tenant_empty_state_logo") if tenant_id else None,

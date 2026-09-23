@@ -46,8 +46,22 @@ class DemoTripAnalyticsTests(unittest.TestCase):
         self.assertEqual(self.client.get("/analytics/trips").status_code, 404)
         self.assertEqual(self.client.get("/analytics").status_code, 200)
 
-    def test_combined_demo_shows_all_analytics_subsections(self):
+    def test_excursion_demo_without_tuning_hides_projects(self):
         self.log_in_demo(["analytics", "excursions"])
+
+        response = self.client.get("/analytics")
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(">Транзакции<", html)
+        self.assertNotIn(">Проекты<", html)
+        self.assertIn("Аналитика по рейсам", html)
+        self.assertNotIn("Рейсы и инвесторы", html)
+        self.assertEqual(self.client.get("/analytics/projects").status_code, 404)
+        self.assertEqual(self.client.get("/analytics/projects/1").status_code, 404)
+
+    def test_demo_with_excursions_and_tuning_keeps_projects(self):
+        self.log_in_demo(["analytics", "excursions", "tuning"])
 
         response = self.client.get("/analytics")
         html = response.get_data(as_text=True)
@@ -56,7 +70,7 @@ class DemoTripAnalyticsTests(unittest.TestCase):
         self.assertIn(">Транзакции<", html)
         self.assertIn(">Проекты<", html)
         self.assertIn("Аналитика по рейсам", html)
-        self.assertNotIn("Рейсы и инвесторы", html)
+        self.assertEqual(self.client.get("/analytics/projects").status_code, 200)
 
 
 if __name__ == "__main__":
