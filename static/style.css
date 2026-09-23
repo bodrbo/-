@@ -5106,6 +5106,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   pointer-events: none;
 }
 .schedule-hour-line,
+.schedule-quarter-line,
 .schedule-half-line {
   position: absolute;
   z-index: 0;
@@ -5116,6 +5117,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 }
 .schedule-hour-line { background: #d8e2ea; }
 .schedule-half-line { background: #edf2f6; }
+.schedule-quarter-line { background: rgba(237,242,246,.55); }
 .schedule-now-line {
   position: absolute;
   z-index: 4;

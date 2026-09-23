@@ -170,7 +170,11 @@
                {% endif %}>
             {% for mark in hour_marks %}
             <span class="schedule-hour-line" style="top: {{ mark.top_px }}px"></span>
-            <span class="schedule-half-line" style="top: {{ mark.top_px + 37.5 }}px"></span>
+            {% if not loop.last %}
+            <span class="schedule-quarter-line" style="top: {{ mark.top_px + time_step_px }}px"></span>
+            <span class="schedule-half-line" style="top: {{ mark.top_px + time_step_px * 2 }}px"></span>
+            <span class="schedule-quarter-line" style="top: {{ mark.top_px + time_step_px * 3 }}px"></span>
+            {% endif %}
             {% endfor %}
             {% if now_line_px is not none %}<span class="schedule-now-line" style="top: {{ now_line_px }}px"><i></i></span>{% endif %}
 
@@ -289,11 +293,11 @@
         </label>
         <label class="field">
           <span>Начало</span>
-          <input type="time" name="start_time" id="scheduleStart" step="1800" required onchange="applyScheduleDuration()">
+          <input type="time" name="start_time" id="scheduleStart" step="{{ time_step_minutes * 60 }}" required onchange="applyScheduleDuration()">
         </label>
         <label class="field">
           <span>Окончание</span>
-          <input type="time" name="end_time" id="scheduleEnd" step="1800" required onchange="syncScheduleTimingPrice()">
+          <input type="time" name="end_time" id="scheduleEnd" step="{{ time_step_minutes * 60 }}" required onchange="syncScheduleTimingPrice()">
         </label>
       </div>
 
@@ -662,6 +666,7 @@
   const scheduleCrewRoleLabels = {{ crew_roles|tojson }};
   const scheduleDayStart = {{ day_start_minutes }};
   const schedulePxPerMinute = {{ px_per_minute }};
+  const scheduleTimeStepMinutes = {{ time_step_minutes }};
   const scheduleCrewCount = {{ visible_crew|length }};
   const scheduleBaseUrl = {{ url_for('schedule.index')|tojson }};
   const scheduleCreateUrl = {{ url_for('schedule.create_item')|tojson }};
@@ -728,7 +733,15 @@
     const params = new URLSearchParams({date: {{ day.isoformat()|tojson }}, employee: value});
     window.location.href = scheduleBaseUrl + '?' + params.toString();
   }
-  function roundHalfHour(minutes) { return Math.max(0, Math.min(1410, Math.round(minutes / 30) * 30)); }
+  function roundScheduleTime(minutes) {
+    return Math.max(
+      0,
+      Math.min(
+        24 * 60 - scheduleTimeStepMinutes,
+        Math.round(minutes / scheduleTimeStepMinutes) * scheduleTimeStepMinutes,
+      ),
+    );
+  }
   function minutesToTime(minutes) {
     const safe = Math.max(0, Math.min(1439, minutes));
     return String(Math.floor(safe / 60)).padStart(2, '0') + ':' + String(safe % 60).padStart(2, '0');
@@ -1670,7 +1683,9 @@
     return Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
   }
   function scheduleDragTime(minutes) {
-    return minutesToTime(Math.round(minutes / 30) * 30);
+    return minutesToTime(
+      Math.round(minutes / scheduleTimeStepMinutes) * scheduleTimeStepMinutes
+    );
   }
   function scheduleDragColumnAt(x, y) {
     const target = document.elementFromPoint(x, y);
@@ -1707,7 +1722,7 @@
     }
     event.preventDefault();
     const deltaSteps = Math.round(
-      (event.clientY - state.originY) / schedulePxPerMinute / 30
+      (event.clientY - state.originY) / schedulePxPerMinute / scheduleTimeStepMinutes
     );
     const timeline = document.querySelector('.schedule-columns');
     const timelineMinutes = timeline
@@ -1716,10 +1731,13 @@
     const latestStart = Math.floor(Math.min(
       24 * 60 - state.durationMinutes - 1,
       scheduleDayStart + timelineMinutes - state.durationMinutes,
-    ) / 30) * 30;
+    ) / scheduleTimeStepMinutes) * scheduleTimeStepMinutes;
     state.startMinutes = Math.max(
       scheduleDayStart,
-      Math.min(latestStart, state.originalStartMinutes + deltaSteps * 30),
+      Math.min(
+        latestStart,
+        state.originalStartMinutes + deltaSteps * scheduleTimeStepMinutes,
+      ),
     );
     const targetColumn = scheduleDragColumnAt(event.clientX, event.clientY);
     document.querySelectorAll('.schedule-column.is-drop-target').forEach(column => {
@@ -2410,7 +2428,7 @@
   function handleScheduleColumnClick(event, employeeId) {
     if (event.target.closest('.schedule-card')) return;
     const column = event.currentTarget;
-    const minutes = roundHalfHour(
+    const minutes = roundScheduleTime(
       scheduleDayStart + (event.clientY - column.getBoundingClientRect().top) / schedulePxPerMinute
     );
     openScheduleCreate(employeeId, minutesToTime(minutes));
@@ -2418,13 +2436,19 @@
   function prepareScheduleColumnKeyboard(column) {
     if (column.dataset.keyboardMinutes) return;
     const duration = Math.floor(column.getBoundingClientRect().height / schedulePxPerMinute);
-    const defaultMinutes = Math.min(scheduleDayStart + duration - 30, Math.max(scheduleDayStart, 10 * 60));
+    const defaultMinutes = Math.min(
+      scheduleDayStart + duration - scheduleTimeStepMinutes,
+      Math.max(scheduleDayStart, 10 * 60),
+    );
     setScheduleColumnKeyboardTime(column, defaultMinutes);
   }
   function setScheduleColumnKeyboardTime(column, minutes) {
     const duration = Math.floor(column.getBoundingClientRect().height / schedulePxPerMinute);
-    const latest = scheduleDayStart + duration - 30;
-    const safeMinutes = Math.max(scheduleDayStart, Math.min(latest, roundHalfHour(minutes)));
+    const latest = scheduleDayStart + duration - scheduleTimeStepMinutes;
+    const safeMinutes = Math.max(
+      scheduleDayStart,
+      Math.min(latest, roundScheduleTime(minutes)),
+    );
     const time = minutesToTime(safeMinutes);
     column.dataset.keyboardMinutes = String(safeMinutes);
     column.dataset.keyboardTime = time;
@@ -2443,7 +2467,10 @@
       openScheduleCreate(employeeId, minutesToTime(current));
     } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
       event.preventDefault();
-      setScheduleColumnKeyboardTime(column, current + (event.key === 'ArrowDown' ? 30 : -30));
+      setScheduleColumnKeyboardTime(
+        column,
+        current + (event.key === 'ArrowDown' ? scheduleTimeStepMinutes : -scheduleTimeStepMinutes),
+      );
     } else if (event.key === 'Home') {
       event.preventDefault();
       setScheduleColumnKeyboardTime(column, scheduleDayStart);

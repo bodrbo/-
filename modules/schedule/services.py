@@ -18,6 +18,7 @@ from .constants import (
     ITEM_KINDS,
     MAX_ITEM_HOURS,
     MIN_ITEM_MINUTES,
+    TIME_STEP_MINUTES,
 )
 
 
@@ -368,7 +369,9 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
     if starts_at and ends_at:
         duration = ends_at - starts_at
         if duration.total_seconds() < MIN_ITEM_MINUTES * 60:
-            errors.append("Рейс должен длиться не меньше 30 минут.")
+            errors.append(
+                f"Рейс должен длиться не меньше {MIN_ITEM_MINUTES} минут."
+            )
         if duration.total_seconds() > MAX_ITEM_HOURS * 3600:
             errors.append("Рейс не может длиться больше 12 часов.")
 
@@ -609,8 +612,10 @@ def move_item(
         old_end = dt.datetime.strptime(item["ends_at"], "%Y-%m-%d %H:%M")
     except (TypeError, ValueError):
         return False, "Не удалось определить новое время рейса.", None
-    if parsed_time.minute not in (0, 30):
-        return False, "Перетаскивание доступно с шагом 30 минут.", None
+    if parsed_time.minute % TIME_STEP_MINUTES:
+        return False, (
+            f"Перетаскивание доступно с шагом {TIME_STEP_MINUTES} минут."
+        ), None
     duration = old_end - old_start
     new_start = dt.datetime.combine(old_start.date(), parsed_time)
     new_end = new_start + duration
@@ -1606,5 +1611,7 @@ def day_view(
         "grid_height": round(total_minutes * px_per_minute, 2),
         "day_start_minutes": earliest,
         "px_per_minute": px_per_minute,
+        "time_step_minutes": TIME_STEP_MINUTES,
+        "time_step_px": round(TIME_STEP_MINUTES * px_per_minute, 2),
         "now_line_px": now_line_px,
     }

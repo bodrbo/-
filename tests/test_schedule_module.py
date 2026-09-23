@@ -147,6 +147,26 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn("перетащите её по времени и между сотрудниками", html)
         self.assertRegex(html, r"/static/style\.css\?v=\d+")
 
+    def test_schedule_uses_fifteen_minute_grid_and_accepts_45_minute_trip(self):
+        self.login()
+        html = self.client.get(
+            "/schedule?date=2026-09-05"
+        ).get_data(as_text=True)
+
+        self.assertIn('id="scheduleStart" step="900"', html)
+        self.assertIn('id="scheduleEnd" step="900"', html)
+        self.assertIn("const scheduleTimeStepMinutes = 15", html)
+        self.assertIn("schedule-quarter-line", html)
+
+        response = self.create_booking(start_time="13:00", end_time="13:45")
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            item = application_module.get_db().execute(
+                "SELECT starts_at, ends_at FROM schedule_items"
+            ).fetchone()
+        self.assertEqual(item["starts_at"], "2026-09-05 13:00")
+        self.assertEqual(item["ends_at"], "2026-09-05 13:45")
+
     def test_admin_can_add_and_remove_employee_from_day_schedule(self):
         self.login()
         remove_response = self.client.post(
@@ -455,13 +475,24 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
                 (item_id,),
             ).fetchone())
 
+        invalid_step = self.client.post(
+            f"/schedule/items/{item_id}/move",
+            json={
+                "start_time": "14:10",
+                "source_employee_id": self.daniil_id,
+                "target_employee_id": self.platon_id,
+            },
+        )
+        self.assertEqual(invalid_step.status_code, 400)
+        self.assertIn("шагом 15 минут", invalid_step.get_json()["message"])
+
         with patch.object(
             application_module, "send_telegram_notification_to_employee"
         ) as notifier:
             response = self.client.post(
                 f"/schedule/items/{item_id}/move",
                 json={
-                    "start_time": "14:00",
+                    "start_time": "14:15",
                     "source_employee_id": self.daniil_id,
                     "target_employee_id": self.platon_id,
                 },
@@ -470,8 +501,8 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["item"]["starts_at"], "2026-09-05 14:00")
-        self.assertEqual(payload["item"]["ends_at"], "2026-09-05 16:30")
+        self.assertEqual(payload["item"]["starts_at"], "2026-09-05 14:15")
+        self.assertEqual(payload["item"]["ends_at"], "2026-09-05 16:45")
         self.assertEqual(
             payload["item"]["assignments"],
             [{
@@ -497,8 +528,8 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
                 "SELECT * FROM schedule_participants WHERE schedule_item_id = ?",
                 (item_id,),
             ).fetchone())
-        self.assertEqual(moved["starts_at"], "2026-09-05 14:00")
-        self.assertEqual(moved["ends_at"], "2026-09-05 16:30")
+        self.assertEqual(moved["starts_at"], "2026-09-05 14:15")
+        self.assertEqual(moved["ends_at"], "2026-09-05 16:45")
         self.assertEqual(moved["revenue"], 18000)
         self.assertEqual(assignment["employee_id"], self.platon_id)
         self.assertEqual(assignment["role"], "guide_captain")
