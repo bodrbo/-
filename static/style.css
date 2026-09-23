@@ -6232,8 +6232,11 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   .schedule-card.event { border-left-width: 4px; }
   .schedule-card-side {
     order: -1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
     max-width: 100%;
-    align-items: flex-start;
+    gap: 5px;
     text-align: left;
   }
   .schedule-card-kind {
@@ -6246,8 +6249,15 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
     text-overflow: clip;
     white-space: normal;
   }
-  .schedule-card-boat,
-  .schedule-card-weather { display: none; }
+  .schedule-card-boat { display: none; }
+  .schedule-card-weather {
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    font-size: 6.5px;
+  }
+  .schedule-card-weather-item svg { flex-basis: 8px; width: 8px; height: 8px; }
+  .schedule-card.is-compact .schedule-card-weather { display: none; }
   .schedule-card-meta {
     display: block;
     margin-top: 2px;
