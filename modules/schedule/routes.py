@@ -182,6 +182,10 @@ def create_schedule_blueprint(
             keep_participants=request.form.get("keep_participants") == "1",
         )
         if success:
+            if request.form.get("resolve_tripster") == "1":
+                tripster_services.mark_item_resolved(
+                    db, item_id, services.current_timestamp()
+                )
             notify_item_changes(
                 before, schedule_notifications.item_snapshot(db, item_id)
             )
@@ -464,6 +468,52 @@ def create_schedule_blueprint(
                 True,
             )
         return redirect_to_day(day, selected_employee)
+
+    @blueprint.route("/schedule/tripster/merge-candidates")
+    @manage_required
+    def tripster_merge_candidates():
+        if session.get("demo_tenant_id"):
+            abort(404)
+        day = services.parse_day(request.args.get("date")).isoformat()
+        try:
+            source_item_id = int(request.args.get("source_item_id", ""))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "message": "Некорректная карточка Tripster."}), 400
+        return jsonify({
+            "ok": True,
+            "date": day,
+            "items": repository.list_tripster_merge_candidates(
+                get_db(), day, source_item_id
+            ),
+        })
+
+    @blueprint.route(
+        "/schedule/items/<int:item_id>/tripster/attach", methods=["POST"]
+    )
+    @manage_required
+    def attach_tripster_item(item_id):
+        if session.get("demo_tenant_id"):
+            abort(404)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"ok": False, "message": "Некорректный запрос."}), 400
+        try:
+            target_item_id = int(payload.get("target_item_id"))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "message": "Выберите рейс."}), 400
+        success, message, target = tripster_services.attach_item_to_existing_trip(
+            get_db(), item_id, target_item_id, services.current_timestamp()
+        )
+        if not success:
+            return jsonify({"ok": False, "message": message}), 400
+        return jsonify({
+            "ok": True,
+            "message": message,
+            "target_item_id": target_item_id,
+            "redirect_url": url_for(
+                "schedule.index", date=target["starts_at"][:10], employee="all"
+            ),
+        })
 
     @blueprint.route("/schedule/weather/sync", methods=["POST"])
     @manage_required

@@ -40,6 +40,21 @@ def init_schema(conn):
         # group-event participant/guest tracking (schedule_participants).
         # NULL means "not recorded", shown as "Количество гостей неизвестно".
         conn.execute("ALTER TABLE schedule_items ADD COLUMN guests_count INTEGER")
+    if "tripster_resolved" not in item_columns:
+        # Once an administrator has deliberately placed a Tripster order,
+        # later imports may refresh its guests and money but must not move it
+        # back to the time/service originally supplied by the marketplace.
+        conn.execute(
+            "ALTER TABLE schedule_items "
+            "ADD COLUMN tripster_resolved INTEGER NOT NULL DEFAULT 0"
+        )
+    if "merged_into_item_id" not in item_columns:
+        # Keep the original Tripster source card as a durable routing alias.
+        # New guests added to the same marketplace event can then follow the
+        # administrator's earlier merge instead of resurrecting the card.
+        conn.execute(
+            "ALTER TABLE schedule_items ADD COLUMN merged_into_item_id INTEGER"
+        )
     conn.execute(
         "UPDATE schedule_items SET service_id = ("
         "SELECT excursion_services.id FROM excursion_services "
@@ -58,6 +73,15 @@ def init_schema(conn):
             UNIQUE(schedule_item_id, employee_id)
         )
         """
+    )
+    # Trips assigned before this routing mechanism was introduced have
+    # already been deliberately scheduled by an administrator. Treat them as
+    # resolved so a later Tripster import cannot undo those manual choices.
+    conn.execute(
+        "UPDATE schedule_items SET tripster_resolved = 1 "
+        "WHERE source = 'tripster' AND tripster_resolved = 0 "
+        "AND EXISTS (SELECT 1 FROM schedule_assignments "
+        "WHERE schedule_assignments.schedule_item_id = schedule_items.id)"
     )
     conn.execute(
         """
@@ -209,6 +233,10 @@ def init_schema(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_schedule_items_day "
         "ON schedule_items(starts_at, deleted_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schedule_items_merged_into "
+        "ON schedule_items(merged_into_item_id)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_schedule_assignments_employee "

@@ -197,6 +197,16 @@ def _mapped_service(db, experience_id):
     return service_repository.get_service_by_tripster_id(db, experience_id)
 
 
+def _resolved_item(db, item_id):
+    if item_id is None:
+        return None
+    return db.execute(
+        "SELECT * FROM schedule_items WHERE id = ? "
+        "AND deleted_at IS NULL AND tripster_resolved = 1",
+        (item_id,),
+    ).fetchone()
+
+
 def _ensure_schedule_item(db, order, timestamp):
     mapped_service = _mapped_service(db, order["experience_id"])
     is_group_order = bool(
@@ -212,6 +222,24 @@ def _ensure_schedule_item(db, order, timestamp):
         (SOURCE, source_ref),
     ).fetchone()
     if existing is not None:
+        if existing["merged_into_item_id"] is not None:
+            target = _resolved_item(db, existing["merged_into_item_id"])
+            if target is not None:
+                db.execute(
+                    "UPDATE schedule_items SET source_updated_at = ?, updated_at = ? "
+                    "WHERE id = ?",
+                    (timestamp, timestamp, target["id"]),
+                )
+                return target["id"], False
+        if existing["tripster_resolved"]:
+            # The administrator already chose the real service/date/time.
+            # Only the clients and payment split are refreshed below.
+            db.execute(
+                "UPDATE schedule_items SET deleted_at = NULL, status = 'scheduled', "
+                "source_updated_at = ?, updated_at = ? WHERE id = ?",
+                (timestamp, timestamp, existing["id"]),
+            )
+            return existing["id"], False
         if mapped_service is not None and existing["service_id"] is None:
             starts_at = dt.datetime.strptime(
                 order["event_start"], "%Y-%m-%d %H:%M"
@@ -275,6 +303,78 @@ def _ensure_schedule_item(db, order, timestamp):
         ),
     )
     return cursor.lastrowid, True
+
+
+def mark_item_resolved(db, item_id, timestamp):
+    """Lock an imported card to the administrator's chosen schedule data."""
+    cursor = db.execute(
+        "UPDATE schedule_items SET tripster_resolved = 1, updated_at = ? "
+        "WHERE id = ? AND deleted_at IS NULL AND source = ?",
+        (timestamp, item_id, SOURCE),
+    )
+    db.commit()
+    return cursor.rowcount > 0
+
+
+def attach_item_to_existing_trip(db, source_item_id, target_item_id, timestamp):
+    """Move every active Tripster order from its intake card to a real trip.
+
+    The original card remains as a soft-deleted routing alias. That makes a
+    later guest for the same grouped Tripster event follow the merge, while
+    ``tripster_resolved`` prevents reimports from restoring marketplace time.
+    """
+    try:
+        source_item = db.execute(
+            "SELECT * FROM schedule_items WHERE id = ? AND deleted_at IS NULL",
+            (source_item_id,),
+        ).fetchone()
+        if source_item is None or source_item["source"] != SOURCE:
+            return False, "Карточка Tripster не найдена.", None
+        if source_item["tripster_resolved"] or source_item["merged_into_item_id"]:
+            return False, "Эта карточка Tripster уже распределена.", None
+        assigned = db.execute(
+            "SELECT 1 FROM schedule_assignments WHERE schedule_item_id = ? LIMIT 1",
+            (source_item_id,),
+        ).fetchone()
+        if assigned is not None:
+            return False, "Этот рейс уже назначен сотруднику.", None
+        target_item = db.execute(
+            "SELECT * FROM schedule_items WHERE id = ? AND deleted_at IS NULL "
+            "AND merged_into_item_id IS NULL",
+            (target_item_id,),
+        ).fetchone()
+        if target_item is None or target_item_id == source_item_id:
+            return False, "Выбранный рейс больше недоступен.", None
+        order_count = db.execute(
+            "SELECT COUNT(*) AS total FROM tripster_orders "
+            "WHERE schedule_item_id = ? AND status = ?",
+            (source_item_id, PAID_STATUS),
+        ).fetchone()["total"]
+        if not order_count:
+            return False, "В карточке нет активных заказов Tripster.", None
+
+        db.execute(
+            "UPDATE tripster_orders SET schedule_item_id = ?, last_seen_at = ? "
+            "WHERE schedule_item_id = ? AND status = ?",
+            (target_item_id, timestamp, source_item_id, PAID_STATUS),
+        )
+        db.execute(
+            "UPDATE schedule_items SET tripster_resolved = 1, updated_at = ? "
+            "WHERE id = ?",
+            (timestamp, target_item_id),
+        )
+        db.execute(
+            "UPDATE schedule_items SET merged_into_item_id = ?, deleted_at = ?, "
+            "updated_at = ? WHERE id = ?",
+            (target_item_id, timestamp, timestamp, source_item_id),
+        )
+        _rebuild_item(db, source_item_id, timestamp)
+        _rebuild_item(db, target_item_id, timestamp)
+        db.commit()
+        return True, "Заказ Tripster добавлен к выбранному рейсу.", target_item
+    except Exception:
+        db.rollback()
+        raise
 
 
 def _find_client_by_identity(db, order):
@@ -373,12 +473,31 @@ def _rebuild_item(db, item_id, timestamp):
         (item_id, SOURCE),
     )
     if not active_rows:
+        if item["source"] == SOURCE:
+            db.execute(
+                "UPDATE schedule_items SET deleted_at = COALESCE(deleted_at, ?), "
+                "updated_at = ?, source_updated_at = ? WHERE id = ?",
+                (timestamp, timestamp, timestamp, item_id),
+            )
+            return True
+        # An internal/Yclients trip may receive a Tripster client and must not
+        # disappear if that marketplace order is later cancelled. Refresh its
+        # totals from whatever non-Tripster participants remain.
+        totals = db.execute(
+            "SELECT COALESCE(SUM(guests_count), 0) AS guests, "
+            "COALESCE(SUM(price), 0) AS revenue FROM schedule_participants "
+            "WHERE schedule_item_id = ?",
+            (item_id,),
+        ).fetchone()
         db.execute(
-            "UPDATE schedule_items SET deleted_at = ?, updated_at = ?, "
-            "source_updated_at = ? WHERE id = ?",
-            (timestamp, timestamp, timestamp, item_id),
+            "UPDATE schedule_items SET participants_count = ?, revenue = ?, "
+            "source_updated_at = ?, updated_at = ? WHERE id = ?",
+            (
+                totals["guests"], round(totals["revenue"], 2),
+                timestamp, timestamp, item_id,
+            ),
         )
-        return True
+        return False
 
     grouped = {}
     for row in active_rows:
@@ -558,9 +677,19 @@ def sync_orders(
 
             schedule_item_id = old_item_id
             if order["status"] == PAID_STATUS and order["event_start"]:
-                schedule_item_id, created = _ensure_schedule_item(
-                    db, order, timestamp
-                )
+                resolved_target = _resolved_item(db, old_item_id)
+                if resolved_target is not None:
+                    schedule_item_id = resolved_target["id"]
+                    created = False
+                    db.execute(
+                        "UPDATE schedule_items SET source_updated_at = ?, "
+                        "updated_at = ? WHERE id = ?",
+                        (timestamp, timestamp, schedule_item_id),
+                    )
+                else:
+                    schedule_item_id, created = _ensure_schedule_item(
+                        db, order, timestamp
+                    )
                 affected_item_ids.add(schedule_item_id)
                 if (
                     employee_notifier is not None

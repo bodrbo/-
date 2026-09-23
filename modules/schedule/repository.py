@@ -155,6 +155,45 @@ def get_item(db, item_id, include_deleted=False):
     return db.execute(query, (item_id,)).fetchone()
 
 
+def list_tripster_merge_candidates(db, day, source_item_id):
+    """Active trips that can receive the guests from one Tripster card.
+
+    A previously merged source stub is deliberately excluded: it is only a
+    routing alias for future imports and no longer represents a real trip.
+    """
+    rows = db.execute(
+        "SELECT schedule_items.*, "
+        "GROUP_CONCAT(schedule_assignments.employee_name, ', ') AS crew_names "
+        "FROM schedule_items "
+        "LEFT JOIN schedule_assignments "
+        "ON schedule_assignments.schedule_item_id = schedule_items.id "
+        "WHERE schedule_items.deleted_at IS NULL "
+        "AND schedule_items.id != ? "
+        "AND schedule_items.merged_into_item_id IS NULL "
+        "AND NOT (schedule_items.source = 'tripster' "
+        "AND schedule_items.tripster_resolved = 0 "
+        "AND NOT EXISTS (SELECT 1 FROM schedule_assignments AS assigned "
+        "WHERE assigned.schedule_item_id = schedule_items.id)) "
+        "AND substr(schedule_items.starts_at, 1, 10) = ? "
+        "GROUP BY schedule_items.id "
+        "ORDER BY schedule_items.starts_at, schedule_items.id",
+        (source_item_id, day),
+    ).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "kind": row["kind"],
+            "service_name": row["service_name"],
+            "boat": row["boat"],
+            "starts_at": row["starts_at"],
+            "ends_at": row["ends_at"],
+            "participants_count": row["participants_count"],
+            "crew_names": row["crew_names"] or "Экипаж не назначен",
+        }
+        for row in rows
+    ]
+
+
 def list_assignments(db, item_id):
     return db.execute(
         "SELECT * FROM schedule_assignments WHERE schedule_item_id = ? "

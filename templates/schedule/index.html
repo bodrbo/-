@@ -181,7 +181,7 @@
             {% for card in cards_by_employee.get(employee.id, []) %}
             {% set card_tag = 'button' if can_manage or can_view_clients else 'article' %}
             <{{ card_tag }}{% if can_manage or can_view_clients %} type="button"{% endif %}
-                    class="schedule-card {{ card.kind }} {{ 'is-compact' if card.height_px < 50 else 'is-medium' if card.height_px < 105 }}{{ ' has-bad-weather' if card.weather and card.weather.is_bad }}"
+                    class="schedule-card {{ card.kind }} {{ 'is-compact' if card.height_px < 50 else 'is-medium' if card.height_px < 105 }}{{ ' has-bad-weather' if card.weather and card.weather.is_bad }}{{ ' is-tripster-intake' if card.source == 'tripster' and not card.tripster_resolved and not card.assignments }}"
                     data-schedule-item-id="{{ card.id }}"
                     data-assignment-employee-id="{{ employee.id }}"
                     {% if can_manage %}data-move-url="{{ url_for('schedule.move_item', item_id=card.id) }}"{% endif %}
@@ -264,6 +264,7 @@
     <div class="schedule-modal-scroll">
     <form method="post" action="{{ url_for('schedule.create_item') }}" id="scheduleItemForm" class="schedule-form">
       <input type="hidden" name="return_employee" value="{{ selected_employee }}">
+      {% if not is_demo_tenant %}<input type="hidden" name="resolve_tripster" id="scheduleResolveSource" value="0">{% endif %}
       <div class="schedule-kind-switch" role="group" aria-label="Тип рейса">
         {% for value, label in item_kinds.items() %}
         <label><input type="radio" name="kind" value="{{ value }}" {{ 'checked' if loop.first }} onchange="syncScheduleKind(true)"><span>{{ label }}</span></label>
@@ -505,6 +506,81 @@
   </section>
 </div>
 
+{% if not is_demo_tenant %}
+<div class="schedule-modal" id="scheduleTripsterResolveModal" hidden>
+  <div class="schedule-modal-backdrop" onclick="closeTripsterResolveModal()"></div>
+  <section class="schedule-modal-card schedule-tripster-resolve-card" role="dialog" aria-modal="true" aria-labelledby="scheduleTripsterResolveTitle">
+    <header class="schedule-modal-header">
+      <div>
+        <span>Входящий заказ Tripster</span>
+        <h2 id="scheduleTripsterResolveTitle">Распределить заказ</h2>
+      </div>
+      <button type="button" class="schedule-modal-close" onclick="closeTripsterResolveModal()" aria-label="Закрыть">×</button>
+    </header>
+    <div class="schedule-tripster-resolve-body">
+      <section class="schedule-tripster-source" aria-label="Данные заказа Tripster">
+        <div>
+          <span>Программа Tripster</span>
+          <strong id="scheduleTripsterSourceService">—</strong>
+        </div>
+        <div>
+          <span>Исходная дата и время</span>
+          <strong id="scheduleTripsterSourceWhen">—</strong>
+        </div>
+        <div>
+          <span>Гостей</span>
+          <strong id="scheduleTripsterSourceGuests">—</strong>
+        </div>
+        <div>
+          <span>Предоплата</span>
+          <strong id="scheduleTripsterSourcePrepayment">—</strong>
+        </div>
+      </section>
+
+      <div class="schedule-tripster-paths">
+        <section class="schedule-tripster-path">
+          <div class="schedule-tripster-path-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h7a4 4 0 014 4v6"/><path d="M12 14l3 3 3-3"/><path d="M4 17h5"/></svg>
+          </div>
+          <div>
+            <h3>Добавить к существующему рейсу</h3>
+            <p>Клиенты и платежи Tripster перейдут в выбранный рейс. Программа и время могут отличаться.</p>
+          </div>
+          <form id="scheduleTripsterAttachForm" onsubmit="return submitTripsterAttach(event)">
+            <label class="field">
+              <span>Дата рейса</span>
+              <input type="date" id="scheduleTripsterTargetDate" required onchange="loadTripsterMergeCandidates()">
+            </label>
+            <label class="field schedule-tripster-target-field">
+              <span>Выберите рейс</span>
+              <select id="scheduleTripsterTargetItem" required disabled onchange="document.getElementById('scheduleTripsterAttachSubmit').disabled = !this.value">
+                <option value="">Загружаем рейсы…</option>
+              </select>
+              <small id="scheduleTripsterTargetHint">Можно выбрать рейс по другой программе.</small>
+            </label>
+            <button type="submit" id="scheduleTripsterAttachSubmit" disabled>Добавить к рейсу</button>
+          </form>
+        </section>
+
+        <section class="schedule-tripster-path">
+          <div class="schedule-tripster-path-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M4 12h16"/><path d="M5 5h4M15 19h4"/></svg>
+          </div>
+          <div>
+            <h3>Создать новый рейс</h3>
+            <p>Заказ станет новым рейсом. Перед сохранением можно изменить программу, дату, время, катер и экипаж.</p>
+          </div>
+          <button type="button" class="btn-secondary schedule-tripster-create" onclick="createTripFromTripsterCard()">Настроить новый рейс</button>
+        </section>
+      </div>
+      <p class="schedule-tripster-preserve-note">
+        Предоплата и сумма к доплате сохраняются в обоих вариантах и продолжат обновляться при импорте Tripster.
+      </p>
+    </div>
+  </section>
+</div>
+{% endif %}
+
 <div class="schedule-modal" id="scheduleRosterModal" hidden>
   <div class="schedule-modal-backdrop" onclick="closeScheduleRosterModal()"></div>
   <section class="schedule-modal-card schedule-roster-card" role="dialog" aria-modal="true" aria-labelledby="scheduleRosterTitle">
@@ -717,6 +793,9 @@
   let scheduleModalTrigger = null;
   let scheduleRosterModalTrigger = null;
   let scheduleViewModalTrigger = null;
+  {% if not is_demo_tenant %}let scheduleSourceModalTrigger = null;
+  let scheduleSourceItemId = null;
+  let scheduleSourceCandidateRequest = 0;{% endif %}
   let scheduleDrag = null;
   let scheduleDragSaving = false;
   const scheduleDraggedCards = new WeakSet();
@@ -858,6 +937,7 @@
     document.getElementById('scheduleParticipantSection').hidden = false;
     document.getElementById('scheduleParticipantSectionHint').hidden = true;
     document.getElementById('scheduleKeepParticipants').value = '0';
+    {% if not is_demo_tenant %}document.getElementById('scheduleResolveSource').value = '0';{% endif %}
     document.querySelectorAll('[data-client-picker]').forEach(picker => {
       picker.dataset.selectedPhone = '';
       picker.querySelector('[data-client-id]').value = '';
@@ -883,12 +963,13 @@
     document.getElementById('scheduleAddonsNewHint').hidden = false;
     setScheduleModalOpen(true);
   }
-  function openScheduleEdit(itemId, tripInfoOnly) {
+  function openScheduleEdit(itemId, tripInfoOnly, resolveExternal) {
     if (!scheduleCanManage) return;
     resetScheduleForm();
     const item = scheduleItems.find(candidate => candidate.id === itemId);
     if (!item) return;
     scheduleEditingItemId = item.id;
+    {% if not is_demo_tenant %}document.getElementById('scheduleResolveSource').value = resolveExternal ? '1' : '0';{% endif %}
     if (tripInfoOnly) {
       document.getElementById('scheduleParticipantSection').hidden = true;
       document.getElementById('scheduleParticipantSectionHint').hidden = false;
@@ -963,10 +1044,18 @@
     }
     document.getElementById('scheduleNote').value = item.note || '';
     item.assignment_ids.forEach((employeeId, index) => addScheduleAssignment(employeeId, item.assignment_roles[index]));
+    {% if not is_demo_tenant %}document.getElementById('scheduleModalEyebrow').textContent = resolveExternal
+      ? 'Новый рейс по заказу Tripster' : item.kind_label;
+    document.getElementById('scheduleModalTitle').textContent = resolveExternal
+      ? 'Настройте рейс перед созданием'
+      : (tripInfoOnly ? `${item.service_name} — данные рейса` : item.service_name);{% else %}
     document.getElementById('scheduleModalEyebrow').textContent = item.kind_label;
-    document.getElementById('scheduleModalTitle').textContent = tripInfoOnly ? `${item.service_name} — данные рейса` : item.service_name;
+    document.getElementById('scheduleModalTitle').textContent = tripInfoOnly
+      ? `${item.service_name} — данные рейса` : item.service_name;{% endif %}
     renderScheduleHeaderWeather('scheduleModalWeather', item.weather);
-    document.getElementById('scheduleSubmit').textContent = 'Сохранить изменения';
+    {% if not is_demo_tenant %}document.getElementById('scheduleSubmit').textContent = resolveExternal
+      ? 'Создать рейс' : 'Сохранить изменения';{% else %}
+    document.getElementById('scheduleSubmit').textContent = 'Сохранить изменения';{% endif %}
     const deleteForm = document.getElementById('scheduleDeleteForm');
     deleteForm.action = scheduleCreateUrl + '/' + item.id + '/delete';
     deleteForm.hidden = false;
@@ -1094,9 +1183,136 @@
       })
       .catch(() => alert('Не удалось убрать товар. Попробуйте ещё раз.'));
   }
+  {% if not is_demo_tenant %}function isUnresolvedTripsterItem(item) {
+    return item && item.source === 'tripster'
+      && !Number(item.tripster_resolved || 0)
+      && !item.merged_into_item_id
+      && !(item.assignments || []).length;
+  }
+  function setTripsterResolveModalOpen(open) {
+    const modal = document.getElementById('scheduleTripsterResolveModal');
+    if (!modal) return;
+    const header = document.querySelector('.schedule-topbar');
+    const shell = document.querySelector('.schedule-shell');
+    if (open) scheduleSourceModalTrigger = document.activeElement;
+    modal.hidden = !open;
+    document.body.classList.toggle('schedule-modal-open', open);
+    if (header) header.inert = open;
+    if (shell) shell.inert = open;
+    if (open) {
+      setTimeout(() => document.getElementById('scheduleTripsterTargetDate').focus(), 20);
+    } else if (scheduleSourceModalTrigger && scheduleSourceModalTrigger !== document.body) {
+      scheduleSourceModalTrigger.focus();
+      scheduleSourceModalTrigger = null;
+    }
+  }
+  function openTripsterResolveModal(itemId) {
+    const item = scheduleItems.find(candidate => candidate.id === itemId);
+    if (!isUnresolvedTripsterItem(item)) return;
+    scheduleSourceItemId = item.id;
+    document.getElementById('scheduleTripsterResolveTitle').textContent =
+      `Распределить заказ · ${item.service_name}`;
+    document.getElementById('scheduleTripsterSourceService').textContent = item.service_name;
+    document.getElementById('scheduleTripsterSourceWhen').textContent =
+      `${scheduleViewDate(item)}, ${item.start_time}–${item.end_time}`;
+    document.getElementById('scheduleTripsterSourceGuests').textContent =
+      String(item.participants_count || item.guests_count || 0);
+    const prepayment = (item.participants || []).reduce(
+      (sum, participant) => sum + Number(participant.prepayment || 0), 0
+    );
+    document.getElementById('scheduleTripsterSourcePrepayment').textContent =
+      formatScheduleMoney(prepayment);
+    document.getElementById('scheduleTripsterTargetDate').value = item.trip_date;
+    setTripsterResolveModalOpen(true);
+    loadTripsterMergeCandidates();
+  }
+  function closeTripsterResolveModal() {
+    scheduleSourceCandidateRequest += 1;
+    scheduleSourceItemId = null;
+    setTripsterResolveModalOpen(false);
+  }
+  function tripsterCandidateLabel(item) {
+    const start = String(item.starts_at || '').slice(11, 16);
+    const end = String(item.ends_at || '').slice(11, 16);
+    const boat = item.boat && item.boat !== 'Не назначен' ? item.boat : 'без катера';
+    return `${start}–${end} · ${item.service_name} · ${boat} · ${item.crew_names}`;
+  }
+  function loadTripsterMergeCandidates() {
+    if (scheduleSourceItemId == null) return;
+    const date = document.getElementById('scheduleTripsterTargetDate').value;
+    const select = document.getElementById('scheduleTripsterTargetItem');
+    const submit = document.getElementById('scheduleTripsterAttachSubmit');
+    const hint = document.getElementById('scheduleTripsterTargetHint');
+    const requestId = ++scheduleSourceCandidateRequest;
+    select.disabled = true;
+    submit.disabled = true;
+    select.replaceChildren(new Option('Загружаем рейсы…', ''));
+    hint.textContent = 'Ищем рейсы на выбранную дату.';
+    const params = new URLSearchParams({
+      date,
+      source_item_id: String(scheduleSourceItemId),
+    });
+    fetch(`${scheduleBaseUrl}/tripster/merge-candidates?${params.toString()}`)
+      .then(response => response.json())
+      .then(data => {
+        if (requestId !== scheduleSourceCandidateRequest) return;
+        if (!data.ok) throw new Error(data.message || 'Не удалось загрузить рейсы.');
+        select.replaceChildren(new Option(
+          data.items.length ? 'Выберите рейс' : 'На эту дату рейсов нет', ''
+        ));
+        data.items.forEach(item => select.add(new Option(tripsterCandidateLabel(item), item.id)));
+        select.disabled = !data.items.length;
+        submit.disabled = true;
+        hint.textContent = data.items.length
+          ? `Найдено рейсов: ${data.items.length}. Программа и время могут отличаться от Tripster.`
+          : 'Выберите другую дату или создайте новый рейс.';
+      })
+      .catch(error => {
+        if (requestId !== scheduleSourceCandidateRequest) return;
+        select.replaceChildren(new Option('Не удалось загрузить рейсы', ''));
+        hint.textContent = error.message;
+      });
+  }
+  function submitTripsterAttach(event) {
+    event.preventDefault();
+    const select = document.getElementById('scheduleTripsterTargetItem');
+    const submit = document.getElementById('scheduleTripsterAttachSubmit');
+    if (scheduleSourceItemId == null || !select.value) return false;
+    submit.disabled = true;
+    submit.textContent = 'Добавляем…';
+    fetch(`${scheduleCreateUrl}/${scheduleSourceItemId}/tripster/attach`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({target_item_id: select.value}),
+    })
+      .then(response => response.json().then(data => ({ok: response.ok, data})))
+      .then(result => {
+        if (!result.ok || !result.data.ok) {
+          throw new Error(result.data.message || 'Не удалось добавить заказ к рейсу.');
+        }
+        window.location.href = result.data.redirect_url;
+      })
+      .catch(error => {
+        alert(error.message);
+        submit.disabled = false;
+        submit.textContent = 'Добавить к рейсу';
+      });
+    return false;
+  }
+  function createTripFromTripsterCard() {
+    const itemId = scheduleSourceItemId;
+    closeTripsterResolveModal();
+    if (itemId != null) openScheduleEdit(itemId, false, true);
+  }{% endif %}
   function handleScheduleCardClick(event, itemId) {
     event.stopPropagation();
     if (scheduleDraggedCards.has(event.currentTarget)) return;
+    const item = scheduleItems.find(candidate => candidate.id === itemId);
+    {% if not is_demo_tenant %}
+    if (isUnresolvedTripsterItem(item)) {
+      openTripsterResolveModal(itemId);
+      return;
+    }{% endif %}
     openScheduleDetail(itemId);
   }
 
@@ -1913,6 +2129,7 @@
     const item = scheduleItems.find(candidate => candidate.id === itemId);
     const sourceColumn = card.closest('.schedule-column');
     if (!item || !sourceColumn || scheduleDrag || scheduleDragSaving) return;
+    {% if not is_demo_tenant %}if (isUnresolvedTripsterItem(item)) return;{% endif %}
     const startMinutes = scheduleItemMinutes(item, 'start_time');
     const durationMinutes = Math.max(
       30, scheduleItemMinutes(item, 'end_time') - startMinutes
@@ -2415,6 +2632,7 @@
       if (input.dataset.priceMode !== 'manual') {
         const price = scheduleServicePriceForBooking(selected);
         input.value = String(Math.round(price * 100) / 100);
+        syncScheduleImportedPayment(input);
       }
     } else {
       const pricePerGuest = selected && selected.value
@@ -2431,6 +2649,7 @@
           ? pricePerGuest * Math.max(0, guests)
           : 0;
         input.value = String(Math.round(price * 100) / 100);
+        syncScheduleImportedPayment(input);
       });
     }
     syncScheduleRevenueTotal();
@@ -2649,15 +2868,19 @@
     const itemModal = document.getElementById('scheduleModal');
     const rosterModal = document.getElementById('scheduleRosterModal');
     const viewModal = document.getElementById('scheduleViewModal');
+    {% if not is_demo_tenant %}const sourceModal = document.getElementById('scheduleTripsterResolveModal');{% endif %}
     const modal = itemModal && !itemModal.hidden
       ? itemModal
       : (rosterModal && !rosterModal.hidden
         ? rosterModal
-        : (viewModal && !viewModal.hidden ? viewModal : null));
+        : (viewModal && !viewModal.hidden
+          ? viewModal
+          {% if not is_demo_tenant %}: (sourceModal && !sourceModal.hidden ? sourceModal : null){% else %}: null{% endif %}));
     if (!modal) return;
     if (event.key === 'Escape') {
       if (modal === rosterModal) closeScheduleRosterModal();
       else if (modal === viewModal) closeScheduleView();
+      {% if not is_demo_tenant %}else if (modal === sourceModal) closeTripsterResolveModal();{% endif %}
       else closeScheduleModal();
       return;
     }
