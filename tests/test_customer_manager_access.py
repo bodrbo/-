@@ -411,6 +411,7 @@ class CustomerManagerAccessTests(unittest.TestCase):
             "client_name": "Экскурсионный Клиент",
             "client_phone": "+79990001122",
             "guests_count": 3,
+            "amount_due": 30300.0,
         }])
         self.assertEqual(manifest["assignments"], [{
             "employee_name": self.CAPTAIN_NAME,
@@ -418,6 +419,7 @@ class CustomerManagerAccessTests(unittest.TestCase):
         }])
         for private_field in ("revenue", "note", "price", "prepayment", "payment_due"):
             self.assertNotIn(private_field, json.dumps(manifest, ensure_ascii=False))
+        self.assertIn("К доплате:", html)
 
         self.login_as_guide()
         guide_html = self.client.get(

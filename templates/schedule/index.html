@@ -1938,6 +1938,11 @@
       : last === 1 ? 'гость' : last >= 2 && last <= 4 ? 'гостя' : 'гостей';
     return `${count} ${word}`;
   }
+  function scheduleViewMoney(value) {
+    return new Intl.NumberFormat('ru-RU', {
+      maximumFractionDigits: 2,
+    }).format(Number(value || 0)) + ' ₽';
+  }
   function openScheduleView(itemId) {
     if (!scheduleCanViewClients) return;
     const item = scheduleItems.find(candidate => candidate.id === itemId);
@@ -1962,9 +1967,13 @@
     const clients = document.getElementById('scheduleViewClients');
     clients.replaceChildren();
     item.participants.forEach(participant => {
+      const guestDetails = [scheduleGuestLabel(participant.guests_count)];
+      if (participant.amount_due !== null && participant.amount_due !== undefined) {
+        guestDetails.push(`К доплате: ${scheduleViewMoney(participant.amount_due)}`);
+      }
       clients.appendChild(scheduleViewRow(
         participant.client_name,
-        scheduleGuestLabel(participant.guests_count),
+        guestDetails.join(' · '),
         participant.client_phone
       ));
     });

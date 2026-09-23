@@ -1409,7 +1409,11 @@ def _display_colors_by_boat(boat_colors):
 
 
 def readonly_item_details(items):
-    """Return the operational trip manifest without prices or internal notes."""
+    """Return the crew manifest without internal notes or price breakdowns.
+
+    Captains need the final amount still due from each guest group at boarding,
+    but not the underlying price, prepayment, payment ledger, or trip revenue.
+    """
     result = []
     for item in items:
         participants = [
@@ -1417,6 +1421,7 @@ def readonly_item_details(items):
                 "client_name": participant["client_name"],
                 "client_phone": participant["client_phone"],
                 "guests_count": participant["guests_count"],
+                "amount_due": _participant_amount_due(participant),
             }
             for participant in item["participants"]
         ]
@@ -1425,6 +1430,7 @@ def readonly_item_details(items):
                 "client_name": item["customer_name"],
                 "client_phone": item["customer_phone"],
                 "guests_count": 1,
+                "amount_due": None,
             })
         participant_total = sum(
             max(0, int(participant["guests_count"] or 0))
