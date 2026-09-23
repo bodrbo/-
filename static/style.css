@@ -6266,7 +6266,6 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
     -webkit-line-clamp: 3;
   }
   .schedule-card.is-medium { padding: 5px 4px 5px 7px; }
-  .schedule-card.is-compact .schedule-card-kind,
   .schedule-card.is-compact .schedule-card-meta { display: none; }
   .schedule-card.is-medium strong { white-space: normal; text-overflow: clip; -webkit-line-clamp: 2; }
   .schedule-card.is-compact { padding: 3px 3px 3px 6px; }
