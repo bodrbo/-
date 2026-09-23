@@ -364,7 +364,13 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         with application_module.app.app_context():
             db = application_module.get_db()
             item = db.execute("SELECT * FROM schedule_items").fetchone()
+            participant = db.execute(
+                "SELECT guests_count FROM schedule_participants "
+                "WHERE schedule_item_id = ?",
+                (item["id"],),
+            ).fetchone()
         self.assertEqual(item["guests_count"], 5)
+        self.assertEqual(participant["guests_count"], 5)
 
         page = self.client.get("/schedule?date=2026-09-05").get_data(as_text=True)
         self.assertIn('<span class="schedule-card-meta">5 гостей</span>', page)
@@ -849,6 +855,9 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn("https://wa.me/${digits}", html)
         self.assertIn("https://t.me/+${digits}", html)
         self.assertIn("button.disabled = true", html)
+        self.assertIn("openScheduleDetail(itemId);", html)
+        self.assertNotIn("if (item && item.kind === 'event')", html)
+        self.assertIn("scheduleDetailQuickAdd').hidden = item.kind !== 'event'", html)
 
     def test_client_card_offers_preferred_contact_method_field(self):
         self.login()
@@ -892,6 +901,47 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn('name="customer_sales_partner_id"', html)
         self.assertIn('name="customer_preferred_contact_method"', html)
         self.assertIn('name="participant_preferred_contact_method[]"', html)
+
+    def test_individual_client_card_edit_keeps_booking_summary_in_sync(self):
+        self.login()
+        self.create_booking(
+            customer_name="Ирина До Редактирования",
+            customer_phone="+79998880004",
+            guests_count="2",
+        )
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item = db.execute("SELECT id FROM schedule_items").fetchone()
+            participant = db.execute(
+                "SELECT id FROM schedule_participants WHERE schedule_item_id = ?",
+                (item["id"],),
+            ).fetchone()
+
+        response = self.client.post(
+            f"/schedule/items/{item['id']}/participants/{participant['id']}",
+            json={
+                "client_name": "Ирина После Редактирования",
+                "client_phone": "+79998880005",
+                "guests_count": 4,
+                "price": 22000,
+                "sales_partner_id": "",
+                "preferred_contact_method": "whatsapp",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["ok"])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item = db.execute(
+                "SELECT customer_name, customer_phone, guests_count, "
+                "participants_count, revenue FROM schedule_items"
+            ).fetchone()
+        self.assertEqual(item["customer_name"], "Ирина После Редактирования")
+        self.assertEqual(item["customer_phone"], "+79998880005")
+        self.assertEqual(item["guests_count"], 4)
+        self.assertEqual(item["participants_count"], 4)
+        self.assertEqual(item["revenue"], 22000)
 
     def test_group_client_card_saves_preferred_contact_method(self):
         self.login()

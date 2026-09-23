@@ -879,10 +879,37 @@ def _recompute_item_totals(db, item_id, timestamp):
         "FROM schedule_participants WHERE schedule_item_id = ?",
         (item_id,),
     ).fetchone()
+    item = db.execute(
+        "SELECT kind FROM schedule_items WHERE id = ?", (item_id,)
+    ).fetchone()
+    booking_participant = None
+    if item is not None and item["kind"] == "booking":
+        booking_participant = db.execute(
+            "SELECT client_name, client_phone, guests_count "
+            "FROM schedule_participants WHERE schedule_item_id = ? "
+            "ORDER BY id LIMIT 1",
+            (item_id,),
+        ).fetchone()
+    booking_name = (
+        booking_participant["client_name"] if booking_participant else None
+    )
     db.execute(
-        "UPDATE schedule_items SET participants_count = ?, revenue = ?, updated_at = ? "
+        "UPDATE schedule_items SET participants_count = ?, revenue = ?, "
+        "customer_name = CASE WHEN ? IS NULL THEN customer_name ELSE ? END, "
+        "customer_phone = CASE WHEN ? IS NULL THEN customer_phone ELSE ? END, "
+        "guests_count = CASE WHEN ? IS NULL THEN guests_count ELSE ? END, "
+        "updated_at = ? "
         "WHERE id = ?",
-        (row["guests"], row["revenue"], timestamp, item_id),
+        (
+            row["guests"], row["revenue"],
+            booking_name,
+            booking_name,
+            booking_name,
+            booking_participant["client_phone"] if booking_participant else None,
+            booking_name,
+            booking_participant["guests_count"] if booking_participant else None,
+            timestamp, item_id,
+        ),
     )
 
 

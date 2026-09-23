@@ -476,7 +476,7 @@
         <div id="scheduleDetailClientsList" class="schedule-detail-clients-list"></div>
       </div>
 
-      <aside class="schedule-detail-quickadd">
+      <aside class="schedule-detail-quickadd" id="scheduleDetailQuickAdd">
         <h3>Быстрое добавление</h3>
         <form id="scheduleQuickAddForm" onsubmit="return submitScheduleQuickAdd(event)">
           <label class="field">
@@ -1097,19 +1097,13 @@
   function handleScheduleCardClick(event, itemId) {
     event.stopPropagation();
     if (scheduleDraggedCards.has(event.currentTarget)) return;
-    const item = scheduleItems.find(candidate => candidate.id === itemId);
-    if (item && item.kind === 'event') {
-      openScheduleDetail(itemId);
-    } else {
-      openScheduleEdit(itemId);
-    }
+    openScheduleDetail(itemId);
   }
 
   // --- Trip detail view: read-only summary + collapsible client list +
-  // quick-add, replacing the old all-fields-at-once form for viewing and
-  // managing an already-saved group excursion (see openScheduleEdit for
-  // creating one, and openScheduleEditFromDetail for changing boat/date/
-  // time/service/crew afterward). ---
+  // quick-add for group excursions. Both trip kinds use the same collapsed
+  // client card; individual excursions simply omit the add-another-client
+  // column because they always have one customer. ---
   function setScheduleDetailModalOpen(open) {
     const modal = document.getElementById('scheduleDetailModal');
     const header = document.querySelector('.schedule-topbar');
@@ -1168,19 +1162,26 @@
     const quickAddPicker = quickAddForm.querySelector('[data-client-picker]');
     quickAddPicker.querySelector('[data-client-id]').value = '';
     quickAddPicker.dataset.selectedPhone = '';
+    document.getElementById('scheduleDetailQuickAdd').hidden = item.kind !== 'event';
+    document.querySelector('.schedule-detail-body').classList.toggle(
+      'is-individual', item.kind === 'booking'
+    );
     renderScheduleDetailClients(item);
     setScheduleDetailModalOpen(true);
   }
   function renderScheduleDetailClients(item) {
     const participants = item.participants || [];
-    document.getElementById('scheduleDetailClientsCount').textContent =
-      `Клиенты ${item.participants_count || 0}/${item.capacity || 0}`;
+    document.getElementById('scheduleDetailClientsCount').textContent = item.kind === 'booking'
+      ? 'Клиент'
+      : `Клиенты ${item.participants_count || 0}/${item.capacity || 0}`;
     const list = document.getElementById('scheduleDetailClientsList');
     list.replaceChildren();
     if (!participants.length) {
       const empty = document.createElement('div');
       empty.className = 'hint schedule-detail-clients-empty';
-      empty.textContent = 'В рейсе пока никого нет — добавьте первого клиента справа.';
+      empty.textContent = item.kind === 'booking'
+        ? 'Клиент пока не указан.'
+        : 'В рейсе пока никого нет — добавьте первого клиента справа.';
       list.appendChild(empty);
       return;
     }
@@ -1357,7 +1358,8 @@
         })
         .catch(() => alert('Не удалось убрать клиента. Попробуйте ещё раз.'));
     });
-    actions.append(editBtn, removeBtn);
+    actions.append(editBtn);
+    if (item.kind === 'event') actions.append(removeBtn);
     view.appendChild(actions);
     return view;
   }
@@ -1709,8 +1711,9 @@
   }
   function openScheduleEditFromDetail() {
     const itemId = scheduleDetailItemId;
+    const item = scheduleItems.find(candidate => candidate.id === itemId);
     closeScheduleDetailModal();
-    openScheduleEdit(itemId, true);
+    openScheduleEdit(itemId, item && item.kind === 'event');
   }
   function scheduleItemMinutes(item, field) {
     const value = String(item[field] || '');

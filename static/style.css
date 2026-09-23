@@ -5551,9 +5551,9 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-addon-add-form input { width: 44px; padding: 4px 6px; text-align: center; }
 .schedule-addon-add-form button { padding: 4px 10px; }
 
-/* --- Trip detail view: summary + client list + quick-add, the default
-   view for an already-saved group excursion (see .schedule-form for the
-   create/trip-info-only-edit form instead). --- */
+/* --- Trip detail view: summary + collapsed client cards. Group excursions
+   also get the quick-add column; individual excursions use the same client
+   presentation without the extra column. --- */
 .schedule-detail-card { width: min(1040px, 100%); }
 .schedule-detail-body {
   flex: 1 1 auto;
@@ -5565,6 +5565,9 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   gap: 18px;
   padding: 20px 22px 22px;
   overscroll-behavior: contain;
+}
+.schedule-detail-body.is-individual {
+  grid-template-columns: 200px minmax(0, 1fr);
 }
 .schedule-detail-summary,
 .schedule-detail-quickadd {
@@ -5766,6 +5769,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-detail-client-edit .field { margin: 0; flex: 0 0 auto; }
 .schedule-detail-client-edit-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .schedule-detail-quickadd h3 { margin: 0; font-size: 13px; }
+.schedule-detail-quickadd[hidden] { display: none; }
 .schedule-detail-quickadd form { display: flex; flex-direction: column; gap: 10px; }
 .schedule-detail-quickadd .field { margin: 0; flex: 0 0 auto; }
 /* ".schedule-detail-quickadd .btn-add" so this out-specifies the generic
@@ -5786,7 +5790,8 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 }
 .schedule-detail-quickadd .btn-add:hover { background: var(--paper-alt); border-color: var(--brass); }
 @media (max-width: 860px) {
-  .schedule-detail-body { grid-template-columns: 1fr; }
+  .schedule-detail-body,
+  .schedule-detail-body.is-individual { grid-template-columns: 1fr; }
   .schedule-detail-summary, .schedule-detail-quickadd { align-self: stretch; }
   .schedule-detail-client-summary { grid-template-columns: minmax(0, 1fr) 44px 84px 18px; }
 }

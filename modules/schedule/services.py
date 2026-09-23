@@ -473,6 +473,7 @@ def validate_item_form(db, form, boats, services, exclude_id=None):
             db, form, errors
         )
         if participant is not None:
+            participant["guests_count"] = booking_guests_count or 1
             raw_customer_price = form.get("customer_price")
             participant["price"] = (
                 legacy_revenue
