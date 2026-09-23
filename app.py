@@ -363,13 +363,16 @@ def _sync_tuning_boat_profiles(db):
     seen_keys = set()
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     for row in db.execute(
-        "SELECT equipment_type, boat_model, motor_model FROM tuning_orders "
+        "SELECT equipment_type, boat_model, motor_model, "
+        "EXISTS (SELECT 1 FROM clients c WHERE c.id = tuning_orders.client_id "
+        "AND c.is_own_company = 1) AS own FROM tuning_orders "
         "WHERE (equipment_type = 'boat' AND TRIM(boat_model) != '') "
         "OR TRIM(motor_model) != '' "
         "ORDER BY id DESC"
     ).fetchall():
         candidates = []
-        if row[0] == "boat" and (row[1] or "").strip():
+        # The company's own boats live in Флот, not in the boat catalog.
+        if row[0] == "boat" and (row[1] or "").strip() and not row[3]:
             candidates.append(("boat", row[1]))
         if (row[2] or "").strip():
             candidates.append(("motor", row[2]))
@@ -630,9 +633,15 @@ def _tuning_boat_profile_id(db, model_name):
 
 def _tuning_boat_model_choices(db):
     """Canonical display names available to the order-form combobox."""
-    _ensure_fleet_boat_profiles(db)
-    db.commit()
-    return _tuning_equipment_model_choices(db, "boat")
+    choices = _tuning_equipment_model_choices(db, "boat")
+    seen = {name.casefold() for name in choices}
+    # Own boats come from Флот rather than from the catalog.
+    for vessel in db.execute(
+        "SELECT name FROM fleet_vessels WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE"
+    ).fetchall():
+        if vessel["name"].casefold() not in seen:
+            choices.append(vessel["name"])
+    return choices
 
 
 def _tuning_motor_model_choices(db):
@@ -3543,7 +3552,7 @@ def init_db(db_path=None, include_bootstrap_data=True):
     # received their newer client_id columns above.
     init_client_segments_schema(conn)
     _ensure_own_company_client(conn)
-    _ensure_fleet_boat_profiles(conn)
+    _remove_fleet_boat_catalog_profiles(conn)
     init_ai_assistant_schema(conn)
     init_investor_finance_schema(conn)
     weather_schema.init_schema(conn)
@@ -5838,33 +5847,57 @@ def _fleet_vessel_by_name(db, name):
     ).fetchone()
 
 
-def _ensure_fleet_boat_profiles(db):
-    """Every Флот vessel is a boat model in the tuning catalog, so orders
-    for the company's own boats can pick it like any client's boat. Length
-    and width come from Флот when the catalog profile has none yet."""
+def _remove_fleet_boat_catalog_profiles(db):
+    """Own boats are managed in Флот and get no boat-catalog card. Drops the
+    cards an earlier version auto-created for them — only untouched ones
+    (no notes, photo, 3D model) that no client's order refers to."""
     columns = {row[1] for row in db.execute("PRAGMA table_info(tuning_boat_profiles)")}
-    has_dims = {"length_m", "width_m"}.issubset(columns)
-    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    for vessel in db.execute(
-        "SELECT name, length_m, width_m FROM fleet_vessels WHERE deleted_at IS NULL"
-    ).fetchall():
-        vessel_name, vessel_length, vessel_width = vessel[0], vessel[1], vessel[2]
-        name = " ".join(vessel_name.split())
+    extra = " AND COALESCE(model_3d_filename, '') = ''" if "model_3d_filename" in columns else ""
+    for vessel in db.execute("SELECT name FROM fleet_vessels").fetchall():
+        name = " ".join(vessel[0].split())
         key = _tuning_equipment_profile_key("boat", name)
         if not key:
             continue
-        db.execute(
-            "INSERT OR IGNORE INTO tuning_boat_profiles "
-            "(model_key, model_name, equipment_type, specifications, created_at, updated_at) "
-            "VALUES (?, ?, 'boat', '', ?, ?)",
-            (key, name, now, now),
-        )
-        if has_dims and (vessel_length or vessel_width):
-            db.execute(
-                "UPDATE tuning_boat_profiles SET length_m = COALESCE(length_m, ?), "
-                "width_m = COALESCE(width_m, ?) WHERE model_key = ?",
-                (vessel_length, vessel_width, key),
-            )
+        profile = db.execute(
+            "SELECT id FROM tuning_boat_profiles WHERE model_key = ? AND equipment_type = 'boat' "
+            "AND TRIM(specifications) = '' AND COALESCE(photo_filename, '') = ''" + extra,
+            (key,),
+        ).fetchone()
+        if profile is None:
+            continue
+        in_use = db.execute(
+            "SELECT 1 FROM tuning_orders o WHERE o.equipment_type = 'boat' "
+            "AND LOWER(TRIM(o.boat_model)) = LOWER(?) AND NOT EXISTS "
+            "(SELECT 1 FROM clients c WHERE c.id = o.client_id AND c.is_own_company = 1) LIMIT 1",
+            (name,),
+        ).fetchone()
+        if in_use is None:
+            db.execute("DELETE FROM tuning_boat_profiles WHERE id = ?", (profile[0],))
+
+
+def _fleet_boat_index(db, boat_model):
+    """Position of the vessel in Флот (the /fleet/<index> page), or None."""
+    wanted = (boat_model or "").strip().casefold()
+    if not wanted:
+        return None
+    for index, boat in enumerate(fleet_boats_for_db(db)):
+        if boat["name"].strip().casefold() == wanted:
+            return index
+    return None
+
+
+def _boat_dimensions(db, boat_model):
+    """Length/width of a boat: Флот for the company's own vessels, the boat
+    catalog profile for everything else. Dict-like with length_m/width_m,
+    or None when nothing is known."""
+    vessel = _fleet_vessel_by_name(db, boat_model)
+    if vessel is not None and (vessel["length_m"] or vessel["width_m"]):
+        return {"length_m": vessel["length_m"], "width_m": vessel["width_m"]}
+    return db.execute(
+        "SELECT length_m, width_m FROM tuning_boat_profiles "
+        "WHERE equipment_type = 'boat' AND model_key = ?",
+        (_tuning_equipment_profile_key("boat", boat_model),),
+    ).fetchone()
 
 
 def _own_order_boat_error(db, client_id, equipment_type, boat_model):
@@ -7255,6 +7288,11 @@ def tuning_index():
         date_from = ""
         date_to = ""
 
+    own_company_id = _own_company_client_id(db)
+    fleet_index_by_name = {
+        boat["name"].strip().casefold(): index
+        for index, boat in enumerate(fleet_boats_for_db(db))
+    }
     conditions = ["source != ?"]
     params = [SUBCONTRACT_REQUEST_SOURCE]
     if date_from:
@@ -7312,10 +7350,15 @@ def tuning_index():
             if not all(word in searchable_text for word in search_words):
                 continue
         boat_profile_id = None
+        fleet_boat_index = None
         if order["equipment_type"] == "boat" and order["boat_model"]:
-            boat_profile_id = profile_ids_by_model.get(
-                _tuning_equipment_profile_key("boat", order["boat_model"])
-            )
+            if order["client_id"] is not None and order["client_id"] == own_company_id:
+                # Own boats link to their Флот page, not the boat catalog.
+                fleet_boat_index = fleet_index_by_name.get(order["boat_model"].strip().casefold())
+            if fleet_boat_index is None:
+                boat_profile_id = profile_ids_by_model.get(
+                    _tuning_equipment_profile_key("boat", order["boat_model"])
+                )
         for motor in order["motors"]:
             motor["profile_id"] = profile_ids_by_model.get(
                 _tuning_equipment_profile_key("motor", motor["motor_model"])
@@ -7329,6 +7372,7 @@ def tuning_index():
             )
         )
         order["boat_profile_id"] = boat_profile_id
+        order["fleet_boat_index"] = fleet_boat_index
         order["motor_profile_id"] = motor_profile_id
         order.update(_tuning_order_deadline_view(
             order["deadline_date"], order["completed_at"], order["status"]
@@ -8554,11 +8598,7 @@ def _shop_map_boats(db, on_date=None):
             and (boat["present_end"] is None or on_date <= boat["present_end"])
         ):
             continue
-        profile = db.execute(
-            "SELECT length_m, width_m FROM tuning_boat_profiles "
-            "WHERE equipment_type = 'boat' AND model_key = ?",
-            (_tuning_equipment_profile_key("boat", boat["boat_model"]),),
-        ).fetchone()
+        profile = _boat_dimensions(db, boat["boat_model"])
         boat["length_m"] = profile["length_m"] if profile else None
         boat["width_m"] = profile["width_m"] if profile else None
         boats.append(boat)
@@ -8669,11 +8709,7 @@ def _shop_map_boat_with_profile(db, boat_id):
     ).fetchone()
     if boat_row is None:
         return None, None, None
-    profile = db.execute(
-        "SELECT length_m, width_m FROM tuning_boat_profiles "
-        "WHERE equipment_type = 'boat' AND model_key = ?",
-        (_tuning_equipment_profile_key("boat", boat_row["boat_model"]),),
-    ).fetchone()
+    profile = _boat_dimensions(db, boat_row["boat_model"])
     return boat_row, (profile["length_m"] if profile else None), (profile["width_m"] if profile else None)
 
 
@@ -8698,11 +8734,7 @@ def _auto_place_boat_on_shop_map(db, order):
     if db.execute("SELECT id FROM shop_map_boats WHERE order_id = ?", (order_id,)).fetchone():
         return
     x_m = y_m = None
-    profile = db.execute(
-        "SELECT length_m, width_m FROM tuning_boat_profiles "
-        "WHERE equipment_type = 'boat' AND model_key = ?",
-        (_tuning_equipment_profile_key("boat", order["boat_model"]),),
-    ).fetchone()
+    profile = _boat_dimensions(db, order["boat_model"])
     room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
     if profile and profile["length_m"] and profile["width_m"] and room is not None:
         length_m, width_m = profile["length_m"], profile["width_m"]
@@ -9080,11 +9112,7 @@ def update_shop_map_boat_position(boat_id):
     ).fetchone()
     if boat_row is None:
         return _shop_map_redirect()
-    profile = db.execute(
-        "SELECT length_m, width_m FROM tuning_boat_profiles "
-        "WHERE equipment_type = 'boat' AND model_key = ?",
-        (_tuning_equipment_profile_key("boat", boat_row["boat_model"]),),
-    ).fetchone()
+    profile = _boat_dimensions(db, boat_row["boat_model"])
     boat_length_m = profile["length_m"] if profile else None
     boat_width_m = profile["width_m"] if profile else None
     room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
@@ -9843,9 +9871,16 @@ def edit_tuning_order(order_id):
     tuning_sub_page = "subcontracts" if is_subcontract else "orders"
     _sync_tuning_boat_profiles(db)
     db.commit()
+    fleet_boat_index = (
+        _fleet_boat_index(db, order["boat_model"])
+        if order["equipment_type"] == "boat" and order["client_id"] is not None
+        and order["client_id"] == _own_company_client_id(db)
+        else None
+    )
     boat_profile_id = (
         _tuning_equipment_profile_id(db, "boat", order["boat_model"])
         if order["equipment_type"] == "boat" and order["boat_model"]
+        and fleet_boat_index is None
         else None
     )
     motor_profile_id = (
@@ -9925,6 +9960,7 @@ def edit_tuning_order(order_id):
             goods_notice=session.pop("tuning_goods_notice", None),
             notes=notes, reminder_recipients=reminder_recipients,
             boat_profile_id=boat_profile_id,
+            fleet_boat_index=fleet_boat_index,
             motor_profile_id=motor_profile_id,
             boat_model_choices=_tuning_boat_model_choices(db),
             motor_model_choices=_tuning_motor_model_choices(db),
@@ -9971,6 +10007,7 @@ def edit_tuning_order(order_id):
             yookassa_error=None,
             hull_sheets=hull_sheets, available_hull_sheets=available_hull_sheets,
             boat_profile_id=boat_profile_id,
+            fleet_boat_index=fleet_boat_index,
             motor_profile_id=motor_profile_id,
             boat_model_choices=_tuning_boat_model_choices(db),
             motor_model_choices=_tuning_motor_model_choices(db),

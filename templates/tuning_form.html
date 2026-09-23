@@ -221,7 +221,9 @@
     <div class="order-summary-item">
       <span class="k">Техника</span>
       <span class="v">
-        {% if edit_order.equipment_type == 'boat' and boat_profile_id %}
+        {% if edit_order.equipment_type == 'boat' and fleet_boat_index is defined and fleet_boat_index is not none %}
+        <a href="{{ url_for('fleet.boat_detail', boat_index=fleet_boat_index) }}">{{ edit_order.boat_model }}</a>
+        {% elif edit_order.equipment_type == 'boat' and boat_profile_id %}
         <a href="{{ url_for('tuning_boat_profile', profile_id=boat_profile_id) }}">{{ edit_order.boat_model }}</a>
         {% elif edit_order.equipment_type == 'motor' and motor_profile_id %}
         <a href="{{ url_for('tuning_motor_profile', profile_id=motor_profile_id) }}">{{ edit_order.motor_model }}</a>
@@ -871,7 +873,10 @@
         <div class="field" id="boatModelField" {{ 'hidden' if selected_equipment_type == 'motor' }}>
           <div class="field-label-with-link">
             <label for="boat_model_search">Модель лодки</label>
-            {% if boat_profile_id and selected_equipment_type == 'boat' %}
+            {% if fleet_boat_index is defined and fleet_boat_index is not none and selected_equipment_type == 'boat' %}
+            <a href="{{ url_for('fleet.boat_detail', boat_index=fleet_boat_index) }}"
+               class="tuning-boat-profile-link">Открыть в разделе «Флот» ↗</a>
+            {% elif boat_profile_id and selected_equipment_type == 'boat' %}
             <a href="{{ url_for('tuning_boat_profile', profile_id=boat_profile_id) }}"
                class="tuning-boat-profile-link">Открыть профиль ↗</a>
             {% endif %}

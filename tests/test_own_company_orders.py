@@ -70,13 +70,18 @@ class OwnCompanyTuningOrderTests(unittest.TestCase):
     def set_status(self, order_id, status):
         self.client.post(f"/tuning/{order_id}/status", data={"status": status})
 
-    def test_company_client_and_fleet_profiles_exist(self):
+    def test_company_client_and_fleet_boat_choices_exist(self):
         self.assertIsNotNone(self.own_id)
         with application_module.app.app_context():
             db = application_module.get_db()
             row = db.execute("SELECT client_name FROM clients WHERE id = ?", (self.own_id,)).fetchone()
             self.assertEqual(row["client_name"], application_module.OWN_COMPANY_NAME)
             self.assertIn(self.vessel, application_module._tuning_boat_model_choices(db))
+            # own boats are offered from Флот but get no boat-catalog card
+            self.assertIsNone(db.execute(
+                "SELECT 1 FROM tuning_boat_profiles WHERE model_key = ?",
+                (application_module._tuning_equipment_profile_key("boat", self.vessel),),
+            ).fetchone())
             ids = [c["id"] for c in application_module._tuning_client_choices(db)]
             self.assertIn(self.own_id, ids)
             # idempotent
@@ -125,6 +130,49 @@ class OwnCompanyTuningOrderTests(unittest.TestCase):
         self.set_status(order_id, "in_progress")
         page = self.client.get("/analytics/trips?month=all").get_data(as_text=True)
         self.assertIn(f"Доработка катера — заказ №{order_id}", page)
+
+    def test_order_links_to_fleet_page_and_creates_no_catalog_profile(self):
+        order_id = self.make_order(self.own_id, self.vessel)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            application_module._sync_tuning_boat_profiles(db)
+            db.commit()
+            self.assertIsNone(db.execute(
+                "SELECT 1 FROM tuning_boat_profiles WHERE model_key = ?",
+                (application_module._tuning_equipment_profile_key("boat", self.vessel),),
+            ).fetchone())
+            index = application_module._fleet_boat_index(db, self.vessel)
+        self.assertIsNotNone(index)
+        fleet_url = f"/fleet/{index}"
+        page = self.client.get(f"/tuning/edit/{order_id}").get_data(as_text=True)
+        self.assertIn(f'href="{fleet_url}"', page)
+        self.assertNotIn("/tuning/boats/", page.split("Техника", 1)[1].split("</span>", 2)[1])
+        listing = self.client.get("/tuning").get_data(as_text=True)
+        self.assertIn(f'href="{fleet_url}"', listing)
+
+    def test_old_auto_created_fleet_catalog_cards_are_removed_unless_used(self):
+        key = application_module._tuning_equipment_profile_key("boat", self.vessel)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            insert = (
+                "INSERT INTO tuning_boat_profiles (model_key, model_name, equipment_type, "
+                "specifications, created_at, updated_at) VALUES (?, ?, 'boat', '', 'x', 'x')"
+            )
+            db.execute(insert, (key, self.vessel))
+            application_module._remove_fleet_boat_catalog_profiles(db)
+            self.assertIsNone(db.execute(
+                "SELECT 1 FROM tuning_boat_profiles WHERE model_key = ?", (key,)).fetchone())
+            db.commit()
+            # a regular client's order with the same model keeps its card
+        self.make_order(self.other_client_id, self.vessel)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(insert, (key, self.vessel))
+            application_module._remove_fleet_boat_catalog_profiles(db)
+            self.assertIsNotNone(db.execute(
+                "SELECT 1 FROM tuning_boat_profiles WHERE model_key = ?", (key,)).fetchone())
+            db.execute("DELETE FROM tuning_boat_profiles WHERE model_key = ?", (key,))
+            db.commit()
 
     def test_own_company_order_requires_fleet_boat(self):
         form = MultiDict([

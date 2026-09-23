@@ -230,7 +230,10 @@
             </td>
             <td>
               <span class="equipment-kind">{{ 'Мотор' if o.equipment_type == 'motor' else 'Лодка' }}</span>
-              {% if o.equipment_type == 'boat' and o.boat_profile_id %}
+              {% if o.equipment_type == 'boat' and o.fleet_boat_index is not none %}
+              <a href="{{ url_for('fleet.boat_detail', boat_index=o.fleet_boat_index) }}"
+                 class="tuning-boat-profile-link">{{ o.boat_model }}</a>
+              {% elif o.equipment_type == 'boat' and o.boat_profile_id %}
               <a href="{{ url_for('tuning_boat_profile', profile_id=o.boat_profile_id) }}"
                  class="tuning-boat-profile-link">{{ o.boat_model }}</a>
               {% elif o.equipment_type == 'motor' and o.motor_profile_id %}
