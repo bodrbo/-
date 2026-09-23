@@ -630,6 +630,8 @@ def _tuning_boat_profile_id(db, model_name):
 
 def _tuning_boat_model_choices(db):
     """Canonical display names available to the order-form combobox."""
+    _ensure_fleet_boat_profiles(db)
+    db.commit()
     return _tuning_equipment_model_choices(db, "boat")
 
 
@@ -2161,6 +2163,10 @@ def init_db(db_path=None, include_bootstrap_data=True):
                     boat["commission_aggregator"],
                 ),
             )
+    if "tuning_order_id" not in trip_cols:
+        # Expense trip generated from an own-boat tuning order
+        # (see _sync_own_boat_order_expense).
+        conn.execute("ALTER TABLE trips ADD COLUMN tuning_order_id INTEGER")
     trip_source_is_new = "source" not in trip_cols
     if "needs_review" not in trip_cols:
         conn.execute(
@@ -2548,6 +2554,13 @@ def init_db(db_path=None, include_bootstrap_data=True):
         conn.execute(
             "ALTER TABLE clients "
             "ADD COLUMN acquisition_channel TEXT NOT NULL DEFAULT ''"
+        )
+    if "is_own_company" not in client_cols:
+        # The company itself as a tuning client (see OWN_COMPANY_NAME): its
+        # "equipment" is the Флот boats, and its orders are booked as
+        # expenses of the boat they are for.
+        conn.execute(
+            "ALTER TABLE clients ADD COLUMN is_own_company INTEGER NOT NULL DEFAULT 0"
         )
     if "preferred_contact_method" not in client_cols:
         conn.execute(
@@ -3529,6 +3542,8 @@ def init_db(db_path=None, include_bootstrap_data=True):
     # Client relationships are classified only after all legacy tables have
     # received their newer client_id columns above.
     init_client_segments_schema(conn)
+    _ensure_own_company_client(conn)
+    _ensure_fleet_boat_profiles(conn)
     init_ai_assistant_schema(conn)
     init_investor_finance_schema(conn)
     weather_schema.init_schema(conn)
@@ -5784,6 +5799,132 @@ def _get_or_create_client(db, phone, client_name, boat_model, client_id=None):
     return cur.lastrowid
 
 
+OWN_COMPANY_NAME = 'ООО "БОДРЫЙ БОЦМАН"'
+
+
+def _own_company_client_id(db):
+    row = db.execute("SELECT id FROM clients WHERE is_own_company = 1 ORDER BY id LIMIT 1").fetchone()
+    return row[0] if row else None
+
+
+def _ensure_own_company_client(db):
+    """The company itself as a tuning client, so its own boats can be
+    refitted through ordinary tuning orders. Idempotent; an already
+    existing client with the same name is adopted instead of duplicated."""
+    existing_id = _own_company_client_id(db)
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    if existing_id is None:
+        row = db.execute(
+            "SELECT id FROM clients WHERE client_name = ? ORDER BY id LIMIT 1", (OWN_COMPANY_NAME,)
+        ).fetchone()
+        if row:
+            existing_id = row[0]
+            db.execute("UPDATE clients SET is_own_company = 1 WHERE id = ?", (existing_id,))
+        else:
+            cur = db.execute(
+                "INSERT INTO clients (client_name, boat_model, phone, token, created_at, is_own_company) "
+                "VALUES (?, '', '', ?, ?, 1)",
+                (OWN_COMPANY_NAME, secrets.token_urlsafe(16), now),
+            )
+            existing_id = cur.lastrowid
+    ensure_client_segment(db, existing_id, TUNING_SEGMENT, now)
+    return existing_id
+
+
+def _fleet_vessel_by_name(db, name):
+    return db.execute(
+        "SELECT * FROM fleet_vessels WHERE deleted_at IS NULL AND name = ? COLLATE NOCASE",
+        ((name or "").strip(),),
+    ).fetchone()
+
+
+def _ensure_fleet_boat_profiles(db):
+    """Every Флот vessel is a boat model in the tuning catalog, so orders
+    for the company's own boats can pick it like any client's boat. Length
+    and width come from Флот when the catalog profile has none yet."""
+    columns = {row[1] for row in db.execute("PRAGMA table_info(tuning_boat_profiles)")}
+    has_dims = {"length_m", "width_m"}.issubset(columns)
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    for vessel in db.execute(
+        "SELECT name, length_m, width_m FROM fleet_vessels WHERE deleted_at IS NULL"
+    ).fetchall():
+        vessel_name, vessel_length, vessel_width = vessel[0], vessel[1], vessel[2]
+        name = " ".join(vessel_name.split())
+        key = _tuning_equipment_profile_key("boat", name)
+        if not key:
+            continue
+        db.execute(
+            "INSERT OR IGNORE INTO tuning_boat_profiles "
+            "(model_key, model_name, equipment_type, specifications, created_at, updated_at) "
+            "VALUES (?, ?, 'boat', '', ?, ?)",
+            (key, name, now, now),
+        )
+        if has_dims and (vessel_length or vessel_width):
+            db.execute(
+                "UPDATE tuning_boat_profiles SET length_m = COALESCE(length_m, ?), "
+                "width_m = COALESCE(width_m, ?) WHERE model_key = ?",
+                (vessel_length, vessel_width, key),
+            )
+
+
+def _own_order_boat_error(db, client_id, equipment_type, boat_model):
+    """Orders of the company itself are only for its own Флот boats — the
+    boat has to be a known vessel for the expense to reach its analytics."""
+    if client_id is None or client_id != _own_company_client_id(db):
+        return None
+    if equipment_type != "boat" or _fleet_vessel_by_name(db, boat_model) is None:
+        return (
+            f"Для клиента {OWN_COMPANY_NAME} выберите катер из раздела «Флот»."
+        )
+    return None
+
+
+def _sync_own_boat_order_expense(db, order_id):
+    """Cost of an own-boat order (works + goods, the order total) is booked
+    as an expense trip of that boat, so it reduces the boat's profitability
+    in Аналитика → Рейсы (and, like any boat expense, is shared with the
+    investor). Kept in step with the order: created once work has started
+    (see TUNING_ANALYTICS_ORDER_STATUSES), updated whenever the total or
+    date changes, removed when the order is cancelled/reopened/deleted."""
+    order = db.execute(
+        "SELECT o.*, c.is_own_company AS own FROM tuning_orders o "
+        "LEFT JOIN clients c ON c.id = o.client_id WHERE o.id = ?",
+        (order_id,),
+    ).fetchone()
+    existing = db.execute(
+        "SELECT id FROM trips WHERE tuning_order_id = ? AND is_expense = 1", (order_id,)
+    ).fetchone()
+    vessel = None
+    if order is not None and order["own"] and order["equipment_type"] == "boat":
+        vessel = _fleet_vessel_by_name(db, order["boat_model"])
+    amount = round(order["total"] or 0, 2) if order is not None else 0
+    if (
+        vessel is None or amount <= 0
+        or order["status"] not in TUNING_ANALYTICS_ORDER_STATUSES
+    ):
+        if existing:
+            db.execute("DELETE FROM trips WHERE id = ?", (existing["id"],))
+        return
+    description = f"Доработка катера — заказ №{order_id}"
+    if existing:
+        db.execute(
+            "UPDATE trips SET boat = ?, trip_date = ?, work_type = ?, extra_total = ?, "
+            "remainder = ?, investor_payout = ?, my_share = ? WHERE id = ?",
+            (vessel["name"], order["order_date"], description, amount,
+             -amount, -amount / 2, -amount / 2, existing["id"]),
+        )
+        return
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "INSERT INTO trips (boat, trip_date, trip_time, work_type, entry_id, revenue, sale_channel, "
+        "commission_pct, commission_amount, labor_cost, fuel_cost, mooring_cost, extra_total, "
+        "remainder, investor_payout, my_share, created_at, is_expense, source, tuning_order_id) "
+        "VALUES (?, ?, '00:00', ?, NULL, 0, 'direct', 0, 0, 0, 0, 0, ?, ?, ?, ?, ?, 1, 'tuning_order', ?)",
+        (vessel["name"], order["order_date"], description, amount,
+         -amount, -amount / 2, -amount / 2, now, order_id),
+    )
+
+
 def _order_payment_totals(db, order_id, total):
     payment_rows = db.execute(
         "SELECT tuning_payments.*, "
@@ -6148,6 +6289,7 @@ def _recompute_order_totals(db, order_id):
         "UPDATE tuning_orders SET subtotal = ?, total = ?, updated_at = ? WHERE id = ?",
         (subtotal, total, now, order_id),
     )
+    _sync_own_boat_order_expense(db, order_id)
     db.commit()
 
 
@@ -9257,6 +9399,12 @@ def add_tuning_order():
 
     db = get_db()
     errors, data = _process_tuning_form(request.form)
+    if not errors:
+        own_error = _own_order_boat_error(
+            db, data["client_id"], data["equipment_type"], data["boat_model"]
+        )
+        if own_error:
+            errors = [own_error]
     if errors:
         return render_template(
             "tuning_form.html", edit_order=None, errors=errors, form_values=request.form,
@@ -9306,6 +9454,8 @@ def add_tuning_order():
     db.commit()
     if data["acceptance_date"]:
         _auto_place_boat_on_shop_map(db, {"id": order_id})
+    _sync_own_boat_order_expense(db, order_id)
+    db.commit()
     return redirect(url_for("tuning_index"))
 
 
@@ -9790,6 +9940,12 @@ def edit_tuning_order(order_id):
         default_order_date=order["order_date"],
         direct_price_mode=is_subcontract,
     )
+    if not errors:
+        own_error = _own_order_boat_error(
+            db, data["client_id"], data["equipment_type"], data["boat_model"]
+        )
+        if own_error:
+            errors = [own_error]
     if errors:
         payments, paid_amount, remaining = _order_payment_totals(db, order_id, order["total"])
         yookassa_payments = db.execute(
@@ -9898,6 +10054,7 @@ def edit_tuning_order(order_id):
 
 def _delete_tuning_order_records(db, order_ids):
     parameters = [(order_id,) for order_id in order_ids]
+    db.executemany("DELETE FROM trips WHERE tuning_order_id = ?", parameters)
     for table_name in (
         "tuning_order_items",
         "tuning_payments",
@@ -10016,8 +10173,10 @@ def bulk_edit_tuning_orders():
             "UPDATE tuning_orders SET status = ? WHERE id = ?",
             [(new_status, order_id) for order_id in order_ids],
         )
+        for order_id in order_ids:
+            _sync_own_boat_order_expense(db, order_id)
+        db.commit()
         if new_status == "in_progress":
-            db.commit()
             for order_id in order_ids:
                 _auto_place_boat_on_shop_map(db, {"id": order_id})
         status_label = next(
@@ -10104,6 +10263,7 @@ def set_tuning_order_status(order_id):
             # Moving between the two done statuses (or staying within the
             # same not-done status) leaves completed_at untouched.
             db.execute("UPDATE tuning_orders SET status = ? WHERE id = ?", (status, order_id))
+        _sync_own_boat_order_expense(db, order_id)
         db.commit()
         if status == "in_progress":
             _auto_place_boat_on_shop_map(db, order)
