@@ -958,6 +958,12 @@
           <span class="field-context">Необязательно. Видно клиенту</span>
         </div>
         <div class="field field-narrow">
+          <label for="acceptance_date">Дата приемки лодки</label>
+          <input type="date" id="acceptance_date" name="acceptance_date"
+                 value="{{ form_values.acceptance_date if form_values and form_values.acceptance_date else '' }}">
+          <span class="field-context">Планируемая. При переводе в «В работе» заменит дату заказа в таблице</span>
+        </div>
+        <div class="field field-narrow">
           <label for="sale_channel">Канал продажи</label>
           <select id="sale_channel" name="sale_channel">
             {% for c in sale_channels %}

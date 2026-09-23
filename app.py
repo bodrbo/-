@@ -3173,6 +3173,11 @@ def init_db(db_path=None, include_bootstrap_data=True):
         # Admin-set target completion date, shown under order_date to both
         # admin and client. NULL means no deadline was set.
         conn.execute("ALTER TABLE tuning_orders ADD COLUMN deadline_date TEXT")
+    if "acceptance_date" not in tuning_cols:
+        # Planned date the boat is brought to the shop. When the order
+        # enters "В работе" it replaces order_date (the date shown in the
+        # orders table) — see _apply_acceptance_date_on_start.
+        conn.execute("ALTER TABLE tuning_orders ADD COLUMN acceptance_date TEXT")
     if "completed_at" not in tuning_cols:
         # Stamped once when status first reaches "done"/"handed_over" (see
         # TUNING_DONE_STATUSES) and left alone while it stays within that
@@ -5469,6 +5474,13 @@ def _process_tuning_form(
             deadline_date = dt.date.fromisoformat(deadline_date_raw).isoformat()
         except ValueError:
             errors.append("Укажите корректный срок исполнения.")
+    acceptance_date_raw = form.get("acceptance_date", "").strip()
+    acceptance_date = None
+    if acceptance_date_raw:
+        try:
+            acceptance_date = dt.date.fromisoformat(acceptance_date_raw).isoformat()
+        except ValueError:
+            errors.append("Укажите корректную дату приемки лодки.")
     sale_channel = form.get("sale_channel", "direct").strip()
     if sale_channel not in [c["value"] for c in SALE_CHANNELS]:
         sale_channel = "direct"
@@ -5609,6 +5621,7 @@ def _process_tuning_form(
         motor_model=motor_model, motor_serial_number=motor_serial_number,
         boat_motors=boat_motors, phone=phone,
         order_date=order_date, deadline_date=deadline_date,
+        acceptance_date=acceptance_date,
         sale_channel=sale_channel, discount_type=discount_type, discount_value=discount_value,
         # discount_pct is kept only for older code/rows that still read it —
         # 0 when the discount is a fixed amount, since it isn't a percent.
@@ -9137,14 +9150,14 @@ def add_tuning_order():
         "INSERT INTO tuning_orders (client_id, client_name, equipment_type, boat_model, "
         "boat_registration_number, motor_model, motor_serial_number, sale_channel, phone, "
         "discount_pct, discount_type, discount_value, subtotal, total, status, order_date, "
-        "deadline_date, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "deadline_date, acceptance_date, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (client_id, data["client_name"], data["equipment_type"], data["boat_model"],
          data["boat_registration_number"], data["motor_model"],
          data["motor_serial_number"], data["sale_channel"], data["phone"],
          data["discount_pct"], data["discount_type"], data["discount_value"],
          data["subtotal"], data["total"], DEFAULT_ORDER_STATUS,
-         data["order_date"], data["deadline_date"], now, now),
+         data["order_date"], data["deadline_date"], data["acceptance_date"], now, now),
     )
     order_id = cur.lastrowid
     _replace_tuning_order_motors(
@@ -9598,6 +9611,7 @@ def edit_tuning_order(order_id):
             "motor_serial_number": order["motor_serial_number"],
             "sale_channel": order["sale_channel"], "phone": order["phone"],
             "order_date": order["order_date"], "deadline_date": order["deadline_date"] or "",
+            "acceptance_date": order["acceptance_date"] or "",
             "discount_type": order["discount_type"], "discount_value": order["discount_value"],
         }
         deadline_view = _tuning_order_deadline_view(
@@ -9690,12 +9704,13 @@ def edit_tuning_order(order_id):
         "UPDATE tuning_orders SET client_id=?, client_name=?, equipment_type=?, boat_model=?, "
         "boat_registration_number=?, motor_model=?, motor_serial_number=?, sale_channel=?, phone=?, "
         "discount_pct=?, discount_type=?, discount_value=?, subtotal=?, total=?, order_date=?, "
-        "deadline_date=?, updated_at=? WHERE id=?",
+        "deadline_date=?, acceptance_date=?, updated_at=? WHERE id=?",
         (client_id, data["client_name"], data["equipment_type"], data["boat_model"],
          data["boat_registration_number"], data["motor_model"],
          data["motor_serial_number"], data["sale_channel"], data["phone"],
          data["discount_pct"], data["discount_type"], data["discount_value"],
-         data["subtotal"], data["total"], data["order_date"], data["deadline_date"], now, order_id),
+         data["subtotal"], data["total"], data["order_date"], data["deadline_date"],
+         data["acceptance_date"], now, order_id),
     )
     _replace_tuning_order_motors(
         db, order_id, data["equipment_type"], data["boat_motors"], now
@@ -9863,6 +9878,7 @@ def bulk_edit_tuning_orders():
                     f"WHERE id IN ({chunk_placeholders}) AND status IN ({done_placeholders})",
                     [*chunk, *TUNING_DONE_STATUSES],
                 )
+        _apply_acceptance_date_on_start(db, order_ids, new_status)
         db.executemany(
             "UPDATE tuning_orders SET status = ? WHERE id = ?",
             [(new_status, order_id) for order_id in order_ids],
@@ -9902,6 +9918,24 @@ def delete_tuning_order(order_id):
     ))
 
 
+def _apply_acceptance_date_on_start(db, order_ids, new_status):
+    """Orders entering "В работе" show the boat acceptance date instead of
+    the original order date. Only fires on a real transition (orders
+    already in progress are left alone) and only when an acceptance date
+    was set. Must run before the status itself is overwritten."""
+    if new_status != "in_progress":
+        return
+    for offset in range(0, len(order_ids), 500):
+        chunk = order_ids[offset:offset + 500]
+        placeholders = ",".join("?" for _ in chunk)
+        db.execute(
+            f"UPDATE tuning_orders SET order_date = acceptance_date "
+            f"WHERE id IN ({placeholders}) AND status != 'in_progress' "
+            f"AND acceptance_date IS NOT NULL AND TRIM(acceptance_date) != ''",
+            chunk,
+        )
+
+
 @app.route("/tuning/<int:order_id>/status", methods=["POST"])
 @admin_login_required
 def set_tuning_order_status(order_id):
@@ -9913,6 +9947,7 @@ def set_tuning_order_status(order_id):
     if status in [s["value"] for s in ORDER_STATUSES]:
         was_done = order["status"] in TUNING_DONE_STATUSES
         becomes_done = status in TUNING_DONE_STATUSES
+        _apply_acceptance_date_on_start(db, [order_id], status)
         if becomes_done and not was_done:
             # First arrival at "done"/"handed_over" — stamp the actual
             # completion date once.

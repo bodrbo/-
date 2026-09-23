@@ -142,6 +142,56 @@ class TuningOrderBulkActionTests(unittest.TestCase):
         self.assertEqual(statuses, {"done"})
         self.assertEqual(subcontract_status, "estimate")
 
+    def _order_dates(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            return [
+                (r["order_date"], r["status"]) for r in db.execute(
+                    "SELECT order_date, status FROM tuning_orders WHERE id IN (?, ?) ORDER BY id",
+                    self.order_ids,
+                ).fetchall()
+            ]
+
+    def test_acceptance_date_replaces_order_date_when_order_starts(self):
+        first, second = self.order_ids
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("UPDATE tuning_orders SET acceptance_date = '2026-10-05' WHERE id = ?", (first,))
+            db.commit()
+            original = [
+                r["order_date"] for r in db.execute(
+                    "SELECT order_date FROM tuning_orders WHERE id IN (?, ?) ORDER BY id", self.order_ids
+                ).fetchall()
+            ]
+
+        self.client.post(f"/tuning/{first}/status", data={"status": "in_progress"})
+        self.client.post(f"/tuning/{second}/status", data={"status": "in_progress"})
+        dates = self._order_dates()
+        self.assertEqual(dates[0], ("2026-10-05", "in_progress"))
+        # No acceptance date set -> order date untouched.
+        self.assertEqual(dates[1], (original[1], "in_progress"))
+
+        # Later edits of the acceptance date / re-selecting the same status
+        # must not rewrite the date again; only a fresh transition does.
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("UPDATE tuning_orders SET acceptance_date = '2026-11-01' WHERE id = ?", (first,))
+            db.commit()
+        self.client.post(f"/tuning/{first}/status", data={"status": "in_progress"})
+        self.assertEqual(self._order_dates()[0][0], "2026-10-05")
+
+    def test_bulk_start_applies_acceptance_date(self):
+        first = self.order_ids[0]
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("UPDATE tuning_orders SET acceptance_date = '2026-10-07' WHERE id = ?", (first,))
+            db.commit()
+        self.client.post(
+            "/tuning/bulk",
+            data={"order_id": [str(i) for i in self.order_ids], "action": "status", "bulk_status": "in_progress"},
+        )
+        self.assertEqual(self._order_dates()[0], ("2026-10-07", "in_progress"))
+
     def test_bulk_action_rejects_invalid_status_and_subcontract(self):
         invalid_status = self.client.post(
             "/tuning/bulk",
