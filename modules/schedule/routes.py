@@ -467,9 +467,10 @@ def create_schedule_blueprint(
             return jsonify({"ok": False, "message": "Чек не найден."}), 404
         if not payment["client_token"]:
             return jsonify({"ok": False, "message": "У клиента нет личной ссылки."}), 400
+        version = repository.attach_and_get_version(db, kind, payment)
         return jsonify({"ok": True, "url": url_for(
             "schedule.public_receipt_pdf", token=payment["client_token"],
-            kind=kind, payment_id=payment_id, _external=True,
+            kind=kind, payment_id=payment_id, v=version, _external=True,
         )})
 
     @blueprint.route("/client/<token>/schedule-receipts/<kind>/<int:payment_id>.pdf")

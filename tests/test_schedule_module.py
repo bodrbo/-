@@ -635,6 +635,16 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         pdf = self.client.get(f"{base}/{paid_id}.pdf")
         self.assertEqual(pdf.status_code, 200)
         self.assertTrue(pdf.data.startswith(b"%PDF"))
+        # The download URL/name carry a fingerprint of the fiscal data so a
+        # phone's PDF viewer can't keep showing an older rendering.
+        version = payment["receipt"]["version"]
+        self.assertEqual(len(version), 8)
+        self.assertIn(version, pdf.headers["Content-Disposition"])
+        link = self.client.get(
+            f"/schedule/items/{item_id}/participants/{participant_id}/receipts/online/{paid_id}/link"
+        ).get_json()
+        self.assertIn(f"v={version}", link["url"])
+        self.assertIn("no-store", pdf.headers["Cache-Control"])
 
         with application_module.app.app_context():
             stored = application_module.get_db().execute(

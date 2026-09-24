@@ -808,7 +808,7 @@
       label.textContent = 'Чек пробит';
       row.appendChild(label);
       const link = document.createElement('a');
-      link.href = `${base}/receipts/${kind}/${payment.id}.pdf`;
+      link.href = `${base}/receipts/${kind}/${payment.id}.pdf?v=${encodeURIComponent(receipt.version || '')}`;
       link.target = '_blank';
       link.rel = 'noopener';
       link.className = 'schedule-receipt-link';

@@ -10832,7 +10832,12 @@ def _schedule_receipt_pdf(db, kind, payment_id):
         return None, "Формирование PDF временно недоступно: не установлена библиотека reportlab."
     except ValueError as error:
         return None, str(error)
-    return pdf_bytes, f"Receipt-trip-{payment['schedule_item_id']}-{kind}-{payment_id}.pdf"
+    # The receipt's fingerprint in the name keeps a re-rendered receipt from
+    # being mistaken for an older download with the same name.
+    version = schedule_repository.receipt_version(data["fiscal_info_json"])
+    return pdf_bytes, (
+        f"Receipt-trip-{payment['schedule_item_id']}-{kind}-{payment_id}-{version}.pdf"
+    )
 
 
 def _modulkassa_receipt_pdf_response(receipt):

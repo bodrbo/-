@@ -1,5 +1,6 @@
 """SQL access for the internal trip schedule."""
 
+import hashlib
 import secrets
 
 from modules.clients.constants import (
@@ -945,6 +946,7 @@ def attach_receipt_summaries(db, manual_by_participant, online_by_participant):
                 "failure": bool(row["failure_message"]),
                 "pdf_ready": bool(row["fiscal_info_json"]) and (row["status"] or "").lower()
                 in RECEIPT_SUCCESS_STATUSES,
+                "version": receipt_version(row["fiscal_info_json"] or row["doc_id"]),
             }
     for payments in online_by_participant.values():
         for payment in payments:
@@ -953,12 +955,28 @@ def attach_receipt_summaries(db, manual_by_participant, online_by_participant):
                 "failure": False,
                 "pdf_ready": bool(payment.get("receipt_json"))
                 and payment.get("receipt_status") == "succeeded",
+                "version": receipt_version(payment.get("receipt_json") or ""),
             }
             # Keep the raw fiscal payload out of the JSON sent to the browser.
             payment.pop("receipt_json", None)
 
 
 RECEIPT_SUCCESS_STATUSES = ("printed", "wait_for_callback", "completed")
+
+
+def receipt_version(payload):
+    """Short fingerprint of a receipt's fiscal data. Added to the PDF URL so
+    a phone's PDF viewer (which caches a document by its URL, whatever the
+    Cache-Control header says) can never show an older rendering."""
+    return hashlib.sha1(str(payload or "").encode("utf-8")).hexdigest()[:8]
+
+
+def attach_and_get_version(db, kind, payment):
+    """receipt_version() of the payment's current receipt data."""
+    if kind == "manual":
+        row = get_latest_receipt(db, payment["id"], only_successful=True)
+        return receipt_version(row["fiscal_info_json"] if row else "")
+    return receipt_version(payment["receipt_json"])
 
 
 def get_manual_payment_context(db, payment_id):
