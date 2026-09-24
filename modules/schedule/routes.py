@@ -2,7 +2,7 @@
 
 import datetime as dt
 
-from flask import Blueprint, abort, jsonify, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, current_app, jsonify, redirect, render_template, request, session, url_for
 
 from modules.clients.constants import CLIENT_CONTACT_METHODS
 from modules.excursion_services import repository as service_repository
@@ -39,6 +39,7 @@ def create_schedule_blueprint(
     apply_minimum_shift=None,
     delete_linked_trip=None,
     update_linked_trip_time=None,
+    receipts=None,
 ):
     blueprint = Blueprint("schedule", __name__)
 
@@ -114,6 +115,7 @@ def create_schedule_blueprint(
             ),
             tripster_configured=not demo_view and tripster_configured(),
             yookassa_configured=yookassa_configured(),
+            receipts_configured=bool(receipts is not None and receipts.configured()),
             weather_configured=weather_configured(),
         )
 
@@ -350,7 +352,7 @@ def create_schedule_blueprint(
         if not isinstance(payload, dict):
             return jsonify({"ok": False, "message": "Некорректный запрос."}), 400
         db = get_db()
-        success, message, _payment_id = services.create_manual_payment(
+        success, message, payment_id = services.create_manual_payment(
             db,
             item_id,
             participant_id,
@@ -359,7 +361,103 @@ def create_schedule_blueprint(
         )
         if not success:
             return jsonify({"ok": False, "message": message}), 400
+        if receipts is not None and payment_id:
+            # Best-effort: a cash-desk outage never blocks recording the payment.
+            receipts.fiscalize(db, payment_id)
         return _participants_response(db, item_id, message)
+
+    def _receipt_payment_or_none(db, kind, item_id, participant_id, payment_id):
+        if kind == "manual":
+            payment = repository.get_manual_payment_context(db, payment_id)
+        elif kind == "online":
+            payment = repository.get_online_payment_context(db, payment_id)
+        else:
+            return None
+        if (
+            payment is None
+            or payment["schedule_item_id"] != item_id
+            or payment["participant_id"] != participant_id
+        ):
+            return None
+        return payment
+
+    def _pdf_response(pdf_bytes, filename):
+        response = current_app.response_class(pdf_bytes, mimetype="application/pdf")
+        response.headers["Content-Disposition"] = f'inline; filename="{filename}"'
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
+    @blueprint.route(
+        "/schedule/items/<int:item_id>/participants/<int:participant_id>"
+        "/manual-payments/<int:payment_id>/receipt/<action>",
+        methods=["POST"],
+    )
+    @manage_required
+    def manual_payment_receipt_action(item_id, participant_id, payment_id, action):
+        db = get_db()
+        if receipts is None or action not in ("retry", "check"):
+            return jsonify({"ok": False, "message": "Действие недоступно."}), 404
+        if _receipt_payment_or_none(db, "manual", item_id, participant_id, payment_id) is None:
+            return jsonify({"ok": False, "message": "Платёж не найден."}), 404
+        if action == "retry":
+            receipts.fiscalize(db, payment_id)
+            return _participants_response(db, item_id, "Чек отправлен на кассу повторно.")
+        receipts.check(db, payment_id)
+        return _participants_response(db, item_id, "Статус чека обновлён.")
+
+    @blueprint.route(
+        "/schedule/items/<int:item_id>/participants/<int:participant_id>"
+        "/receipts/<kind>/<int:payment_id>.pdf"
+    )
+    @manage_required
+    def participant_receipt_pdf(item_id, participant_id, kind, payment_id):
+        db = get_db()
+        if receipts is None or _receipt_payment_or_none(
+            db, kind, item_id, participant_id, payment_id
+        ) is None:
+            return "Чек не найден.", 404
+        pdf_bytes, info = receipts.pdf(db, kind, payment_id)
+        if pdf_bytes is None:
+            return info, 404
+        return _pdf_response(pdf_bytes, info)
+
+    @blueprint.route(
+        "/schedule/items/<int:item_id>/participants/<int:participant_id>"
+        "/receipts/<kind>/<int:payment_id>/link"
+    )
+    @manage_required
+    def participant_receipt_link(item_id, participant_id, kind, payment_id):
+        """Public download link the manager can send to the client — the
+        client's own token authorises it, like the cabinet's tuning receipts."""
+        db = get_db()
+        payment = _receipt_payment_or_none(db, kind, item_id, participant_id, payment_id)
+        if receipts is None or payment is None:
+            return jsonify({"ok": False, "message": "Чек не найден."}), 404
+        if not payment["client_token"]:
+            return jsonify({"ok": False, "message": "У клиента нет личной ссылки."}), 400
+        return jsonify({"ok": True, "url": url_for(
+            "schedule.public_receipt_pdf", token=payment["client_token"],
+            kind=kind, payment_id=payment_id, _external=True,
+        )})
+
+    @blueprint.route("/client/<token>/schedule-receipts/<kind>/<int:payment_id>.pdf")
+    def public_receipt_pdf(token, kind, payment_id):
+        db = get_db()
+        if receipts is None:
+            return "Чек не найден.", 404
+        if kind == "manual":
+            payment = repository.get_manual_payment_context(db, payment_id)
+        elif kind == "online":
+            payment = repository.get_online_payment_context(db, payment_id)
+        else:
+            payment = None
+        if payment is None or not payment["client_token"] or payment["client_token"] != token:
+            return "Чек не найден.", 404
+        pdf_bytes, info = receipts.pdf(db, kind, payment_id)
+        if pdf_bytes is None:
+            return info, 404
+        return _pdf_response(pdf_bytes, info)
 
     @blueprint.route(
         "/schedule/items/<int:item_id>/participants/<int:participant_id>"

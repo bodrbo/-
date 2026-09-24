@@ -134,6 +134,9 @@ from modules.schedule import (
     create_schedule_blueprint,
     init_schema as init_schedule_schema,
 )
+from types import SimpleNamespace
+
+from modules.schedule import repository as schedule_repository
 from modules.schedule import services as schedule_services
 from modules.tuning_schedule import (
     create_tuning_schedule_blueprint,
@@ -5316,6 +5319,12 @@ app.register_blueprint(
         update_linked_trip_time=lambda db, trip_id, trip_date, trip_time: (
             _update_trip_datetime_from_schedule(db, trip_id, trip_date, trip_time)
         ),
+        receipts=SimpleNamespace(
+            configured=lambda: _modulkassa_configured(),
+            fiscalize=lambda db, payment_id: _schedule_receipt_fiscalize(db, payment_id),
+            check=lambda db, payment_id: _schedule_receipt_check(db, payment_id),
+            pdf=lambda db, kind, payment_id: _schedule_receipt_pdf(db, kind, payment_id),
+        ),
     )
 )
 
@@ -6062,20 +6071,35 @@ def _modulkassa_fiscalize_payment(db, order, payment_id, amount, payment_type):
     later by _modulkassa_check_status, via the cron endpoint or a manual
     check. Never raises: a ModulKassa outage must not stop the payment
     itself from being recorded."""
+    _modulkassa_post_document(
+        db, "modulkassa_receipts", payment_id,
+        doc_num=f"order-{order['id']}-payment-{payment_id}",
+        position_name=f"Оплата по заказу №{order['id']}",
+        contact=_modulkassa_contact_from_phone(order["phone"]),
+        amount=amount, payment_type=payment_type,
+    )
+
+
+def _modulkassa_post_document(
+    db, table, payment_id, doc_num, position_name, contact, amount, payment_type
+):
+    """Queues one SALE document (a single service line) in ModulKassa and
+    records it in `table` (modulkassa_receipts for tuning payments,
+    schedule_modulkassa_receipts for excursion payments). Never raises."""
     if not _modulkassa_configured():
         return
     doc_id = str(uuid.uuid4())
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     body = {
         "id": doc_id,
-        "docNum": f"order-{order['id']}-payment-{payment_id}",
+        "docNum": doc_num,
         "docType": "SALE",
         "checkoutDateTime": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
-        "email": _modulkassa_contact_from_phone(order["phone"]),
+        "email": contact,
         "printReceipt": False,
         "taxMode": None,
         "inventPositions": [{
-            "name": f"Оплата по заказу №{order['id']}",
+            "name": position_name,
             "price": amount,
             "quantity": 1,
             "vatTag": _current_modulkassa_vat_tag(db),
@@ -6091,7 +6115,7 @@ def _modulkassa_fiscalize_payment(db, order, payment_id, amount, payment_type):
         )
     except requests.RequestException as e:
         db.execute(
-            "INSERT INTO modulkassa_receipts (payment_id, doc_id, status, failure_message, created_at, updated_at) "
+            f"INSERT INTO {table} (payment_id, doc_id, status, failure_message, created_at, updated_at) "
             "VALUES (?, ?, 'failed', ?, ?, ?)",
             (payment_id, doc_id, str(e), now, now),
         )
@@ -6100,13 +6124,13 @@ def _modulkassa_fiscalize_payment(db, order, payment_id, amount, payment_type):
     if resp.ok:
         status = (resp.json().get("status") or "queued").lower()
         db.execute(
-            "INSERT INTO modulkassa_receipts (payment_id, doc_id, status, created_at, updated_at) "
+            f"INSERT INTO {table} (payment_id, doc_id, status, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?)",
             (payment_id, doc_id, status, now, now),
         )
     else:
         db.execute(
-            "INSERT INTO modulkassa_receipts (payment_id, doc_id, status, failure_message, created_at, updated_at) "
+            f"INSERT INTO {table} (payment_id, doc_id, status, failure_message, created_at, updated_at) "
             "VALUES (?, ?, 'failed', ?, ?, ?)",
             (payment_id, doc_id, f"HTTP {resp.status_code}: {resp.text[:300]}", now, now),
         )
@@ -6194,7 +6218,7 @@ def _modulkassa_receipts_for_client_order(db, order_id):
     return receipts
 
 
-def _modulkassa_check_status(db, receipt):
+def _modulkassa_check_status(db, receipt, table="modulkassa_receipts"):
     """Polls one receipt's current status and updates the row. Best-effort
     — a network hiccup here just leaves the row as it was, retried on the
     next cron pass or manual check."""
@@ -6214,7 +6238,7 @@ def _modulkassa_check_status(db, receipt):
     failure_info = data.get("failureInfo")
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     db.execute(
-        "UPDATE modulkassa_receipts SET status=?, fiscal_info_json=?, failure_message=?, updated_at=? WHERE id=?",
+        f"UPDATE {table} SET status=?, fiscal_info_json=?, failure_message=?, updated_at=? WHERE id=?",
         (
             status,
             json.dumps(data.get("fiscalInfo"), ensure_ascii=False) if data.get("fiscalInfo") else None,
@@ -6568,10 +6592,18 @@ def _build_modulkassa_receipt_pdf(receipt):
         Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
     )
 
-    fiscal_info = _modulkassa_fiscal_info(receipt)
-    qr_payload = str((fiscal_info or {}).get("qr") or "").strip()
-    if not fiscal_info or not qr_payload:
+    # The receipt may be a tuning row (order_id) or a plain dict built for an
+    # excursion payment (ref_label/ref_value/item_name/non_fiscal...). A
+    # non-fiscal document is a payment confirmation without fiscal data or QR.
+    data = dict(receipt)
+    non_fiscal = bool(data.get("non_fiscal"))
+    fiscal_info = _modulkassa_fiscal_info(receipt) or {}
+    qr_payload = str(fiscal_info.get("qr") or "").strip()
+    if not non_fiscal and (not fiscal_info or not qr_payload):
         raise ValueError("МодульКасса ещё не передала данные QR-кода чека.")
+    ref_label = data.get("ref_label") or "Заказ"
+    ref_value = data.get("ref_value") or f"№{data.get('order_id')}"
+    item_name = data.get("item_name") or f"Оплата по заказу №{data.get('order_id')}"
 
     _register_act_fonts()
     buf = BytesIO()
@@ -6582,7 +6614,7 @@ def _build_modulkassa_receipt_pdf(receipt):
         rightMargin=24 * mm,
         topMargin=12 * mm,
         bottomMargin=12 * mm,
-        title=f"Кассовый чек по заказу №{receipt['order_id']}",
+        title=data.get("pdf_title") or f"Кассовый чек по заказу №{data.get('order_id')}",
         author=COMPANY_NAME,
     )
     ink = colors.HexColor("#153845")
@@ -6630,8 +6662,8 @@ def _build_modulkassa_receipt_pdf(receipt):
         Paragraph(safe(COMPANY_NAME), center),
         Paragraph(safe(COMPANY_ADDRESS), center),
         Spacer(1, 18),
-        Paragraph("Кассовый чек", title),
-        Paragraph("Электронная копия данных фискализации", subtitle),
+        Paragraph(safe(data.get("doc_title") or "Кассовый чек"), title),
+        Paragraph(safe(data.get("doc_subtitle") or "Электронная копия данных фискализации"), subtitle),
         Spacer(1, 18),
     ]
 
@@ -6642,19 +6674,24 @@ def _build_modulkassa_receipt_pdf(receipt):
         "PURCHASE": "Расход",
         "PURCHASE_RETURN": "Возврат расхода",
     }.get(check_type, check_type)
+    if non_fiscal:
+        check_type_label = "Оплата"
     fiscal_amount = fiscal_info.get("sum")
     if fiscal_amount in (None, ""):
-        fiscal_amount = receipt["amount"]
+        fiscal_amount = data["amount"]
 
     overview = Table(
         [
-            [Paragraph("Заказ", label), Paragraph(f"№{receipt['order_id']}", value)],
-            [Paragraph("Клиент", label), Paragraph(safe(receipt["client_name"]), value)],
+            [Paragraph(safe(ref_label), label), Paragraph(safe(ref_value), value)],
+            [Paragraph("Клиент", label), Paragraph(safe(data["client_name"]), value)],
             [
                 Paragraph("Дата расчёта", label),
                 Paragraph(
-                    _receipt_datetime_from_qr(qr_payload)
-                    or _receipt_datetime(fiscal_info.get("date")),
+                    _receipt_datetime(data.get("paid_at")) if non_fiscal
+                    else (
+                        _receipt_datetime_from_qr(qr_payload)
+                        or _receipt_datetime(fiscal_info.get("date"))
+                    ),
                     value,
                 ),
             ],
@@ -6665,7 +6702,8 @@ def _build_modulkassa_receipt_pdf(receipt):
                     {
                         "CASH": "Наличные",
                         "CARD": "Безналичный",
-                    }.get(receipt["payment_type"], "Не указан"),
+                        "ONLINE": "Онлайн (ЮKassa)",
+                    }.get(data.get("payment_type"), "Не указан"),
                     value,
                 ),
             ],
@@ -6687,7 +6725,7 @@ def _build_modulkassa_receipt_pdf(receipt):
     item_table = Table(
         [
             [Paragraph("Наименование", label), Paragraph("Сумма", label)],
-            [Paragraph(f"Оплата по заказу №{receipt['order_id']}", body), Paragraph(_receipt_money(fiscal_amount), value)],
+            [Paragraph(safe(item_name), body), Paragraph(_receipt_money(fiscal_amount), value)],
             [Paragraph("ИТОГО", ParagraphStyle("total-label", parent=total_style, alignment=TA_LEFT)), Paragraph(_receipt_money(fiscal_amount), total_style)],
         ],
         colWidths=[105 * mm, 53 * mm],
@@ -6703,57 +6741,65 @@ def _build_modulkassa_receipt_pdf(receipt):
     ]))
     flow.extend([item_table, Spacer(1, 20)])
 
-    fiscal_rows = [
-        ("Смена", fiscal_info.get("shiftNumber")),
-        ("Чек за смену", fiscal_info.get("checkNumber")),
-        ("ФН", fiscal_info.get("fnNumber")),
-        ("ФД", fiscal_info.get("fnDocNumber")),
-        ("ФП", fiscal_info.get("fnDocMark")),
-        (
-            "РН ККТ",
-            fiscal_info.get("ecrRegistrationNumber")
-            or fiscal_info.get("ercRegistrationNumber"),
-        ),
-    ]
-    fiscal_table = Table(
-        [[Paragraph(name, label), Paragraph(safe(field_value), value)] for name, field_value in fiscal_rows],
-        colWidths=[58 * mm, 100 * mm],
-    )
-    fiscal_table.setStyle(TableStyle([
-        ("BOX", (0, 0), (-1, -1), 0.7, line),
-        ("INNERGRID", (0, 0), (-1, -1), 0.4, line),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 9),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 9),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-    ]))
-    flow.extend([fiscal_table, Spacer(1, 18)])
-
-    qr_size = 40 * mm
-    qr_table = Table(
-        [[
-            _build_fiscal_receipt_qr(qr_payload, qr_size),
-            Paragraph(
-                "<b>Проверка подлинности</b><br/>"
-                "Отсканируйте QR-код в приложении ФНС России или откройте "
-                f'<link href="{FNS_RECEIPT_CHECK_URL}" color="#3498db">сервис проверки чека ФНС</link> '
-                "и введите фискальные реквизиты.",
-                body,
+    if non_fiscal:
+        flow.append(Paragraph(
+            safe(data.get("non_fiscal_note") or
+                 "Оплата принята. Кассовый чек формируется платёжной системой."),
+            center,
+        ))
+    else:
+        fiscal_rows = [
+            ("Смена", fiscal_info.get("shiftNumber")),
+            ("Чек за смену", fiscal_info.get("checkNumber")),
+            ("ФН", fiscal_info.get("fnNumber")),
+            ("ФД", fiscal_info.get("fnDocNumber")),
+            ("ФП", fiscal_info.get("fnDocMark")),
+            (
+                "РН ККТ",
+                fiscal_info.get("ecrRegistrationNumber")
+                or fiscal_info.get("ercRegistrationNumber"),
             ),
-        ]],
-        colWidths=[48 * mm, 110 * mm],
-    )
-    qr_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.white),
-        ("BOX", (0, 0), (-1, -1), 1, blue),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 8),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-        ("TOPPADDING", (0, 0), (-1, -1), 8),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-    ]))
-    flow.append(qr_table)
+        ]
+        fiscal_table = Table(
+            [[Paragraph(name, label), Paragraph(safe(field_value), value)] for name, field_value in fiscal_rows],
+            colWidths=[58 * mm, 100 * mm],
+        )
+        fiscal_table.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.7, line),
+            ("INNERGRID", (0, 0), (-1, -1), 0.4, line),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 9),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        flow.extend([fiscal_table, Spacer(1, 18)])
+
+        qr_size = 40 * mm
+        qr_table = Table(
+            [[
+                _build_fiscal_receipt_qr(qr_payload, qr_size),
+                Paragraph(
+                    "<b>Проверка подлинности</b><br/>"
+                    "Отсканируйте QR-код в приложении ФНС России или откройте "
+                    f'<link href="{FNS_RECEIPT_CHECK_URL}" color="#3498db">сервис проверки чека ФНС</link> '
+                    "и введите фискальные реквизиты.",
+                    body,
+                ),
+            ]],
+            colWidths=[48 * mm, 110 * mm],
+        )
+        qr_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+            ("BOX", (0, 0), (-1, -1), 1, blue),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        flow.append(qr_table)
+
 
     doc.build(flow)
     return buf.getvalue()
@@ -10681,6 +10727,79 @@ def retry_modulkassa_receipt(order_id, payment_id):
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
+SCHEDULE_MANUAL_PAYMENT_TYPES = {"cash": "CASH", "cashless": "CARD"}
+
+
+def _schedule_receipt_service_line(payment):
+    day = format_ru_date((payment["starts_at"] or "")[:10])
+    return f"{payment['service_name']}" + (f", {day}" if day else "")
+
+
+def _schedule_receipt_fiscalize(db, payment_id):
+    """Queues the ModulKassa fiscal receipt for one manual (cash/cashless)
+    excursion payment — same flow as tuning order payments. Best-effort:
+    never raises, a cash-desk outage must not lose the recorded payment."""
+    payment = schedule_repository.get_manual_payment_context(db, payment_id)
+    payment_type = SCHEDULE_MANUAL_PAYMENT_TYPES.get(payment["payment_method"]) if payment else None
+    if payment is None or payment_type is None:
+        return
+    _modulkassa_post_document(
+        db, "schedule_modulkassa_receipts", payment_id,
+        doc_num=f"schedule-{payment['schedule_item_id']}-payment-{payment_id}",
+        position_name=f"Оплата: {_schedule_receipt_service_line(payment)}"[:128],
+        contact=_modulkassa_contact_from_phone(payment["client_phone"]),
+        amount=payment["amount"], payment_type=payment_type,
+    )
+
+
+def _schedule_receipt_check(db, payment_id):
+    receipt = schedule_repository.get_latest_receipt(db, payment_id)
+    if receipt is not None and _modulkassa_configured():
+        _modulkassa_check_status(db, receipt, "schedule_modulkassa_receipts")
+        db.commit()
+
+
+def _schedule_receipt_pdf(db, kind, payment_id):
+    """(pdf_bytes, filename) or (None, message). Manual payments get the
+    fiscal ModulKassa receipt; succeeded ЮKassa link payments get a branded
+    non-fiscal payment confirmation (ЮKassa issues the cash receipt itself)."""
+    if kind == "manual":
+        payment = schedule_repository.get_manual_payment_context(db, payment_id)
+        receipt_row = schedule_repository.get_latest_receipt(db, payment_id, only_successful=True)
+        if payment is None or receipt_row is None:
+            return None, "Фискальные данные чека ещё не получены."
+        data = {
+            "payment_type": SCHEDULE_MANUAL_PAYMENT_TYPES.get(payment["payment_method"]),
+            "fiscal_info_json": receipt_row["fiscal_info_json"],
+            "non_fiscal": False,
+        }
+    elif kind == "online":
+        payment = schedule_repository.get_online_payment_context(db, payment_id)
+        if payment is None or payment["status"] != "succeeded":
+            return None, "Оплата ещё не подтверждена."
+        data = {
+            "payment_type": "ONLINE", "non_fiscal": True,
+            "doc_title": "Подтверждение оплаты",
+            "doc_subtitle": "Оплата по ссылке через ЮKassa",
+            "paid_at": payment["updated_at"],
+        }
+    else:
+        return None, "Чек не найден."
+    data.update(
+        amount=payment["amount"], client_name=payment["client_name"],
+        ref_label="Рейс", ref_value=_schedule_receipt_service_line(payment),
+        item_name=f"Оплата: {payment['service_name']}",
+        pdf_title=f"Чек об оплате рейса №{payment['schedule_item_id']}",
+    )
+    try:
+        pdf_bytes = _build_modulkassa_receipt_pdf(data)
+    except ImportError:
+        return None, "Формирование PDF временно недоступно: не установлена библиотека reportlab."
+    except ValueError as error:
+        return None, str(error)
+    return pdf_bytes, f"Receipt-trip-{payment['schedule_item_id']}-{kind}-{payment_id}.pdf"
+
+
 def _modulkassa_receipt_pdf_response(receipt):
     fiscal_info = _modulkassa_fiscal_info(receipt)
     if not fiscal_info or not fiscal_info.get("qr"):
@@ -10743,8 +10862,13 @@ def cron_check_modulkassa_receipts():
     ).fetchall()
     for r in pending:
         _modulkassa_check_status(db, r)
+    schedule_pending = db.execute(
+        "SELECT * FROM schedule_modulkassa_receipts WHERE status IN ('queued', 'pending')"
+    ).fetchall()
+    for r in schedule_pending:
+        _modulkassa_check_status(db, r, "schedule_modulkassa_receipts")
     db.commit()
-    return f"checked {len(pending)} receipt(s)", 200
+    return f"checked {len(pending) + len(schedule_pending)} receipt(s)", 200
 
 
 @app.route("/tuning/<int:order_id>/notes/add", methods=["POST"])

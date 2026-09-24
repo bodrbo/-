@@ -397,6 +397,7 @@ def list_day_items(db, day):
         manual_payments_by_participant.setdefault(
             row["participant_id"], []
         ).append(dict(row))
+    attach_receipt_summaries(db, manual_payments_by_participant, payments_by_participant)
     participants_by_item = {}
     for participant in participants:
         participant = dict(participant)
@@ -762,6 +763,7 @@ def list_item_participants_with_addons(db, item_id):
         manual_payments_by_participant.setdefault(
             row["participant_id"], []
         ).append(dict(row))
+    attach_receipt_summaries(db, manual_payments_by_participant, payments_by_participant)
     result = []
     for participant in participants:
         participant = dict(participant)
@@ -897,7 +899,92 @@ def get_manual_payment(db, payment_id, participant_id, item_id):
     ).fetchone()
 
 
+def attach_receipt_summaries(db, manual_by_participant, online_by_participant):
+    """Adds a small `receipt` dict to every manual payment (ModulKassa status
+    and whether the fiscal data for the PDF has arrived) and marks succeeded
+    online payments as having a payment confirmation to download."""
+    manual_ids = [
+        payment["id"] for payments in manual_by_participant.values() for payment in payments
+    ]
+    latest = {}
+    if manual_ids:
+        placeholders = ",".join("?" for _id in manual_ids)
+        for row in db.execute(
+            "SELECT * FROM schedule_modulkassa_receipts "
+            f"WHERE payment_id IN ({placeholders}) ORDER BY id",
+            tuple(manual_ids),
+        ).fetchall():
+            latest[row["payment_id"]] = row  # newest wins (ORDER BY id)
+    for payments in manual_by_participant.values():
+        for payment in payments:
+            row = latest.get(payment["id"])
+            if row is None:
+                payment["receipt"] = None
+                continue
+            payment["receipt"] = {
+                "status": (row["status"] or "").lower(),
+                "failure": bool(row["failure_message"]),
+                "pdf_ready": bool(row["fiscal_info_json"]) and (row["status"] or "").lower()
+                in RECEIPT_SUCCESS_STATUSES,
+            }
+    for payments in online_by_participant.values():
+        for payment in payments:
+            payment["receipt"] = {
+                "status": "confirmation", "failure": False,
+                "pdf_ready": payment["status"] == "succeeded",
+            }
+
+
+RECEIPT_SUCCESS_STATUSES = ("printed", "wait_for_callback", "completed")
+
+
+def get_manual_payment_context(db, payment_id):
+    """One manual payment with the trip and client it belongs to — the
+    facts a receipt needs."""
+    return db.execute(
+        "SELECT pay.*, item.service_name, item.starts_at, item.ends_at, "
+        "participant.client_name, participant.client_phone, participant.client_id, "
+        "clients.token AS client_token "
+        "FROM schedule_manual_payments pay "
+        "JOIN schedule_items item ON item.id = pay.schedule_item_id "
+        "JOIN schedule_participants participant ON participant.id = pay.participant_id "
+        "LEFT JOIN clients ON clients.id = participant.client_id "
+        "WHERE pay.id = ?",
+        (payment_id,),
+    ).fetchone()
+
+
+def get_online_payment_context(db, payment_id):
+    return db.execute(
+        "SELECT pay.*, item.service_name, item.starts_at, item.ends_at, "
+        "participant.client_name, participant.client_phone, participant.client_id, "
+        "clients.token AS client_token "
+        "FROM schedule_yookassa_payments pay "
+        "JOIN schedule_items item ON item.id = pay.schedule_item_id "
+        "JOIN schedule_participants participant ON participant.id = pay.participant_id "
+        "LEFT JOIN clients ON clients.id = participant.client_id "
+        "WHERE pay.id = ?",
+        (payment_id,),
+    ).fetchone()
+
+
+def get_latest_receipt(db, payment_id, only_successful=False):
+    query = "SELECT * FROM schedule_modulkassa_receipts WHERE payment_id = ?"
+    if only_successful:
+        query += (
+            " AND LOWER(status) IN ('printed', 'wait_for_callback', 'completed')"
+            " AND fiscal_info_json IS NOT NULL"
+        )
+    return db.execute(query + " ORDER BY id DESC LIMIT 1", (payment_id,)).fetchone()
+
+
 def delete_manual_payment(db, payment_id, participant_id, item_id):
+    db.execute(
+        "DELETE FROM schedule_modulkassa_receipts WHERE payment_id IN "
+        "(SELECT id FROM schedule_manual_payments "
+        "WHERE id = ? AND participant_id = ? AND schedule_item_id = ?)",
+        (payment_id, participant_id, item_id),
+    )
     cursor = db.execute(
         "DELETE FROM schedule_manual_payments "
         "WHERE id = ? AND participant_id = ? AND schedule_item_id = ?",

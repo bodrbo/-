@@ -211,6 +211,27 @@ def init_schema(conn):
         "CREATE INDEX IF NOT EXISTS idx_schedule_manual_payments_participant "
         "ON schedule_manual_payments(participant_id)"
     )
+    # Fiscal receipts (ModulKassa) of manual cash/cashless payments — same
+    # shape as the tuning center's modulkassa_receipts, keyed by
+    # schedule_manual_payments.id.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schedule_modulkassa_receipts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            payment_id INTEGER NOT NULL,
+            doc_id TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL DEFAULT 'queued',
+            fiscal_info_json TEXT,
+            failure_message TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_schedule_modulkassa_receipts_payment "
+        "ON schedule_modulkassa_receipts(payment_id)"
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS schedule_day_crew (

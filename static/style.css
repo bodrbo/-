@@ -11761,3 +11761,14 @@ button.partner-open-price-save svg {
 .goods-price-form .icon-btn svg { width: 13px; height: 13px; }
 .goods-price-form .icon-btn.approve:hover { background: var(--success); color: #fff8f4; border-color: var(--success); }
 .goods-price-input { width: 84px; height: 27px; padding: 0 6px; font-size: 13px; }
+
+/* Receipts of schedule payments */
+.schedule-receipt-row { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 4px; border-top: 1px dashed rgba(16, 42, 67, .1); font-size: 10.5px; }
+.schedule-yookassa-item .schedule-receipt-row { flex: 1 0 100%; }
+.schedule-receipt-row .btn-secondary { padding: 3px 8px; font-size: 10.5px; margin-top: 0; min-height: 0; }
+.schedule-receipt-row .schedule-receipt-link { color: var(--brass-strong); font-weight: 700; text-decoration: none; }
+.schedule-receipt-row .schedule-receipt-link:hover { text-decoration: underline; }
+.schedule-receipt-badge { padding: 2px 7px; border-radius: 999px; font-size: 10px; font-weight: 700; background: #eef2f5; color: var(--ink-soft); }
+.schedule-receipt-badge.is-ready { background: #e3f4ea; color: #1e7a45; }
+.schedule-receipt-badge.is-pending { background: #fdf3dc; color: #8a6a12; }
+.schedule-receipt-badge.is-failed { background: #fbe4e1; color: #b3372a; }

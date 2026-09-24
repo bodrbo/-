@@ -1,6 +1,6 @@
 import sqlite3
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from support import application_module
 from modules.schedule.schema import init_schema
@@ -70,6 +70,10 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             (employee_id, position),
         )
         return employee_id
+
+    @staticmethod
+    def anonymous_client():
+        return application_module.app.test_client()
 
     def login(self):
         with self.client.session_transaction() as session:
@@ -485,6 +489,116 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertEqual(payment["participant_id"], participant_id)
         self.assertEqual(payment["amount"], 5000)
         self.assertEqual(payment["payment_method"], "cashless")
+
+    def _booking_with_manual_payment(self, configured=True):
+        self.login()
+        self.assertEqual(self.create_booking().status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = db.execute("SELECT id FROM schedule_items").fetchone()["id"]
+            participant_id = db.execute(
+                "SELECT id FROM schedule_participants WHERE schedule_item_id = ?", (item_id,)
+            ).fetchone()["id"]
+        fake_post = Mock()
+        fake_post.return_value.ok = True
+        fake_post.return_value.json.return_value = {"status": "QUEUED"}
+        with patch.object(application_module, "_modulkassa_configured", return_value=configured), \
+                patch.object(application_module.requests, "post", fake_post):
+            response = self.client.post(
+                f"/schedule/items/{item_id}/participants/{participant_id}/manual-payments",
+                json={"amount": "5000", "payment_method": "cashless"},
+            )
+        self.assertEqual(response.status_code, 200)
+        payment = response.get_json()["participants"][0]["manual_payments"][0]
+        return item_id, participant_id, payment, fake_post
+
+    def test_manual_payment_queues_fiscal_receipt(self):
+        item_id, participant_id, payment, fake_post = self._booking_with_manual_payment()
+        fake_post.assert_called_once()
+        body = fake_post.call_args.kwargs["json"]
+        self.assertEqual(body["moneyPositions"], [{"paymentType": "CARD", "sum": 5000.0}])
+        self.assertTrue(body["inventPositions"][0]["name"].startswith("Оплата: "))
+        self.assertEqual(payment["receipt"]["status"], "queued")
+        self.assertFalse(payment["receipt"]["pdf_ready"])
+
+    def test_manual_payment_without_cash_desk_is_still_recorded(self):
+        _item, _participant, payment, fake_post = self._booking_with_manual_payment(configured=False)
+        fake_post.assert_not_called()
+        self.assertIsNone(payment["receipt"])
+
+    def test_receipt_pdf_download_and_public_link(self):
+        item_id, participant_id, payment, _post = self._booking_with_manual_payment()
+        base = f"/schedule/items/{item_id}/participants/{participant_id}"
+        # not yet fiscalized -> no PDF
+        self.assertEqual(self.client.get(f"{base}/receipts/manual/{payment['id']}.pdf").status_code, 404)
+
+        fake_get = Mock()
+        fake_get.return_value.ok = True
+        fake_get.return_value.json.return_value = {
+            "status": "PRINTED",
+            "fiscalInfo": {
+                "qr": "t=20260907T143000&s=5000.00&fn=9999078900008998&i=571&fp=3125146288&n=1",
+                "shiftNumber": 8, "checkNumber": 17, "fnNumber": "9999078900008998",
+                "fnDocNumber": 571, "fnDocMark": 3125146288, "sum": 5000,
+            },
+        }
+        with patch.object(application_module, "_modulkassa_configured", return_value=True), \
+                patch.object(application_module.requests, "get", fake_get):
+            response = self.client.post(f"{base}/manual-payments/{payment['id']}/receipt/check")
+        updated = response.get_json()["participants"][0]["manual_payments"][0]
+        self.assertTrue(updated["receipt"]["pdf_ready"])
+
+        pdf = self.client.get(f"{base}/receipts/manual/{payment['id']}.pdf")
+        self.assertEqual(pdf.status_code, 200)
+        self.assertTrue(pdf.data.startswith(b"%PDF"))
+
+        link = self.client.get(f"{base}/receipts/manual/{payment['id']}/link").get_json()
+        self.assertTrue(link["ok"])
+        public_path = link["url"].split("://", 1)[1].split("/", 1)[1]
+        public = self.anonymous_client().get("/" + public_path)
+        self.assertEqual(public.status_code, 200)
+        self.assertTrue(public.data.startswith(b"%PDF"))
+        wrong = self.anonymous_client().get(
+            f"/client/not-the-token/schedule-receipts/manual/{payment['id']}.pdf"
+        )
+        self.assertEqual(wrong.status_code, 404)
+
+        # deleting the payment drops its receipts
+        self.client.post(f"{base}/manual-payments/{payment['id']}/delete")
+        with application_module.app.app_context():
+            left = application_module.get_db().execute(
+                "SELECT COUNT(*) FROM schedule_modulkassa_receipts WHERE payment_id = ?",
+                (payment["id"],),
+            ).fetchone()[0]
+        self.assertEqual(left, 0)
+
+    def test_succeeded_online_payment_gets_branded_confirmation_pdf(self):
+        self.login()
+        self.assertEqual(self.create_booking().status_code, 302)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = db.execute("SELECT id FROM schedule_items").fetchone()["id"]
+            participant_id = db.execute(
+                "SELECT id FROM schedule_participants WHERE schedule_item_id = ?", (item_id,)
+            ).fetchone()["id"]
+            pending_id = db.execute(
+                "INSERT INTO schedule_yookassa_payments (schedule_item_id, participant_id, "
+                "yookassa_payment_id, amount, status, confirmation_url, applied, created_at, updated_at) "
+                "VALUES (?, ?, 'yk-pending', 3000, 'pending', 'https://x', 0, '2026-09-05 10:00', '2026-09-05 10:00')",
+                (item_id, participant_id),
+            ).lastrowid
+            paid_id = db.execute(
+                "INSERT INTO schedule_yookassa_payments (schedule_item_id, participant_id, "
+                "yookassa_payment_id, amount, status, confirmation_url, applied, created_at, updated_at) "
+                "VALUES (?, ?, 'yk-paid', 4000, 'succeeded', 'https://x', 1, '2026-09-05 10:00', '2026-09-05 10:05')",
+                (item_id, participant_id),
+            ).lastrowid
+            db.commit()
+        base = f"/schedule/items/{item_id}/participants/{participant_id}/receipts/online"
+        self.assertEqual(self.client.get(f"{base}/{pending_id}.pdf").status_code, 404)
+        pdf = self.client.get(f"{base}/{paid_id}.pdf")
+        self.assertEqual(pdf.status_code, 200)
+        self.assertTrue(pdf.data.startswith(b"%PDF"))
 
     def test_schedule_routes_notify_on_assignment_change_and_deletion(self):
         self.login()

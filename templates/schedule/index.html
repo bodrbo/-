@@ -778,6 +778,84 @@
   const scheduleExcursionPartners = {{ excursion_partners|tojson }};
   const scheduleContactMethods = {{ client_contact_methods|tojson }};
   const scheduleYookassaConfigured = {{ yookassa_configured|tojson }};
+  const scheduleReceiptsConfigured = {{ receipts_configured|tojson }};
+  const scheduleReceiptStatusLabels = {
+    queued: 'Чек в очереди',
+    pending: 'Чек печатается',
+    failed: 'Ошибка чека',
+  };
+  function scheduleReceiptRequest(url, options) {
+    return fetch(url, options).then(r => r.json());
+  }
+  function buildScheduleReceiptRow(item, participant, payment, kind) {
+    const receipt = payment.receipt;
+    const base = `${scheduleCreateUrl}/${item.id}/participants/${participant.id}`;
+    const row = document.createElement('div');
+    row.className = 'schedule-receipt-row';
+    const addBtn = (text, title, handler) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn-secondary';
+      btn.textContent = text;
+      btn.title = title;
+      btn.addEventListener('click', handler);
+      row.appendChild(btn);
+      return btn;
+    };
+    if (receipt && receipt.pdf_ready) {
+      const label = document.createElement('b');
+      label.className = 'schedule-receipt-badge is-ready';
+      label.textContent = kind === 'manual' ? 'Чек пробит' : 'Оплата подтверждена';
+      row.appendChild(label);
+      const link = document.createElement('a');
+      link.href = `${base}/receipts/${kind}/${payment.id}.pdf`;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.className = 'schedule-receipt-link';
+      link.textContent = 'Скачать чек';
+      row.appendChild(link);
+      addBtn('Ссылка клиенту', 'Скопировать ссылку на чек, чтобы отправить клиенту', event => {
+        const btn = event.currentTarget;
+        scheduleReceiptRequest(`${base}/receipts/${kind}/${payment.id}/link`)
+          .then(data => {
+            if (!data.ok) { alert(data.message || 'Не удалось получить ссылку.'); return; }
+            return scheduleCopyToClipboard(data.url).then(() => {
+              const previous = btn.textContent;
+              btn.textContent = 'Скопировано';
+              setTimeout(() => { btn.textContent = previous; }, 1800);
+            });
+          })
+          .catch(() => alert('Не удалось получить ссылку. Попробуйте ещё раз.'));
+      });
+      return row;
+    }
+    if (kind !== 'manual') return null;
+    const act = (action, failText) => () => {
+      scheduleReceiptRequest(`${base}/manual-payments/${payment.id}/receipt/${action}`, {method: 'POST'})
+        .then(data => {
+          if (!data.ok) { alert(data.message || failText); return; }
+          scheduleApplyParticipantUpdate(item.id, data);
+        })
+        .catch(() => alert(failText));
+    };
+    if (receipt && (receipt.status === 'queued' || receipt.status === 'pending')) {
+      const label = document.createElement('b');
+      label.className = 'schedule-receipt-badge is-pending';
+      label.textContent = scheduleReceiptStatusLabels[receipt.status];
+      row.appendChild(label);
+      addBtn('Проверить', 'Обновить статус чека', act('check', 'Не удалось проверить чек.'));
+      return row;
+    }
+    if (!scheduleReceiptsConfigured) return null;
+    if (receipt) {
+      const label = document.createElement('b');
+      label.className = 'schedule-receipt-badge is-failed';
+      label.textContent = scheduleReceiptStatusLabels[receipt.status] || 'Чек не готов';
+      row.appendChild(label);
+    }
+    addBtn(receipt ? 'Пробить повторно' : 'Пробить чек', 'Отправить чек на кассу', act('retry', 'Не удалось пробить чек.'));
+    return row;
+  }
   const scheduleYookassaStatusLabels = {
     pending: 'Ожидает оплаты',
     waiting_for_capture: 'Обрабатывается',
@@ -1617,6 +1695,8 @@
       removeBtn.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 5l10 10M15 5L5 15"/></svg>';
       removeBtn.addEventListener('click', () => deleteScheduleManualPayment(item.id, participant.id, payment.id));
       li.append(amount, badge, date, removeBtn);
+      const manualReceiptRow = buildScheduleReceiptRow(item, participant, payment, 'manual');
+      if (manualReceiptRow) li.appendChild(manualReceiptRow);
       manualList.appendChild(li);
     });
     if (!manualPayments.length) {
@@ -1666,6 +1746,10 @@
         badge.className = 'schedule-yookassa-badge';
         badge.textContent = scheduleYookassaStatusLabels[payment.status] || payment.status;
         li.append(amount, badge);
+        if (payment.status === 'succeeded') {
+          const onlineReceiptRow = buildScheduleReceiptRow(item, participant, payment, 'online');
+          if (onlineReceiptRow) li.appendChild(onlineReceiptRow);
+        }
         if (payment.status !== 'succeeded' && payment.status !== 'canceled') {
           const link = document.createElement('a');
           link.href = payment.confirmation_url;
