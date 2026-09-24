@@ -6593,13 +6593,12 @@ def _build_modulkassa_receipt_pdf(receipt):
     )
 
     # The receipt may be a tuning row (order_id) or a plain dict built for an
-    # excursion payment (ref_label/ref_value/item_name/non_fiscal...). A
-    # non-fiscal document is a payment confirmation without fiscal data or QR.
+    # excursion payment (ref_label/ref_value/item_name/...). Always a fiscal
+    # document: it needs the fiscal data and the QR.
     data = dict(receipt)
-    non_fiscal = bool(data.get("non_fiscal"))
     fiscal_info = _modulkassa_fiscal_info(receipt) or {}
     qr_payload = str(fiscal_info.get("qr") or "").strip()
-    if not non_fiscal and (not fiscal_info or not qr_payload):
+    if not fiscal_info or not qr_payload:
         raise ValueError("МодульКасса ещё не передала данные QR-кода чека.")
     ref_label = data.get("ref_label") or "Заказ"
     ref_value = data.get("ref_value") or f"№{data.get('order_id')}"
@@ -6674,8 +6673,6 @@ def _build_modulkassa_receipt_pdf(receipt):
         "PURCHASE": "Расход",
         "PURCHASE_RETURN": "Возврат расхода",
     }.get(check_type, check_type)
-    if non_fiscal:
-        check_type_label = "Оплата"
     fiscal_amount = fiscal_info.get("sum")
     if fiscal_amount in (None, ""):
         fiscal_amount = data["amount"]
@@ -6687,11 +6684,8 @@ def _build_modulkassa_receipt_pdf(receipt):
             [
                 Paragraph("Дата расчёта", label),
                 Paragraph(
-                    _receipt_datetime(data.get("paid_at")) if non_fiscal
-                    else (
-                        _receipt_datetime_from_qr(qr_payload)
-                        or _receipt_datetime(fiscal_info.get("date"))
-                    ),
+                    _receipt_datetime_from_qr(qr_payload)
+                    or _receipt_datetime(fiscal_info.get("date")),
                     value,
                 ),
             ],
@@ -6741,64 +6735,59 @@ def _build_modulkassa_receipt_pdf(receipt):
     ]))
     flow.extend([item_table, Spacer(1, 20)])
 
-    if non_fiscal:
-        flow.append(Paragraph(
-            safe(data.get("non_fiscal_note") or
-                 "Оплата принята. Кассовый чек формируется платёжной системой."),
-            center,
-        ))
-    else:
-        fiscal_rows = [
-            ("Смена", fiscal_info.get("shiftNumber")),
-            ("Чек за смену", fiscal_info.get("checkNumber")),
-            ("ФН", fiscal_info.get("fnNumber")),
-            ("ФД", fiscal_info.get("fnDocNumber")),
-            ("ФП", fiscal_info.get("fnDocMark")),
-            (
-                "РН ККТ",
-                fiscal_info.get("ecrRegistrationNumber")
-                or fiscal_info.get("ercRegistrationNumber"),
-            ),
-        ]
-        fiscal_table = Table(
-            [[Paragraph(name, label), Paragraph(safe(field_value), value)] for name, field_value in fiscal_rows],
-            colWidths=[58 * mm, 100 * mm],
-        )
-        fiscal_table.setStyle(TableStyle([
-            ("BOX", (0, 0), (-1, -1), 0.7, line),
-            ("INNERGRID", (0, 0), (-1, -1), 0.4, line),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 9),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 9),
-            ("TOPPADDING", (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ]))
-        flow.extend([fiscal_table, Spacer(1, 18)])
+    fiscal_rows = [
+        ("Смена", fiscal_info.get("shiftNumber")),
+        ("Чек за смену", fiscal_info.get("checkNumber")),
+        ("ФН", fiscal_info.get("fnNumber")),
+        ("ФД", fiscal_info.get("fnDocNumber")),
+        ("ФП", fiscal_info.get("fnDocMark")),
+        (
+            "РН ККТ",
+            fiscal_info.get("ecrRegistrationNumber")
+            or fiscal_info.get("ercRegistrationNumber"),
+        ),
+    ]
+    if data.get("skip_empty_fiscal_rows"):
+        fiscal_rows = [row for row in fiscal_rows if row[1] not in (None, "")]
+    fiscal_table = Table(
+        [[Paragraph(name, label), Paragraph(safe(field_value), value)] for name, field_value in fiscal_rows],
+        colWidths=[58 * mm, 100 * mm],
+    )
+    fiscal_table.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.7, line),
+        ("INNERGRID", (0, 0), (-1, -1), 0.4, line),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 9),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    flow.extend([fiscal_table, Spacer(1, 18)])
 
-        qr_size = 40 * mm
-        qr_table = Table(
-            [[
-                _build_fiscal_receipt_qr(qr_payload, qr_size),
-                Paragraph(
-                    "<b>Проверка подлинности</b><br/>"
-                    "Отсканируйте QR-код в приложении ФНС России или откройте "
-                    f'<link href="{FNS_RECEIPT_CHECK_URL}" color="#3498db">сервис проверки чека ФНС</link> '
-                    "и введите фискальные реквизиты.",
-                    body,
-                ),
-            ]],
-            colWidths=[48 * mm, 110 * mm],
-        )
-        qr_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.white),
-            ("BOX", (0, 0), (-1, -1), 1, blue),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 8),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-        ]))
-        flow.append(qr_table)
+    qr_size = 40 * mm
+    qr_table = Table(
+        [[
+            _build_fiscal_receipt_qr(qr_payload, qr_size),
+            Paragraph(
+                "<b>Проверка подлинности</b><br/>"
+                "Отсканируйте QR-код в приложении ФНС России или откройте "
+                f'<link href="{FNS_RECEIPT_CHECK_URL}" color="#3498db">сервис проверки чека ФНС</link> '
+                "и введите фискальные реквизиты.",
+                body,
+            ),
+        ]],
+        colWidths=[48 * mm, 110 * mm],
+    )
+    qr_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+        ("BOX", (0, 0), (-1, -1), 1, blue),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    flow.append(qr_table)
 
 
     doc.build(flow)
@@ -10728,6 +10717,50 @@ def retry_modulkassa_receipt(order_id, payment_id):
 
 
 SCHEDULE_MANUAL_PAYMENT_TYPES = {"cash": "CASH", "cashless": "CARD"}
+# Fiscal documents carry the cash desk's local time; the business (and its
+# ККТ) is in Санкт-Петербург, i.e. Moscow time.
+RECEIPT_LOCAL_TZ = dt.timezone(dt.timedelta(hours=3))
+
+
+def _load_json_dict(raw):
+    try:
+        value = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _fiscal_info_from_yookassa_receipt(receipt, amount):
+    """Shapes a receipt read from ЮKassa (fiscal_document_number /
+    fiscal_storage_number / fiscal_attribute / registered_at) like
+    ModulKassa's fiscalInfo, including the standard fiscal QR string that
+    the ФНС app and kkt-online.nalog.ru check receipts by:
+    t=<time>&s=<sum>&fn=<ФН>&i=<ФД>&fp=<ФП>&n=<1 приход | 2 возврат прихода>.
+    None while any fiscal attribute is missing."""
+    document = receipt.get("fiscal_document_number")
+    storage = receipt.get("fiscal_storage_number")
+    attribute = receipt.get("fiscal_attribute")
+    registered = str(receipt.get("registered_at") or "")
+    if not (document and storage and attribute and registered):
+        return None
+    try:
+        moment = dt.datetime.fromisoformat(registered.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=dt.timezone.utc)  # ЮKassa times are UTC
+    local = moment.astimezone(RECEIPT_LOCAL_TZ)
+    operation = 2 if receipt.get("type") == "refund" else 1
+    total = float(amount)
+    qr = (
+        f"t={local:%Y%m%dT%H%M%S}&s={total:.2f}&fn={storage}"
+        f"&i={document}&fp={attribute}&n={operation}"
+    )
+    return {
+        "qr": qr, "sum": total, "date": local.isoformat(timespec="seconds"),
+        "checkType": "SALE_RETURN" if operation == 2 else "SALE",
+        "fnNumber": storage, "fnDocNumber": document, "fnDocMark": attribute,
+    }
 
 
 def _schedule_receipt_service_line(payment):
@@ -10760,9 +10793,9 @@ def _schedule_receipt_check(db, payment_id):
 
 
 def _schedule_receipt_pdf(db, kind, payment_id):
-    """(pdf_bytes, filename) or (None, message). Manual payments get the
-    fiscal ModulKassa receipt; succeeded ЮKassa link payments get a branded
-    non-fiscal payment confirmation (ЮKassa issues the cash receipt itself)."""
+    """(pdf_bytes, filename) or (None, message). Both kinds are real fiscal
+    receipts: manual payments come from ModulKassa's own answer, paid ЮKassa
+    links from the receipt ЮKassa read back from the cash desk (ФН/ФД/ФП)."""
     if kind == "manual":
         payment = schedule_repository.get_manual_payment_context(db, payment_id)
         receipt_row = schedule_repository.get_latest_receipt(db, payment_id, only_successful=True)
@@ -10771,17 +10804,19 @@ def _schedule_receipt_pdf(db, kind, payment_id):
         data = {
             "payment_type": SCHEDULE_MANUAL_PAYMENT_TYPES.get(payment["payment_method"]),
             "fiscal_info_json": receipt_row["fiscal_info_json"],
-            "non_fiscal": False,
         }
     elif kind == "online":
         payment = schedule_repository.get_online_payment_context(db, payment_id)
-        if payment is None or payment["status"] != "succeeded":
-            return None, "Оплата ещё не подтверждена."
+        stored = _load_json_dict(payment["receipt_json"]) if payment is not None else None
+        if payment is None or payment["receipt_status"] != "succeeded" or not stored:
+            return None, "Фискальный чек ещё не получен из кассы."
+        fiscal_info = _fiscal_info_from_yookassa_receipt(stored, payment["amount"])
+        if fiscal_info is None:
+            return None, "Фискальный чек ещё не получен из кассы."
         data = {
-            "payment_type": "ONLINE", "non_fiscal": True,
-            "doc_title": "Подтверждение оплаты",
-            "doc_subtitle": "Оплата по ссылке через ЮKassa",
-            "paid_at": payment["updated_at"],
+            "payment_type": "ONLINE",
+            "fiscal_info_json": json.dumps(fiscal_info, ensure_ascii=False),
+            "skip_empty_fiscal_rows": True,
         }
     else:
         return None, "Чек не найден."
@@ -10854,6 +10889,13 @@ def cron_check_modulkassa_receipts():
     Protected by CRON_SECRET, same as the other /internal/cron endpoints."""
     if not CRON_SECRET or request.args.get("token") != CRON_SECRET:
         return "forbidden", 403
+    # Paid ЮKassa links of the schedule: fetch their fiscal receipts (the
+    # cash desk registers them a little after the payment).
+    if yookassa_configured():
+        try:
+            schedule_services.sync_pending_receipts(get_db(), _yookassa_request)
+        except Exception:
+            pass
     if not _modulkassa_configured():
         return "modulkassa not configured", 503
     db = get_db()

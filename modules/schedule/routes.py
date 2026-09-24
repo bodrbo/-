@@ -408,6 +408,37 @@ def create_schedule_blueprint(
 
     @blueprint.route(
         "/schedule/items/<int:item_id>/participants/<int:participant_id>"
+        "/yookassa/<int:payment_id>/receipt/check",
+        methods=["POST"],
+    )
+    @manage_required
+    def check_online_payment_receipt(item_id, participant_id, payment_id):
+        """Looks the fiscal receipt of a paid link up in ЮKassa."""
+        if not yookassa_configured() or yookassa_request is None:
+            return jsonify({"ok": False, "message": "ЮKassa не настроена на сервере."}), 400
+        db = get_db()
+        record = repository.get_yookassa_payment(db, payment_id, participant_id)
+        if record is None or record["schedule_item_id"] != item_id or record["status"] != "succeeded":
+            return jsonify({"ok": False, "message": "Оплата не найдена или ещё не подтверждена."}), 404
+        status = services.refresh_payment_receipt(db, record, yookassa_request)
+        message = (
+            "Чек найден." if status == "succeeded"
+            else "Чек ещё формируется — попробуйте через пару минут."
+        )
+        return _participants_response(db, item_id, message)
+
+    @blueprint.route("/internal/cron/sync-schedule-receipts")
+    def cron_sync_schedule_receipts():
+        """Polls ЮKassa for the fiscal receipts of recently paid links."""
+        if not cron_secret or request.args.get("token") != cron_secret:
+            return "forbidden", 403
+        if not yookassa_configured() or yookassa_request is None:
+            return "yookassa not configured", 503
+        checked, found = services.sync_pending_receipts(get_db(), yookassa_request)
+        return f"ok: {checked} checked, {found} receipts found", 200
+
+    @blueprint.route(
+        "/schedule/items/<int:item_id>/participants/<int:participant_id>"
         "/receipts/<kind>/<int:payment_id>.pdf"
     )
     @manage_required

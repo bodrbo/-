@@ -15,6 +15,8 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             db = application_module.get_db()
             db.execute("DELETE FROM schedule_day_crew")
             db.execute("DELETE FROM schedule_manual_payments")
+            db.execute("DELETE FROM schedule_yookassa_payments")
+            db.execute("DELETE FROM schedule_modulkassa_receipts")
             db.execute("DELETE FROM schedule_participants")
             db.execute("DELETE FROM schedule_assignments")
             db.execute("DELETE FROM schedule_items")
@@ -572,7 +574,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(left, 0)
 
-    def test_succeeded_online_payment_gets_branded_confirmation_pdf(self):
+    def _booking_with_paid_link(self):
         self.login()
         self.assertEqual(self.create_booking().status_code, 302)
         with application_module.app.app_context():
@@ -581,24 +583,109 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             participant_id = db.execute(
                 "SELECT id FROM schedule_participants WHERE schedule_item_id = ?", (item_id,)
             ).fetchone()["id"]
-            pending_id = db.execute(
-                "INSERT INTO schedule_yookassa_payments (schedule_item_id, participant_id, "
-                "yookassa_payment_id, amount, status, confirmation_url, applied, created_at, updated_at) "
-                "VALUES (?, ?, 'yk-pending', 3000, 'pending', 'https://x', 0, '2026-09-05 10:00', '2026-09-05 10:00')",
-                (item_id, participant_id),
-            ).lastrowid
             paid_id = db.execute(
                 "INSERT INTO schedule_yookassa_payments (schedule_item_id, participant_id, "
                 "yookassa_payment_id, amount, status, confirmation_url, applied, created_at, updated_at) "
-                "VALUES (?, ?, 'yk-paid', 4000, 'succeeded', 'https://x', 1, '2026-09-05 10:00', '2026-09-05 10:05')",
+                "VALUES (?, ?, 'yk-paid', 4000, 'succeeded', 'https://x', 1, "
+                "'2026-09-05 10:00', '2026-09-05 10:05')",
                 (item_id, participant_id),
             ).lastrowid
             db.commit()
+        return item_id, participant_id, paid_id
+
+    def _check_link_receipt(self, item_id, participant_id, paid_id, receipts):
+        fake_request = Mock(return_value={"items": receipts})
+        with patch.object(application_module, "yookassa_configured", return_value=True), \
+                patch.object(application_module, "_yookassa_request", fake_request):
+            response = self.client.post(
+                f"/schedule/items/{item_id}/participants/{participant_id}"
+                f"/yookassa/{paid_id}/receipt/check"
+            )
+        return response, fake_request
+
+    def test_paid_link_receipt_is_read_back_from_yookassa_and_rendered_with_qr(self):
+        item_id, participant_id, paid_id = self._booking_with_paid_link()
         base = f"/schedule/items/{item_id}/participants/{participant_id}/receipts/online"
-        self.assertEqual(self.client.get(f"{base}/{pending_id}.pdf").status_code, 404)
+        # nothing registered yet -> no PDF, and no fake "confirmation"
+        self.assertEqual(self.client.get(f"{base}/{paid_id}.pdf").status_code, 404)
+
+        response, fake_request = self._check_link_receipt(
+            item_id, participant_id, paid_id,
+            [{"id": "r1", "type": "payment", "status": "pending"}],
+        )
+        self.assertEqual(fake_request.call_args.args[:2], ("GET", "/receipts"))
+        self.assertEqual(fake_request.call_args.kwargs["params"], {"payment_id": "yk-paid"})
+        payment = response.get_json()["participants"][0]["payments"][0]
+        self.assertEqual(payment["receipt"]["status"], "pending")
+        self.assertFalse(payment["receipt"]["pdf_ready"])
+        self.assertNotIn("receipt_json", payment)
+        self.assertEqual(self.client.get(f"{base}/{paid_id}.pdf").status_code, 404)
+
+        response, _ = self._check_link_receipt(item_id, participant_id, paid_id, [
+            {"id": "r0", "type": "refund", "status": "succeeded"},
+            {
+                "id": "r1", "type": "payment", "status": "succeeded",
+                "registered_at": "2026-09-05T07:05:12.000Z",
+                "fiscal_document_number": 571, "fiscal_storage_number": "9999078900008998",
+                "fiscal_attribute": "3125146288",
+            },
+        ])
+        payment = response.get_json()["participants"][0]["payments"][0]
+        self.assertTrue(payment["receipt"]["pdf_ready"])
         pdf = self.client.get(f"{base}/{paid_id}.pdf")
         self.assertEqual(pdf.status_code, 200)
         self.assertTrue(pdf.data.startswith(b"%PDF"))
+
+        with application_module.app.app_context():
+            stored = application_module.get_db().execute(
+                "SELECT receipt_json FROM schedule_yookassa_payments WHERE id = ?", (paid_id,)
+            ).fetchone()["receipt_json"]
+            info = application_module._fiscal_info_from_yookassa_receipt(
+                __import__("json").loads(stored), 4000
+            )
+        # registered_at is UTC; the QR carries the Moscow-time receipt moment
+        self.assertEqual(
+            info["qr"],
+            "t=20260905T100512&s=4000.00&fn=9999078900008998&i=571&fp=3125146288&n=1",
+        )
+
+    def test_receipt_without_fiscal_attributes_is_not_treated_as_ready(self):
+        item_id, participant_id, paid_id = self._booking_with_paid_link()
+        response, _ = self._check_link_receipt(item_id, participant_id, paid_id, [
+            {"id": "r1", "type": "payment", "status": "succeeded",
+             "registered_at": "2026-09-05T07:05:12.000Z"},
+        ])
+        payment = response.get_json()["participants"][0]["payments"][0]
+        self.assertFalse(payment["receipt"]["pdf_ready"])
+
+    def test_cron_polls_receipts_of_recent_paid_links(self):
+        item_id, participant_id, paid_id = self._booking_with_paid_link()
+        with application_module.app.app_context():
+            application_module.get_db().execute(
+                "UPDATE schedule_yookassa_payments SET updated_at = ? WHERE id = ?",
+                (application_module.dt.datetime.now().strftime("%Y-%m-%d %H:%M"), paid_id),
+            )
+            application_module.get_db().commit()
+        fake_request = Mock(return_value={"items": [{
+            "type": "payment", "status": "succeeded",
+            "registered_at": "2026-09-05T07:05:12Z", "fiscal_document_number": 1,
+            "fiscal_storage_number": "123", "fiscal_attribute": "456",
+        }]})
+        # The cron URL itself is guarded by the secret captured at startup
+        # (unset in tests -> always forbidden); the polling is tested directly.
+        self.assertEqual(
+            self.anonymous_client().get("/internal/cron/sync-schedule-receipts?token=x").status_code,
+            403,
+        )
+        with application_module.app.app_context():
+            checked, found = application_module.schedule_services.sync_pending_receipts(
+                application_module.get_db(), fake_request
+            )
+            row = application_module.get_db().execute(
+                "SELECT receipt_status FROM schedule_yookassa_payments WHERE id = ?", (paid_id,)
+            ).fetchone()
+        self.assertEqual((checked, found), (1, 1))
+        self.assertEqual(row["receipt_status"], "succeeded")
 
     def test_schedule_routes_notify_on_assignment_change_and_deletion(self):
         self.login()

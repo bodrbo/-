@@ -855,6 +855,25 @@ def update_yookassa_payment_status(db, payment_id, status, timestamp):
     )
 
 
+def save_yookassa_receipt(db, payment_id, status, receipt_json, timestamp):
+    db.execute(
+        "UPDATE schedule_yookassa_payments SET receipt_status = ?, "
+        "receipt_json = COALESCE(?, receipt_json), receipt_checked_at = ? WHERE id = ?",
+        (status, receipt_json, timestamp, payment_id),
+    )
+
+
+def list_payments_needing_receipt(db, since_timestamp):
+    """Succeeded link payments whose fiscal receipt isn't stored yet —
+    registration in the cash desk is asynchronous, so they are polled."""
+    return db.execute(
+        "SELECT * FROM schedule_yookassa_payments "
+        "WHERE status = 'succeeded' AND receipt_status != 'succeeded' "
+        "AND updated_at >= ? ORDER BY id",
+        (since_timestamp,),
+    ).fetchall()
+
+
 def apply_yookassa_payment(db, payment_id, participant_id, amount):
     """First-time-succeeded side effect — reduces the participant's
     remaining balance and flags the payment as applied so a later webhook
@@ -930,9 +949,13 @@ def attach_receipt_summaries(db, manual_by_participant, online_by_participant):
     for payments in online_by_participant.values():
         for payment in payments:
             payment["receipt"] = {
-                "status": "confirmation", "failure": False,
-                "pdf_ready": payment["status"] == "succeeded",
+                "status": payment.get("receipt_status") or "",
+                "failure": False,
+                "pdf_ready": bool(payment.get("receipt_json"))
+                and payment.get("receipt_status") == "succeeded",
             }
+            # Keep the raw fiscal payload out of the JSON sent to the browser.
+            payment.pop("receipt_json", None)
 
 
 RECEIPT_SUCCESS_STATUSES = ("printed", "wait_for_callback", "completed")

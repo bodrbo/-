@@ -1,6 +1,7 @@
 """Validation and view models for the internal trip schedule."""
 
 import datetime as dt
+import json
 import math
 import secrets
 import sqlite3
@@ -1151,7 +1152,75 @@ def sync_participant_payment(db, record, yookassa_request):
             db, record["id"], record["participant_id"], record["amount"]
         )
     db.commit()
+    if status == "succeeded":
+        # The cash desk registers the receipt a moment after the payment, so
+        # this often only finds "pending" — the cron / "Проверить чек" button
+        # pick it up later.
+        refresh_payment_receipt(db, record, yookassa_request)
     return status
+
+
+def _pick_payment_receipt(items):
+    """The income receipt of a payment: a registered one wins over a
+    pending one; refunds and cancelled receipts are ignored."""
+    candidates = [
+        item for item in items
+        if item.get("type", "payment") == "payment" and item.get("status") != "canceled"
+    ]
+    candidates.sort(key=lambda item: item.get("status") == "succeeded", reverse=True)
+    return candidates[0] if candidates else None
+
+
+def refresh_payment_receipt(db, record, yookassa_request):
+    """Reads the fiscal receipt of a paid link from ЮKassa (its receipts API
+    lists the receipts issued for a payment, including those the connected
+    ModulKassa cash desk registered) and stores the fiscal data — ФН, ФД,
+    ФП and the registration time — the PDF is built from. Best-effort:
+    returns the stored receipt status ('' when nothing was found or the API
+    failed) and never raises."""
+    try:
+        listing = yookassa_request(
+            "GET", "/receipts", params={"payment_id": record["yookassa_payment_id"]}
+        )
+    except Exception:
+        return record["receipt_status"] if "receipt_status" in record.keys() else ""
+    receipt = _pick_payment_receipt(listing.get("items") or [])
+    timestamp = current_timestamp()
+    if receipt is None:
+        repository.save_yookassa_receipt(db, record["id"], "", None, timestamp)
+        db.commit()
+        return ""
+    has_fiscal_data = all(
+        receipt.get(key)
+        for key in ("fiscal_document_number", "fiscal_storage_number", "fiscal_attribute", "registered_at")
+    )
+    if receipt.get("status") == "succeeded" and has_fiscal_data:
+        stored = {
+            key: receipt.get(key)
+            for key in (
+                "id", "type", "registered_at", "fiscal_document_number",
+                "fiscal_storage_number", "fiscal_attribute", "fiscal_provider_id",
+            )
+        }
+        repository.save_yookassa_receipt(
+            db, record["id"], "succeeded", json.dumps(stored, ensure_ascii=False), timestamp
+        )
+        status = "succeeded"
+    else:
+        repository.save_yookassa_receipt(db, record["id"], "pending", None, timestamp)
+        status = "pending"
+    db.commit()
+    return status
+
+
+def sync_pending_receipts(db, yookassa_request, days=7):
+    since = (dt.datetime.now() - dt.timedelta(days=days)).strftime("%Y-%m-%d %H:%M")
+    found = 0
+    rows = repository.list_payments_needing_receipt(db, since)
+    for record in rows:
+        if refresh_payment_receipt(db, record, yookassa_request) == "succeeded":
+            found += 1
+    return len(rows), found
 
 
 def sync_participant_payment_by_remote_id(db, yookassa_payment_id, yookassa_request):

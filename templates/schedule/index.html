@@ -805,7 +805,7 @@
     if (receipt && receipt.pdf_ready) {
       const label = document.createElement('b');
       label.className = 'schedule-receipt-badge is-ready';
-      label.textContent = kind === 'manual' ? 'Чек пробит' : 'Оплата подтверждена';
+      label.textContent = 'Чек пробит';
       row.appendChild(label);
       const link = document.createElement('a');
       link.href = `${base}/receipts/${kind}/${payment.id}.pdf`;
@@ -829,7 +829,22 @@
       });
       return row;
     }
-    if (kind !== 'manual') return null;
+    if (kind === 'online') {
+      if (!scheduleYookassaConfigured) return null;
+      const label = document.createElement('b');
+      label.className = 'schedule-receipt-badge is-pending';
+      label.textContent = 'Чек формируется';
+      row.appendChild(label);
+      addBtn('Найти чек', 'Запросить фискальный чек этой оплаты', () => {
+        scheduleReceiptRequest(`${base}/yookassa/${payment.id}/receipt/check`, {method: 'POST'})
+          .then(data => {
+            if (!data.ok) { alert(data.message || 'Не удалось получить чек.'); return; }
+            scheduleApplyParticipantUpdate(item.id, data);
+          })
+          .catch(() => alert('Не удалось получить чек. Попробуйте ещё раз.'));
+      });
+      return row;
+    }
     const act = (action, failText) => () => {
       scheduleReceiptRequest(`${base}/manual-payments/${payment.id}/receipt/${action}`, {method: 'POST'})
         .then(data => {

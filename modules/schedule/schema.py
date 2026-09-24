@@ -195,6 +195,21 @@ def init_schema(conn):
         "CREATE INDEX IF NOT EXISTS idx_schedule_yookassa_payments_participant "
         "ON schedule_yookassa_payments(participant_id)"
     )
+    # The fiscal receipt of a paid link: ЮKassa passes the payment to
+    # ModulKassa, which fiscalizes it; the receipt's fiscal data (ФН/ФД/ФП,
+    # time) is read back from ЮKassa's receipts API by payment id.
+    yookassa_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(schedule_yookassa_payments)")
+    }
+    for column, ddl in (
+        ("receipt_status", "TEXT NOT NULL DEFAULT ''"),
+        ("receipt_json", "TEXT"),
+        ("receipt_checked_at", "TEXT"),
+    ):
+        if column not in yookassa_columns:
+            conn.execute(
+                f"ALTER TABLE schedule_yookassa_payments ADD COLUMN {column} {ddl}"
+            )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS schedule_manual_payments (
