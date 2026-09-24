@@ -670,7 +670,13 @@ class TripsterScheduleImportTests(unittest.TestCase):
         self.assertEqual(resolved, 1)
 
     def test_tripster_cancellation_notifies_assigned_employee(self):
-        self.sync([self.order()])
+        future_event = {
+            "aware_start_dt": "2099-09-10T13:00:00+03:00",
+            "date": "2099-09-10",
+            "time": "13:00",
+            "is_grouping_enabled": False,
+        }
+        self.sync([self.order(event=future_event)])
         with application_module.app.app_context():
             db = application_module.get_db()
             item_id = db.execute(
@@ -694,13 +700,50 @@ class TripsterScheduleImportTests(unittest.TestCase):
             application_module, "send_telegram_notification_to_employee"
         ) as notifier:
             response, _fetcher = self.sync([
-                self.order(status="cancelled")
+                self.order(status="cancelled", event=future_event)
             ])
 
         self.assertEqual(response.status_code, 302)
         notifier.assert_called_once()
         self.assertEqual(notifier.call_args.args[1], employee["name"])
         self.assertIn("Рейс отменён", notifier.call_args.args[2])
+
+    def test_tripster_reimport_of_finished_trip_does_not_notify_employee(self):
+        past_event = {
+            "aware_start_dt": "2026-08-10T13:00:00+03:00",
+            "date": "2026-08-10",
+            "time": "13:00",
+            "is_grouping_enabled": False,
+        }
+        self.sync([self.order(event=past_event)])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = db.execute(
+                "SELECT id FROM schedule_items WHERE source_ref = 'order:7001'"
+            ).fetchone()["id"]
+            employee = db.execute(
+                "SELECT employees.id, employees.name FROM employees "
+                "JOIN employee_positions ON employee_positions.employee_id = employees.id "
+                "WHERE employees.deleted_at IS NULL AND employee_positions.position "
+                "IN ('Капитан', 'Гид', 'Гид-капитан') LIMIT 1"
+            ).fetchone()
+            db.execute(
+                "INSERT INTO schedule_assignments "
+                "(schedule_item_id, employee_id, employee_name, role, created_at) "
+                "VALUES (?, ?, ?, 'captain', '2026-08-01 12:00')",
+                (item_id, employee["id"], employee["name"]),
+            )
+            db.commit()
+
+        with patch.object(
+            application_module, "send_telegram_notification_to_employee"
+        ) as notifier:
+            response, _fetcher = self.sync([
+                self.order(status="cancelled", event=past_event)
+            ])
+
+        self.assertEqual(response.status_code, 302)
+        notifier.assert_not_called()
 
     def test_manual_full_sync_refreshes_guest_count(self):
         self.sync([self.order(persons_count=2)])

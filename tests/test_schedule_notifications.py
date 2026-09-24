@@ -1,3 +1,4 @@
+import datetime as dt
 import unittest
 from unittest.mock import Mock
 
@@ -17,8 +18,8 @@ class ScheduleNotificationTests(unittest.TestCase):
 
     @staticmethod
     def snapshot(
-        starts_at="2026-09-10 13:00",
-        ends_at="2026-09-10 15:30",
+        starts_at="2099-09-10 13:00",
+        ends_at="2099-09-10 15:30",
         boat="Бодрый Первый",
         assignments=None,
     ):
@@ -86,8 +87,8 @@ class ScheduleNotificationTests(unittest.TestCase):
     def test_time_and_boat_change_are_combined_into_one_message(self):
         before = self.snapshot()
         after = self.snapshot(
-            starts_at="2026-09-11 14:00",
-            ends_at="2026-09-11 16:30",
+            starts_at="2099-09-11 14:00",
+            ends_at="2099-09-11 16:30",
             boat="Ларус",
         )
 
@@ -124,6 +125,50 @@ class ScheduleNotificationTests(unittest.TestCase):
 
         deliveries = notify_item_changes(
             self.db, before, dict(before), self.sender
+        )
+
+        self.assertEqual(deliveries, [])
+        self.sender.assert_not_called()
+
+    def test_finished_trip_never_notifies_about_retrospective_changes(self):
+        before = self.snapshot(
+            starts_at="2026-09-10 13:00",
+            ends_at="2026-09-10 15:30",
+        )
+        after = self.snapshot(
+            starts_at="2026-09-10 14:00",
+            ends_at="2026-09-10 16:30",
+            boat="Ларус",
+            assignments=before["assignments"] + ({
+                "employee_id": 8,
+                "employee_name": "Капитон Капитанов",
+                "role": "captain",
+            },),
+        )
+
+        deliveries = notify_item_changes(
+            self.db,
+            before,
+            after,
+            self.sender,
+            now=dt.datetime(2026, 9, 24, 12, 0),
+        )
+
+        self.assertEqual(deliveries, [])
+        self.sender.assert_not_called()
+
+    def test_finished_trip_cancellation_is_silent(self):
+        before = self.snapshot(
+            starts_at="2026-09-10 13:00",
+            ends_at="2026-09-10 15:30",
+        )
+
+        deliveries = notify_item_changes(
+            self.db,
+            before,
+            None,
+            self.sender,
+            now=dt.datetime(2026, 9, 24, 12, 0),
         )
 
         self.assertEqual(deliveries, [])

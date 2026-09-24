@@ -762,5 +762,6 @@ def sync_orders(
                 before,
                 schedule_notifications.item_snapshot(db, item_id),
                 employee_notifier,
+                now=now,
             )
     return stats

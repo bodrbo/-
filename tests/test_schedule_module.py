@@ -702,7 +702,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         with patch.object(
             application_module, "send_telegram_notification_to_employee"
         ) as notifier:
-            response = self.create_booking()
+            response = self.create_booking(trip_date="2099-09-05")
         self.assertEqual(response.status_code, 302)
         notifier.assert_called_once()
         self.assertEqual(notifier.call_args.args[1], "Даниил Галецкий")
@@ -720,7 +720,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
                 f"/schedule/items/{item_id}",
                 data=self.booking_data(
                     boat="Ларус",
-                    trip_date="2026-09-06",
+                    trip_date="2099-09-06",
                     start_time="14:00",
                     end_time="16:30",
                 ),
@@ -735,7 +735,7 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         ) as notifier:
             response = self.client.post(
                 f"/schedule/items/{item_id}/delete",
-                data={"return_date": "2026-09-06", "return_employee": "all"},
+                data={"return_date": "2099-09-06", "return_employee": "all"},
             )
         self.assertEqual(response.status_code, 302)
         notifier.assert_called_once()
@@ -743,7 +743,18 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
 
     def test_admin_can_drag_trip_in_time_and_to_another_employee(self):
         self.login()
-        self.create_booking()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.executemany(
+                "INSERT INTO schedule_day_crew "
+                "(work_date, employee_id, created_at) VALUES (?, ?, ?)",
+                [
+                    ("2099-09-05", self.daniil_id, "2099-09-01 09:00"),
+                    ("2099-09-05", self.platon_id, "2099-09-01 09:01"),
+                ],
+            )
+            db.commit()
+        self.create_booking(trip_date="2099-09-05")
         with application_module.app.app_context():
             db = application_module.get_db()
             item = db.execute("SELECT * FROM schedule_items").fetchone()
@@ -779,8 +790,8 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["item"]["starts_at"], "2026-09-05 14:15")
-        self.assertEqual(payload["item"]["ends_at"], "2026-09-05 16:45")
+        self.assertEqual(payload["item"]["starts_at"], "2099-09-05 14:15")
+        self.assertEqual(payload["item"]["ends_at"], "2099-09-05 16:45")
         self.assertEqual(
             payload["item"]["assignments"],
             [{
@@ -806,8 +817,8 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
                 "SELECT * FROM schedule_participants WHERE schedule_item_id = ?",
                 (item_id,),
             ).fetchone())
-        self.assertEqual(moved["starts_at"], "2026-09-05 14:15")
-        self.assertEqual(moved["ends_at"], "2026-09-05 16:45")
+        self.assertEqual(moved["starts_at"], "2099-09-05 14:15")
+        self.assertEqual(moved["ends_at"], "2099-09-05 16:45")
         self.assertEqual(moved["revenue"], 18000)
         self.assertEqual(assignment["employee_id"], self.platon_id)
         self.assertEqual(assignment["role"], "guide_captain")

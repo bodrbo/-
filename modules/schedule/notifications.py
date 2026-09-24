@@ -73,6 +73,27 @@ def _assignment_map(snapshot):
     }
 
 
+def _trip_has_finished(snapshot, now=None):
+    """Return True when the trip represented by *snapshot* is already over.
+
+    Schedule timestamps are stored as naive local datetimes, so the comparison
+    intentionally uses the same representation.  Invalid legacy timestamps do
+    not suppress notifications: failing open is safer for a genuinely upcoming
+    trip whose old data could not be parsed.
+    """
+    if snapshot is None:
+        return False
+    raw_end = snapshot.get("ends_at") or snapshot.get("starts_at")
+    try:
+        ends_at = dt.datetime.strptime(raw_end, "%Y-%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return False
+    current = now or dt.datetime.now()
+    if current.tzinfo is not None:
+        current = current.replace(tzinfo=None)
+    return ends_at <= current
+
+
 def _base_lines(snapshot, assignment=None):
     lines = [
         f"Рейс: <b>{_safe(snapshot['service_name'])}</b>",
@@ -101,9 +122,17 @@ def _deliver(db, event, employee_name, text, employee_notifier, deliveries):
     })
 
 
-def notify_item_changes(db, before, after, employee_notifier):
+def notify_item_changes(db, before, after, employee_notifier, now=None):
     """Compare two snapshots and send at most one message per employee."""
     if employee_notifier is None or (before is None and after is None):
+        return []
+
+    # Imports and retrospective corrections may rebuild an old card and make
+    # its crew look newly assigned.  Historical bookkeeping must stay silent.
+    # For deletion use the last existing snapshot; otherwise the resulting
+    # schedule state decides whether the trip is still relevant to employees.
+    effective_snapshot = after if after is not None else before
+    if _trip_has_finished(effective_snapshot, now=now):
         return []
 
     deliveries = []
