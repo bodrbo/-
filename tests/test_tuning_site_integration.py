@@ -110,13 +110,14 @@ class TuningSiteIntegrationTests(unittest.TestCase):
         self.assertEqual(order["status"], "new_request")
         self.assertEqual(order["source"], "tuning_site")
         self.assertEqual(order["source_ref"], "tuning_site:lead-2026-0001")
-        self.assertEqual(order["sale_channel"], "direct")
+        self.assertEqual(order["sale_channel"], "bodrbo_tuning")
         self.assertEqual(order["order_date"], "2026-08-27")
         self.assertEqual(order["subtotal"], 0)
         self.assertEqual(order["total"], 0)
         self.assertEqual(client["phone"], order["phone"])
         self.assertEqual(client["client_name"], order["client_name"])
         self.assertEqual(client["boat_model"], order["boat_model"])
+        self.assertEqual(client["acquisition_channel"], "bodrbo_tuning")
         self.assertEqual(project["name"], f"Заказ №{order['id']}")
         self.assertIsNone(note["author_admin_id"])
         self.assertIn(self.payload()["message"], note["text"])
@@ -247,6 +248,37 @@ class TuningSiteIntegrationTests(unittest.TestCase):
             'href="/tuning/boats" class="active">Каталог лодок</a>', html
         )
         self.assertNotIn("Заказов всего", html)
+
+    def test_tuning_form_uses_shared_channels_and_all_partner_types(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            for name, token, segment in (
+                ("Партнёр тюнинга общий", "shared-tuning-partner", "tuning"),
+                ("Партнёр экскурсий общий", "shared-excursion-partner", "excursion"),
+            ):
+                partner_id = db.execute(
+                    "INSERT INTO clients "
+                    "(client_name, boat_model, phone, token, created_at) "
+                    "VALUES (?, '', '', ?, '2026-09-24 10:00')",
+                    (name, token),
+                ).lastrowid
+                db.execute(
+                    "INSERT INTO client_segments "
+                    "(client_id, segment, relationship_type, created_at) "
+                    "VALUES (?, ?, 'partner', '2026-09-24 10:00')",
+                    (partner_id, segment),
+                )
+            db.commit()
+        with self.client.session_transaction() as session:
+            session["admin_id"] = 1
+            session["admin_name"] = "Администратор"
+
+        html = self.client.get("/tuning/add").get_data(as_text=True)
+        self.assertIn("Партнёр тюнинга общий · партнёр (тюнинг)", html)
+        self.assertIn("Партнёр экскурсий общий · партнёр (экскурсии)", html)
+        self.assertIn("Сайт bodrbo-tuning.ru", html)
+        self.assertIn("Сайт bodrbo-fort.ru", html)
+        self.assertIn('class="sales-channel-add"', html)
 
 
 if __name__ == "__main__":

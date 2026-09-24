@@ -9,6 +9,7 @@ from modules.clients.constants import (
     EXCURSION_SEGMENT,
 )
 from modules.clients.services import ensure_segment
+from modules.sales_channels import repository as sales_channel_repository
 
 
 def list_excursion_partners(db):
@@ -250,7 +251,8 @@ def update_item_capacity(db, item_id, capacity, timestamp):
 def item_has_sales_partner(db, item_id):
     return db.execute(
         "SELECT 1 FROM schedule_participants "
-        "WHERE schedule_item_id = ? AND sales_partner_id IS NOT NULL LIMIT 1",
+        "WHERE schedule_item_id = ? AND (sales_partner_id IS NOT NULL "
+        "OR sales_channel IN ('tripster', 'sputnik', 'aggregator', 'mixed')) LIMIT 1",
         (item_id,),
     ).fetchone() is not None
 
@@ -399,9 +401,14 @@ def list_day_items(db, day):
             row["participant_id"], []
         ).append(dict(row))
     attach_receipt_summaries(db, manual_payments_by_participant, payments_by_participant)
+    channel_labels = sales_channel_repository.label_map(db)
     participants_by_item = {}
     for participant in participants:
         participant = dict(participant)
+        participant["sales_channel_label"] = channel_labels.get(
+            participant.get("sales_channel"),
+            participant.get("sales_partner_name") or "",
+        )
         participant["addons"] = addons_by_item_and_client.get(
             (participant["schedule_item_id"], participant["client_id"]), []
         )
@@ -590,15 +597,22 @@ def save_item(db, item_id, data, assignments, participants, timestamp, keep_part
                 client_id = cursor.lastrowid
             ensure_segment(db, client_id, EXCURSION_SEGMENT, timestamp)
             db.execute(
-                "UPDATE clients SET preferred_contact_method = ? WHERE id = ?",
-                (participant.get("preferred_contact_method", ""), client_id),
+                "UPDATE clients SET preferred_contact_method = ?, "
+                "acquisition_channel = CASE WHEN ? != '' THEN ? "
+                "ELSE acquisition_channel END WHERE id = ?",
+                (
+                    participant.get("preferred_contact_method", ""),
+                    participant.get("sales_channel", ""),
+                    participant.get("sales_channel", ""), client_id,
+                ),
             )
             if reusable_booking_participant is not None and participant_index == 0:
                 old_client_id = reusable_booking_participant["client_id"]
                 db.execute(
                     "UPDATE schedule_participants SET client_id = ?, client_name = ?, "
                     "client_phone = ?, guests_count = ?, price = ?, prepayment = ?, "
-                    "payment_due = ?, source = ?, source_ref = ?, sales_partner_id = ? "
+                    "payment_due = ?, source = ?, source_ref = ?, sales_partner_id = ?, "
+                    "sales_channel = ? "
                     "WHERE id = ? AND schedule_item_id = ?",
                     (
                         client_id, participant["client_name"],
@@ -608,6 +622,7 @@ def save_item(db, item_id, data, assignments, participants, timestamp, keep_part
                         participant.get("source", "internal"),
                         participant.get("source_ref"),
                         participant.get("sales_partner_id"),
+                        participant.get("sales_channel", ""),
                         reusable_booking_participant["id"], item_id,
                     ),
                 )
@@ -622,8 +637,8 @@ def save_item(db, item_id, data, assignments, participants, timestamp, keep_part
                     "INSERT INTO schedule_participants "
                     "(schedule_item_id, client_id, client_name, client_phone, "
                     "guests_count, price, prepayment, payment_due, created_at, "
-                    "source, source_ref, sales_partner_id) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "source, source_ref, sales_partner_id, sales_channel) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         item_id, client_id, participant["client_name"],
                         participant["client_phone"], participant["guests_count"],
@@ -632,6 +647,7 @@ def save_item(db, item_id, data, assignments, participants, timestamp, keep_part
                         participant.get("source", "internal"),
                         participant.get("source_ref"),
                         participant.get("sales_partner_id"),
+                        participant.get("sales_channel", ""),
                     ),
                 )
             if auto_add_products and client_id not in existing_client_ids:
@@ -765,9 +781,14 @@ def list_item_participants_with_addons(db, item_id):
             row["participant_id"], []
         ).append(dict(row))
     attach_receipt_summaries(db, manual_payments_by_participant, payments_by_participant)
+    channel_labels = sales_channel_repository.label_map(db)
     result = []
     for participant in participants:
         participant = dict(participant)
+        participant["sales_channel_label"] = channel_labels.get(
+            participant.get("sales_channel"),
+            participant.get("sales_partner_name") or "",
+        )
         participant["addons"] = addons_by_client.get(participant["client_id"], [])
         participant["payments"] = payments_by_participant.get(participant["id"], [])
         participant["manual_payments"] = manual_payments_by_participant.get(
@@ -1113,8 +1134,8 @@ def add_participant(db, item_id, client_id, name, phone, guests_count, price, ti
     cursor = db.execute(
         "INSERT INTO schedule_participants "
         "(schedule_item_id, client_id, client_name, client_phone, guests_count, price, "
-        "prepayment, payment_due, created_at, source, source_ref, sales_partner_id) "
-        "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'internal', NULL, NULL)",
+        "prepayment, payment_due, created_at, source, source_ref, sales_partner_id, "
+        "sales_channel) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 'internal', NULL, NULL, '')",
         (item_id, resolved_client_id, name, phone, guests_count, price, price, timestamp),
     )
     participant_id = cursor.lastrowid
@@ -1132,7 +1153,7 @@ def add_participant(db, item_id, client_id, name, phone, guests_count, price, ti
 
 def add_external_participant(
     db, item_id, client_id, name, phone, guests_count, price, timestamp,
-    source, source_ref,
+    source, source_ref, sales_channel="",
 ):
     """Insert one idempotent participant from a trusted external API.
 
@@ -1149,14 +1170,19 @@ def add_external_participant(
         )
         resolved_client_id = cursor.lastrowid
     ensure_segment(db, resolved_client_id, EXCURSION_SEGMENT, timestamp)
+    if sales_channel:
+        db.execute(
+            "UPDATE clients SET acquisition_channel = ? WHERE id = ?",
+            (sales_channel, resolved_client_id),
+        )
     cursor = db.execute(
         "INSERT INTO schedule_participants "
         "(schedule_item_id, client_id, client_name, client_phone, guests_count, price, "
-        "prepayment, payment_due, created_at, source, source_ref, sales_partner_id) "
-        "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL)",
+        "prepayment, payment_due, created_at, source, source_ref, sales_partner_id, "
+        "sales_channel) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL, ?)",
         (
             item_id, resolved_client_id, name, phone, guests_count, price, price,
-            timestamp, source, source_ref,
+            timestamp, source, source_ref, sales_channel,
         ),
     )
     item = db.execute(
@@ -1190,15 +1216,22 @@ def update_participant(db, participant_id, item_id, data, timestamp):
     payment_due = data["price"] if row["source"] != "tripster" else row["payment_due"]
     db.execute(
         "UPDATE schedule_participants SET client_name = ?, client_phone = ?, "
-        "guests_count = ?, price = ?, payment_due = ?, sales_partner_id = ? WHERE id = ?",
+        "guests_count = ?, price = ?, payment_due = ?, sales_partner_id = ?, "
+        "sales_channel = ? WHERE id = ?",
         (
             data["client_name"], data["client_phone"], data["guests_count"],
-            data["price"], payment_due, data["sales_partner_id"], participant_id,
+            data["price"], payment_due, data["sales_partner_id"],
+            data.get("sales_channel", ""), participant_id,
         ),
     )
     db.execute(
-        "UPDATE clients SET preferred_contact_method = ? WHERE id = ?",
-        (data["preferred_contact_method"], row["client_id"]),
+        "UPDATE clients SET preferred_contact_method = ?, "
+        "acquisition_channel = CASE WHEN ? != '' THEN ? "
+        "ELSE acquisition_channel END WHERE id = ?",
+        (
+            data["preferred_contact_method"], data.get("sales_channel", ""),
+            data.get("sales_channel", ""), row["client_id"],
+        ),
     )
     _recompute_item_totals(db, item_id, timestamp)
     db.commit()

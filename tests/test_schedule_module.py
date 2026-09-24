@@ -1097,13 +1097,15 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         with application_module.app.app_context():
             db = application_module.get_db()
             participant = db.execute(
-                "SELECT sales_partner_id, client_id FROM schedule_participants"
+                "SELECT sales_partner_id, sales_channel, client_id "
+                "FROM schedule_participants"
             ).fetchone()
             client = db.execute(
                 "SELECT preferred_contact_method FROM clients WHERE id = ?",
                 (participant["client_id"],),
             ).fetchone()
         self.assertEqual(participant["sales_partner_id"], partner_id)
+        self.assertEqual(participant["sales_channel"], f"partner:{partner_id}")
         self.assertEqual(client["preferred_contact_method"], "telegram")
 
         html = self.client.get(
@@ -1112,6 +1114,44 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn('name="customer_sales_partner_id"', html)
         self.assertIn('name="customer_preferred_contact_method"', html)
         self.assertIn('name="participant_preferred_contact_method[]"', html)
+
+    def test_sales_channels_include_both_partner_segments_and_custom_entries(self):
+        self.login()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "DELETE FROM client_segments WHERE client_id IN "
+                "(SELECT id FROM clients WHERE token = 'tuning-channel-partner')"
+            )
+            db.execute(
+                "DELETE FROM clients WHERE token = 'tuning-channel-partner'"
+            )
+            tuning_partner_id = db.execute(
+                "INSERT INTO clients (client_name, boat_model, phone, token, created_at) "
+                "VALUES ('Тюнинг-партнёр канала', '', '', 'tuning-channel-partner', "
+                "'2026-09-01 10:00')"
+            ).lastrowid
+            db.execute(
+                "INSERT INTO client_segments "
+                "(client_id, segment, relationship_type, created_at) "
+                "VALUES (?, 'tuning', 'partner', '2026-09-01 10:00')",
+                (tuning_partner_id,),
+            )
+            db.commit()
+
+        created = self.client.post(
+            "/api/sales-channels", json={"name": "Рекомендация яхт-клуба"}
+        )
+        self.assertEqual(created.status_code, 201)
+        channel = created.get_json()["channel"]
+        self.assertTrue(channel["value"].startswith("custom:"))
+
+        html = self.client.get("/schedule?date=2026-09-05").get_data(as_text=True)
+        self.assertIn("Сайт bodrbo-tuning.ru", html)
+        self.assertIn("Сайт bodrbo-fort.ru", html)
+        self.assertIn("Тюнинг-партнёр канала · партнёр (тюнинг)", html)
+        self.assertIn("Рекомендация яхт-клуба", html)
+        self.assertIn('class="sales-channel-add"', html)
 
     def test_individual_client_card_edit_keeps_booking_summary_in_sync(self):
         self.login()

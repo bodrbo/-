@@ -11710,7 +11710,6 @@ button.partner-open-price-save svg {
 .tuning-calendar-card-time { font-family: 'PT Mono', monospace; font-size: 9.5px; font-weight: 700; opacity: .92; }
 .tuning-calendar-card strong { overflow: hidden; margin-top: 2px; font-size: 12px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .tuning-calendar-card-meta { overflow: hidden; margin-top: 2px; font-size: 10px; opacity: .9; text-overflow: ellipsis; white-space: nowrap; }
-
 /* Карта цеха — лента времени */
 .shop-timeline-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:12px}
 .shop-timeline-head h2{margin:0}
@@ -11772,3 +11771,127 @@ button.partner-open-price-save svg {
 .schedule-receipt-badge.is-ready { background: #e3f4ea; color: #1e7a45; }
 .schedule-receipt-badge.is-pending { background: #fdf3dc; color: #8a6a12; }
 .schedule-receipt-badge.is-failed { background: #fbe4e1; color: #b3372a; }
+
+.sales-channel-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  gap: 8px;
+  align-items: stretch;
+  width: 100%;
+}
+
+.sales-channel-control select {
+  min-width: 0;
+  width: 100%;
+}
+
+.sales-channel-add {
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  min-width: 38px;
+  min-height: 38px;
+  padding: 0;
+  border: 1px solid rgba(34, 120, 169, .26);
+  border-radius: 10px;
+  background: #eaf4fa;
+  color: #176a98;
+  font: 700 22px/1 Arial, sans-serif;
+  cursor: pointer;
+  transition: background-color .16s ease, border-color .16s ease, transform .16s ease;
+}
+
+.sales-channel-add:hover {
+  background: #dceef8;
+  border-color: rgba(34, 120, 169, .48);
+  transform: translateY(-1px);
+}
+
+.sales-channel-add:focus-visible {
+  outline: 3px solid rgba(57, 160, 214, .28);
+  outline-offset: 2px;
+}
+
+.sales-channel-modal[hidden] { display: none; }
+
+.sales-channel-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1600;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.sales-channel-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border: 0;
+  background: rgba(8, 37, 53, .58);
+  backdrop-filter: blur(4px);
+  cursor: default;
+}
+
+.sales-channel-modal-card {
+  position: relative;
+  width: min(460px, 100%);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .55);
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(8, 37, 53, .26);
+}
+
+.sales-channel-modal-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 22px;
+  background: #123f52;
+  color: #fff;
+}
+
+.sales-channel-modal-card > header span {
+  display: block;
+  margin-bottom: 4px;
+  color: #9fc8da;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.sales-channel-modal-card > header h2 {
+  margin: 0;
+  color: #fff;
+  font-size: 21px;
+}
+
+.sales-channel-modal-card > form { padding: 22px; }
+
+.sales-channel-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.sales-channel-modal-error {
+  margin: 10px 0 0;
+  color: #b63c32;
+  font-size: 13px;
+}
+
+@media (max-width: 520px) {
+  .sales-channel-modal { padding: 12px; }
+  .sales-channel-modal-card > header,
+  .sales-channel-modal-card > form { padding: 18px; }
+  .sales-channel-modal-actions { flex-direction: column-reverse; }
+  .sales-channel-modal-actions .btn { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sales-channel-add { transition: none; }
+}

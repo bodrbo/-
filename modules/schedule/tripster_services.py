@@ -542,8 +542,8 @@ def _rebuild_item(db, item_id, timestamp):
         db.execute(
             "INSERT INTO schedule_participants "
             "(schedule_item_id, client_id, client_name, client_phone, guests_count, "
-            "price, prepayment, payment_due, created_at, source, source_ref) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "price, prepayment, payment_due, created_at, source, source_ref, sales_channel) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'tripster')",
             (
                 item_id, participant["client_id"], participant["client_name"],
                 participant["client_phone"], participant["guests_count"],

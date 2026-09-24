@@ -152,6 +152,18 @@ def init_schema(conn):
         conn.execute(
             "ALTER TABLE schedule_participants ADD COLUMN sales_partner_id INTEGER"
         )
+    if "sales_channel" not in participant_columns:
+        conn.execute(
+            "ALTER TABLE schedule_participants "
+            "ADD COLUMN sales_channel TEXT NOT NULL DEFAULT ''"
+        )
+        conn.execute(
+            "UPDATE schedule_participants SET sales_channel = "
+            "CASE WHEN sales_partner_id IS NOT NULL "
+            "THEN 'partner:' || sales_partner_id "
+            "WHEN source = 'tripster' THEN 'tripster' "
+            "WHEN source = 'fort_site' THEN 'bodrbo_fort' ELSE '' END"
+        )
     if "paid_online" not in participant_columns:
         conn.execute(
             "ALTER TABLE schedule_participants "

@@ -988,12 +988,15 @@
         </div>
         <div class="field field-narrow">
           <label for="sale_channel">Канал продажи</label>
-          <select id="sale_channel" name="sale_channel">
-            {% for c in sale_channels %}
-            <option value="{{ c.value }}"
-              {{ 'selected' if form_values and form_values.sale_channel == c.value }}>{{ c.label }}</option>
-            {% endfor %}
-          </select>
+          <span class="sales-channel-control">
+            <select id="sale_channel" name="sale_channel" data-sales-channel-select>
+              {% for c in sale_channels %}
+              <option value="{{ c.value }}"
+                {{ 'selected' if form_values and form_values.sale_channel == c.value }}>{{ c.label }}</option>
+              {% endfor %}
+            </select>
+            <button type="button" class="sales-channel-add" onclick="openSalesChannelModal(this.previousElementSibling)" aria-label="Добавить канал продаж" title="Добавить канал продаж">+</button>
+          </span>
         </div>
         </div>
       </div>
@@ -1212,9 +1215,64 @@
   </div>
   {% endif %}
 
+  <div class="sales-channel-modal" id="salesChannelModal" hidden>
+    <button type="button" class="sales-channel-modal-backdrop" onclick="closeSalesChannelModal()" aria-label="Закрыть окно"></button>
+    <section class="sales-channel-modal-card" role="dialog" aria-modal="true" aria-labelledby="salesChannelModalTitle">
+      <header><div><span>Справочник</span><h2 id="salesChannelModalTitle">Новый канал продаж</h2></div><button type="button" class="schedule-modal-close" onclick="closeSalesChannelModal()" aria-label="Закрыть">×</button></header>
+      <form onsubmit="createSalesChannel(event)">
+        <label class="field"><span>Название канала</span><input id="salesChannelName" maxlength="120" autocomplete="off" placeholder="Например, рекомендация от отеля" required></label>
+        <p class="sales-channel-modal-error" id="salesChannelError" role="alert" hidden></p>
+        <div class="sales-channel-modal-actions"><button type="button" class="btn secondary" onclick="closeSalesChannelModal()">Отмена</button><button type="submit" class="btn primary" id="salesChannelSubmit">Добавить канал</button></div>
+      </form>
+    </section>
+  </div>
 </main>
 
 <script>
+var salesChannelCreateUrl = {{ url_for('create_sales_channel')|tojson }};
+var salesChannelTargetSelect = null;
+var salesChannelModalTrigger = null;
+function openSalesChannelModal(select) {
+  salesChannelTargetSelect = select || null;
+  salesChannelModalTrigger = document.activeElement;
+  document.getElementById('salesChannelName').value = '';
+  document.getElementById('salesChannelError').hidden = true;
+  document.getElementById('salesChannelModal').hidden = false;
+  setTimeout(function () { document.getElementById('salesChannelName').focus(); }, 20);
+}
+function closeSalesChannelModal() {
+  document.getElementById('salesChannelModal').hidden = true;
+  if (salesChannelModalTrigger) salesChannelModalTrigger.focus();
+  salesChannelModalTrigger = null;
+  salesChannelTargetSelect = null;
+}
+async function createSalesChannel(event) {
+  event.preventDefault();
+  var submit = document.getElementById('salesChannelSubmit');
+  var error = document.getElementById('salesChannelError');
+  submit.disabled = true;
+  error.hidden = true;
+  try {
+    var response = await fetch(salesChannelCreateUrl, {
+      method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+      body: JSON.stringify({name: document.getElementById('salesChannelName').value.trim()})
+    });
+    var payload = await response.json();
+    if (!response.ok || !payload.ok) throw new Error(payload.message || 'Не удалось добавить канал.');
+    document.querySelectorAll('[data-sales-channel-select]').forEach(function (select) {
+      if (!Array.from(select.options).some(function (option) { return option.value === payload.channel.value; })) {
+        select.add(new Option(payload.channel.label, payload.channel.value));
+      }
+    });
+    if (salesChannelTargetSelect) salesChannelTargetSelect.value = payload.channel.value;
+    closeSalesChannelModal();
+  } catch (requestError) {
+    error.textContent = requestError.message;
+    error.hidden = false;
+  } finally {
+    submit.disabled = false;
+  }
+}
 function openAssignModal(actionUrl, description) {
   var form = document.getElementById('assign-form');
   form.action = actionUrl;

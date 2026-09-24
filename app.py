@@ -31,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 from flask import (
-    Flask, abort, g, has_request_context, jsonify, redirect, render_template, request,
+    Flask, abort, g, has_app_context, has_request_context, jsonify, redirect, render_template, request,
     send_from_directory, session, url_for,
 )
 from werkzeug.datastructures import MultiDict
@@ -190,6 +190,8 @@ from modules.clients import (
     update_directory_contact,
 )
 from modules.clients.partner_quote_pdf import build_partner_quote_pdf
+from modules.sales_channels import init_schema as init_sales_channels_schema
+from modules.sales_channels import repository as sales_channel_repository
 from modules.clients.constants import (
     CLIENT_ACQUISITION_CHANNELS,
     CLIENT_CONTACT_METHODS,
@@ -769,6 +771,13 @@ def _tuning_partner_choices(db):
         "ORDER BY clients.client_name COLLATE NOCASE, clients.phone, clients.id",
         (TUNING_SEGMENT, CLIENT_RELATIONSHIP_PARTNER),
     ).fetchall()
+
+
+def _sales_channel_choices(db):
+    """One directory for tuning orders, excursion clients and trip guests."""
+    return sales_channel_repository.list_channels(
+        db, include_tripster=not bool(session.get("demo_tenant_id"))
+    )
 
 
 def get_work_item_photos(db, item_id):
@@ -3556,6 +3565,7 @@ def init_db(db_path=None, include_bootstrap_data=True):
     init_client_segments_schema(conn)
     _ensure_own_company_client(conn)
     _remove_fleet_boat_catalog_profiles(conn)
+    init_sales_channels_schema(conn)
     init_ai_assistant_schema(conn)
     init_investor_finance_schema(conn)
     weather_schema.init_schema(conn)
@@ -5516,8 +5526,22 @@ def _process_tuning_form(
             acceptance_date = dt.date.fromisoformat(acceptance_date_raw).isoformat()
         except ValueError:
             errors.append("Укажите корректную дату приемки лодки.")
-    sale_channel = form.get("sale_channel", "direct").strip()
-    if sale_channel not in [c["value"] for c in SALE_CHANNELS]:
+    raw_sale_channel = form.get("sale_channel", "direct")
+    sale_channel = (
+        sales_channel_repository.normalise_value(
+            get_db(), raw_sale_channel,
+            include_tripster=not (
+                has_request_context() and bool(session.get("demo_tenant_id"))
+            ),
+        )
+        if has_app_context()
+        else str(raw_sale_channel or "").strip()
+    )
+    if not has_app_context() and sale_channel not in {
+        channel["value"] for channel in SALE_CHANNELS
+    }:
+        sale_channel = ""
+    if not sale_channel:
         sale_channel = "direct"
 
     if not client_name:
@@ -9452,7 +9476,7 @@ def add_tuning_order():
         db.commit()
         return render_template(
             "tuning_form.html", edit_order=None, errors=None, form_values=None,
-            items_prefill=None, boat_motors_prefill=[], sale_channels=SALE_CHANNELS,
+            items_prefill=None, boat_motors_prefill=[], sale_channels=_sales_channel_choices(db),
             active_page="tuning", sub_page="orders",
             today=dt.date.today().isoformat(),
             boat_model_choices=_tuning_boat_model_choices(db),
@@ -9472,7 +9496,7 @@ def add_tuning_order():
         return render_template(
             "tuning_form.html", edit_order=None, errors=errors, form_values=request.form,
             items_prefill=None, boat_motors_prefill=_boat_motor_form_values(request.form),
-            sale_channels=SALE_CHANNELS, active_page="tuning", sub_page="orders",
+            sale_channels=_sales_channel_choices(db), active_page="tuning", sub_page="orders",
             today=dt.date.today().isoformat(),
             boat_model_choices=_tuning_boat_model_choices(db),
             motor_model_choices=_tuning_motor_model_choices(db),
@@ -9702,12 +9726,17 @@ def tuning_site_lead_webhook():
         client_id = _get_or_create_client(
             db, data["phone"], data["name"], data["boat_model"]
         )
+        db.execute(
+            "UPDATE clients SET acquisition_channel = 'bodrbo_tuning' "
+            "WHERE id = ?",
+            (client_id,),
+        )
         cursor = db.execute(
             "INSERT INTO tuning_orders "
             "(client_id, client_name, boat_model, sale_channel, phone, "
             "discount_pct, discount_type, discount_value, subtotal, total, "
             "status, source, source_ref, order_date, created_at, updated_at) "
-            "VALUES (?, ?, ?, 'direct', ?, 0, 'percent', 0, 0, 0, "
+            "VALUES (?, ?, ?, 'bodrbo_tuning', ?, 0, 'percent', 0, 0, 0, "
             "'new_request', 'tuning_site', ?, ?, ?, ?)",
             (
                 client_id,
@@ -9979,7 +10008,7 @@ def edit_tuning_order(order_id):
             "tuning_form.html", edit_order=order, errors=None, form_values=form_values,
             deadline_view=deadline_view,
             items_prefill=items, boat_motors_prefill=boat_motors,
-            sale_channels=SALE_CHANNELS, active_page="tuning", sub_page=tuning_sub_page,
+            sale_channels=_sales_channel_choices(db), active_page="tuning", sub_page=tuning_sub_page,
             today=dt.date.today().isoformat(),
             payments=payments, paid_amount=paid_amount, remaining=remaining,
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
@@ -10034,7 +10063,7 @@ def edit_tuning_order(order_id):
                 order["deadline_date"], order["completed_at"], order["status"]
             ),
             items_prefill=None, boat_motors_prefill=_boat_motor_form_values(request.form),
-            sale_channels=SALE_CHANNELS, active_page="tuning", sub_page=tuning_sub_page,
+            sale_channels=_sales_channel_choices(db), active_page="tuning", sub_page=tuning_sub_page,
             today=dt.date.today().isoformat(),
             payments=payments, paid_amount=paid_amount, remaining=remaining,
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
@@ -11333,6 +11362,7 @@ def _render_client_dashboard(
             ).fetchall()
 
     orders = []
+    sales_channel_labels = sales_channel_repository.label_map(db)
     paid_total = 0.0
     remaining_total = 0.0
     for o in order_rows:
@@ -11368,6 +11398,9 @@ def _render_client_dashboard(
             (o["id"],),
         ).fetchall()
         order = dict(o)
+        order["sale_channel_label"] = sales_channel_labels.get(
+            order.get("sale_channel"), order.get("sale_channel") or "Не указан"
+        )
         order["partner_request_direction"] = (
             "incoming"
             if order.get("source") == SUBCONTRACT_REQUEST_SOURCE
@@ -11471,13 +11504,7 @@ def _render_client_dashboard(
             if orders else (client["boat_model"] or "—")
         ),
         work_photos_by_item=work_photos_by_item, cost_units=SUPPLY_COST_UNITS,
-        client_acquisition_channels=[
-            channel for channel in CLIENT_ACQUISITION_CHANNELS
-            if not (
-                session.get("demo_tenant_id")
-                and channel["value"] == TRIPSTER_CHANNEL
-            )
-        ],
+        client_acquisition_channels=_sales_channel_choices(db),
         client_contact_methods=CLIENT_CONTACT_METHODS,
         viewer_role=viewer_role,
         client_section=client_section,
@@ -12095,23 +12122,21 @@ def partner_order_estimate_pdf(token, order_id):
 @excursion_manager_or_admin_required
 def update_client_acquisition_channel(client_id):
     db = get_db()
-    _client_section_for_request(EXCURSION_SEGMENT, strict=True)
-    channel = request.form.get("acquisition_channel", "").strip()
-    allowed_channels = {
-        item["value"] for item in CLIENT_ACQUISITION_CHANNELS
-    }
-    is_excursion_client = db.execute(
-        "SELECT 1 FROM client_segments WHERE client_id = ? AND segment = ?",
-        (client_id, EXCURSION_SEGMENT),
-    ).fetchone() is not None
-    channel_allowed_for_viewer = not (
-        session.get("demo_tenant_id") and channel == TRIPSTER_CHANNEL
+    section = _client_section_for_request(
+        EXCURSION_SEGMENT if _is_customer_manager(db)
+        else request.form.get("section", EXCURSION_SEGMENT),
+        manager_view=_is_customer_manager(db), strict=True,
     )
-    if (
-        is_excursion_client
-        and channel_allowed_for_viewer
-        and (not channel or channel in allowed_channels)
-    ):
+    raw_channel = request.form.get("acquisition_channel", "").strip()
+    channel = sales_channel_repository.normalise_value(
+        db, raw_channel,
+        include_tripster=not bool(session.get("demo_tenant_id")),
+    ) if raw_channel else ""
+    belongs_to_section = db.execute(
+        "SELECT 1 FROM client_segments WHERE client_id = ? AND segment = ?",
+        (client_id, section),
+    ).fetchone() is not None
+    if belongs_to_section and (not raw_channel or channel):
         db.execute(
             "UPDATE clients SET acquisition_channel = ? WHERE id = ?",
             (channel, client_id),
@@ -12119,8 +12144,22 @@ def update_client_acquisition_channel(client_id):
         db.commit()
     return redirect(url_for(
         "admin_client_dashboard", client_id=client_id,
-        section=EXCURSION_SEGMENT,
+        section=section,
     ))
+
+
+@app.route("/api/sales-channels", methods=["POST"])
+@excursion_manager_or_admin_required
+def create_sales_channel():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(ok=False, message="Некорректный запрос."), 400
+    channel, error = sales_channel_repository.create_custom_channel(
+        get_db(), payload.get("name"), dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    )
+    if error:
+        return jsonify(ok=False, message=error), 400
+    return jsonify(ok=True, channel=channel), 201
 
 
 @app.route(

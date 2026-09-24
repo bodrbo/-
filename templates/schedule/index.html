@@ -342,12 +342,15 @@
         </label>
         <label class="field">
           <span>Канал продаж</span>
-          <select name="customer_sales_partner_id" id="scheduleCustomerSalesPartner">
-            <option value="">Не указан</option>
-            {% for partner in excursion_partners %}
-            <option value="{{ partner.id }}">{{ partner.client_name }}</option>
-            {% endfor %}
-          </select>
+          <span class="sales-channel-control">
+            <select name="customer_sales_partner_id" id="scheduleCustomerSalesPartner" data-sales-channel-select>
+              <option value="">Не указан</option>
+              {% for channel in sales_channels %}
+              <option value="{{ channel.value }}">{{ channel.label }}</option>
+              {% endfor %}
+            </select>
+            <button type="button" class="sales-channel-add" onclick="openSalesChannelModal(this.previousElementSibling)" aria-label="Добавить канал продаж" title="Добавить канал продаж">+</button>
+          </span>
         </label>
         <label class="field">
           <span>Канал связи</span>
@@ -707,12 +710,15 @@
     </button>
     <label class="field schedule-participant-channel">
       <span>Канал продаж</span>
-      <select name="participant_sales_partner_id[]">
-        <option value="">Не указан</option>
-        {% for partner in excursion_partners %}
-        <option value="{{ partner.id }}">{{ partner.client_name }}</option>
-        {% endfor %}
-      </select>
+      <span class="sales-channel-control">
+        <select name="participant_sales_partner_id[]" data-sales-channel-select>
+          <option value="">Не указан</option>
+          {% for channel in sales_channels %}
+          <option value="{{ channel.value }}">{{ channel.label }}</option>
+          {% endfor %}
+        </select>
+        <button type="button" class="sales-channel-add" onclick="openSalesChannelModal(this.previousElementSibling)" aria-label="Добавить канал продаж" title="Добавить канал продаж">+</button>
+      </span>
     </label>
     <label class="field schedule-participant-contact">
       <span>Канал связи</span>
@@ -762,6 +768,26 @@
 </div>
 {% endif %}
 
+{% if can_manage %}
+<div class="sales-channel-modal" id="salesChannelModal" hidden>
+  <button type="button" class="sales-channel-modal-backdrop" onclick="closeSalesChannelModal()" aria-label="Закрыть окно"></button>
+  <section class="sales-channel-modal-card" role="dialog" aria-modal="true" aria-labelledby="salesChannelModalTitle">
+    <header>
+      <div><span>Справочник</span><h2 id="salesChannelModalTitle">Новый канал продаж</h2></div>
+      <button type="button" class="schedule-modal-close" onclick="closeSalesChannelModal()" aria-label="Закрыть">×</button>
+    </header>
+    <form onsubmit="createSalesChannel(event)">
+      <label class="field"><span>Название канала</span><input id="salesChannelName" maxlength="120" autocomplete="off" placeholder="Например, рекомендация от отеля" required></label>
+      <p class="sales-channel-modal-error" id="salesChannelError" role="alert" hidden></p>
+      <div class="sales-channel-modal-actions">
+        <button type="button" class="btn secondary" onclick="closeSalesChannelModal()">Отмена</button>
+        <button type="submit" class="btn primary" id="salesChannelSubmit">Добавить канал</button>
+      </div>
+    </form>
+  </section>
+</div>
+{% endif %}
+
 <script>
   const scheduleItems = {{ schedule_items_json|tojson }};
   const scheduleCanManage = {{ can_manage|tojson }};
@@ -774,8 +800,9 @@
   const scheduleBaseUrl = {{ url_for('schedule.index')|tojson }};
   const scheduleCreateUrl = {{ url_for('schedule.create_item')|tojson }};
   const scheduleClientSearchUrl = {{ url_for('schedule.search_clients')|tojson }};
+  const salesChannelCreateUrl = {{ url_for('create_sales_channel')|tojson }};
   const scheduleAddonProducts = {{ addon_products|tojson }};
-  const scheduleExcursionPartners = {{ excursion_partners|tojson }};
+  const scheduleSalesChannels = {{ sales_channels|tojson }};
   const scheduleContactMethods = {{ client_contact_methods|tojson }};
   const scheduleYookassaConfigured = {{ yookassa_configured|tojson }};
   const scheduleReceiptsConfigured = {{ receipts_configured|tojson }};
@@ -886,6 +913,8 @@
   let scheduleModalTrigger = null;
   let scheduleRosterModalTrigger = null;
   let scheduleViewModalTrigger = null;
+  let salesChannelTargetSelect = null;
+  let salesChannelModalTrigger = null;
   {% if not is_demo_tenant %}let scheduleSourceModalTrigger = null;
   let scheduleSourceItemId = null;
   let scheduleSourceCandidateRequest = 0;{% endif %}
@@ -1117,7 +1146,7 @@
     }
     document.getElementById('scheduleBookingGuestsCount').value = item.guests_count || '';
     document.getElementById('scheduleCustomerSalesPartner').value = bookingParticipant
-      ? String(bookingParticipant.sales_partner_id || '') : '';
+      ? String(bookingParticipant.sales_channel || (bookingParticipant.sales_partner_id ? `partner:${bookingParticipant.sales_partner_id}` : '')) : '';
     document.getElementById('scheduleCustomerContactMethod').value = bookingParticipant
       ? (bookingParticipant.preferred_contact_method || '') : '';
     document.getElementById('scheduleCapacity').value = item.capacity || 10;
@@ -1126,7 +1155,8 @@
         participant.client_id, participant.client_name, participant.client_phone,
         participant.guests_count || 1, false, participant.price ?? 0,
         participant.source_ref || '', participant.prepayment || 0,
-        participant.payment_due || 0, participant.sales_partner_id || '',
+        participant.payment_due || 0,
+        participant.sales_channel || (participant.sales_partner_id ? `partner:${participant.sales_partner_id}` : ''),
         participant.preferred_contact_method || ''
       ));
     }
@@ -1170,6 +1200,57 @@
     const div = document.createElement('div');
     div.textContent = String(value == null ? '' : value);
     return div.innerHTML;
+  }
+  function openSalesChannelModal(select) {
+    const modal = document.getElementById('salesChannelModal');
+    if (!modal) return;
+    salesChannelTargetSelect = select || null;
+    salesChannelModalTrigger = document.activeElement;
+    document.getElementById('salesChannelName').value = '';
+    document.getElementById('salesChannelError').hidden = true;
+    modal.hidden = false;
+    setTimeout(() => document.getElementById('salesChannelName').focus(), 20);
+  }
+  function closeSalesChannelModal() {
+    const modal = document.getElementById('salesChannelModal');
+    if (!modal) return;
+    modal.hidden = true;
+    if (salesChannelModalTrigger) salesChannelModalTrigger.focus();
+    salesChannelModalTrigger = null;
+    salesChannelTargetSelect = null;
+  }
+  async function createSalesChannel(event) {
+    event.preventDefault();
+    const name = document.getElementById('salesChannelName').value.trim();
+    const submit = document.getElementById('salesChannelSubmit');
+    const error = document.getElementById('salesChannelError');
+    submit.disabled = true;
+    error.hidden = true;
+    try {
+      const response = await fetch(salesChannelCreateUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+        body: JSON.stringify({name}),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.message || 'Не удалось добавить канал.');
+      const channel = payload.channel;
+      if (!scheduleSalesChannels.some(item => item.value === channel.value)) {
+        scheduleSalesChannels.push(channel);
+      }
+      document.querySelectorAll('[data-sales-channel-select]').forEach(select => {
+        if (![...select.options].some(option => option.value === channel.value)) {
+          select.add(new Option(channel.label, channel.value));
+        }
+      });
+      if (salesChannelTargetSelect) salesChannelTargetSelect.value = channel.value;
+      closeSalesChannelModal();
+    } catch (requestError) {
+      error.textContent = requestError.message;
+      error.hidden = false;
+    } finally {
+      submit.disabled = false;
+    }
   }
   function renderScheduleAddons(item) {
     const list = document.getElementById('scheduleAddonsList');
@@ -1581,7 +1662,7 @@
     const payLine = document.createElement('p');
     payLine.innerHTML = `<b>Оплата.</b> Стоимость программы: ${Number(participant.price).toFixed(0)} ₽ · К доплате: ${scheduleParticipantAmountDue(participant).toFixed(0)} ₽`;
     const channelLine = document.createElement('p');
-    channelLine.innerHTML = `<b>Канал продаж.</b> ${participant.sales_partner_name ? scheduleEscapeHtml(participant.sales_partner_name) : 'Не указан'}`;
+    channelLine.innerHTML = `<b>Канал продаж.</b> ${participant.sales_channel_label ? scheduleEscapeHtml(participant.sales_channel_label) : 'Не указан'}`;
     const contactMethodInfo = scheduleContactMethods.find(method => method.value === participant.preferred_contact_method);
     const contactMethodLine = document.createElement('p');
     contactMethodLine.innerHTML = `<b>Канал связи.</b> ${contactMethodInfo ? scheduleEscapeHtml(contactMethodInfo.label) : 'Не указан'}`;
@@ -1932,9 +2013,11 @@
   function buildScheduleDetailClientEditForm(item, participant, viewToRestore) {
     const form = document.createElement('form');
     form.className = 'schedule-detail-client-edit';
-    const partnerOptions = scheduleExcursionPartners.map(partner => {
-      const selected = partner.id === participant.sales_partner_id ? ' selected' : '';
-      return `<option value="${partner.id}"${selected}>${scheduleEscapeHtml(partner.client_name)}</option>`;
+    const currentSalesChannel = participant.sales_channel
+      || (participant.sales_partner_id ? `partner:${participant.sales_partner_id}` : '');
+    const partnerOptions = scheduleSalesChannels.map(channel => {
+      const selected = channel.value === currentSalesChannel ? ' selected' : '';
+      return `<option value="${scheduleEscapeHtml(channel.value)}"${selected}>${scheduleEscapeHtml(channel.label)}</option>`;
     }).join('');
     const contactMethodOptions = scheduleContactMethods.map(method => {
       const selected = method.value === participant.preferred_contact_method ? ' selected' : '';
@@ -1945,7 +2028,7 @@
       <label class="field"><span>Телефон</span><input name="client_phone" type="tel" value="${scheduleEscapeHtml(participant.client_phone || '')}"></label>
       <label class="field"><span>Гостей</span><input name="guests_count" type="number" min="1" max="100" value="${participant.guests_count}"></label>
       <label class="field"><span>Стоимость, ₽</span><input name="price" type="text" inputmode="decimal" value="${participant.price}"></label>
-      <label class="field"><span>Канал продаж</span><select name="sales_partner_id"><option value="">Не указан</option>${partnerOptions}</select></label>
+      <label class="field"><span>Канал продаж</span><span class="sales-channel-control"><select name="sales_partner_id" data-sales-channel-select><option value="">Не указан</option>${partnerOptions}</select><button type="button" class="sales-channel-add" onclick="openSalesChannelModal(this.previousElementSibling)" aria-label="Добавить канал продаж" title="Добавить канал продаж">+</button></span></label>
       <label class="field"><span>Канал связи</span><select name="preferred_contact_method"><option value="">Не указан</option>${contactMethodOptions}</select></label>
       <div class="schedule-detail-client-edit-actions">
         <button type="button" class="btn-secondary">Отмена</button>

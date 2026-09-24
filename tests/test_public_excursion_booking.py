@@ -148,10 +148,16 @@ class PublicExcursionBookingTests(unittest.TestCase):
                 "SELECT segment FROM client_segments WHERE client_id = ?",
                 (participant["client_id"],),
             ).fetchone()
+            client = db.execute(
+                "SELECT acquisition_channel FROM clients WHERE id = ?",
+                (participant["client_id"],),
+            ).fetchone()
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(participant["source"], "fort_site")
         self.assertEqual(participant["source_ref"], "fort_site:site-booking-0001")
+        self.assertEqual(participant["sales_channel"], "bodrbo_fort")
+        self.assertEqual(client["acquisition_channel"], "bodrbo_fort")
         self.assertEqual(participant["guests_count"], 2)
         self.assertEqual(participant["price"], 7400)
         self.assertEqual(item["participants_count"], 2)

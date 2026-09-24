@@ -25,6 +25,10 @@ TUNING_SALE_CHANNEL_LABELS = {
     "direct": "Напрямую",
     "aggregator": "Через агрегатора/агента",
     "mixed": "Смешанно / другое",
+    "tripster": "Трипстер",
+    "sputnik": "Спутник",
+    "bodrbo_tuning": "bodrbo-tuning.ru",
+    "bodrbo_fort": "bodrbo-fort.ru",
 }
 CLIENT_STATUS_LABELS = {
     "satisfied": "Довольные",

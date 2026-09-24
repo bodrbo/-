@@ -10,6 +10,7 @@ from modules.clients.constants import CLIENT_CONTACT_METHODS
 from modules.clients import yclients as yclients_clients
 from modules.excursion_services import repository as service_repository
 from modules.fleet import repository as fleet_repository
+from modules.sales_channels import repository as sales_channel_repository
 
 from . import repository
 from .constants import (
@@ -136,21 +137,17 @@ def _validate_booking_client(db, form, errors):
     if contact_method and contact_method not in valid_contact_methods:
         errors.append("Выберите корректный канал связи.")
         contact_method = ""
-    raw_sales_partner_id = str(
+    raw_sales_channel = str(
         form.get("customer_sales_partner_id") or ""
     ).strip()
-    sales_partner_id = None
-    if raw_sales_partner_id:
-        try:
-            sales_partner_id = int(raw_sales_partner_id)
-        except ValueError:
-            sales_partner_id = None
-        valid_partner_ids = {
-            partner["id"] for partner in repository.list_excursion_partners(db)
-        }
-        if sales_partner_id not in valid_partner_ids:
+    sales_channel = ""
+    if raw_sales_channel:
+        sales_channel = sales_channel_repository.normalise_value(
+            db, raw_sales_channel
+        )
+        if not sales_channel:
             errors.append("Выберите корректный канал продаж.")
-            sales_partner_id = None
+    sales_partner_id = sales_channel_repository.partner_id(sales_channel)
     if not name:
         errors.append("Для записи укажите имя клиента.")
     phone_identity = _normalise_phone_identity(phone)
@@ -197,6 +194,7 @@ def _validate_booking_client(db, form, errors):
         "guests_count": 1,
         "client_token": secrets.token_urlsafe(16) if client is None else None,
         "sales_partner_id": sales_partner_id,
+        "sales_channel": sales_channel,
         "preferred_contact_method": contact_method,
     }
     return name, phone, participant
@@ -219,9 +217,6 @@ def _validate_participants(db, form, capacity, errors):
         len(raw_payment_dues), len(raw_sales_partner_ids),
         len(raw_contact_methods),
     )
-    valid_partner_ids = {
-        partner["id"] for partner in repository.list_excursion_partners(db)
-    }
     valid_contact_methods = {item["value"] for item in CLIENT_CONTACT_METHODS}
     # Search every identity by phone so a tuning client taking an excursion
     # is reused, while only excursion clients appear in the picker itself.
@@ -313,18 +308,17 @@ def _validate_participants(db, form, capacity, errors):
             else None
         )
         is_tripster = source_ref is not None
-        raw_sales_partner_id = (
+        raw_sales_channel = (
             raw_sales_partner_ids[index] if index < len(raw_sales_partner_ids) else ""
         ).strip()
-        sales_partner_id = None
-        if raw_sales_partner_id:
-            try:
-                sales_partner_id = int(raw_sales_partner_id)
-            except ValueError:
-                sales_partner_id = None
-            if sales_partner_id not in valid_partner_ids:
+        sales_channel = ""
+        if raw_sales_channel:
+            sales_channel = sales_channel_repository.normalise_value(
+                db, raw_sales_channel
+            )
+            if not sales_channel:
                 errors.append(f"{row_label}: неизвестный канал продаж.")
-                sales_partner_id = None
+        sales_partner_id = sales_channel_repository.partner_id(sales_channel)
         contact_method = (
             raw_contact_methods[index] if index < len(raw_contact_methods) else ""
         ).strip()
@@ -351,6 +345,7 @@ def _validate_participants(db, form, capacity, errors):
             "source": "tripster" if is_tripster else "internal",
             "source_ref": source_ref,
             "sales_partner_id": sales_partner_id,
+            "sales_channel": sales_channel,
             "preferred_contact_method": contact_method,
         })
         if client is not None:
@@ -1344,17 +1339,12 @@ def _resolve_client_for_participant(db, raw_client_id, phone, errors):
 def _validate_sales_partner_id(db, form, errors):
     raw_value = str(form.get("sales_partner_id") or "").strip()
     if not raw_value:
-        return None
-    try:
-        partner_id = int(raw_value)
-    except ValueError:
-        errors.append("Некорректный канал продаж.")
-        return None
-    valid_ids = {partner["id"] for partner in repository.list_excursion_partners(db)}
-    if partner_id not in valid_ids:
+        return None, ""
+    sales_channel = sales_channel_repository.normalise_value(db, raw_value)
+    if not sales_channel:
         errors.append("Неизвестный канал продаж.")
-        return None
-    return partner_id
+        return None, ""
+    return sales_channel_repository.partner_id(sales_channel), sales_channel
 
 
 def add_participant_quick(db, item_id, form):
@@ -1407,7 +1397,7 @@ def edit_participant(db, item_id, participant_id, form):
     if not 1 <= guests_count <= 100:
         errors.append("Количество гостей должно быть от 1 до 100.")
     price = _parse_money(form.get("price"), errors, "Стоимость")
-    sales_partner_id = _validate_sales_partner_id(db, form, errors)
+    sales_partner_id, sales_channel = _validate_sales_partner_id(db, form, errors)
     contact_method = str(form.get("preferred_contact_method") or "").strip()
     allowed_contact_methods = {item["value"] for item in CLIENT_CONTACT_METHODS}
     if contact_method and contact_method not in allowed_contact_methods:
@@ -1419,6 +1409,7 @@ def edit_participant(db, item_id, participant_id, form):
         {
             "client_name": name, "client_phone": phone, "guests_count": guests_count,
             "price": price, "sales_partner_id": sales_partner_id,
+            "sales_channel": sales_channel,
             "preferred_contact_method": contact_method,
         },
         current_timestamp(),

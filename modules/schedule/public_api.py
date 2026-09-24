@@ -257,6 +257,7 @@ def _create_booking(db, data):
             timestamp=timestamp,
             source=SOURCE,
             source_ref=source_ref,
+            sales_channel="bodrbo_fort",
         )
         db.commit()
     except sqlite3.IntegrityError:

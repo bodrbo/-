@@ -6,6 +6,7 @@ from flask import Blueprint, abort, current_app, jsonify, redirect, render_templ
 
 from modules.clients.constants import CLIENT_CONTACT_METHODS
 from modules.excursion_services import repository as service_repository
+from modules.sales_channels import repository as sales_channel_repository
 
 from modules.weather import services as weather_services
 
@@ -98,7 +99,9 @@ def create_schedule_blueprint(
             boats=request_boats(db),
             trip_services=service_repository.list_services(db),
             addon_products=service_repository.list_addon_products(db),
-            excursion_partners=repository.list_excursion_partners(db),
+            sales_channels=sales_channel_repository.list_channels(
+                db, include_tripster=not demo_view
+            ),
             client_contact_methods=CLIENT_CONTACT_METHODS,
             item_kinds=ITEM_KINDS,
             crew_roles=CREW_ROLES,
