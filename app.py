@@ -10805,6 +10805,7 @@ def _schedule_receipt_pdf(db, kind, payment_id):
             "payment_type": SCHEDULE_MANUAL_PAYMENT_TYPES.get(payment["payment_method"]),
             "fiscal_info_json": receipt_row["fiscal_info_json"],
         }
+        version_source = receipt_row["fiscal_info_json"]
     elif kind == "online":
         payment = schedule_repository.get_online_payment_context(db, payment_id)
         stored = _load_json_dict(payment["receipt_json"]) if payment is not None else None
@@ -10818,6 +10819,7 @@ def _schedule_receipt_pdf(db, kind, payment_id):
             "fiscal_info_json": json.dumps(fiscal_info, ensure_ascii=False),
             "skip_empty_fiscal_rows": True,
         }
+        version_source = payment["receipt_json"]
     else:
         return None, "Чек не найден."
     data.update(
@@ -10834,7 +10836,7 @@ def _schedule_receipt_pdf(db, kind, payment_id):
         return None, str(error)
     # The receipt's fingerprint in the name keeps a re-rendered receipt from
     # being mistaken for an older download with the same name.
-    version = schedule_repository.receipt_version(data["fiscal_info_json"])
+    version = schedule_repository.receipt_version(version_source)
     return pdf_bytes, (
         f"Receipt-trip-{payment['schedule_item_id']}-{kind}-{payment_id}-{version}.pdf"
     )
