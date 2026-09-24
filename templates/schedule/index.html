@@ -814,7 +814,7 @@
       link.className = 'schedule-receipt-link';
       link.textContent = 'Скачать чек';
       row.appendChild(link);
-      addBtn('Ссылка клиенту', 'Скопировать ссылку на чек, чтобы отправить клиенту', event => {
+      addBtn('Ссылка на чек', 'Скопировать ссылку на чек (не на оплату), чтобы отправить клиенту', event => {
         const btn = event.currentTarget;
         scheduleReceiptRequest(`${base}/receipts/${kind}/${payment.id}/link`)
           .then(data => {
