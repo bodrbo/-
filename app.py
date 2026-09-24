@@ -8706,7 +8706,7 @@ def _shop_map_obb_overlap(ax, ay, a_half_l, a_half_w, a_angle, bx, by, b_half_l,
     return True
 
 
-def _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, rotation_deg, exclude_boat_id=None, interval=None):
+def _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, rotation_deg, exclude_boat_id=None, interval=None, on_date=None):
     """Shared by the manual position form, drag, and rotate routes — a
     boat may not stick out of the room, overlap any fixed zone/element, or
     come within SHOP_MAP_BOAT_GAP_M of another boat already on the map, at
@@ -8731,7 +8731,7 @@ def _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, rotati
         ):
             return f"Лодка пересекается с зоной «{el['name']}»."
     all_boats = _shop_map_boats(db)
-    if interval is None and exclude_boat_id is not None:
+    if interval is None and on_date is None and exclude_boat_id is not None:
         own = next((b for b in all_boats if b["id"] == exclude_boat_id), None)
         interval = (own["present_start"], own["present_end"]) if own else None
     for boat in all_boats:
@@ -8739,8 +8739,17 @@ def _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, rotati
             continue
         if not boat["length_m"] or not boat["width_m"]:
             continue
-        # A boat only blocks the spot while both are in the shop at once —
-        # one that leaves before this one arrives frees the place.
+        # Moving a boat on the map only has to respect the boats standing
+        # in the shop on the day being viewed; a boat that isn't there that
+        # day doesn't block it (a clash on a later day shows up on the map
+        # for that day, highlighted).
+        if on_date is not None and not (
+            boat["present_start"] <= on_date
+            and (boat["present_end"] is None or on_date <= boat["present_end"])
+        ):
+            continue
+        # Auto-placement: a boat only blocks the spot while both are in the
+        # shop at once — one that leaves before this one arrives frees it.
         if interval is not None and not _shop_map_intervals_overlap(
             interval[0], interval[1], boat["present_start"], boat["present_end"]
         ):
@@ -8947,6 +8956,20 @@ def tuning_shop_map():
         else:
             boats_missing_dimensions.append(boat)
 
+    # Boats that stand closer than the required gap on this very day (their
+    # spots were fine while they were never in the shop together) get flagged.
+    for index, first in enumerate(boats_on_map):
+        for second in boats_on_map[index + 1:]:
+            first_w, first_h = _shop_map_boat_footprint(first["length_m"], first["width_m"], first["rotation_deg"])
+            second_w, second_h = _shop_map_boat_footprint(second["length_m"], second["width_m"], second["rotation_deg"])
+            if _shop_map_obb_overlap(
+                first["x_m"] + first_w / 2, first["y_m"] + first_h / 2,
+                first["length_m"] / 2, first["width_m"] / 2, first["rotation_deg"],
+                second["x_m"] + second_w / 2, second["y_m"] + second_h / 2,
+                second["length_m"] / 2, second["width_m"] / 2, second["rotation_deg"],
+                margin=SHOP_MAP_BOAT_GAP_M,
+            ):
+                first["conflict"] = second["conflict"] = True
     return render_template(
         "tuning_shop_map.html", active_page="tuning", sub_page="shop_map",
         room=room, scale=SHOP_MAP_SCALE, padding=SHOP_MAP_PADDING,
@@ -9195,6 +9218,7 @@ def update_shop_map_boat_position(boat_id):
         error = _shop_map_boat_placement_error(
             db, room, x_m, y_m, boat_length_m or 0, boat_width_m or 0, boat_row["rotation_deg"],
             exclude_boat_id=boat_id,
+            on_date=_parse_shop_map_date(request.form.get("date"), None),
         )
         if error:
             errors.append(error)
@@ -9236,7 +9260,8 @@ def drag_shop_map_boat(boat_id):
 
     room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
     error = _shop_map_boat_placement_error(
-        db, room, x_m, y_m, length_m, width_m, boat_row["rotation_deg"], exclude_boat_id=boat_id
+        db, room, x_m, y_m, length_m, width_m, boat_row["rotation_deg"], exclude_boat_id=boat_id,
+        on_date=_parse_shop_map_date(request.form.get("date"), None),
     )
     if error:
         return jsonify({"error": error}), 400
@@ -9280,6 +9305,7 @@ def rotate_shop_map_boat(boat_id):
     error = _shop_map_boat_placement_error(
         db, room, new_x_m, new_y_m, length_m, width_m, new_rotation,
         exclude_boat_id=boat_id,
+        on_date=_parse_shop_map_date(request.form.get("date"), None),
     )
     if error:
         return jsonify({"error": "Не помещается развёрнутой: " + error}), 400

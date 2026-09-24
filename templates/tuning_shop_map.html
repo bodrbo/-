@@ -214,9 +214,9 @@
                data-box-w-px="{{ boat.box_w_px }}" data-box-h-px="{{ boat.box_h_px }}"
                data-rotation="{{ boat.rotation_deg }}"
                transform="translate({{ boat.cx_px }}, {{ boat.cy_px }}) rotate({{ boat.rotation_deg }}) translate({{ boat.pivot_shift_px }}, 0) scale({{ boat.box_w_px / 180 }}, {{ boat.box_h_px / 52 }})">
-              <path class="shop-map-boat-hull"
+              <path class="shop-map-boat-hull{{ ' is-conflict' if boat.conflict }}"
                     d="M 180 0 C 170 22 120 26 85 25 C 45 24 15 18 0 12 L 0 -12 C 15 -18 45 -24 85 -25 C 120 -26 170 -22 180 0 Z">
-                <title>{{ boat.client_name }} — {{ boat.boat_model }} ({{ boat.length_m|float|round(2) }} × {{ boat.width_m|float|round(2) }} м) — перетащите, чтобы передвинуть</title>
+                <title>{{ boat.client_name }} — {{ boat.boat_model }} ({{ boat.length_m|float|round(2) }} × {{ boat.width_m|float|round(2) }} м){{ ' — стоит ближе 0,5 м к другой лодке в этот день, передвиньте' if boat.conflict }} — перетащите, чтобы передвинуть</title>
               </path>
             </g>
           </a>
@@ -545,6 +545,7 @@
       var formData = new FormData();
       formData.append("x_m", xM);
       formData.append("y_m", yM);
+      formData.append("date", {{ selected_date|tojson }});
       fetch(group.dataset.dragUrl, { method: "POST", body: formData })
         .then(function (r) { return r.json(); })
         .then(function (data) {
@@ -617,6 +618,7 @@
       var finalRotation = Math.round(rotation) % 360;
       var formData = new FormData();
       formData.append("rotation_deg", finalRotation);
+      formData.append("date", {{ selected_date|tojson }});
       fetch(handle.dataset.rotateUrl, { method: "POST", body: formData })
         .then(function (r) { return r.json(); })
         .then(function (data) {

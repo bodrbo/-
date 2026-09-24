@@ -141,6 +141,58 @@ class ShopMapAutoPlacementTests(unittest.TestCase):
         self.assertTrue(overlap("2030-01-01", None, "2030-03-01", "2030-03-05"))
         self.assertFalse(overlap("2030-01-01", "2030-01-10", None, None))
 
+    def test_moving_a_boat_only_respects_boats_present_on_the_viewed_day(self):
+        key = application_module._tuning_equipment_profile_key("boat", "Тест-катер")
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT OR REPLACE INTO tuning_boat_profiles (model_key, model_name, equipment_type, "
+                "specifications, length_m, width_m, created_at, updated_at) "
+                "VALUES (?, 'Тест-катер', 'boat', '', 5, 2, 'x', 'x')", (key,)
+            )
+            other_id = self._insert_order(db)
+            db.commit()
+        try:
+            self.set_dates(self.order_id, "2030-05-10", None)      # in the shop from May 10
+            self.set_dates(other_id, "2030-05-11", None)           # arrives a day later
+            for order_id in (self.order_id, other_id):
+                with application_module.app.app_context():
+                    application_module._auto_place_boat_on_shop_map(
+                        application_module.get_db(), {"id": order_id}
+                    )
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                boat_ids = {
+                    r["order_id"]: r["id"] for r in db.execute(
+                        "SELECT id, order_id FROM shop_map_boats WHERE order_id IN (?, ?)",
+                        (self.order_id, other_id),
+                    ).fetchall()
+                }
+                other_row = db.execute(
+                    "SELECT x_m, y_m FROM shop_map_boats WHERE order_id = ?", (other_id,)
+                ).fetchone()
+                target = (other_row["x_m"], other_row["y_m"])
+            drag = lambda date: self.client.post(
+                f"/tuning/shop-map/boats/{boat_ids[self.order_id]}/drag",
+                data={"x_m": target[0], "y_m": target[1], "date": date},
+            )
+            # the other boat isn't in the shop on May 10 -> its spot is free that day
+            self.assertEqual(drag("2030-05-10").status_code, 200)
+            # on May 11 both are there -> too close
+            self.assertEqual(drag("2030-05-11").status_code, 400)
+            # ... and the map for that day flags the clash
+            page = self.client.get("/tuning/shop-map?date=2030-05-11").get_data(as_text=True)
+            self.assertIn("is-conflict", page)
+            calm = self.client.get("/tuning/shop-map?date=2030-05-10").get_data(as_text=True)
+            self.assertNotIn("shop-map-boat-hull is-conflict", calm)
+        finally:
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                db.execute("DELETE FROM shop_map_boats WHERE order_id = ?", (other_id,))
+                db.execute("DELETE FROM tuning_orders WHERE id = ?", (other_id,))
+                db.execute("DELETE FROM tuning_boat_profiles WHERE model_key = ?", (key,))
+                db.commit()
+
     def test_toggling_status_back_and_forth_stays_consistent(self):
         self.set_status(self.order_id, "in_progress")
         self.assertTrue(self.is_on_map(self.order_id))
