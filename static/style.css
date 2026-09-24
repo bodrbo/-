@@ -4875,6 +4875,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-tripster-button:hover:not(:disabled) { border-color: #bd8f2a; background: #fff4d3; }
 .schedule-tripster-button:disabled { cursor: not-allowed; opacity: .5; }
 .schedule-tripster-button svg { width: 17px; height: 17px; }
+.schedule-tripster-mobile-label { display: none; }
 .schedule-weather-form { margin: 0; }
 .schedule-weather-button {
   display: inline-flex;
@@ -6261,15 +6262,22 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   .schedule-command-actions { display: grid; grid-template-columns: minmax(0, 1fr) 44px auto 44px; gap: 6px; }
   .schedule-body.is-read-only .schedule-command-actions { grid-template-columns: minmax(0, 1fr) auto; }
   .schedule-crew-filter select { width: 100%; min-width: 0; }
+  .schedule-crew-filter { grid-column: 1; grid-row: 1; }
   .schedule-roster-button { width: 44px; padding: 0; }
+  .schedule-roster-button { grid-column: 2; grid-row: 1; }
   .schedule-roster-button span,
   .schedule-roster-button b { position: absolute; overflow: hidden; width: 1px; height: 1px; padding: 0; clip: rect(0,0,0,0); white-space: nowrap; }
   .schedule-day-total { min-width: 88px; padding: 3px 8px; }
+  .schedule-day-total { grid-column: 3; grid-row: 1; }
   .schedule-day-total span { font-size: 8px; }
   .schedule-day-total strong { margin-top: 2px; font-size: 13px; }
   .schedule-create-button { width: 44px; min-height: 44px; padding: 0; }
+  .schedule-create-button { grid-column: 4; grid-row: 1; }
   .schedule-create-button span { position: absolute; overflow: hidden; width: 1px; height: 1px; clip: rect(0,0,0,0); white-space: nowrap; }
-  .schedule-tripster-form { display: none; }
+  .schedule-tripster-form { display: block; grid-column: 1 / -1; grid-row: 2; }
+  .schedule-tripster-button { width: 100%; min-height: 42px; }
+  .schedule-tripster-desktop-label { display: none; }
+  .schedule-tripster-mobile-label { display: inline; }
   .schedule-weather-form { display: none; }
   .schedule-board-nav { grid-template-columns: auto minmax(0, 1fr); gap: 7px; padding-left: 9px; }
   .schedule-board-nav.is-contained { grid-template-columns: 1fr; }

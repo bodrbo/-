@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from support import application_module
@@ -168,6 +169,13 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn("/schedule/clients/search", html)
         self.assertIn("function startScheduleDrag", html)
         self.assertIn("перетащите её по времени и между сотрудниками", html)
+        self.assertIn("Обновить заказы Tripster", html)
+        stylesheet = Path(application_module.app.static_folder, "style.css").read_text()
+        self.assertIn(
+            ".schedule-tripster-form { display: block; grid-column: 1 / -1; grid-row: 2; }",
+            stylesheet,
+        )
+        self.assertNotIn(".schedule-tripster-form { display: none; }", stylesheet)
         self.assertRegex(html, r"/static/style\.css\?v=\d+")
 
     def test_schedule_uses_fifteen_minute_grid_and_accepts_45_minute_trip(self):
