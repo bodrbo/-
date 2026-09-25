@@ -1595,7 +1595,18 @@ def remove_participant(db, item_id, participant_id):
     return True, "Клиент удалён из рейса."
 
 
-def add_day_crew_member(db, day, employee_id):
+def _recalculate_past_shift_pay(db, day, apply_minimum_shift, today=None):
+    """Retroactive roster edits must reach payroll: the minimum-shift top-up
+    is normally recalculated only when a trip of that day gets closed, so a
+    captain added to (or removed from) a day that already ended — with no
+    trip of its own — would never get (or lose) it. Only past days: today's
+    shift isn't over, and the top-up follows the closed trips anyway."""
+    if apply_minimum_shift is None or day >= (today or dt.date.today()):
+        return False
+    return bool(apply_minimum_shift(db, day.isoformat(), day.isoformat()))
+
+
+def add_day_crew_member(db, day, employee_id, apply_minimum_shift=None, today=None):
     eligible = {
         employee["id"]: employee for employee in repository.list_crew_employees(db)
     }
@@ -1606,10 +1617,13 @@ def add_day_crew_member(db, day, employee_id):
     )
     if not added:
         return True, f"{eligible[employee_id]['name']} уже добавлен в расписание."
-    return True, f"{eligible[employee_id]['name']} добавлен в расписание."
+    message = f"{eligible[employee_id]['name']} добавлен в расписание."
+    if _recalculate_past_shift_pay(db, day, apply_minimum_shift, today):
+        message += " Доплата за дежурство начислена."
+    return True, message
 
 
-def remove_day_crew_member(db, day, employee_id):
+def remove_day_crew_member(db, day, employee_id, apply_minimum_shift=None, today=None):
     eligible = {
         employee["id"]: employee for employee in repository.list_crew_employees(db)
     }
@@ -1627,7 +1641,10 @@ def remove_day_crew_member(db, day, employee_id):
     )
     if not removed:
         return False, "Сотрудник уже отсутствует в расписании на эту дату."
-    return True, f"{employee_name} убран из расписания."
+    message = f"{employee_name} убран из расписания."
+    if _recalculate_past_shift_pay(db, day, apply_minimum_shift, today):
+        message += " Доплата за дежурство пересчитана."
+    return True, message
 
 
 def _normalise_hex_color(raw_color):

@@ -712,6 +712,72 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertIn('id="scheduleDetailNumber"', page)
         self.assertIn("№${item.id}", page)
 
+    def _shift_topups(self, employee_name, day):
+        with application_module.app.app_context():
+            return [
+                dict(row) for row in application_module.get_db().execute(
+                    "SELECT * FROM entries WHERE employee = ? AND work_date = ? AND work_type = ?",
+                    (employee_name, day, application_module.MIN_SHIFT_TOPUP_WORK_TYPE),
+                ).fetchall()
+            ]
+
+    def test_adding_a_captain_to_a_past_shift_pays_the_duty_topup(self):
+        self.login()
+        past, future = "2026-08-20", "2030-01-15"
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "DELETE FROM entries WHERE employee = 'Платон Жмаев' AND work_date IN (?, ?)",
+                (past, future),
+            )
+            db.commit()
+
+        response = self.client.post(
+            "/schedule/crew", data={"work_date": past, "employee_id": self.platon_id},
+            follow_redirects=True,
+        )
+        self.assertIn("Доплата за дежурство начислена", response.get_data(as_text=True))
+        topups = self._shift_topups("Платон Жмаев", past)
+        self.assertEqual(len(topups), 1)
+        self.assertEqual(topups[0]["amount"], application_module.MIN_SHIFT_RATE)
+
+        # adding again is a no-op (no duplicate top-up)
+        self.client.post("/schedule/crew", data={"work_date": past, "employee_id": self.platon_id})
+        self.assertEqual(len(self._shift_topups("Платон Жмаев", past)), 1)
+
+        # a future shift hasn't happened yet: no pay
+        self.client.post("/schedule/crew", data={"work_date": future, "employee_id": self.platon_id})
+        self.assertEqual(self._shift_topups("Платон Жмаев", future), [])
+
+        # taking the captain off the past shift takes the top-up back
+        response = self.client.post(
+            f"/schedule/crew/{self.platon_id}/remove", data={"work_date": past},
+            follow_redirects=True,
+        )
+        self.assertIn("Доплата за дежурство пересчитана", response.get_data(as_text=True))
+        self.assertEqual(self._shift_topups("Платон Жмаев", past), [])
+        self.client.post(f"/schedule/crew/{self.platon_id}/remove", data={"work_date": future})
+
+    def test_past_shift_topup_only_covers_the_shortfall(self):
+        self.login()
+        past = "2026-08-21"
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM entries WHERE employee = 'Платон Жмаев' AND work_date = ?", (past,))
+            db.execute(
+                "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
+                "VALUES ('Платон Жмаев', 'Малый тур', 1870, 1, 1870, ?, '2026-08-21 12:00')", (past,)
+            )
+            db.commit()
+        self.client.post("/schedule/crew", data={"work_date": past, "employee_id": self.platon_id})
+        topups = self._shift_topups("Платон Жмаев", past)
+        self.assertEqual([t["amount"] for t in topups], [application_module.MIN_SHIFT_RATE - 1870])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM entries WHERE employee = 'Платон Жмаев' AND work_date = ?", (past,))
+            db.execute("DELETE FROM schedule_day_crew WHERE work_date = ?", (past,))
+            db.commit()
+
     def test_schedule_routes_notify_on_assignment_change_and_deletion(self):
         self.login()
         with patch.object(

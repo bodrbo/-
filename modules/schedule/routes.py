@@ -141,7 +141,7 @@ def create_schedule_blueprint(
         except (TypeError, ValueError):
             employee_id = 0
         success, message = services.add_day_crew_member(
-            get_db(), day, employee_id
+            get_db(), day, employee_id, apply_minimum_shift=apply_minimum_shift
         )
         set_notice(message, success)
         return redirect_to_day(day.isoformat())
@@ -153,7 +153,7 @@ def create_schedule_blueprint(
     def remove_crew_member(employee_id):
         day = services.parse_day(request.form.get("work_date"))
         success, message = services.remove_day_crew_member(
-            get_db(), day, employee_id
+            get_db(), day, employee_id, apply_minimum_shift=apply_minimum_shift
         )
         set_notice(message, success)
         return redirect_to_day(day.isoformat())
