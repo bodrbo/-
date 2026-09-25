@@ -706,10 +706,15 @@ def create_schedule_blueprint(
             get_db(), create_trip_from_schedule, get_role_rate,
             apply_minimum_shift=apply_minimum_shift,
         )
-        return (
+        summary = (
             f"ok: {stats['closed']} closed, {stats['needs_review']} flagged, "
-            f"{stats['skipped']} skipped",
-            200,
+            f"{stats['skipped']} skipped"
         )
+        details = stats["skipped_details"][:50]
+        if details:
+            summary += "\nSkipped (retried on every run):\n" + "\n".join(details)
+            if len(stats["skipped_details"]) > len(details):
+                summary += f"\n… and {len(stats['skipped_details']) - len(details)} more"
+        return summary, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
     return blueprint

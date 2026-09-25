@@ -982,13 +982,16 @@ def auto_close_schedule_items(db, create_trip, get_role_rate, apply_minimum_shif
     cutoff = (now - dt.timedelta(minutes=AUTO_CLOSE_GRACE_MINUTES)).strftime("%Y-%m-%d %H:%M")
     timestamp = current_timestamp()
 
-    stats = {"closed": 0, "needs_review": 0, "skipped": 0}
+    stats = {"closed": 0, "needs_review": 0, "skipped": 0, "skipped_details": []}
     closed_dates = set()
 
     for item in repository.list_items_ready_to_close(db, cutoff):
         assignments = repository.list_assignments(db, item["id"])
         if not assignments:
             stats["skipped"] += 1
+            stats["skipped_details"].append(
+                f"№{item['id']} {item['starts_at']} «{item['service_name']}»: нет назначенного экипажа"
+            )
             continue
 
         starts = dt.datetime.strptime(item["starts_at"], "%Y-%m-%d %H:%M")
@@ -1048,6 +1051,10 @@ def auto_close_schedule_items(db, create_trip, get_role_rate, apply_minimum_shif
         errors, trip_id = create_trip(db, payload, needs_review=needs_review)
         if errors:
             stats["skipped"] += 1
+            stats["skipped_details"].append(
+                f"№{item['id']} {item['starts_at']} «{item['service_name']}», "
+                f"катер «{item['boat']}»: {'; '.join(errors)}"
+            )
             continue
 
         repository.set_accounting_trip_id(db, item["id"], trip_id, timestamp)

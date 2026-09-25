@@ -92,6 +92,27 @@ class ScheduleAutoCloseTests(unittest.TestCase):
     def get_role_rate(db, role):
         return payroll_rates_repository.get_excursion_role_rate(db, role)
 
+    def test_skipped_items_are_reported_with_their_reason(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            no_crew = self.make_item(
+                db, starts_at="2026-09-20 09:00", ends_at="2026-09-20 10:00", assign=False,
+            )
+            unknown_boat = self.make_item(
+                db, starts_at="2026-09-20 11:00", ends_at="2026-09-20 12:00",
+            )
+            db.execute("UPDATE schedule_items SET boat = 'Несуществующий' WHERE id = ?", (unknown_boat,))
+            db.commit()
+            stats = schedule_services.auto_close_schedule_items(
+                db, self.create_trip, self.get_role_rate, now=dt.datetime(2026, 9, 21, 12, 0),
+            )
+        self.assertEqual(stats["skipped"], 2)
+        details = " | ".join(stats["skipped_details"])
+        self.assertIn(f"№{no_crew}", details)
+        self.assertIn("нет назначенного экипажа", details)
+        self.assertIn(f"№{unknown_boat}", details)
+        self.assertIn("Выберите катер", details)
+
     def test_boatless_city_item_pays_the_crew_without_a_trip(self):
         with application_module.app.app_context():
             db = application_module.get_db()
