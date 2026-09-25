@@ -2466,7 +2466,9 @@ def init_db(db_path=None, include_bootstrap_data=True):
     tuning_yookassa_cols = {
         row[1] for row in conn.execute("PRAGMA table_info(tuning_yookassa_payments)").fetchall()
     }
-    for column in ("yookassa_invoice_id", "expires_at"):
+    for column in (
+        "yookassa_invoice_id", "expires_at", "receipt_status", "receipt_json", "receipt_checked_at",
+    ):
         if column not in tuning_yookassa_cols:
             # Payment links are ЮKassa invoices (see _send_yookassa_payment);
             # until the client pays, yookassa_payment_id is an "invoice:<id>"
@@ -6011,8 +6013,13 @@ def _order_payment_totals(db, order_id, total):
         "modulkassa_receipts.id AS receipt_id, "
         "modulkassa_receipts.status AS receipt_status, "
         "modulkassa_receipts.failure_message AS receipt_failure_message, "
-        "modulkassa_receipts.fiscal_info_json AS receipt_fiscal_info_json "
+        "modulkassa_receipts.fiscal_info_json AS receipt_fiscal_info_json, "
+        "ty.id AS online_row_id, ty.receipt_status AS online_receipt_status, "
+        "ty.receipt_json AS online_receipt_json, ty.amount AS online_amount "
         "FROM tuning_payments "
+        # A payment made through a ЮKassa link: its fiscal receipt is read
+        # back from ЮKassa (see _refresh_tuning_online_receipt).
+        "LEFT JOIN tuning_yookassa_payments ty ON ty.tuning_payment_id = tuning_payments.id "
         # A retry adds another modulkassa_receipts row for the same
         # payment rather than overwriting the old one (keeps history of
         # every attempt) — join only the latest one, or a plain join would
@@ -6029,6 +6036,15 @@ def _order_payment_totals(db, order_id, total):
     payments = []
     for row in payment_rows:
         payment = dict(row)
+        payment["is_online"] = payment["online_row_id"] is not None
+        payment["online_receipt_pending"] = False
+        if payment["is_online"] and not payment["receipt_status"]:
+            online_info = _online_receipt_fiscal_info(payment["online_receipt_json"], payment["amount"])
+            if online_info is not None:
+                payment["receipt_status"] = "printed"
+                payment["receipt_fiscal_info_json"] = json.dumps(online_info, ensure_ascii=False)
+            else:
+                payment["online_receipt_pending"] = True
         fiscal_info = _modulkassa_fiscal_info(payment)
         payment["receipt_pdf_available"] = bool(
             (payment["receipt_status"] or "").lower()
@@ -6040,6 +6056,72 @@ def _order_payment_totals(db, order_id, total):
     paid_amount = sum(p["amount"] for p in payments)
     remaining = max(0.0, total - paid_amount)
     return payments, paid_amount, remaining
+
+
+def _online_receipt_fiscal_info(receipt_json, amount):
+    """Fiscal info (with the QR string) of a paid ЮKassa link's receipt, or
+    None while ЮKassa hasn't returned all fiscal attributes yet."""
+    stored = _load_json_dict(receipt_json)
+    if not stored:
+        return None
+    return _fiscal_info_from_yookassa_receipt(stored, amount)
+
+
+def _refresh_tuning_online_receipt(db, record):
+    """Reads the fiscal receipt of a paid tuning link from ЮKassa (its
+    receipts API lists the receipts registered for the payment — ФН/ФД/ФП and
+    the registration time) and stores it on the link's row. Best-effort:
+    returns the stored status ('succeeded', 'pending' or '') and never raises."""
+    if record["yookassa_payment_id"].startswith(TUNING_INVOICE_PLACEHOLDER_PREFIX):
+        return ""  # an invoice nobody has paid: no payment yet
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    try:
+        listing = _yookassa_request(
+            "GET", "/receipts", params={"payment_id": record["yookassa_payment_id"]}
+        )
+    except Exception:
+        return record["receipt_status"] or ""
+    receipt = schedule_services._pick_payment_receipt(listing.get("items") or [])
+    if receipt is None:
+        db.execute(
+            "UPDATE tuning_yookassa_payments SET receipt_status = '', receipt_checked_at = ? WHERE id = ?",
+            (now, record["id"]),
+        )
+        db.commit()
+        return ""
+    ready = receipt.get("status") == "succeeded" and all(
+        receipt.get(key) for key in (
+            "fiscal_document_number", "fiscal_storage_number", "fiscal_attribute", "registered_at",
+        )
+    )
+    stored = None
+    if ready:
+        stored = json.dumps({
+            key: receipt.get(key) for key in (
+                "id", "type", "registered_at", "fiscal_document_number",
+                "fiscal_storage_number", "fiscal_attribute", "fiscal_provider_id",
+            )
+        }, ensure_ascii=False)
+    db.execute(
+        "UPDATE tuning_yookassa_payments SET receipt_status = ?, "
+        "receipt_json = COALESCE(?, receipt_json), receipt_checked_at = ? WHERE id = ?",
+        ("succeeded" if ready else "pending", stored, now, record["id"]),
+    )
+    db.commit()
+    return "succeeded" if ready else "pending"
+
+
+def _sync_tuning_online_receipts(db, days=7):
+    """Cron backup: paid tuning links whose fiscal receipt isn't stored yet."""
+    since = (dt.datetime.now() - dt.timedelta(days=days)).strftime("%Y-%m-%d %H:%M")
+    rows = db.execute(
+        "SELECT * FROM tuning_yookassa_payments WHERE status = 'succeeded' "
+        "AND COALESCE(receipt_status, '') != 'succeeded' AND updated_at >= ? ORDER BY id",
+        (since,),
+    ).fetchall()
+    for record in rows:
+        _refresh_tuning_online_receipt(db, record)
+    return len(rows)
 
 
 def _modulkassa_configured():
@@ -6213,7 +6295,35 @@ def _modulkassa_fiscal_info(receipt):
 
 
 def _modulkassa_receipt_for_payment(db, order_id, payment_id):
-    """Return one successful fiscal receipt tied to the requested payment."""
+    """Return one successful fiscal receipt tied to the requested payment —
+    a ModulKassa document (manual payments) or, for a payment made through a
+    ЮKassa link, the receipt read back from ЮKassa."""
+    row = _modulkassa_receipt_row_for_payment(db, order_id, payment_id)
+    if row is not None:
+        return row
+    online = db.execute(
+        "SELECT tp.id AS payment_id, tp.order_id, tp.amount, tp.paid_at, o.client_id, "
+        "o.client_name, ty.receipt_json "
+        "FROM tuning_payments tp JOIN tuning_orders o ON o.id = tp.order_id "
+        "JOIN tuning_yookassa_payments ty ON ty.tuning_payment_id = tp.id "
+        "WHERE tp.order_id = ? AND tp.id = ?",
+        (order_id, payment_id),
+    ).fetchone()
+    if online is None:
+        return None
+    info = _online_receipt_fiscal_info(online["receipt_json"], online["amount"])
+    if info is None:
+        return None
+    data = dict(online)
+    data.update(
+        payment_type="ONLINE", fiscal_info_json=json.dumps(info, ensure_ascii=False),
+        skip_empty_fiscal_rows=True,
+    )
+    data.pop("receipt_json", None)
+    return data
+
+
+def _modulkassa_receipt_row_for_payment(db, order_id, payment_id):
     return db.execute(
         "SELECT tp.id AS payment_id, tp.order_id, tp.amount, tp.paid_at, "
         "tp.payment_type, o.client_id, o.client_name, "
@@ -6253,6 +6363,22 @@ def _modulkassa_receipts_for_client_order(db, order_id):
         fiscal_info = _modulkassa_fiscal_info(row)
         if fiscal_info and fiscal_info.get("qr"):
             receipts.append(dict(row))
+    # Payments made through a ЮKassa link, with their receipt read from ЮKassa.
+    for row in db.execute(
+        "SELECT tp.id AS payment_id, tp.amount, tp.paid_at, ty.receipt_json "
+        "FROM tuning_payments tp JOIN tuning_yookassa_payments ty ON ty.tuning_payment_id = tp.id "
+        "WHERE tp.order_id = ? AND ty.receipt_status = 'succeeded' "
+        "ORDER BY tp.paid_at DESC, tp.id DESC",
+        (order_id,),
+    ).fetchall():
+        info = _online_receipt_fiscal_info(row["receipt_json"], row["amount"])
+        if info and info.get("qr"):
+            receipts.append({
+                "payment_id": row["payment_id"], "amount": row["amount"],
+                "paid_at": row["paid_at"], "payment_type": "ONLINE",
+                "receipt_status": "printed",
+                "fiscal_info_json": json.dumps(info, ensure_ascii=False),
+            })
     return receipts
 
 
@@ -10764,6 +10890,15 @@ def delete_tuning_payment(order_id, payment_id):
 @admin_login_required
 def check_modulkassa_receipt(order_id, payment_id):
     db = get_db()
+    online = db.execute(
+        "SELECT ty.* FROM tuning_yookassa_payments ty JOIN tuning_payments tp "
+        "ON ty.tuning_payment_id = tp.id WHERE tp.id = ? AND tp.order_id = ?",
+        (payment_id, order_id),
+    ).fetchone()
+    if online is not None:
+        # Paid through a ЮKassa link: look the fiscal receipt up in ЮKassa.
+        _refresh_tuning_online_receipt(db, online)
+        return redirect(url_for("edit_tuning_order", order_id=order_id))
     receipt = db.execute(
         "SELECT * FROM modulkassa_receipts WHERE payment_id = ? ORDER BY id DESC LIMIT 1", (payment_id,)
     ).fetchone()
@@ -10974,6 +11109,7 @@ def cron_check_modulkassa_receipts():
             # the fiscal receipts of the ones already paid.
             schedule_services.sync_open_invoices(get_db(), _yookassa_request)
             _sync_open_tuning_invoices(get_db())
+            _sync_tuning_online_receipts(get_db())
             schedule_services.sync_pending_receipts(get_db(), _yookassa_request)
         except Exception:
             pass
@@ -12368,6 +12504,13 @@ def _sync_yookassa_payment(db, record, remote=None):
             (cur.lastrowid, record["id"]),
         )
     db.commit()
+    if status == "succeeded":
+        # The cash desk registers the receipt shortly after the payment; if
+        # it isn't there yet, the cron / "Найти чек" button pick it up.
+        fresh = db.execute(
+            "SELECT * FROM tuning_yookassa_payments WHERE id = ?", (record["id"],)
+        ).fetchone()
+        _refresh_tuning_online_receipt(db, fresh)
     return status
 
 

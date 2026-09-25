@@ -149,6 +149,83 @@ class TuningYookassaInvoiceTests(unittest.TestCase):
         self.assertEqual((row["status"], row["yookassa_payment_id"]), ("succeeded", "pay-inv"))
         self.assertEqual([p["amount"] for p in payments], [4000.0])
 
+    RECEIPT = {
+        "id": "r1", "type": "payment", "status": "succeeded",
+        "registered_at": "2026-09-25T09:30:12.000Z",
+        "fiscal_document_number": 777, "fiscal_storage_number": "9999078900008998",
+        "fiscal_attribute": "3125146288",
+    }
+
+    def pay_link(self, receipts):
+        self.create_link(mock.Mock(return_value=self.invoice()))
+        row = self.row()
+
+        def api(method, path, **kwargs):
+            if path == "/receipts":
+                return {"items": receipts}
+            return self.invoice("succeeded", {"id": "pay-inv", "status": "succeeded"})
+
+        with mock.patch.object(application_module, "_yookassa_request", api):
+            self.client.post(f"/tuning/{self.order_id}/yookassa/{row['id']}/check")
+        return api
+
+    def payment_id(self):
+        with application_module.app.app_context():
+            return application_module.get_db().execute(
+                "SELECT id FROM tuning_payments WHERE order_id = ?", (self.order_id,)
+            ).fetchone()["id"]
+
+    def test_paid_link_shows_receipt_state_and_downloads_the_fiscal_pdf(self):
+        self.pay_link([{"id": "r1", "type": "payment", "status": "pending"}])
+        page = self.client.get(f"/tuning/edit/{self.order_id}").get_data(as_text=True)
+        self.assertIn("Чек формируется", page)
+        self.assertIn("Найти чек", page)
+        self.assertNotIn("PDF чека", page)
+        payment_id = self.payment_id()
+        pdf_url = f"/tuning/{self.order_id}/pay/{payment_id}/receipt.pdf"
+        self.assertEqual(self.client.get(pdf_url).status_code, 404)
+
+        def api(method, path, **kwargs):
+            return {"items": [self.RECEIPT]}
+
+        with mock.patch.object(application_module, "_yookassa_request", api):
+            self.client.post(f"/tuning/{self.order_id}/pay/{payment_id}/receipt/check")
+        page = self.client.get(f"/tuning/edit/{self.order_id}").get_data(as_text=True)
+        self.assertIn("PDF чека", page)
+        self.assertNotIn("Найти чек", page)
+        self.assertIn("Онлайн (ЮKassa)", page)
+        pdf = self.client.get(pdf_url)
+        self.assertEqual(pdf.status_code, 200)
+        self.assertTrue(pdf.data.startswith(b"%PDF"))
+        # the client's own cabinet offers it too
+        cabinet = self.client.get(f"/client/{self.MARK}-token").get_data(as_text=True)
+        self.assertIn(f"/payments/{payment_id}/receipt.pdf", cabinet)
+        public = application_module.app.test_client().get(
+            f"/client/{self.MARK}-token/orders/{self.order_id}/payments/{payment_id}/receipt.pdf"
+        )
+        self.assertEqual(public.status_code, 200)
+
+    def test_receipt_found_immediately_when_ready_at_payment_time(self):
+        self.pay_link([self.RECEIPT])
+        page = self.client.get(f"/tuning/edit/{self.order_id}").get_data(as_text=True)
+        self.assertIn("PDF чека", page)
+
+    def test_cron_backup_finds_the_receipt_later(self):
+        self.pay_link([])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "UPDATE tuning_yookassa_payments SET updated_at = ? WHERE order_id = ?",
+                (application_module.dt.datetime.now().strftime("%Y-%m-%d %H:%M"), self.order_id),
+            )
+            db.commit()
+            with mock.patch.object(
+                application_module, "_yookassa_request",
+                mock.Mock(return_value={"items": [self.RECEIPT]}),
+            ):
+                self.assertEqual(application_module._sync_tuning_online_receipts(db), 1)
+                self.assertEqual(application_module._sync_tuning_online_receipts(db), 0)
+
     def test_webhook_payment_is_matched_to_its_invoice_link(self):
         self.create_link(mock.Mock(return_value=self.invoice()))
 
