@@ -113,6 +113,31 @@ class ScheduleAutoCloseTests(unittest.TestCase):
         self.assertIn(f"№{unknown_boat}", details)
         self.assertIn("Выберите катер", details)
 
+    def test_old_cards_are_neither_closed_nor_reported(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            old_no_crew = self.make_item(
+                db, starts_at="2024-05-01 09:00", ends_at="2024-05-01 10:00", assign=False,
+            )
+            old_with_crew = self.make_item(
+                db, starts_at="2024-05-02 09:00", ends_at="2024-05-02 10:00",
+            )
+            recent_no_crew = self.make_item(
+                db, starts_at="2026-09-19 09:00", ends_at="2026-09-19 10:00", assign=False,
+            )
+            stats = schedule_services.auto_close_schedule_items(
+                db, self.create_trip, self.get_role_rate, now=dt.datetime(2026, 9, 21, 12, 0),
+            )
+            old_item = schedule_repository.get_item(db, old_with_crew)
+        # 2024 history is out of the lookback window: not closed into pay ...
+        self.assertIsNone(old_item["accounting_trip_id"])
+        self.assertEqual(stats["closed"], 0)
+        # ... and only the recent skipped card is counted and reported
+        self.assertEqual(stats["skipped"], 1)
+        self.assertEqual(len(stats["skipped_details"]), 1)
+        self.assertIn(f"№{recent_no_crew}", stats["skipped_details"][0])
+        self.assertNotIn(str(old_no_crew), "".join(stats["skipped_details"]))
+
     def test_boatless_city_item_pays_the_crew_without_a_trip(self):
         with application_module.app.app_context():
             db = application_module.get_db()

@@ -702,17 +702,25 @@ def create_schedule_blueprint(
             return "forbidden", 403
         if create_trip_from_schedule is None or get_role_rate is None:
             return "not configured", 503
+        try:
+            report_days = min(max(int(request.args.get("days", 7)), 1), 60)
+        except ValueError:
+            report_days = 7
         stats = services.auto_close_schedule_items(
             get_db(), create_trip_from_schedule, get_role_rate,
-            apply_minimum_shift=apply_minimum_shift,
+            apply_minimum_shift=apply_minimum_shift, report_days=report_days,
         )
         summary = (
             f"ok: {stats['closed']} closed, {stats['needs_review']} flagged, "
-            f"{stats['skipped']} skipped"
+            f"{stats['skipped']} skipped "
+            f"(last {services.AUTO_CLOSE_LOOKBACK_DAYS} days considered)"
         )
         details = stats["skipped_details"][:50]
         if details:
-            summary += "\nSkipped (retried on every run):\n" + "\n".join(details)
+            summary += (
+                f"\nSkipped in the last {report_days} days (retried on every run; "
+                "add &days=N for more):\n" + "\n".join(details)
+            )
             if len(stats["skipped_details"]) > len(details):
                 summary += f"\n… and {len(stats['skipped_details']) - len(details)} more"
         return summary, 200, {"Content-Type": "text/plain; charset=utf-8"}

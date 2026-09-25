@@ -955,7 +955,13 @@ def attach_participant_from_record(db, item_id, record, timestamp):
 AUTO_CLOSE_GRACE_MINUTES = 20
 
 
-def auto_close_schedule_items(db, create_trip, get_role_rate, apply_minimum_shift=None, now=None):
+AUTO_CLOSE_LOOKBACK_DAYS = 60
+
+
+def auto_close_schedule_items(
+    db, create_trip, get_role_rate, apply_minimum_shift=None, now=None,
+    report_days=7,
+):
     """Turn every schedule item whose trip is over into a real trips row —
     the internal-schedule replacement for the YCLIENTS import pipeline.
     Called on a timer (see routes.cron_close_schedule_items), no admin
@@ -985,13 +991,17 @@ def auto_close_schedule_items(db, create_trip, get_role_rate, apply_minimum_shif
     stats = {"closed": 0, "needs_review": 0, "skipped": 0, "skipped_details": []}
     closed_dates = set()
 
-    for item in repository.list_items_ready_to_close(db, cutoff):
+    since = (now - dt.timedelta(days=AUTO_CLOSE_LOOKBACK_DAYS)).strftime("%Y-%m-%d %H:%M")
+    report_from = (now - dt.timedelta(days=report_days)).strftime("%Y-%m-%d %H:%M")
+
+    for item in repository.list_items_ready_to_close(db, cutoff, since):
         assignments = repository.list_assignments(db, item["id"])
         if not assignments:
             stats["skipped"] += 1
-            stats["skipped_details"].append(
-                f"№{item['id']} {item['starts_at']} «{item['service_name']}»: нет назначенного экипажа"
-            )
+            if item["ends_at"] >= report_from:
+                stats["skipped_details"].append(
+                    f"№{item['id']} {item['starts_at']} «{item['service_name']}»: нет назначенного экипажа"
+                )
             continue
 
         starts = dt.datetime.strptime(item["starts_at"], "%Y-%m-%d %H:%M")
@@ -1051,10 +1061,11 @@ def auto_close_schedule_items(db, create_trip, get_role_rate, apply_minimum_shif
         errors, trip_id = create_trip(db, payload, needs_review=needs_review)
         if errors:
             stats["skipped"] += 1
-            stats["skipped_details"].append(
-                f"№{item['id']} {item['starts_at']} «{item['service_name']}», "
-                f"катер «{item['boat']}»: {'; '.join(errors)}"
-            )
+            if item["ends_at"] >= report_from:
+                stats["skipped_details"].append(
+                    f"№{item['id']} {item['starts_at']} «{item['service_name']}», "
+                    f"катер «{item['boat']}»: {'; '.join(errors)}"
+                )
             continue
 
         repository.set_accounting_trip_id(db, item["id"], trip_id, timestamp)

@@ -204,18 +204,23 @@ def list_assignments(db, item_id):
     ).fetchall()
 
 
-def list_items_ready_to_close(db, cutoff):
+def list_items_ready_to_close(db, cutoff, since=None):
     """Schedule items whose end time is at or before `cutoff` (the caller
     applies the grace buffer), not cancelled (deleted_at IS NULL), and not
     already turned into a trip — the auto-close job's candidate queue. See
     services.auto_close_schedule_items."""
-    return db.execute(
+    query = (
         "SELECT * FROM schedule_items "
         "WHERE deleted_at IS NULL AND accounting_trip_id IS NULL "
-        "AND payroll_closed_at IS NULL AND ends_at <= ? "
-        "ORDER BY ends_at, id",
-        (cutoff,),
-    ).fetchall()
+        "AND payroll_closed_at IS NULL AND ends_at <= ?"
+    )
+    params = [cutoff]
+    if since:
+        # Old history is out of scope: a card from long ago that only now
+        # gets a crew must not silently book pay into a past period.
+        query += " AND ends_at >= ?"
+        params.append(since)
+    return db.execute(query + " ORDER BY ends_at, id", params).fetchall()
 
 
 def close_item_payroll_only(db, item_id, work_date, labor_items, timestamp):
