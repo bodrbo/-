@@ -2463,6 +2463,15 @@ def init_db(db_path=None, include_bootstrap_data=True):
         )
         """
     )
+    tuning_yookassa_cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(tuning_yookassa_payments)").fetchall()
+    }
+    for column in ("yookassa_invoice_id", "expires_at"):
+        if column not in tuning_yookassa_cols:
+            # Payment links are ЮKassa invoices (see _send_yookassa_payment);
+            # until the client pays, yookassa_payment_id is an "invoice:<id>"
+            # placeholder.
+            conn.execute(f"ALTER TABLE tuning_yookassa_payments ADD COLUMN {column} TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS excursion_refund_records (
@@ -10045,6 +10054,7 @@ def edit_tuning_order(order_id):
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
             yookassa_payments=yookassa_payments, yookassa_configured=yookassa_configured(),
             yookassa_error=session.pop("yookassa_error", None),
+            yookassa_notice=session.pop("yookassa_notice", None),
             hull_sheets=hull_sheets, available_hull_sheets=available_hull_sheets,
             work_photos_by_item=work_photos_by_item,
             assignable_employees=assignable_employees,
@@ -10963,6 +10973,7 @@ def cron_check_modulkassa_receipts():
             # Links still waiting for payment (backup for the webhook), then
             # the fiscal receipts of the ones already paid.
             schedule_services.sync_open_invoices(get_db(), _yookassa_request)
+            _sync_open_tuning_invoices(get_db())
             schedule_services.sync_pending_receipts(get_db(), _yookassa_request)
         except Exception:
             pass
@@ -11518,7 +11529,7 @@ def _render_client_dashboard(
         if not is_admin_view:
             pending = db.execute(
                 "SELECT amount, confirmation_url FROM tuning_yookassa_payments "
-                "WHERE order_id = ? AND status != 'succeeded' "
+                "WHERE order_id = ? AND status NOT IN ('succeeded', 'canceled') "
                 "ORDER BY id DESC LIMIT 1",
                 (order["id"],),
             ).fetchone()
@@ -12336,9 +12347,12 @@ def _sync_yookassa_payment(db, record, remote=None):
     record it in the same tuning_payments ledger admin-entered payments use
     — so paid/remaining totals everywhere stay correct without special-casing
     online payments."""
-    if remote is None:
-        remote = _yookassa_request("GET", f"/payments/{record['yookassa_payment_id']}")
-    status = remote.get("status", record["status"])
+    if record["yookassa_invoice_id"]:
+        status = _sync_tuning_invoice_status(db, record)
+    else:
+        if remote is None:
+            remote = _yookassa_request("GET", f"/payments/{record['yookassa_payment_id']}")
+        status = remote.get("status", record["status"])
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
         "UPDATE tuning_yookassa_payments SET status = ?, updated_at = ? WHERE id = ?",
@@ -12355,6 +12369,78 @@ def _sync_yookassa_payment(db, record, remote=None):
         )
     db.commit()
     return status
+
+
+TUNING_INVOICE_PLACEHOLDER_PREFIX = "invoice:"
+TUNING_INVOICE_VALID_DAYS = 14  # ЮKassa allows at most 30
+
+
+def _sync_tuning_invoice_status(db, record):
+    """Status of a payment link that is an ЮKassa invoice. The invoice turns
+    succeeded once its payment did; the payment id shows up then (or when
+    the client starts paying) and replaces the row's placeholder id."""
+    invoice = _yookassa_request("GET", f"/invoices/{record['yookassa_invoice_id']}")
+    details = invoice.get("payment_details") or {}
+    remote_payment_id = details.get("id")
+    if remote_payment_id and record["yookassa_payment_id"].startswith(
+        TUNING_INVOICE_PLACEHOLDER_PREFIX
+    ):
+        taken = db.execute(
+            "SELECT 1 FROM tuning_yookassa_payments WHERE yookassa_payment_id = ? AND id != ?",
+            (remote_payment_id, record["id"]),
+        ).fetchone()
+        if taken is None:
+            db.execute(
+                "UPDATE tuning_yookassa_payments SET yookassa_payment_id = ? WHERE id = ?",
+                (remote_payment_id, record["id"]),
+            )
+    status = {"succeeded": "succeeded", "canceled": "canceled"}.get(
+        invoice.get("status"), "pending"
+    )
+    if status == "succeeded" and details.get("status") not in (None, "succeeded"):
+        status = "pending"
+    return status
+
+
+def _sync_open_tuning_invoices(db):
+    """Backup for the webhook: polls every tuning link still waiting for
+    payment (also turns expired ones into canceled)."""
+    rows = db.execute(
+        "SELECT * FROM tuning_yookassa_payments WHERE yookassa_invoice_id IS NOT NULL "
+        "AND status = 'pending' ORDER BY id DESC LIMIT 200"
+    ).fetchall()
+    for record in rows:
+        try:
+            _sync_yookassa_payment(db, record)
+        except Exception:
+            continue
+    return len(rows)
+
+
+def _find_tuning_invoice_record_for_payment(db, remote):
+    """The tuning link a paid ЮKassa payment belongs to: by its invoice id,
+    or failing that by the order id in its metadata plus the amount."""
+    invoice_id = (remote.get("invoice_details") or {}).get("id")
+    if invoice_id:
+        record = db.execute(
+            "SELECT * FROM tuning_yookassa_payments WHERE yookassa_invoice_id = ?",
+            (invoice_id,),
+        ).fetchone()
+        if record is not None:
+            return record
+    order_id = str((remote.get("metadata") or {}).get("tuning_order_id") or "")
+    if order_id.isdigit():
+        try:
+            amount = float((remote.get("amount") or {}).get("value"))
+        except (TypeError, ValueError):
+            return None
+        return db.execute(
+            "SELECT * FROM tuning_yookassa_payments WHERE order_id = ? "
+            "AND yookassa_invoice_id IS NOT NULL AND status = 'pending' "
+            "AND ABS(amount - ?) < 0.005 ORDER BY id DESC LIMIT 1",
+            (int(order_id), amount),
+        ).fetchone()
+    return None
 
 
 # Our own product unit codes -> ЮKassa's receipt `measure` enum (54-ФЗ
@@ -12374,22 +12460,69 @@ def _send_yookassa_payment(db, order_id, order, amount, description, receipt_ite
     metadata = {"tuning_order_id": str(order_id)}
     if extra_metadata:
         metadata.update(extra_metadata)
+    receipt = {
+        "customer": {"phone": _normalize_ru_phone(order["phone"])},
+        "items": receipt_items,
+    }
     body = {
         "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
         "capture": True,
         "description": description[:128],
         "confirmation": {"type": "redirect", "return_url": return_url},
         "metadata": metadata,
-        "receipt": {
-            "customer": {"phone": _normalize_ru_phone(order["phone"])},
-            "items": receipt_items,
-        },
+        "receipt": receipt,
     }
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    # The link is an ЮKassa *invoice*, valid TUNING_INVOICE_VALID_DAYS days —
+    # a plain payment's confirmation link only lives a short, non-extendable
+    # time. If invoices can't be created, fall back to a plain payment so a
+    # link can always be issued (and say so).
+    invoice_body = {
+        "payment_data": {
+            "amount": body["amount"], "capture": True,
+            "description": body["description"], "metadata": metadata,
+            "receipt": receipt,
+        },
+        "cart": [
+            {
+                "description": item["description"],
+                "price": item["amount"],
+                "quantity": item["quantity"],
+            }
+            for item in receipt_items
+        ],
+        "delivery_method_data": {"type": "self"},
+        "locale": "ru_RU",
+        "expires_at": (
+            dt.datetime.utcnow() + dt.timedelta(days=TUNING_INVOICE_VALID_DAYS)
+        ).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        "description": body["description"],
+        "metadata": metadata,
+    }
+    invoice_error = None
+    try:
+        invoice = _yookassa_request(
+            "POST", "/invoices", json_body=invoice_body,
+            idempotence_key=secrets.token_hex(16),
+        )
+        url = (invoice.get("delivery_method") or {}).get("url")
+        if not invoice.get("id") or not url:
+            raise ValueError("в ответе нет ссылки на счёт")
+        db.execute(
+            "INSERT INTO tuning_yookassa_payments (order_id, yookassa_payment_id, "
+            "yookassa_invoice_id, amount, status, confirmation_url, expires_at, "
+            "created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+            (order_id, TUNING_INVOICE_PLACEHOLDER_PREFIX + invoice["id"], invoice["id"],
+             amount, url, invoice.get("expires_at") or invoice_body["expires_at"], now, now),
+        )
+        db.commit()
+        return
+    except Exception as e:
+        invoice_error = e
     try:
         remote = _yookassa_request(
             "POST", "/payments", json_body=body, idempotence_key=secrets.token_hex(16)
         )
-        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
         db.execute(
             "INSERT INTO tuning_yookassa_payments (order_id, yookassa_payment_id, amount, status, "
             "confirmation_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -12397,6 +12530,10 @@ def _send_yookassa_payment(db, order_id, order, amount, description, receipt_ite
              remote["confirmation"]["confirmation_url"], now, now),
         )
         db.commit()
+        session["yookassa_notice"] = (
+            "Ссылка создана, но короткоживущая: счета ЮKassa недоступны "
+            f"({str(invoice_error)[:160]}). Она истечёт в течение суток."
+        )
     except Exception as e:
         session["yookassa_error"] = str(e)
 
@@ -12522,7 +12659,9 @@ def delete_yookassa_payment(order_id, payment_id):
     if record["status"] == "succeeded":
         session["yookassa_error"] = "Нельзя удалить счёт с успешной оплатой."
         return redirect(url_for("edit_tuning_order", order_id=order_id))
-    if record["status"] == "waiting_for_capture":
+    if record["status"] == "waiting_for_capture" and not record["yookassa_payment_id"].startswith(
+        TUNING_INVOICE_PLACEHOLDER_PREFIX
+    ):
         try:
             _yookassa_request(
                 "POST", f"/payments/{record['yookassa_payment_id']}/cancel",
@@ -12533,6 +12672,11 @@ def delete_yookassa_payment(order_id, payment_id):
             return redirect(url_for("edit_tuning_order", order_id=order_id))
     db.execute("DELETE FROM tuning_yookassa_payments WHERE id = ?", (payment_id,))
     db.commit()
+    if record["yookassa_invoice_id"]:
+        session["yookassa_notice"] = (
+            "Ссылка удалена из заказа. Сам счёт в ЮKassa действует до истечения срока — "
+            "не отправляйте эту ссылку клиенту."
+        )
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
@@ -12555,11 +12699,18 @@ def yookassa_webhook():
                     "SELECT * FROM tuning_yookassa_payments WHERE yookassa_payment_id = ?",
                     (object_id,),
                 ).fetchone()
+                remote_payment = None
+                if record is None:
+                    # A payment made through one of our invoice links only
+                    # gets known here: match it to its tuning link.
+                    remote_payment = _yookassa_request("GET", f"/payments/{object_id}")
+                    record = _find_tuning_invoice_record_for_payment(db, remote_payment)
                 if record is not None:
                     _sync_yookassa_payment(db, record)
-                schedule_services.sync_participant_payment_by_remote_id(
-                    db, object_id, _yookassa_request
-                )
+                else:
+                    schedule_services.sync_participant_payment_by_remote_id(
+                        db, object_id, _yookassa_request, remote=remote_payment
+                    )
                 excursion_payment = db.execute(
                     "SELECT 1 FROM excursion_yookassa_payments "
                     "WHERE yookassa_payment_id = ?",

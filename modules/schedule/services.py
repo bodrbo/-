@@ -1357,16 +1357,19 @@ def sync_pending_receipts(db, yookassa_request, days=7):
     return len(rows), found
 
 
-def sync_participant_payment_by_remote_id(db, yookassa_payment_id, yookassa_request):
+def sync_participant_payment_by_remote_id(
+    db, yookassa_payment_id, yookassa_request, remote=None,
+):
     record = repository.get_yookassa_payment_by_remote_id(db, yookassa_payment_id)
     if record is None:
         # A payment made through one of our invoice links: match it by the
         # invoice it belongs to (or, failing that, the participant/amount
         # in its metadata).
-        try:
-            remote = yookassa_request("GET", f"/payments/{yookassa_payment_id}")
-        except Exception:
-            return None
+        if remote is None:
+            try:
+                remote = yookassa_request("GET", f"/payments/{yookassa_payment_id}")
+            except Exception:
+                return None
         invoice_id = (remote.get("invoice_details") or {}).get("id")
         if invoice_id:
             record = repository.get_yookassa_payment_by_invoice_id(db, invoice_id)
