@@ -11910,3 +11910,8 @@ button.partner-open-price-save svg {
 .schedule-modal-header .schedule-modal-number { font-size: 12px; letter-spacing: .04em; text-transform: none; white-space: nowrap; user-select: all; }
 
 .schedule-yookassa-item .schedule-yookassa-until { color: var(--ink-soft); font-size: 10px; white-space: nowrap; }
+
+.shop-map-warnings { margin: 0 0 14px; padding: 10px 14px; border: 1px solid #e0b4ae; border-radius: 8px; background: #fbeeec; color: #8a2c22; font-size: 13px; }
+.shop-map-warnings ul { margin: 6px 0 0; padding-left: 18px; }
+.shop-map-warnings a { color: inherit; font-weight: 700; }
+.shop-map-warning { background: #fdf3dc; border-color: #ecd9a4; color: #7a5a10; }

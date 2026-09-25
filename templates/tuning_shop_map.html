@@ -216,7 +216,7 @@
                transform="translate({{ boat.cx_px }}, {{ boat.cy_px }}) rotate({{ boat.rotation_deg }}) translate({{ boat.pivot_shift_px }}, 0) scale({{ boat.box_w_px / 180 }}, {{ boat.box_h_px / 52 }})">
               <path class="shop-map-boat-hull{{ ' is-conflict' if boat.conflict }}"
                     d="M 180 0 C 170 22 120 26 85 25 C 45 24 15 18 0 12 L 0 -12 C 15 -18 45 -24 85 -25 C 120 -26 170 -22 180 0 Z">
-                <title>{{ boat.client_name }} — {{ boat.boat_model }} ({{ boat.length_m|float|round(2) }} × {{ boat.width_m|float|round(2) }} м){{ ' — стоит ближе 0,5 м к другой лодке в этот день, передвиньте' if boat.conflict }} — перетащите, чтобы передвинуть</title>
+                <title>{{ boat.client_name }} — {{ boat.boat_model }} ({{ boat.length_m|float|round(2) }} × {{ boat.width_m|float|round(2) }} м){{ ' — есть предупреждения (см. под картой)' if boat.conflict }} — перетащите, чтобы передвинуть</title>
               </path>
             </g>
           </a>
@@ -243,10 +243,23 @@
 
   <section class="panel">
     <h2>Лодки в цеху на {{ selected_date|ru_date }}</h2>
-    <p class="hint">Лодку можно перетащить на карте, чтобы переместить, и повернуть на любой угол — потяните за кружок у носа. Зоны и другие объекты цеха непроходимы, а между лодками всегда остаётся зазор не меньше 0,5 м.</p>
+    <p class="hint">Лодку можно перетащить на карте, чтобы переместить, и повернуть на любой угол — потяните за кружок у носа. Положение не ограничено: лодку можно поставить куда угодно, но если она выходит за пределы цеха, пересекает зону или стоит ближе 0,5 м к другой лодке, вы увидите предупреждение, а лодка будет обведена красным пунктиром.</p>
     <p class="hint">Лодка появляется в цеху в дату приемки из заказа и уходит в дату срока исполнения (у выполненного заказа — в фактическую дату завершения). Заказ без даты приемки попадает на карту, когда переходит в «В работе». Положение лодки одно на весь период стоянки; места лодок, которые в эти даты в цеху не стоят, свободны. Размер на карте — реальные длина и ширина из профиля лодки.</p>
     {% if boat_error %}
     <div class="alert"><strong>Не удалось сохранить:</strong> {{ boat_error }}</div>
+    {% endif %}
+    {% if boat_warning %}
+    <div class="alert shop-map-warning" role="status"><strong>Положение сохранено, но:</strong> {{ boat_warning }}</div>
+    {% endif %}
+    {% if map_warnings %}
+    <div class="shop-map-warnings">
+      <strong>Предупреждения на {{ selected_date|ru_date }}</strong>
+      <ul>
+        {% for w in map_warnings %}
+        <li><a href="{{ url_for('edit_tuning_order', order_id=w.boat.order_id) }}">{{ w.boat.client_name }} — {{ w.boat.boat_model }}</a>: {{ w.message }}</li>
+        {% endfor %}
+      </ul>
+    </div>
     {% endif %}
     {% if boats_missing_dimensions %}
     <p class="hint">

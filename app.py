@@ -8846,19 +8846,21 @@ def _shop_map_obb_overlap(ax, ay, a_half_l, a_half_w, a_angle, bx, by, b_half_l,
     return True
 
 
-def _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, rotation_deg, exclude_boat_id=None, interval=None, on_date=None):
-    """Shared by the manual position form, drag, and rotate routes — a
-    boat may not stick out of the room, overlap any fixed zone/element, or
-    come within SHOP_MAP_BOAT_GAP_M of another boat already on the map, at
-    any rotation angle."""
+def _shop_map_boat_placement_errors(db, room, x_m, y_m, length_m, width_m, rotation_deg, exclude_boat_id=None, interval=None, on_date=None):
+    """Every rule a boat's position breaks — sticking out of the room,
+    overlapping a fixed zone/element, coming within SHOP_MAP_BOAT_GAP_M of
+    another boat — at any rotation angle. Moving a boat is never blocked by
+    these (the admin has full freedom); they are shown as warnings, and
+    auto-placement uses them to find a clear spot."""
+    problems = []
     footprint_w, footprint_h = _shop_map_boat_footprint(length_m, width_m, rotation_deg)
     if room is not None:
-        if x_m < -0.001 or y_m < -0.001:
-            return "Лодка на этой позиции выходит за пределы цеха."
-        if x_m + footprint_w > room["length_m"] + 0.001:
-            return "Лодка на этой позиции выходит за пределы цеха по длине."
-        if y_m + footprint_h > room["width_m"] + 0.001:
-            return "Лодка на этой позиции выходит за пределы цеха по ширине."
+        if (
+            x_m < -0.001 or y_m < -0.001
+            or x_m + footprint_w > room["length_m"] + 0.001
+            or y_m + footprint_h > room["width_m"] + 0.001
+        ):
+            problems.append("Лодка выходит за пределы цеха.")
     cx, cy = x_m + footprint_w / 2, y_m + footprint_h / 2
     half_l, half_w = length_m / 2, width_m / 2
     for el in db.execute(
@@ -8869,7 +8871,7 @@ def _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, rotati
             cx, cy, half_l, half_w, rotation_deg,
             el_cx, el_cy, el["width_m"] / 2, el["height_m"] / 2, 0,
         ):
-            return f"Лодка пересекается с зоной «{el['name']}»."
+            problems.append(f"Лодка пересекается с зоной «{el['name']}».")
     all_boats = _shop_map_boats(db)
     if interval is None and on_date is None and exclude_boat_id is not None:
         own = next((b for b in all_boats if b["id"] == exclude_boat_id), None)
@@ -8902,11 +8904,37 @@ def _shop_map_boat_placement_error(db, room, x_m, y_m, length_m, width_m, rotati
             other_cx, other_cy, boat["length_m"] / 2, boat["width_m"] / 2, boat["rotation_deg"],
             margin=SHOP_MAP_BOAT_GAP_M,
         ):
-            return (
-                f"Лодка окажется ближе {SHOP_MAP_BOAT_GAP_M:g} м к лодке "
+            problems.append(
+                f"Лодка ближе {SHOP_MAP_BOAT_GAP_M:g} м к лодке "
                 f"«{boat['client_name']} — {boat['boat_model']}»."
             )
-    return None
+    return problems
+
+
+def _shop_map_boat_placement_error(*args, **kwargs):
+    """First problem of _shop_map_boat_placement_errors, or None — what
+    auto-placement needs to decide whether a spot is clear."""
+    problems = _shop_map_boat_placement_errors(*args, **kwargs)
+    return problems[0] if problems else None
+
+
+def _shop_map_clamp_to_canvas(room, x_m, y_m, footprint_w, footprint_h):
+    """Boats may be dropped anywhere — even outside the room — but not so
+    far that they leave the drawn canvas (the room plus its margin) and
+    can't be grabbed again."""
+    margin = SHOP_MAP_PADDING / SHOP_MAP_SCALE
+    if room is None:
+        return x_m, y_m
+    x_m = min(max(x_m, -margin), room["length_m"] + margin - footprint_w)
+    y_m = min(max(y_m, -margin), room["width_m"] + margin - footprint_h)
+    return x_m, y_m
+
+
+def _shop_map_save_warning(problems):
+    """Warnings of a just-saved position, shown once on the next map view."""
+    if problems:
+        session["shop_map_boat_warning"] = " ".join(problems)
+    return " ".join(problems)
 
 
 def _shop_map_boat_with_profile(db, boat_id):
@@ -9096,20 +9124,19 @@ def tuning_shop_map():
         else:
             boats_missing_dimensions.append(boat)
 
-    # Boats that stand closer than the required gap on this very day (their
-    # spots were fine while they were never in the shop together) get flagged.
-    for index, first in enumerate(boats_on_map):
-        for second in boats_on_map[index + 1:]:
-            first_w, first_h = _shop_map_boat_footprint(first["length_m"], first["width_m"], first["rotation_deg"])
-            second_w, second_h = _shop_map_boat_footprint(second["length_m"], second["width_m"], second["rotation_deg"])
-            if _shop_map_obb_overlap(
-                first["x_m"] + first_w / 2, first["y_m"] + first_h / 2,
-                first["length_m"] / 2, first["width_m"] / 2, first["rotation_deg"],
-                second["x_m"] + second_w / 2, second["y_m"] + second_h / 2,
-                second["length_m"] / 2, second["width_m"] / 2, second["rotation_deg"],
-                margin=SHOP_MAP_BOAT_GAP_M,
-            ):
-                first["conflict"] = second["conflict"] = True
+    # Rules are advisory: every boat standing on this day is checked against
+    # the room, the zones and the other boats present that day; the results
+    # are shown as warnings (a red dashed outline and a list under the map).
+    room_row = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+    map_warnings = []
+    for boat in boats_on_map:
+        boat["warnings"] = _shop_map_boat_placement_errors(
+            db, room_row, boat["x_m"], boat["y_m"], boat["length_m"], boat["width_m"],
+            boat["rotation_deg"], exclude_boat_id=boat["id"], on_date=selected_date,
+        )
+        boat["conflict"] = bool(boat["warnings"])
+        for message in boat["warnings"]:
+            map_warnings.append({"boat": boat, "message": message})
     return render_template(
         "tuning_shop_map.html", active_page="tuning", sub_page="shop_map",
         room=room, scale=SHOP_MAP_SCALE, padding=SHOP_MAP_PADDING,
@@ -9125,6 +9152,8 @@ def tuning_shop_map():
         element_error=session.pop("shop_map_element_error", None),
         element_notice=session.pop("shop_map_element_notice", None),
         boat_error=session.pop("shop_map_boat_error", None),
+        boat_warning=session.pop("shop_map_boat_warning", None),
+        map_warnings=map_warnings,
     )
 
 
@@ -9341,31 +9370,32 @@ def update_shop_map_boat_position(boat_id):
 
     errors = []
 
-    def _parse_nonnegative(raw, label):
+    def _parse_meters(raw, label):
         raw = raw.strip().replace(",", ".")
         try:
             value = float(raw)
-            if value < 0:
+            if value != value or abs(value) > 1000:
                 raise ValueError
             return value
         except ValueError:
-            errors.append(f"«{label}» должна быть числом в метрах, не меньше нуля.")
+            errors.append(f"«{label}» должна быть числом в метрах.")
             return None
 
-    x_m = _parse_nonnegative(request.form.get("x_m", ""), "От левой стены")
-    y_m = _parse_nonnegative(request.form.get("y_m", ""), "От верхней стены")
-    if not errors and x_m is not None and y_m is not None:
-        error = _shop_map_boat_placement_error(
-            db, room, x_m, y_m, boat_length_m or 0, boat_width_m or 0, boat_row["rotation_deg"],
-            exclude_boat_id=boat_id,
-            on_date=_parse_shop_map_date(request.form.get("date"), None),
-        )
-        if error:
-            errors.append(error)
-
+    x_m = _parse_meters(request.form.get("x_m", ""), "От левой стены")
+    y_m = _parse_meters(request.form.get("y_m", ""), "От верхней стены")
     if errors:
         session["shop_map_boat_error"] = " ".join(errors)
         return _shop_map_redirect()
+
+    footprint_w, footprint_h = _shop_map_boat_footprint(
+        boat_length_m or 0, boat_width_m or 0, boat_row["rotation_deg"]
+    )
+    x_m, y_m = _shop_map_clamp_to_canvas(room, x_m, y_m, footprint_w, footprint_h)
+    _shop_map_save_warning(_shop_map_boat_placement_errors(
+        db, room, x_m, y_m, boat_length_m or 0, boat_width_m or 0, boat_row["rotation_deg"],
+        exclude_boat_id=boat_id,
+        on_date=_parse_shop_map_date(request.form.get("date"), None),
+    ))
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
@@ -9380,9 +9410,8 @@ def update_shop_map_boat_position(boat_id):
 @admin_login_required
 def drag_shop_map_boat(boat_id):
     """AJAX counterpart of update_shop_map_boat_position, used by dragging
-    a boat directly on the map — same validation, JSON in/out instead of a
-    redirect so the page doesn't have to fully reload just to reject a
-    drop and the caller can decide what to show."""
+    a boat directly on the map — JSON in/out instead of a redirect. Any
+    position is accepted; rule violations come back as a warning."""
     db = get_db()
     boat_row, length_m, width_m = _shop_map_boat_with_profile(db, boat_id)
     if boat_row is None:
@@ -9395,16 +9424,16 @@ def drag_shop_map_boat(boat_id):
         y_m = float(request.form.get("y_m", "").replace(",", "."))
     except ValueError:
         return jsonify({"error": "Некорректные координаты."}), 400
-    if x_m < 0 or y_m < 0:
-        return jsonify({"error": "Лодка не может выйти за пределы цеха."}), 400
+    if x_m != x_m or y_m != y_m or abs(x_m) > 1000 or abs(y_m) > 1000:
+        return jsonify({"error": "Некорректные координаты."}), 400
 
     room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
-    error = _shop_map_boat_placement_error(
+    footprint_w, footprint_h = _shop_map_boat_footprint(length_m, width_m, boat_row["rotation_deg"])
+    x_m, y_m = _shop_map_clamp_to_canvas(room, x_m, y_m, footprint_w, footprint_h)
+    warning = _shop_map_save_warning(_shop_map_boat_placement_errors(
         db, room, x_m, y_m, length_m, width_m, boat_row["rotation_deg"], exclude_boat_id=boat_id,
         on_date=_parse_shop_map_date(request.form.get("date"), None),
-    )
-    if error:
-        return jsonify({"error": error}), 400
+    ))
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
@@ -9412,7 +9441,7 @@ def drag_shop_map_boat(boat_id):
         (x_m, y_m, now, boat_id),
     )
     db.commit()
-    return jsonify({"x_m": x_m, "y_m": y_m})
+    return jsonify({"x_m": x_m, "y_m": y_m, "warning": warning})
 
 
 @app.route("/tuning/shop-map/boats/<int:boat_id>/rotate", methods=["POST"])
@@ -9442,13 +9471,12 @@ def rotate_shop_map_boat(boat_id):
     new_y_m = center_y - new_h / 2
 
     room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
-    error = _shop_map_boat_placement_error(
+    new_x_m, new_y_m = _shop_map_clamp_to_canvas(room, new_x_m, new_y_m, new_w, new_h)
+    warning = _shop_map_save_warning(_shop_map_boat_placement_errors(
         db, room, new_x_m, new_y_m, length_m, width_m, new_rotation,
         exclude_boat_id=boat_id,
         on_date=_parse_shop_map_date(request.form.get("date"), None),
-    )
-    if error:
-        return jsonify({"error": "Не помещается развёрнутой: " + error}), 400
+    ))
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
@@ -9456,7 +9484,9 @@ def rotate_shop_map_boat(boat_id):
         (new_x_m, new_y_m, new_rotation, now, boat_id),
     )
     db.commit()
-    return jsonify({"rotation_deg": new_rotation, "x_m": new_x_m, "y_m": new_y_m})
+    return jsonify({
+        "rotation_deg": new_rotation, "x_m": new_x_m, "y_m": new_y_m, "warning": warning,
+    })
 
 
 @app.route("/tuning/shop-map/boats/<int:boat_id>/remove", methods=["POST"])

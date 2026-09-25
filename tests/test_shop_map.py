@@ -141,7 +141,7 @@ class ShopMapAutoPlacementTests(unittest.TestCase):
         self.assertTrue(overlap("2030-01-01", None, "2030-03-01", "2030-03-05"))
         self.assertFalse(overlap("2030-01-01", "2030-01-10", None, None))
 
-    def test_moving_a_boat_only_respects_boats_present_on_the_viewed_day(self):
+    def test_boats_move_freely_and_rule_violations_only_warn(self):
         key = application_module._tuning_equipment_profile_key("boat", "Тест-катер")
         with application_module.app.app_context():
             db = application_module.get_db()
@@ -176,15 +176,48 @@ class ShopMapAutoPlacementTests(unittest.TestCase):
                 f"/tuning/shop-map/boats/{boat_ids[self.order_id]}/drag",
                 data={"x_m": target[0], "y_m": target[1], "date": date},
             )
-            # the other boat isn't in the shop on May 10 -> its spot is free that day
-            self.assertEqual(drag("2030-05-10").status_code, 200)
-            # on May 11 both are there -> too close
-            self.assertEqual(drag("2030-05-11").status_code, 400)
-            # ... and the map for that day flags the clash
+            # Any drop is accepted; the answer only carries a warning, and only
+            # for boats standing in the shop that day.
+            quiet = drag("2030-05-10")
+            self.assertEqual(quiet.status_code, 200)
+            self.assertEqual(quiet.get_json()["warning"], "")
+            noisy = drag("2030-05-11")
+            self.assertEqual(noisy.status_code, 200)
+            self.assertIn("ближе 0.5 м", noisy.get_json()["warning"])
+            # the map for that day flags the clash and lists it
             page = self.client.get("/tuning/shop-map?date=2030-05-11").get_data(as_text=True)
             self.assertIn("is-conflict", page)
+            self.assertIn("Предупреждения на", page)
             calm = self.client.get("/tuning/shop-map?date=2030-05-10").get_data(as_text=True)
             self.assertNotIn("shop-map-boat-hull is-conflict", calm)
+
+            # dropping outside the room is allowed too (warned), and clamped
+            # to the drawn canvas so the boat can still be grabbed
+            outside = self.client.post(
+                f"/tuning/shop-map/boats/{boat_ids[self.order_id]}/drag",
+                data={"x_m": 500, "y_m": -300, "date": "2030-05-10"},
+            )
+            self.assertEqual(outside.status_code, 200)
+            body = outside.get_json()
+            self.assertIn("за пределы цеха", body["warning"])
+            with application_module.app.app_context():
+                room = application_module.get_db().execute(
+                    "SELECT length_m FROM shop_map_room ORDER BY id LIMIT 1"
+                ).fetchone()
+            self.assertLess(body["x_m"], room["length_m"] + 3)
+            self.assertGreater(body["y_m"], -3)
+            # nonsense is still refused
+            bad = self.client.post(
+                f"/tuning/shop-map/boats/{boat_ids[self.order_id]}/drag",
+                data={"x_m": "abc", "y_m": 1},
+            )
+            self.assertEqual(bad.status_code, 400)
+            # rotating in place never blocks either
+            rotated = self.client.post(
+                f"/tuning/shop-map/boats/{boat_ids[other_id]}/rotate",
+                data={"rotation_deg": 90, "date": "2030-05-11"},
+            )
+            self.assertEqual(rotated.status_code, 200)
         finally:
             with application_module.app.app_context():
                 db = application_module.get_db()
