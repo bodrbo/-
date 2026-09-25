@@ -192,13 +192,14 @@
       {% endif %}
     </div>
 
+    {% if partner_scheme_error %}<div class="alert" role="alert">{{ partner_scheme_error }}</div>{% endif %}
     {% if clients %}
     <div class="table-scroll">
       <table class="records tuning-clients-table" id="tuning-clients-table">
         {% if client_section == 'excursion' %}
         <thead><tr><th>Контакт</th><th>Тип контакта</th><th>Лояльность</th><th>Телефон</th><th>Рейсов</th><th>Последний рейс</th><th>Ближайший рейс</th><th>Катера</th></tr></thead>
         {% else %}
-        <thead><tr><th>Контакт</th><th>Тип контакта</th><th>Лояльность</th><th>Телефон</th><th>Последняя техника</th><th>Заказов</th><th>Последний заказ</th><th>Сумма</th><th>Оплачено</th><th>К доплате</th></tr></thead>
+        <thead><tr><th>Контакт</th><th>Тип контакта</th><th>Лояльность</th><th>Телефон</th><th>Последняя техника</th><th>Заказов</th><th>Последний заказ</th><th>Сумма</th><th>Оплачено</th><th>К доплате</th>{% if is_partner_directory %}<th>Схема работы</th>{% endif %}</tr></thead>
         {% endif %}
         <tbody>
           {% for client in clients %}
@@ -255,6 +256,26 @@
             <td class="amount">{{ client.order_total|money }}</td>
             <td class="amount tuning-client-paid">{{ client.paid_total|money }}</td>
             <td class="amount {{ 'tuning-client-debt' if client.outstanding > 0 }}">{{ client.outstanding|money }}</td>
+            {% if is_partner_directory %}
+            <td class="partner-scheme-cell">
+              <form action="{{ url_for('update_partner_work_scheme', client_id=client.id) }}" method="post" class="partner-scheme-form">
+                <select name="work_scheme" aria-label="Схема работы {{ client.client_name }}" onchange="var v=this.form.work_scheme_value; v.hidden = !this.value; v.placeholder = this.value === 'percent' ? '%' : '₽ за заказ';">
+                  <option value="" {{ 'selected' if not client.work_scheme }}>Не задана</option>
+                  {% for value, label in partner_schemes %}
+                  <option value="{{ value }}" {{ 'selected' if client.work_scheme == value }}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+                <input type="text" inputmode="decimal" name="work_scheme_value" class="partner-scheme-value"
+                       value="{{ ('%g' % client.work_scheme_value) if client.work_scheme else '' }}"
+                       placeholder="{{ '%' if client.work_scheme == 'percent' else '₽ за заказ' }}"
+                       {{ 'hidden' if not client.work_scheme }} aria-label="Значение схемы">
+                <button type="submit" class="icon-btn approve" title="Сохранить схему работы">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5l4 4 8-9"/></svg>
+                </button>
+              </form>
+              {% if client.work_scheme_summary %}<span class="muted partner-scheme-summary">{{ client.work_scheme_summary }}</span>{% endif %}
+            </td>
+            {% endif %}
             {% endif %}
           </tr>
           {% endfor %}

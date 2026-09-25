@@ -11915,3 +11915,11 @@ button.partner-open-price-save svg {
 .shop-map-warnings ul { margin: 6px 0 0; padding-left: 18px; }
 .shop-map-warnings a { color: inherit; font-weight: 700; }
 .shop-map-warning { background: #fdf3dc; border-color: #ecd9a4; color: #7a5a10; }
+
+.partner-scheme-form { display: flex; align-items: center; gap: 4px; margin: 0; }
+.partner-scheme-form select { width: auto; min-width: 150px; padding: 4px 6px; font-size: 12px; }
+.partner-scheme-form .partner-scheme-value { width: 78px; padding: 4px 6px; font-size: 12px; }
+.partner-scheme-form .icon-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 27px; height: 27px; margin: 0; padding: 0; border-radius: 6px; border: 1px solid var(--hairline); background: transparent; color: var(--ink-soft); cursor: pointer; }
+.partner-scheme-form .icon-btn svg { width: 13px; height: 13px; }
+.partner-scheme-form .icon-btn.approve:hover { background: var(--success); color: #fff8f4; border-color: var(--success); }
+.partner-scheme-summary { display: block; margin-top: 3px; font-size: 11px; }

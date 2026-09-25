@@ -2463,6 +2463,25 @@ def init_db(db_path=None, include_bootstrap_data=True):
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS partner_commissions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL UNIQUE,
+            partner_id INTEGER NOT NULL,
+            scheme TEXT NOT NULL,
+            rate REAL NOT NULL,
+            base_total REAL NOT NULL,
+            amount REAL NOT NULL,
+            recorded_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_partner_commissions_partner "
+        "ON partner_commissions(partner_id)"
+    )
     tuning_yookassa_cols = {
         row[1] for row in conn.execute("PRAGMA table_info(tuning_yookassa_payments)").fetchall()
     }
@@ -5961,6 +5980,85 @@ def _own_order_boat_error(db, client_id, equipment_type, boat_model):
     return None
 
 
+PARTNER_SCHEMES = (
+    ("percent", "Процент с заказа"),
+    ("fixed", "Фиксированный тариф"),
+)
+PARTNER_SCHEME_LABELS = dict(PARTNER_SCHEMES)
+
+
+def _partner_scheme_summary(scheme, value):
+    if scheme == "percent":
+        return f"{value:g} % с заказа"
+    if scheme == "fixed":
+        return f"{value:,.0f} ₽ за заказ".replace(",", " ")
+    return ""
+
+
+def _sync_order_accounting(db, order_id):
+    """Everything derived from an order's status/total: the expense of an
+    own-boat order and a tuning partner's commission."""
+    _sync_own_boat_order_expense(db, order_id)
+    _sync_partner_commission(db, order_id)
+
+
+def _sync_partner_commission(db, order_id):
+    """Books the commission of a tuning partner on an order they brought (the
+    order's client is the partner) into partner_commissions, per the
+    partner's "схема работы": a percent of the order total or a fixed sum per
+    order. The order counts from the moment it reaches "В работе" (or later —
+    see TUNING_ANALYTICS_ORDER_STATUSES) and drops out if it goes back to an
+    earlier status or is cancelled. The scheme/rate are snapshotted when the
+    row is created, so changing a partner's scheme later only affects new
+    orders; a percent commission follows the order total while it changes."""
+    order = db.execute(
+        "SELECT id, client_id, source, status, total FROM tuning_orders WHERE id = ?",
+        (order_id,),
+    ).fetchone()
+    existing = db.execute(
+        "SELECT * FROM partner_commissions WHERE order_id = ?", (order_id,)
+    ).fetchone()
+    qualifies = (
+        order is not None
+        and order["client_id"] is not None
+        and order["source"] != SUBCONTRACT_REQUEST_SOURCE
+        and order["status"] in TUNING_ANALYTICS_ORDER_STATUSES
+    )
+    if not qualifies:
+        if existing:
+            db.execute("DELETE FROM partner_commissions WHERE id = ?", (existing["id"],))
+        return
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    total = round(order["total"] or 0, 2)
+    if existing:
+        amount = _partner_commission_amount(existing["scheme"], existing["rate"], total)
+        db.execute(
+            "UPDATE partner_commissions SET base_total = ?, amount = ?, updated_at = ? WHERE id = ?",
+            (total, amount, now, existing["id"]),
+        )
+        return
+    partner = db.execute(
+        "SELECT work_scheme, work_scheme_value FROM client_segments "
+        "WHERE client_id = ? AND segment = ? AND relationship_type = ?",
+        (order["client_id"], TUNING_SEGMENT, CLIENT_RELATIONSHIP_PARTNER),
+    ).fetchone()
+    if partner is None or partner["work_scheme"] not in PARTNER_SCHEME_LABELS:
+        return
+    db.execute(
+        "INSERT INTO partner_commissions (order_id, partner_id, scheme, rate, base_total, "
+        "amount, recorded_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (order_id, order["client_id"], partner["work_scheme"], partner["work_scheme_value"],
+         total, _partner_commission_amount(partner["work_scheme"], partner["work_scheme_value"], total),
+         now, now),
+    )
+
+
+def _partner_commission_amount(scheme, rate, total):
+    if scheme == "percent":
+        return round(total * rate / 100, 2)
+    return round(rate, 2)
+
+
 def _sync_own_boat_order_expense(db, order_id):
     """Cost of an own-boat order (works + goods, the order total) is booked
     as an expense trip of that boat, so it reduces the boat's profitability
@@ -6510,7 +6608,7 @@ def _recompute_order_totals(db, order_id):
         "UPDATE tuning_orders SET subtotal = ?, total = ?, updated_at = ? WHERE id = ?",
         (subtotal, total, now, order_id),
     )
-    _sync_own_boat_order_expense(db, order_id)
+    _sync_order_accounting(db, order_id)
     db.commit()
 
 
@@ -7891,7 +7989,13 @@ def tuning_clients():
             "(SELECT latest.equipment_type FROM tuning_orders latest "
             " WHERE latest.client_id = c.id "
             " ORDER BY latest.order_date DESC, latest.id DESC LIMIT 1) "
-            "AS latest_equipment_type "
+            "AS latest_equipment_type, "
+            "(SELECT scheme_cs.work_scheme FROM client_segments scheme_cs "
+            " WHERE scheme_cs.client_id = c.id AND scheme_cs.segment = 'tuning' "
+            " AND scheme_cs.relationship_type = 'partner') AS work_scheme, "
+            "(SELECT scheme_cs.work_scheme_value FROM client_segments scheme_cs "
+            " WHERE scheme_cs.client_id = c.id AND scheme_cs.segment = 'tuning' "
+            " AND scheme_cs.relationship_type = 'partner') AS work_scheme_value "
             "FROM clients c "
             "LEFT JOIN ("
             " SELECT client_id, COUNT(*) AS order_count, SUM(total) AS order_total, "
@@ -7920,10 +8024,17 @@ def tuning_clients():
             client["outstanding"] = max(
                 0.0, client["order_total"] - client["paid_total"]
             )
+            client["work_scheme"] = client["work_scheme"] or ""
+            client["work_scheme_value"] = client["work_scheme_value"] or 0
+            client["work_scheme_summary"] = _partner_scheme_summary(
+                client["work_scheme"], client["work_scheme_value"]
+            )
             clients.append(client)
 
     return render_template(
         "tuning_clients.html",
+        partner_schemes=PARTNER_SCHEMES,
+        partner_scheme_error=session.pop("partner_scheme_error", None),
         clients=clients,
         clients_count=clients_count,
         orders_count=orders_count,
@@ -8098,6 +8209,67 @@ def update_tuning_client_status(client_id):
     if relationship_type == CLIENT_RELATIONSHIP_PARTNER:
         redirect_args["relationship"] = relationship_type
     return redirect(url_for("tuning_clients", **redirect_args))
+
+
+@app.route("/admin/clients/<int:client_id>/work-scheme", methods=["POST"])
+@admin_login_required
+def update_partner_work_scheme(client_id):
+    """Sets how a tuning partner earns on the orders they bring — "процент с
+    заказа" (needs a percent) or "фиксированный тариф" (a sum per order).
+    Applies to orders that reach "В работе" from now on; commissions already
+    booked keep the scheme they were booked with."""
+    db = get_db()
+    partner = db.execute(
+        "SELECT 1 FROM client_segments WHERE client_id = ? AND segment = ? "
+        "AND relationship_type = ?",
+        (client_id, TUNING_SEGMENT, CLIENT_RELATIONSHIP_PARTNER),
+    ).fetchone()
+    redirect_url = url_for(
+        "tuning_clients", section=TUNING_SEGMENT, relationship=CLIENT_RELATIONSHIP_PARTNER
+    )
+    if partner is None:
+        return redirect(redirect_url)
+    scheme = request.form.get("work_scheme", "").strip()
+    raw_value = request.form.get("work_scheme_value", "").strip().replace(",", ".").replace(" ", "")
+    value = 0.0
+    error = None
+    if scheme not in PARTNER_SCHEME_LABELS:
+        scheme = ""
+    elif not raw_value:
+        error = "Укажите процент." if scheme == "percent" else "Укажите сумму за заказ."
+    else:
+        try:
+            value = float(raw_value)
+            if value != value or value <= 0:
+                raise ValueError
+            if scheme == "percent" and value > 100:
+                raise ValueError
+            if value > 100_000_000:
+                raise ValueError
+        except ValueError:
+            error = (
+                "Процент должен быть числом от 0 до 100."
+                if scheme == "percent" else "Сумма за заказ должна быть положительным числом."
+            )
+    if error:
+        session["partner_scheme_error"] = error
+        return redirect(redirect_url)
+    db.execute(
+        "UPDATE client_segments SET work_scheme = ?, work_scheme_value = ? "
+        "WHERE client_id = ? AND segment = ? AND relationship_type = ?",
+        (scheme, value, client_id, TUNING_SEGMENT, CLIENT_RELATIONSHIP_PARTNER),
+    )
+    if scheme:
+        # Orders the partner brought that are in work right now start
+        # earning under the new scheme too.
+        for row in db.execute(
+            "SELECT id FROM tuning_orders WHERE client_id = ? AND source != ? "
+            "AND status = 'in_progress' AND id NOT IN (SELECT order_id FROM partner_commissions)",
+            (client_id, SUBCONTRACT_REQUEST_SOURCE),
+        ).fetchall():
+            _sync_partner_commission(db, row["id"])
+    db.commit()
+    return redirect(redirect_url)
 
 
 @app.route("/admin/clients/<int:client_id>/relationship", methods=["POST"])
@@ -9737,7 +9909,7 @@ def add_tuning_order():
     db.commit()
     if data["acceptance_date"]:
         _auto_place_boat_on_shop_map(db, {"id": order_id})
-    _sync_own_boat_order_expense(db, order_id)
+    _sync_order_accounting(db, order_id)
     db.commit()
     return redirect(url_for("tuning_index"))
 
@@ -10353,6 +10525,7 @@ def edit_tuning_order(order_id):
 def _delete_tuning_order_records(db, order_ids):
     parameters = [(order_id,) for order_id in order_ids]
     db.executemany("DELETE FROM trips WHERE tuning_order_id = ?", parameters)
+    db.executemany("DELETE FROM partner_commissions WHERE order_id = ?", parameters)
     for table_name in (
         "tuning_order_items",
         "tuning_payments",
@@ -10472,7 +10645,7 @@ def bulk_edit_tuning_orders():
             [(new_status, order_id) for order_id in order_ids],
         )
         for order_id in order_ids:
-            _sync_own_boat_order_expense(db, order_id)
+            _sync_order_accounting(db, order_id)
         db.commit()
         if new_status == "in_progress":
             for order_id in order_ids:
@@ -10561,7 +10734,7 @@ def set_tuning_order_status(order_id):
             # Moving between the two done statuses (or staying within the
             # same not-done status) leaves completed_at untouched.
             db.execute("UPDATE tuning_orders SET status = ? WHERE id = ?", (status, order_id))
-        _sync_own_boat_order_expense(db, order_id)
+        _sync_order_accounting(db, order_id)
         db.commit()
         if status == "in_progress":
             _auto_place_boat_on_shop_map(db, order)
@@ -11487,11 +11660,43 @@ def remove_tuning_order_product(order_id, row_id):
 
 def _client_segment_profile(db, client_id, segment):
     row = db.execute(
-        "SELECT relationship_type, partner_title, partner_logo_filename "
+        "SELECT relationship_type, partner_title, partner_logo_filename, "
+        "work_scheme, work_scheme_value "
         "FROM client_segments WHERE client_id = ? AND segment = ?",
         (client_id, segment),
     ).fetchone()
     return dict(row) if row is not None else None
+
+
+def _partner_income_summary(db, partner_id, partner_profile):
+    """The partner cabinet's "Доходность": every order that has reached
+    "В работе" with the commission booked for it (see _sync_partner_commission)."""
+    rows = db.execute(
+        "SELECT pc.*, o.equipment_type, o.boat_model, o.motor_model, o.status, o.order_date "
+        "FROM partner_commissions pc JOIN tuning_orders o ON o.id = pc.order_id "
+        "WHERE pc.partner_id = ? ORDER BY pc.recorded_at DESC, pc.id DESC",
+        (partner_id,),
+    ).fetchall()
+    entries = []
+    for row in rows:
+        entry = dict(row)
+        entry["equipment"] = (
+            row["motor_model"] if row["equipment_type"] == "motor" else row["boat_model"]
+        ) or "—"
+        entry["scheme_label"] = _partner_scheme_summary(row["scheme"], row["rate"])
+        entries.append(entry)
+    month = dt.date.today().strftime("%Y-%m")
+    return {
+        "entries": entries,
+        "total": round(sum(e["amount"] for e in entries), 2),
+        "month_total": round(
+            sum(e["amount"] for e in entries if e["recorded_at"][:7] == month), 2
+        ),
+        "scheme_summary": _partner_scheme_summary(
+            (partner_profile or {}).get("work_scheme", ""),
+            (partner_profile or {}).get("work_scheme_value", 0) or 0,
+        ),
+    }
 
 
 def _partner_logo_url(partner_profile):
@@ -11706,8 +11911,12 @@ def _render_client_dashboard(
         for item in order["work_items"]:
             work_photos_by_item[item["id"]] = get_work_item_photos(db, item["id"])
 
+    partner_income = None
+    if is_tuning_partner:
+        partner_income = _partner_income_summary(db, client["id"], partner_profile)
     return render_template(
         "client_dashboard.html", client=client, orders=orders,
+        partner_income=partner_income,
         visible_orders=visible_orders, grand_total=grand_total,
         paid_total=paid_total, remaining_total=remaining_total,
         primary_equipment=(

@@ -169,6 +169,19 @@ def init_schema(conn):
         conn.execute(
             "ALTER TABLE client_segments ADD COLUMN partner_logo_filename TEXT"
         )
+    if "work_scheme" not in segment_columns:
+        # How a partner earns on the orders they bring: 'percent' of the
+        # order total or a 'fixed' sum per order; '' = not set. The rate is
+        # a percent (0-100) or rubles per order.
+        conn.execute(
+            "ALTER TABLE client_segments ADD COLUMN work_scheme "
+            "TEXT NOT NULL DEFAULT ''"
+        )
+    if "work_scheme_value" not in segment_columns:
+        conn.execute(
+            "ALTER TABLE client_segments ADD COLUMN work_scheme_value "
+            "REAL NOT NULL DEFAULT 0"
+        )
     conn.execute(
         "UPDATE client_segments SET relationship_type = 'client' "
         "WHERE relationship_type IS NULL "

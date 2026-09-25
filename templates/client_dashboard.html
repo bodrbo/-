@@ -264,6 +264,50 @@
     </div>
   </div>
 
+  {% if is_tuning_partner and partner_income %}
+  <details class="panel collapsible-panel partner-income" id="partner-income" open>
+    <summary><span>Доходность</span><span class="chev" aria-hidden="true"></span></summary>
+    <div class="collapsible-body">
+      <div class="totals-grid partner-totals-grid">
+        <div class="panel total-card">
+          <span class="k">Схема работы</span>
+          <span class="v" style="font-size:18px;">{{ partner_income.scheme_summary or 'Не задана' }}</span>
+        </div>
+        <div class="panel total-card">
+          <span class="k">Комиссия за этот месяц</span>
+          <span class="v">{{ partner_income.month_total|money }} ₽</span>
+        </div>
+        <div class="panel total-card total-card-grand">
+          <span class="k">Комиссия за всё время</span>
+          <span class="v">{{ partner_income.total|money }} ₽</span>
+        </div>
+      </div>
+      {% if partner_income.entries %}
+      <div class="table-scroll">
+        <table class="records">
+          <thead><tr><th>Дата</th><th>Заказ</th><th>Техника</th><th>Сумма заказа, ₽</th><th>Схема</th><th>Комиссия, ₽</th></tr></thead>
+          <tbody>
+            {% for e in partner_income.entries %}
+            <tr>
+              <td class="muted">{{ e.recorded_at[:10]|ru_date }}</td>
+              <td>№{{ e.order_id }}</td>
+              <td>{{ e.equipment }}</td>
+              <td class="amount">{{ e.base_total|money }}</td>
+              <td class="muted">{{ e.scheme_label }}</td>
+              <td class="amount">{{ e.amount|money }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">Заказ попадает сюда, когда его статус меняется на «В работе». Комиссия по процентной схеме следует за суммой заказа; если заказ вернули на более ранний этап или отменили, запись убирается.</p>
+      {% else %}
+      <p class="hint">Пока нет заказов в работе. Заказ попадёт сюда, как только его статус изменится на «В работе».</p>
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+
   <section class="panel" id="orders">
     <div class="partner-orders-heading">
       <h2>{{ ('Входящие заявки' if partner_request_view == 'incoming' else 'Исходящие заявки') if is_tuning_partner else 'Ваши заказы' }}</h2>
