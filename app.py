@@ -12596,12 +12596,13 @@ def create_yookassa_goods_payment(order_id):
     receipt_items = []
     total = 0.0
     for g in goods:
-        line_total = round(g["quantity"] * g["unit_price"], 2)
-        total += line_total
+        # ЮKassa's receipt `amount` is the price of ONE unit; the line's sum
+        # is amount x quantity, and those lines must add up to the payment.
+        total += g["quantity"] * g["unit_price"]
         receipt_items.append({
             "description": g["product_name"][:128],
             "quantity": g["quantity"],
-            "amount": {"value": f"{line_total:.2f}", "currency": "RUB"},
+            "amount": {"value": f"{g['unit_price']:.2f}", "currency": "RUB"},
             "vat_code": vat_code,
             "measure": YOOKASSA_UNIT_MEASURE.get(g["unit"], "piece"),
             "payment_subject": "commodity",

@@ -86,6 +86,38 @@ class TuningYookassaInvoiceTests(unittest.TestCase):
         self.assertIn("https://yookassa.ru/my/i/t1/a", page)
         self.assertIn("до 10.10", page)
 
+    def test_goods_receipt_lines_use_the_unit_price(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO tuning_order_products (order_id, product_id, product_name, quantity, "
+                "unit_price, cost_price, unit, created_at) VALUES (?, 1, 'Фитинг', 3, 250, 100, "
+                "'piece', '2026-09-10 10:00')", (self.order_id,),
+            )
+            db.execute(
+                "INSERT INTO tuning_order_products (order_id, product_id, product_name, quantity, "
+                "unit_price, cost_price, unit, created_at) VALUES (?, 2, 'Канат', 2.5, 120, 50, "
+                "'linear_m', '2026-09-10 10:00')", (self.order_id,),
+            )
+            db.commit()
+        api = mock.Mock(return_value=self.invoice())
+        with mock.patch.object(application_module, "yookassa_configured", return_value=True), \
+                mock.patch.object(application_module, "_yookassa_request", api):
+            self.client.post(f"/tuning/{self.order_id}/yookassa/create-goods")
+        body = api.call_args.kwargs["json_body"]
+        items = body["payment_data"]["receipt"]["items"]
+        self.assertEqual(
+            [(i["quantity"], i["amount"]["value"]) for i in items], [(3, "250.00"), (2.5, "120.00")]
+        )
+        self.assertEqual(body["payment_data"]["amount"]["value"], "1050.00")  # 3*250 + 2.5*120
+        cart_total = sum(float(c["price"]["value"]) * c["quantity"] for c in body["cart"])
+        self.assertAlmostEqual(cart_total, 1050.0)
+        with application_module.app.app_context():
+            application_module.get_db().execute(
+                "DELETE FROM tuning_order_products WHERE order_id = ?", (self.order_id,)
+            )
+            application_module.get_db().commit()
+
     def test_falls_back_to_a_plain_payment_and_warns(self):
         def api(method, path, **kwargs):
             if path == "/invoices":
