@@ -29,6 +29,10 @@ def init_schema(conn):
     item_columns = {
         row[1] for row in conn.execute("PRAGMA table_info(schedule_items)")
     }
+    if "payroll_closed_at" not in item_columns:
+        # Boat-less items (city excursions) can't become a trips row; this
+        # marks that their crew pay was written straight into entries.
+        conn.execute("ALTER TABLE schedule_items ADD COLUMN payroll_closed_at TEXT")
     if "source_ref" not in item_columns:
         conn.execute("ALTER TABLE schedule_items ADD COLUMN source_ref TEXT")
     if "source_updated_at" not in item_columns:

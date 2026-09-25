@@ -211,10 +211,40 @@ def list_items_ready_to_close(db, cutoff):
     services.auto_close_schedule_items."""
     return db.execute(
         "SELECT * FROM schedule_items "
-        "WHERE deleted_at IS NULL AND accounting_trip_id IS NULL AND ends_at <= ? "
+        "WHERE deleted_at IS NULL AND accounting_trip_id IS NULL "
+        "AND payroll_closed_at IS NULL AND ends_at <= ? "
         "ORDER BY ends_at, id",
         (cutoff,),
     ).fetchall()
+
+
+def close_item_payroll_only(db, item_id, work_date, labor_items, timestamp):
+    """Writes the crew pay of a boat-less item (city excursion) straight into
+    `entries` — there is no boat, hence no trips row, investor split or
+    trip_labor link — and marks the item closed."""
+    for labor in labor_items:
+        db.execute(
+            "INSERT INTO entries (employee, work_type, rate, quantity, amount, "
+            "work_date, created_at, schedule_item_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                labor["employee"], labor["work_type"], labor["rate"], labor["quantity"],
+                round(labor["rate"] * labor["quantity"], 2), work_date, timestamp, item_id,
+            ),
+        )
+    db.execute(
+        "UPDATE schedule_items SET payroll_closed_at = ?, updated_at = ? WHERE id = ?",
+        (timestamp, timestamp, item_id),
+    )
+
+
+def delete_item_payroll(db, item_id):
+    db.execute("DELETE FROM entries WHERE schedule_item_id = ?", (item_id,))
+
+
+def move_item_payroll(db, item_id, work_date):
+    db.execute(
+        "UPDATE entries SET work_date = ? WHERE schedule_item_id = ?", (work_date, item_id)
+    )
 
 
 def set_accounting_trip_id(db, item_id, trip_id, timestamp):

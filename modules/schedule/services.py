@@ -714,6 +714,8 @@ def move_item(
     )
     if not moved:
         return False, "Рейс изменился во время переноса. Обновите страницу.", None
+    if item["payroll_closed_at"]:
+        repository.move_item_payroll(db, item_id, new_start.strftime("%Y-%m-%d"))
     if item["accounting_trip_id"] is not None and update_linked_trip_time is not None:
         update_linked_trip_time(
             db, item["accounting_trip_id"], new_start.strftime("%Y-%m-%d"),
@@ -742,7 +744,11 @@ def delete_item(db, item_id, delete_linked_trip=None):
     if item is None:
         return False, "Рейс не найден."
     had_linked_trip = item["accounting_trip_id"] is not None
-    if had_linked_trip:
+    if item["payroll_closed_at"]:
+        # A boat-less item already paid out through payroll: take its pay back.
+        repository.delete_item_payroll(db, item_id)
+        had_linked_trip = True
+    if item["accounting_trip_id"] is not None:
         if delete_linked_trip is None:
             return False, (
                 "Рейс уже связан с финансовым учётом. Сначала отвяжите его в разделе рейсов."
@@ -1011,6 +1017,19 @@ def auto_close_schedule_items(db, create_trip, get_role_rate, apply_minimum_shif
                 "quantity": round(hours, 2),
                 "rate": rate,
             })
+
+        if not item["boat"]:
+            # City excursion: no boat -> no trips row (and no investor
+            # split), but the crew must still be paid.
+            repository.close_item_payroll_only(
+                db, item["id"], item["starts_at"][:10], labor_items, timestamp
+            )
+            db.commit()
+            stats["closed"] += 1
+            if needs_review:
+                stats["needs_review"] += 1
+            closed_dates.add(item["starts_at"][:10])
+            continue
 
         payload = {
             "boat": item["boat"],

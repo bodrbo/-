@@ -92,6 +92,57 @@ class ScheduleAutoCloseTests(unittest.TestCase):
     def get_role_rate(db, role):
         return payroll_rates_repository.get_excursion_role_rate(db, role)
 
+    def test_boatless_city_item_pays_the_crew_without_a_trip(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = self.make_item(
+                db, starts_at="2026-09-20 09:00", ends_at="2026-09-20 11:00", revenue=3000,
+            )
+            db.execute("UPDATE schedule_items SET boat = '' WHERE id = ?", (item_id,))
+            db.commit()
+            stats = schedule_services.auto_close_schedule_items(
+                db, self.create_trip, self.get_role_rate, now=self.now,
+            )
+            again = schedule_services.auto_close_schedule_items(
+                db, self.create_trip, self.get_role_rate, now=self.now,
+            )
+            item = schedule_repository.get_item(db, item_id)
+            entries = db.execute(
+                "SELECT * FROM entries WHERE employee = ?", ("Автозакрытие Тест",)
+            ).fetchall()
+            trips = db.execute("SELECT COUNT(*) FROM trips").fetchone()[0]
+
+        self.assertEqual((stats["closed"], stats["skipped"]), (1, 0))
+        self.assertEqual((again["closed"], again["skipped"]), (0, 0))  # idempotent
+        self.assertIsNone(item["accounting_trip_id"])
+        self.assertIsNotNone(item["payroll_closed_at"])
+        self.assertEqual(trips, 0)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["work_date"], "2026-09-20")
+        self.assertEqual(entries[0]["quantity"], 2)
+        self.assertEqual(entries[0]["schedule_item_id"], item_id)
+
+    def test_deleting_a_paid_city_item_takes_the_pay_back(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = self.make_item(
+                db, starts_at="2026-09-20 09:00", ends_at="2026-09-20 10:00",
+            )
+            db.execute("UPDATE schedule_items SET boat = '' WHERE id = ?", (item_id,))
+            db.commit()
+            schedule_services.auto_close_schedule_items(
+                db, self.create_trip, self.get_role_rate, now=self.now,
+            )
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM entries WHERE schedule_item_id = ?", (item_id,)).fetchone()[0], 1
+            )
+            success, _message = schedule_services.delete_item(db, item_id)
+            left = db.execute(
+                "SELECT COUNT(*) FROM entries WHERE schedule_item_id = ?", (item_id,)
+            ).fetchone()[0]
+        self.assertTrue(success)
+        self.assertEqual(left, 0)
+
     def test_ended_item_closes_into_trip_with_payroll_entry(self):
         with application_module.app.app_context():
             db = application_module.get_db()

@@ -1757,6 +1757,11 @@ def init_db(db_path=None, include_bootstrap_data=True):
         )
     if "project_id" not in cols:
         conn.execute("ALTER TABLE entries ADD COLUMN project_id INTEGER")
+    if "schedule_item_id" not in cols:
+        # Pay of a schedule item that has no boat (city excursion) — it is
+        # closed straight into payroll, without a trips row (see
+        # modules.schedule.services.auto_close_schedule_items).
+        conn.execute("ALTER TABLE entries ADD COLUMN schedule_item_id INTEGER")
 
     conn.execute(
         """
