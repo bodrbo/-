@@ -11905,3 +11905,6 @@ button.partner-open-price-save svg {
 }
 
 .shop-map-boat-hull.is-conflict { stroke: #c0392b; stroke-width: 3; stroke-dasharray: 6 3; vector-effect: non-scaling-stroke; }
+
+.schedule-modal-header-side { display: flex; align-items: center; gap: 12px; }
+.schedule-modal-header .schedule-modal-number { font-size: 12px; letter-spacing: .04em; text-transform: none; white-space: nowrap; user-select: all; }

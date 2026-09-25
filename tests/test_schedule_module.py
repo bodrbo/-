@@ -705,6 +705,13 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         self.assertEqual((checked, found), (1, 1))
         self.assertEqual(row["receipt_status"], "succeeded")
 
+    def test_card_number_is_shown_in_the_detail_header(self):
+        self.login()
+        self.assertEqual(self.create_booking().status_code, 302)
+        page = self.client.get("/schedule?date=2026-09-05").get_data(as_text=True)
+        self.assertIn('id="scheduleDetailNumber"', page)
+        self.assertIn("№${item.id}", page)
+
     def test_schedule_routes_notify_on_assignment_change_and_deletion(self):
         self.login()
         with patch.object(

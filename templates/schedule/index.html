@@ -447,7 +447,10 @@
         <h2 id="scheduleDetailTitle">—</h2>
         <div class="schedule-modal-weather" id="scheduleDetailWeather" hidden></div>
       </div>
-      <button type="button" class="schedule-modal-close" onclick="closeScheduleDetailModal()" aria-label="Закрыть">×</button>
+      <div class="schedule-modal-header-side">
+        <span class="schedule-modal-number" id="scheduleDetailNumber" title="Номер рейса"></span>
+        <button type="button" class="schedule-modal-close" onclick="closeScheduleDetailModal()" aria-label="Закрыть">×</button>
+      </div>
     </header>
     <div class="schedule-detail-body">
       <aside class="schedule-detail-summary">
@@ -746,7 +749,10 @@
         <span id="scheduleViewKind">Рейс</span>
         <h2 id="scheduleViewTitle">Карточка рейса</h2>
       </div>
-      <button type="button" class="schedule-modal-close" onclick="closeScheduleView()" aria-label="Закрыть карточку">×</button>
+      <div class="schedule-modal-header-side">
+        <span class="schedule-modal-number" id="scheduleViewNumber" title="Номер рейса"></span>
+        <button type="button" class="schedule-modal-close" onclick="closeScheduleView()" aria-label="Закрыть карточку">×</button>
+      </div>
     </header>
     <div class="schedule-view-body">
       <dl class="schedule-view-facts">
@@ -1538,6 +1544,7 @@
     scheduleDetailExpandedIds.clear();
     document.getElementById('scheduleDetailEyebrow').textContent = item.kind_label;
     document.getElementById('scheduleDetailTitle').textContent = item.service_name;
+    document.getElementById('scheduleDetailNumber').textContent = `№${item.id}`;
     renderScheduleHeaderWeather('scheduleDetailWeather', item.weather);
     document.getElementById('scheduleDetailBoat').textContent = item.boat_label || item.boat || 'Не требуется';
     const crewNames = (item.assignments || []).map(a => a.employee_name);
@@ -2389,6 +2396,7 @@
     scheduleViewModalTrigger = document.activeElement;
     document.getElementById('scheduleViewKind').textContent = item.kind_label;
     document.getElementById('scheduleViewTitle').textContent = item.service_name;
+    document.getElementById('scheduleViewNumber').textContent = `№${item.id}`;
     document.getElementById('scheduleViewTime').textContent =
       `${scheduleViewDate(item)}, ${item.start_time}–${item.end_time}`;
     document.getElementById('scheduleViewBoat').textContent = item.boat_label || item.boat || 'Не требуется';
