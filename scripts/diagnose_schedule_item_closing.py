@@ -106,7 +106,7 @@ def main():
                 print("   ЗАПИСИ НЕТ (ссылка на удалённый рейс)")
             else:
                 show(trip, ["boat", "trip_date", "trip_time", "work_type", "revenue", "labor_cost",
-                            "my_share", "investor_payout", "source", "needs_review"])
+                            "my_share", "investor_payout", "source", "needs_review", "created_at"])
                 links = db.execute(
                     "SELECT e.* FROM trip_labor tl JOIN entries e ON e.id = tl.entry_id WHERE tl.trip_id = ?",
                     (trip["id"],),
@@ -115,6 +115,13 @@ def main():
                 for e in links:
                     print(f"   #{e['id']} {e['employee']} | {e['work_type']} | {e['work_date']} | "
                           f"{e['quantity']} ч × {e['rate']} = {e['amount']}")
+        print("== Как часто срабатывает автозакрытие (когда создавались рейсы source=schedule_auto):")
+        for row in db.execute(
+            "SELECT created_at, trip_date, trip_time, boat FROM trips WHERE source = 'schedule_auto' "
+            "ORDER BY id DESC LIMIT 8"
+        ).fetchall():
+            print(f"   создан {row['created_at']} ← рейс {row['trip_date']} {row['trip_time']} {row['boat']}")
+        print(f"   сейчас: {now.strftime('%Y-%m-%d %H:%M')}")
         entries = db.execute("SELECT * FROM entries WHERE schedule_item_id = ?", (item_id,)).fetchall()
         if entries:
             print(f"== Записи зарплаты по карточке без рейса (городская): {len(entries)}")
