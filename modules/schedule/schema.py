@@ -221,6 +221,12 @@ def init_schema(conn):
         ("receipt_status", "TEXT NOT NULL DEFAULT ''"),
         ("receipt_json", "TEXT"),
         ("receipt_checked_at", "TEXT"),
+        # Payment links are ЮKassa invoices (valid up to 30 days, unlike a
+        # plain payment's short confirmation window). The payment itself
+        # only exists once the client pays: until then yookassa_payment_id
+        # holds an "invoice:<id>" placeholder.
+        ("yookassa_invoice_id", "TEXT"),
+        ("expires_at", "TEXT"),
     ):
         if column not in yookassa_columns:
             conn.execute(

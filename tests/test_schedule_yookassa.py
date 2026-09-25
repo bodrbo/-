@@ -70,10 +70,12 @@ class ScheduleYookassaPaymentTests(unittest.TestCase):
             "confirmation": {"confirmation_url": "https://yookassa.ru/checkout/pay-schedule-1"},
         }
 
-    def test_create_participant_payment_inserts_row_with_full_receipt(self):
+    def test_create_participant_payment_falls_back_to_plain_payment_without_invoices(self):
         posts = []
 
         def api(method, path, json_body=None, idempotence_key=None, **kwargs):
+            if path == "/invoices":
+                raise RuntimeError("invoices are not enabled")
             posts.append((method, path, json_body, idempotence_key))
             return self.remote_payment()
 
@@ -88,6 +90,8 @@ class ScheduleYookassaPaymentTests(unittest.TestCase):
             ).fetchone()
 
             self.assertTrue(success, message)
+            self.assertIn("короткоживущая", message)
+            self.assertIsNone(row["yookassa_invoice_id"])
             self.assertEqual(row["amount"], 4500.0)
             self.assertEqual(row["status"], "pending")
             self.assertEqual(row["confirmation_url"], "https://yookassa.ru/checkout/pay-schedule-1")
@@ -115,6 +119,8 @@ class ScheduleYookassaPaymentTests(unittest.TestCase):
             posts = []
 
             def api(method, path, json_body=None, idempotence_key=None, **kwargs):
+                if path == "/invoices":
+                    raise RuntimeError("no invoices")
                 posts.append(json_body)
                 return self.remote_payment()
 
@@ -124,6 +130,157 @@ class ScheduleYookassaPaymentTests(unittest.TestCase):
             )
             self.assertTrue(success, message)
             self.assertNotIn("customer", posts[0]["receipt"])
+
+    def remote_invoice(self, status="pending", payment_details=None, invoice_id="inv-1"):
+        return {
+            "id": invoice_id, "status": status,
+            "delivery_method": {"type": "self", "url": "https://yookassa.ru/invoice/inv-1"},
+            "expires_at": "2026-10-10T10:00:00.000Z",
+            "payment_details": payment_details,
+        }
+
+    def create_invoice_link(self, amount="4500"):
+        calls = []
+
+        def api(method, path, json_body=None, idempotence_key=None, **kwargs):
+            calls.append((method, path, json_body))
+            return self.remote_invoice()
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            success, message, payment_id = services.create_participant_payment(
+                db, self.item_id, self.participant_id, amount,
+                api, 7, fake_phone_normalizer, "https://example.test/",
+            )
+        return success, message, payment_id, calls
+
+    def test_payment_link_is_a_long_lived_invoice(self):
+        success, message, payment_id, calls = self.create_invoice_link()
+        self.assertTrue(success, message)
+        self.assertIn(str(services.INVOICE_VALID_DAYS), message)
+        self.assertEqual([(c[0], c[1]) for c in calls], [("POST", "/invoices")])
+        body = calls[0][2]
+        self.assertEqual(body["delivery_method_data"], {"type": "self"})
+        self.assertEqual(body["payment_data"]["amount"]["value"], "4500.00")
+        self.assertTrue(body["payment_data"]["capture"])
+        self.assertEqual(
+            body["payment_data"]["metadata"]["schedule_participant_id"], str(self.participant_id)
+        )
+        self.assertEqual(body["payment_data"]["receipt"]["items"][0]["vat_code"], 7)
+        self.assertEqual(body["cart"][0]["price"]["value"], "4500.00")
+        self.assertTrue(body["expires_at"].endswith("Z"))
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT * FROM schedule_yookassa_payments WHERE id = ?", (payment_id,)
+            ).fetchone()
+        self.assertEqual(row["yookassa_invoice_id"], "inv-1")
+        self.assertEqual(row["confirmation_url"], "https://yookassa.ru/invoice/inv-1")
+        self.assertEqual(row["yookassa_payment_id"], "invoice:inv-1")
+        self.assertEqual(row["expires_at"], "2026-10-10T10:00:00.000Z")
+
+    def test_paid_invoice_is_applied_once_and_gets_its_payment_id(self):
+        _ok, _msg, payment_id, _calls = self.create_invoice_link()
+        paid = self.remote_invoice(
+            "succeeded", {"id": "pay-from-invoice", "status": "succeeded"}
+        )
+        api = mock.Mock(side_effect=lambda method, path, **kw: (
+            paid if path.startswith("/invoices/") else {"items": []}
+        ))
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            record = db.execute(
+                "SELECT * FROM schedule_yookassa_payments WHERE id = ?", (payment_id,)
+            ).fetchone()
+            self.assertEqual(services.sync_participant_payment(db, record, api), "succeeded")
+            record = db.execute(
+                "SELECT * FROM schedule_yookassa_payments WHERE id = ?", (payment_id,)
+            ).fetchone()
+            self.assertEqual(services.sync_participant_payment(db, record, api), "succeeded")
+            row = db.execute(
+                "SELECT * FROM schedule_yookassa_payments WHERE id = ?", (payment_id,)
+            ).fetchone()
+            paid_online = db.execute(
+                "SELECT paid_online FROM schedule_participants WHERE id = ?", (self.participant_id,)
+            ).fetchone()["paid_online"]
+        self.assertEqual(row["yookassa_payment_id"], "pay-from-invoice")
+        self.assertEqual(row["status"], "succeeded")
+        self.assertEqual(paid_online, 4500.0)  # counted exactly once
+        # the receipt is then looked up by the real payment id
+        receipt_calls = [c for c in api.call_args_list if c.args[1] == "/receipts"]
+        self.assertTrue(receipt_calls)
+        self.assertEqual(receipt_calls[0].kwargs["params"], {"payment_id": "pay-from-invoice"})
+
+    def test_webhook_payment_is_matched_to_its_invoice(self):
+        _ok, _msg, payment_id, _calls = self.create_invoice_link()
+
+        def api(method, path, **kwargs):
+            if path == "/payments/pay-hook":
+                return {
+                    "id": "pay-hook", "status": "succeeded",
+                    "amount": {"value": "4500.00", "currency": "RUB"},
+                    "invoice_details": {"id": "inv-1"},
+                    "metadata": {"schedule_participant_id": str(self.participant_id)},
+                }
+            if path == "/invoices/inv-1":
+                return self.remote_invoice("succeeded", {"id": "pay-hook", "status": "succeeded"})
+            return {"items": []}
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            status = services.sync_participant_payment_by_remote_id(db, "pay-hook", api)
+            row = db.execute(
+                "SELECT status, yookassa_payment_id FROM schedule_yookassa_payments WHERE id = ?",
+                (payment_id,),
+            ).fetchone()
+        self.assertEqual(status, "succeeded")
+        self.assertEqual((row["status"], row["yookassa_payment_id"]), ("succeeded", "pay-hook"))
+
+    def test_webhook_falls_back_to_participant_and_amount(self):
+        _ok, _msg, payment_id, _calls = self.create_invoice_link()
+
+        def api(method, path, **kwargs):
+            if path == "/payments/pay-nolink":
+                return {
+                    "id": "pay-nolink", "status": "succeeded",
+                    "amount": {"value": "4500.00", "currency": "RUB"},
+                    "metadata": {"schedule_participant_id": str(self.participant_id)},
+                }
+            if path == "/invoices/inv-1":
+                return self.remote_invoice("succeeded", {"id": "pay-nolink", "status": "succeeded"})
+            return {"items": []}
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            status = services.sync_participant_payment_by_remote_id(db, "pay-nolink", api)
+        self.assertEqual(status, "succeeded")
+
+    def test_expired_invoice_becomes_canceled_and_open_invoices_are_polled(self):
+        _ok, _msg, payment_id, _calls = self.create_invoice_link()
+        api = mock.Mock(return_value=self.remote_invoice("canceled"))
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            checked, changed = services.sync_open_invoices(db, api)
+            status = db.execute(
+                "SELECT status FROM schedule_yookassa_payments WHERE id = ?", (payment_id,)
+            ).fetchone()["status"]
+            again = services.sync_open_invoices(db, api)
+        self.assertEqual((checked, changed), (1, 1))
+        self.assertEqual(status, "canceled")
+        self.assertEqual(again, (0, 0))
+
+    def test_unpaid_invoice_has_no_receipt_lookup_and_delete_warns_about_the_invoice(self):
+        _ok, _msg, payment_id, _calls = self.create_invoice_link()
+        api = mock.Mock()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            record = db.execute(
+                "SELECT * FROM schedule_yookassa_payments WHERE id = ?", (payment_id,)
+            ).fetchone()
+            self.assertEqual(services.refresh_payment_receipt(db, record, api), "")
+            api.assert_not_called()
+            success, message = services.delete_participant_payment(db, record, api)
+        self.assertTrue(success)
+        self.assertIn("не отправляйте", message)
 
     def test_create_participant_payment_rejects_non_positive_amount(self):
         with application_module.app.app_context():

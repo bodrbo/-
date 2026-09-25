@@ -891,6 +891,64 @@ def create_yookassa_payment_row(
     return cursor.lastrowid
 
 
+INVOICE_PLACEHOLDER_PREFIX = "invoice:"
+
+
+def create_yookassa_invoice_row(
+    db, item_id, participant_id, invoice_id, amount, url, expires_at, timestamp,
+):
+    cursor = db.execute(
+        "INSERT INTO schedule_yookassa_payments "
+        "(schedule_item_id, participant_id, yookassa_payment_id, yookassa_invoice_id, "
+        "amount, status, confirmation_url, expires_at, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+        (item_id, participant_id, INVOICE_PLACEHOLDER_PREFIX + invoice_id, invoice_id,
+         amount, url, expires_at, timestamp, timestamp),
+    )
+    db.commit()
+    return cursor.lastrowid
+
+
+def get_yookassa_payment_by_invoice_id(db, invoice_id):
+    return db.execute(
+        "SELECT * FROM schedule_yookassa_payments WHERE yookassa_invoice_id = ?",
+        (invoice_id,),
+    ).fetchone()
+
+
+def find_open_invoice_row(db, participant_id, amount):
+    """Fallback match of a paid invoice payment to its link when the payment
+    carries no invoice id: the participant's pending invoice of that amount."""
+    return db.execute(
+        "SELECT * FROM schedule_yookassa_payments WHERE participant_id = ? "
+        "AND yookassa_invoice_id IS NOT NULL AND status = 'pending' AND ABS(amount - ?) < 0.005 "
+        "ORDER BY id DESC LIMIT 1",
+        (participant_id, amount),
+    ).fetchone()
+
+
+def list_open_invoice_rows(db, limit=200):
+    return db.execute(
+        "SELECT * FROM schedule_yookassa_payments WHERE yookassa_invoice_id IS NOT NULL "
+        "AND status = 'pending' ORDER BY id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+
+
+def attach_payment_to_invoice_row(db, row_id, remote_payment_id):
+    """Replaces the invoice placeholder with the real payment id — unless
+    that id is already taken by another row."""
+    taken = db.execute(
+        "SELECT 1 FROM schedule_yookassa_payments WHERE yookassa_payment_id = ? AND id != ?",
+        (remote_payment_id, row_id),
+    ).fetchone()
+    if taken is None:
+        db.execute(
+            "UPDATE schedule_yookassa_payments SET yookassa_payment_id = ? WHERE id = ?",
+            (remote_payment_id, row_id),
+        )
+
+
 def get_yookassa_payment(db, payment_id, participant_id):
     return db.execute(
         "SELECT * FROM schedule_yookassa_payments WHERE id = ? AND participant_id = ?",

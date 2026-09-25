@@ -10960,6 +10960,9 @@ def cron_check_modulkassa_receipts():
     # cash desk registers them a little after the payment).
     if yookassa_configured():
         try:
+            # Links still waiting for payment (backup for the webhook), then
+            # the fiscal receipts of the ones already paid.
+            schedule_services.sync_open_invoices(get_db(), _yookassa_request)
             schedule_services.sync_pending_receipts(get_db(), _yookassa_request)
         except Exception:
             pass

@@ -1107,13 +1107,27 @@ def remove_participant_addon(db, item_id, addon_id):
     return True, "Товар удалён."
 
 
+INVOICE_VALID_DAYS = 14  # ЮKassa allows at most 30
+
+
+def _invoice_expires_at(now=None):
+    moment = (now or dt.datetime.utcnow()) + dt.timedelta(days=INVOICE_VALID_DAYS)
+    return moment.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
 def create_participant_payment(
     db, item_id, participant_id, raw_amount, yookassa_request, vat_code,
     phone_normalizer, return_url,
 ):
     """Create a ЮKassa payment link covering some amount owed by one
     participant (full remaining balance, a percentage of it, or a manual
-    figure — all resolved client-side into one final `raw_amount`)."""
+    figure — all resolved client-side into one final `raw_amount`).
+
+    The link is an ЮKassa *invoice* valid INVOICE_VALID_DAYS days — a plain
+    payment's confirmation link only lives for a short, non-configurable
+    time. If invoices can't be created (not enabled for the shop, or the
+    API refuses the request) it falls back to a plain payment so a link can
+    always be issued, and says so in the message."""
     item = repository.get_item(db, item_id)
     if item is None:
         return False, "Рейс не найден.", None
@@ -1155,19 +1169,103 @@ def create_participant_payment(
         },
         "receipt": receipt,
     }
+    timestamp = current_timestamp()
+    invoice_error = None
+    invoice_body = {
+        "payment_data": {
+            "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
+            "capture": True,
+            "description": description,
+            "metadata": body["metadata"],
+            "receipt": receipt,
+        },
+        "cart": [{
+            "description": description,
+            "price": {"value": f"{amount:.2f}", "currency": "RUB"},
+            "quantity": 1.000,
+        }],
+        "delivery_method_data": {"type": "self"},
+        "locale": "ru_RU",
+        "expires_at": _invoice_expires_at(),
+        "description": description,
+        "metadata": body["metadata"],
+    }
+    try:
+        invoice = yookassa_request(
+            "POST", "/invoices", json_body=invoice_body,
+            idempotence_key=secrets.token_hex(16),
+        )
+        url = (invoice.get("delivery_method") or {}).get("url")
+        if not invoice.get("id") or not url:
+            raise ValueError("в ответе нет ссылки на счёт")
+        payment_id = repository.create_yookassa_invoice_row(
+            db, item_id, participant_id, invoice["id"], amount, url,
+            invoice.get("expires_at") or invoice_body["expires_at"], timestamp,
+        )
+        return True, (
+            f"Ссылка на оплату создана — действует {INVOICE_VALID_DAYS} дн."
+        ), payment_id
+    except Exception as error:
+        invoice_error = error
     try:
         remote = yookassa_request(
             "POST", "/payments", json_body=body, idempotence_key=secrets.token_hex(16)
         )
     except Exception as error:
         return False, f"Не удалось создать ссылку на оплату: {error}", None
-    timestamp = current_timestamp()
     payment_id = repository.create_yookassa_payment_row(
         db, item_id, participant_id, remote["id"], amount,
         remote.get("status", "pending"), remote["confirmation"]["confirmation_url"],
         timestamp,
     )
-    return True, "Ссылка на оплату создана.", payment_id
+    return True, (
+        "Ссылка создана, но короткоживущая: счета ЮKassa недоступны "
+        f"({str(invoice_error)[:160]}). Ссылка истечёт в течение суток."
+    ), payment_id
+
+
+def _sync_invoice_payment(db, record, yookassa_request):
+    """Status of a link that is an ЮKassa invoice. The invoice turns
+    succeeded once its payment did; the payment id appears only then (or when
+    the client starts paying), and replaces the row's placeholder id."""
+    invoice = yookassa_request("GET", f"/invoices/{record['yookassa_invoice_id']}")
+    details = invoice.get("payment_details") or {}
+    remote_payment_id = details.get("id")
+    if remote_payment_id and record["yookassa_payment_id"].startswith(
+        repository.INVOICE_PLACEHOLDER_PREFIX
+    ):
+        repository.attach_payment_to_invoice_row(db, record["id"], remote_payment_id)
+    status = {"succeeded": "succeeded", "canceled": "canceled"}.get(
+        invoice.get("status"), "pending"
+    )
+    if status == "succeeded" and details.get("status") not in (None, "succeeded"):
+        status = "pending"
+    repository.update_yookassa_payment_status(db, record["id"], status, current_timestamp())
+    if status == "succeeded" and not record["applied"]:
+        repository.apply_yookassa_payment(
+            db, record["id"], record["participant_id"], record["amount"]
+        )
+    db.commit()
+    if status == "succeeded":
+        fresh = db.execute(
+            "SELECT * FROM schedule_yookassa_payments WHERE id = ?", (record["id"],)
+        ).fetchone()
+        refresh_payment_receipt(db, fresh, yookassa_request)
+    return status
+
+
+def sync_open_invoices(db, yookassa_request):
+    """Safety net next to the webhook: polls every link still waiting for
+    payment (also turns expired ones into canceled)."""
+    changed = 0
+    rows = repository.list_open_invoice_rows(db)
+    for record in rows:
+        try:
+            if _sync_invoice_payment(db, record, yookassa_request) != "pending":
+                changed += 1
+        except Exception:
+            continue
+    return len(rows), changed
 
 
 def sync_participant_payment(db, record, yookassa_request):
@@ -1175,6 +1273,8 @@ def sync_participant_payment(db, record, yookassa_request):
     it turns succeeded, reduce the participant's remaining balance — the
     guard on `applied` keeps a webhook and a manual "Проверить" click (or
     a redelivered webhook) from double-counting the same payment."""
+    if record["yookassa_invoice_id"]:
+        return _sync_invoice_payment(db, record, yookassa_request)
     remote = yookassa_request("GET", f"/payments/{record['yookassa_payment_id']}")
     status = remote.get("status", record["status"])
     timestamp = current_timestamp()
@@ -1210,6 +1310,8 @@ def refresh_payment_receipt(db, record, yookassa_request):
     ФП and the registration time — the PDF is built from. Best-effort:
     returns the stored receipt status ('' when nothing was found or the API
     failed) and never raises."""
+    if record["yookassa_payment_id"].startswith(repository.INVOICE_PLACEHOLDER_PREFIX):
+        return ""  # an invoice nobody has paid: there is no payment yet
     try:
         listing = yookassa_request(
             "GET", "/receipts", params={"payment_id": record["yookassa_payment_id"]}
@@ -1258,14 +1360,37 @@ def sync_pending_receipts(db, yookassa_request, days=7):
 def sync_participant_payment_by_remote_id(db, yookassa_payment_id, yookassa_request):
     record = repository.get_yookassa_payment_by_remote_id(db, yookassa_payment_id)
     if record is None:
-        return None
+        # A payment made through one of our invoice links: match it by the
+        # invoice it belongs to (or, failing that, the participant/amount
+        # in its metadata).
+        try:
+            remote = yookassa_request("GET", f"/payments/{yookassa_payment_id}")
+        except Exception:
+            return None
+        invoice_id = (remote.get("invoice_details") or {}).get("id")
+        if invoice_id:
+            record = repository.get_yookassa_payment_by_invoice_id(db, invoice_id)
+        if record is None:
+            metadata = remote.get("metadata") or {}
+            participant_id = str(metadata.get("schedule_participant_id") or "")
+            if participant_id.isdigit():
+                try:
+                    amount = float((remote.get("amount") or {}).get("value"))
+                except (TypeError, ValueError):
+                    amount = None
+                if amount is not None:
+                    record = repository.find_open_invoice_row(db, int(participant_id), amount)
+        if record is None:
+            return None
     return sync_participant_payment(db, record, yookassa_request)
 
 
 def delete_participant_payment(db, record, yookassa_request):
     if record["status"] == "succeeded":
         return False, "Нельзя удалить ссылку с успешной оплатой."
-    if record["status"] == "waiting_for_capture":
+    if record["status"] == "waiting_for_capture" and not record["yookassa_payment_id"].startswith(
+        repository.INVOICE_PLACEHOLDER_PREFIX
+    ):
         try:
             yookassa_request(
                 "POST", f"/payments/{record['yookassa_payment_id']}/cancel",
@@ -1274,6 +1399,11 @@ def delete_participant_payment(db, record, yookassa_request):
         except Exception as error:
             return False, f"Не удалось отменить оплату в ЮKassa: {error}"
     repository.delete_yookassa_payment_row(db, record["id"], record["participant_id"])
+    if record["yookassa_invoice_id"]:
+        return True, (
+            "Ссылка удалена из карточки. Сам счёт в ЮKassa действует до истечения срока — "
+            "не отправляйте эту ссылку клиенту."
+        )
     return True, "Ссылка на оплату удалена."
 
 

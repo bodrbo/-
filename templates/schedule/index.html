@@ -1850,6 +1850,16 @@
         badge.className = 'schedule-yookassa-badge';
         badge.textContent = scheduleYookassaStatusLabels[payment.status] || payment.status;
         li.append(amount, badge);
+        if (payment.expires_at && payment.status === 'pending') {
+          const until = document.createElement('small');
+          until.className = 'schedule-yookassa-until';
+          const rawUntil = String(payment.expires_at);
+          const untilDate = new Date(rawUntil);
+          until.textContent = Number.isNaN(untilDate.getTime())
+            ? ''
+            : `до ${untilDate.toLocaleDateString('ru-RU', {day: '2-digit', month: '2-digit'})}`;
+          li.appendChild(until);
+        }
         if (payment.status === 'succeeded') {
           const onlineReceiptRow = buildScheduleReceiptRow(item, participant, payment, 'online');
           if (onlineReceiptRow) li.appendChild(onlineReceiptRow);

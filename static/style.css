@@ -11908,3 +11908,5 @@ button.partner-open-price-save svg {
 
 .schedule-modal-header-side { display: flex; align-items: center; gap: 12px; }
 .schedule-modal-header .schedule-modal-number { font-size: 12px; letter-spacing: .04em; text-transform: none; white-space: nowrap; user-select: all; }
+
+.schedule-yookassa-item .schedule-yookassa-until { color: var(--ink-soft); font-size: 10px; white-space: nowrap; }
