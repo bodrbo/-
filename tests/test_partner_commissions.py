@@ -95,6 +95,9 @@ class PartnerCommissionTests(unittest.TestCase):
         self.assertEqual(tuple(self.scheme_row()), ("", 0.0))
         page = self.client.get("/admin/clients?section=tuning&relationship=partner").get_data(as_text=True)
         self.assertIn("Схема работы", page)
+        self.assertNotIn("<th>Лояльность</th>", page)
+        clients_page = self.client.get("/admin/clients?section=tuning&relationship=client").get_data(as_text=True)
+        self.assertIn("<th>Лояльность</th>", clients_page)
 
     def test_percent_commission_appears_in_work_and_follows_the_total(self):
         self.set_scheme("percent", "10")

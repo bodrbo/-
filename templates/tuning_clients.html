@@ -197,9 +197,9 @@
     <div class="table-scroll">
       <table class="records tuning-clients-table" id="tuning-clients-table">
         {% if client_section == 'excursion' %}
-        <thead><tr><th>Контакт</th><th>Тип контакта</th><th>Лояльность</th><th>Телефон</th><th>Рейсов</th><th>Последний рейс</th><th>Ближайший рейс</th><th>Катера</th></tr></thead>
+        <thead><tr><th>Контакт</th><th>Тип контакта</th>{% if not is_partner_directory %}<th>Лояльность</th>{% endif %}<th>Телефон</th><th>Рейсов</th><th>Последний рейс</th><th>Ближайший рейс</th><th>Катера</th></tr></thead>
         {% else %}
-        <thead><tr><th>Контакт</th><th>Тип контакта</th><th>Лояльность</th><th>Телефон</th><th>Последняя техника</th><th>Заказов</th><th>Последний заказ</th><th>Сумма</th><th>Оплачено</th><th>К доплате</th>{% if is_partner_directory %}<th>Схема работы</th>{% endif %}</tr></thead>
+        <thead><tr><th>Контакт</th><th>Тип контакта</th>{% if not is_partner_directory %}<th>Лояльность</th>{% endif %}<th>Телефон</th><th>Последняя техника</th><th>Заказов</th><th>Последний заказ</th><th>Сумма</th><th>Оплачено</th><th>К доплате</th>{% if is_partner_directory %}<th>Схема работы</th>{% endif %}</tr></thead>
         {% endif %}
         <tbody>
           {% for client in clients %}
@@ -220,6 +220,7 @@
                 <button type="submit" class="sr-only">Сохранить тип контакта {{ client.client_name }}</button>
               </form>
             </td>
+            {% if not is_partner_directory %}
             <td>
               <form action="{{ url_for('update_tuning_client_status', client_id=client.id) }}" method="post" class="status-badge status-client-{{ client.status }} tuning-client-status-form">
                 <input type="hidden" name="section" value="{{ client_section }}">
@@ -236,6 +237,7 @@
                 <button type="submit" class="sr-only">Сохранить статус клиента {{ client.client_name }}</button>
               </form>
             </td>
+            {% endif %}
             <td>{% if client.phone %}<a href="tel:{{ client.phone }}" class="tuning-client-phone">{{ client.phone }}</a>{% else %}<span class="muted">Не указан</span>{% endif %}</td>
             {% if client_section == 'excursion' %}
             <td class="amount">{{ client.trip_count }}</td>
