@@ -11210,8 +11210,9 @@ def tuning_order_board(order_id):
 def update_tuning_assignment_dates(assignment_id):
     """Admin correction of a task's assignment and completion dates. The
     completion date only exists while the task is "Выполнена" (it can be
-    cleared there); the time of day is kept. Payroll is not touched — the
-    payout keeps the date it was made on."""
+    cleared there); the time of day is kept. The payout of a paid task moves
+    with the completion date (its payroll entry's date), which can shift it
+    into another payroll week — the notice flags weeks already marked paid."""
     db = get_db()
     assignment = db.execute(
         "SELECT tia.*, ti.order_id FROM tuning_item_assignments tia "
@@ -11260,8 +11261,36 @@ def update_tuning_assignment_dates(assignment_id):
         "UPDATE tuning_item_assignments SET assigned_at = ?, completed_at = ? WHERE id = ?",
         (new_assigned, new_completed, assignment_id),
     )
+    notice = "Даты задачи обновлены."
+    if assignment["entry_id"] and completed_day is not None:
+        entry = db.execute(
+            "SELECT work_date, employee FROM entries WHERE id = ?", (assignment["entry_id"],)
+        ).fetchone()
+        if entry is not None and entry["work_date"][:10] != completed_day:
+            old_day = entry["work_date"][:10]
+            db.execute(
+                "UPDATE entries SET work_date = ? WHERE id = ?", (completed_day, assignment["entry_id"])
+            )
+            notice += f" Дата выплаты изменена: {format_ru_date(old_day)} → {format_ru_date(completed_day)}."
+
+            def week_start(day_iso):
+                day = dt.date.fromisoformat(day_iso)
+                return (day - dt.timedelta(days=day.weekday())).isoformat()
+
+            settled = [
+                period for period in {week_start(old_day), week_start(completed_day)}
+                if db.execute(
+                    "SELECT 1 FROM payments WHERE employee = ? AND period_key = ?",
+                    (entry["employee"], period),
+                ).fetchone() is not None
+            ]
+            if settled:
+                notice += (
+                    " Внимание: одна из затронутых недель уже отмечена оплаченной — "
+                    "сверьте расчёты с сотрудником."
+                )
     db.commit()
-    session["tuning_board_notice"] = "Даты задачи обновлены."
+    session["tuning_board_notice"] = notice
     return redirect(board)
 
 

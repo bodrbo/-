@@ -741,6 +741,63 @@ class TuningTaskDatesTests(_TuningTaskFixture, unittest.TestCase):
         self.edit_dates(task_id, "2026-08-28", "")
         self.assertIsNone(self.assignment(self.EMPLOYEE_A)["completed_at"])
 
+    def test_editing_the_completion_date_moves_the_payout_date(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task_id = self.assignment(self.EMPLOYEE_A)["id"]
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            entry_id = db.execute(
+                "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
+                "VALUES (?, 'Полировка корпуса', 100, 2, 200, '2026-09-08', '2026-09-08 12:00')",
+                (self.EMPLOYEE_A,),
+            ).lastrowid
+            db.execute(
+                "UPDATE tuning_item_assignments SET entry_id = ?, assignment_status = 'done', "
+                "assigned_at = '2026-08-01 09:00', completed_at = '2026-09-08 18:00' WHERE id = ?",
+                (entry_id, task_id),
+            )
+            db.commit()
+
+        def entry_date():
+            with application_module.app.app_context():
+                return application_module.get_db().execute(
+                    "SELECT work_date FROM entries WHERE id = ?", (entry_id,)
+                ).fetchone()["work_date"]
+
+        self.edit_dates(task_id, "2026-08-01", "2026-09-02")
+        self.assertEqual(entry_date(), "2026-09-02")
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("Дата выплаты изменена", page)
+        self.assertNotIn("уже отмечена оплаченной", page)
+
+        # unchanged completion date: the payout is left alone
+        self.edit_dates(task_id, "2026-08-05", "2026-09-02")
+        self.assertEqual(entry_date(), "2026-09-02")
+        # clearing the completion date keeps the payout where it is
+        self.edit_dates(task_id, "2026-08-05", "")
+        self.assertEqual(entry_date(), "2026-09-02")
+
+        # moving it out of / into a week that is already settled warns
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("INSERT INTO payments (employee, period_key, paid_at) VALUES (?, '2026-08-31', "
+                       "'2026-09-09 10:00')", (self.EMPLOYEE_A,))
+            db.execute("UPDATE tuning_item_assignments SET completed_at = '2026-09-02 18:00' WHERE id = ?",
+                       (task_id,))
+            db.commit()
+        try:
+            self.edit_dates(task_id, "2026-08-05", "2026-09-10")  # week of 08-31 -> week of 09-07
+            self.assertEqual(entry_date(), "2026-09-10")
+            page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+            self.assertIn("уже отмечена оплаченной", page)
+        finally:
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                db.execute("DELETE FROM payments WHERE employee = ? AND period_key = '2026-08-31'",
+                           (self.EMPLOYEE_A,))
+                db.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
+                db.commit()
+
     def test_invalid_or_inconsistent_dates_are_rejected(self):
         self.assign(self.EMPLOYEE_A, 100, 2)
         task_id = self.assignment(self.EMPLOYEE_A)["id"]
