@@ -458,6 +458,8 @@
               {{ g.product_name }}
               {% if g.writeoff_warehouse_name %}
               <div class="hint" style="margin:2px 0 0 0;">Списано со склада «{{ g.writeoff_warehouse_name }}»</div>
+              {% elif g.chosen_warehouse_name %}
+              <div class="hint" style="margin:2px 0 0 0;">Склад списания «{{ g.chosen_warehouse_name }}» — спишется, когда заказ будет «В работе»</div>
               {% endif %}
             </td>
             <td class="amount">{{ g.quantity|float|round(2) }} {{ cost_units|selectattr('value', 'equalto', g.unit)|map(attribute='label')|first }}</td>
@@ -521,6 +523,16 @@
       <div class="field field-narrow">
         <label for="product_quantity">Количество</label>
         <input type="text" inputmode="decimal" id="product_quantity" name="quantity" required>
+      </div>
+      <div class="field">
+        <label for="product_warehouse">Склад списания</label>
+        <select id="product_warehouse" name="warehouse_id">
+          <option value="">Не списывать</option>
+          {% for w in goods_warehouses|default([]) %}
+          <option value="{{ w.id }}" data-name="{{ w.name }}">{{ w.name }}</option>
+          {% endfor %}
+        </select>
+        <span class="field-context">Необязательно. Спишется, когда статус заказа станет «В работе»</span>
       </div>
       <div class="field field-narrow">
         <label for="product_unit_price">Цена, ₽</label>
@@ -1496,9 +1508,28 @@ function updateOrderTotal() {
 document.addEventListener('DOMContentLoaded', function () {
   var priceInput = document.getElementById('product_unit_price');
   if (!priceInput) return;
+  var warehouseSelect = document.getElementById('product_warehouse');
+  // Show what each warehouse holds of the chosen product.
+  function showStock(productId) {
+    if (!warehouseSelect) return;
+    Array.prototype.forEach.call(warehouseSelect.options, function (opt) {
+      if (opt.value) opt.textContent = opt.getAttribute('data-name');
+    });
+    if (!productId) return;
+    fetch('/tuning/products/' + encodeURIComponent(productId) + '/stock')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        (data.warehouses || []).forEach(function (w) {
+          var opt = warehouseSelect.querySelector('option[value="' + w.warehouse_id + '"]');
+          if (opt) opt.textContent = w.name + ' — в наличии ' + (Math.round(w.quantity * 100) / 100);
+        });
+      })
+      .catch(function () {});
+  }
   document.querySelectorAll('#goods .combo-option').forEach(function (option) {
     option.addEventListener('click', function () {
       priceInput.value = option.getAttribute('data-price') || '';
+      showStock(option.getAttribute('data-value'));
     });
   });
   var search = document.getElementById('product_search');
