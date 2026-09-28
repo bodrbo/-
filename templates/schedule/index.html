@@ -585,6 +585,10 @@
       <p class="schedule-tripster-preserve-note">
         Предоплата и сумма к доплате сохраняются в обоих вариантах и продолжат обновляться при импорте Tripster.
       </p>
+      <div class="schedule-tripster-dismiss">
+        <button type="button" class="btn-secondary danger" id="scheduleTripsterDismiss" onclick="dismissTripsterCard()">Удалить заказ из расписания</button>
+        <small>Заказ пропадёт из колонки «Не назначено». В Tripster ничего не передаётся; появится снова только если придёт новый заказ на это же время.</small>
+      </div>
     </div>
   </section>
 </div>
@@ -1500,6 +1504,25 @@
         submit.textContent = 'Добавить к рейсу';
       });
     return false;
+  }
+  function dismissTripsterCard() {
+    const itemId = scheduleSourceItemId;
+    if (itemId == null) return;
+    if (!confirm('Удалить этот заказ Tripster из расписания? В Tripster ничего не передаётся.')) return;
+    const button = document.getElementById('scheduleTripsterDismiss');
+    button.disabled = true;
+    fetch(`${scheduleCreateUrl}/${itemId}/tripster/dismiss`, {method: 'POST'})
+      .then(response => response.json().then(data => ({ok: response.ok, data})))
+      .then(result => {
+        if (!result.ok || !result.data.ok) {
+          throw new Error(result.data.message || 'Не удалось удалить заказ.');
+        }
+        window.location.href = result.data.redirect_url;
+      })
+      .catch(error => {
+        alert(error.message);
+        button.disabled = false;
+      });
   }
   function createTripFromTripsterCard() {
     const itemId = scheduleSourceItemId;

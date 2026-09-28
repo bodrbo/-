@@ -207,7 +207,39 @@ def _resolved_item(db, item_id):
     ).fetchone()
 
 
-def _ensure_schedule_item(db, order, timestamp):
+def dismiss_item(db, item_id, timestamp):
+    """Deletes an unassigned Tripster intake card from the schedule. Purely
+    local — nothing is sent to Tripster (the integration only ever reads).
+    The card stays deleted when the sync re-reads the same orders; a new
+    order for the same slot brings it back (see _ensure_schedule_item)."""
+    item = db.execute(
+        "SELECT * FROM schedule_items WHERE id = ? AND deleted_at IS NULL", (item_id,)
+    ).fetchone()
+    if item is None:
+        return False, "Рейс не найден."
+    if item["source"] != SOURCE or item["tripster_resolved"] or item["merged_into_item_id"] is not None:
+        return False, "Удалять так можно только неразобранные заказы Tripster."
+    if db.execute(
+        "SELECT 1 FROM schedule_assignments WHERE schedule_item_id = ? LIMIT 1", (item_id,)
+    ).fetchone() is not None:
+        return False, "Заказ уже назначен сотруднику — удалите рейс обычным способом."
+    payments = db.execute(
+        "SELECT (SELECT COUNT(*) FROM schedule_manual_payments WHERE schedule_item_id = ?) "
+        "+ (SELECT COUNT(*) FROM schedule_yookassa_payments WHERE schedule_item_id = ?)",
+        (item_id, item_id),
+    ).fetchone()[0]
+    if payments:
+        return False, "По заказу уже есть платежи — удалить его нельзя."
+    db.execute(
+        "UPDATE schedule_items SET deleted_at = ?, tripster_dismissed = 1, updated_at = ? "
+        "WHERE id = ?",
+        (timestamp, timestamp, item_id),
+    )
+    db.commit()
+    return True, "Заказ Tripster удалён из расписания."
+
+
+def _ensure_schedule_item(db, order, timestamp, is_new_order=False):
     mapped_service = _mapped_service(db, order["experience_id"])
     is_group_order = bool(
         order["is_grouping_enabled"]
@@ -221,6 +253,18 @@ def _ensure_schedule_item(db, order, timestamp):
         "SELECT * FROM schedule_items WHERE source = ? AND source_ref = ?",
         (SOURCE, source_ref),
     ).fetchone()
+    if existing is not None and existing["tripster_dismissed"]:
+        if not is_new_order:
+            # The same orders again: the admin deleted this card, keep it so.
+            return existing["id"], False
+        db.execute(
+            "UPDATE schedule_items SET tripster_dismissed = 0, deleted_at = NULL, "
+            "status = 'scheduled', updated_at = ? WHERE id = ?",
+            (timestamp, existing["id"]),
+        )
+        existing = db.execute(
+            "SELECT * FROM schedule_items WHERE id = ?", (existing["id"],)
+        ).fetchone()
     if existing is not None:
         if existing["merged_into_item_id"] is not None:
             target = _resolved_item(db, existing["merged_into_item_id"])
@@ -463,6 +507,8 @@ def _rebuild_item(db, item_id, timestamp):
     ).fetchone()
     if item is None:
         return False
+    if item["tripster_dismissed"]:
+        return False  # deleted by the admin: leave the card and its data alone
     active_rows = db.execute(
         "SELECT * FROM tripster_orders WHERE schedule_item_id = ? AND status = ? "
         "ORDER BY order_id",
@@ -688,7 +734,7 @@ def sync_orders(
                     )
                 else:
                     schedule_item_id, created = _ensure_schedule_item(
-                        db, order, timestamp
+                        db, order, timestamp, is_new_order=existing is None
                     )
                 affected_item_ids.add(schedule_item_id)
                 if (

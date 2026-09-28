@@ -11987,3 +11987,8 @@ button.partner-open-price-save svg {
 .board-task-dates .icon-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 27px; height: 27px; margin: 0; padding: 0; border-radius: 6px; border: 1px solid var(--hairline); background: transparent; color: var(--ink-soft); cursor: pointer; }
 .board-task-dates .icon-btn svg { width: 13px; height: 13px; }
 .board-task-dates .icon-btn.approve:hover { background: var(--success); color: #fff8f4; border-color: var(--success); }
+
+.schedule-tripster-dismiss { display: grid; gap: 6px; justify-items: start; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--hairline); }
+.schedule-tripster-dismiss small { color: var(--ink-soft); font-size: 11px; }
+.schedule-tripster-dismiss .btn-secondary.danger { color: var(--danger); border-color: rgba(179, 64, 44, .35); }
+.schedule-tripster-dismiss .btn-secondary.danger:hover { background: var(--danger); color: #fff8f4; }

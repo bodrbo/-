@@ -353,6 +353,109 @@ class TripsterScheduleImportTests(unittest.TestCase):
         self.assertEqual(segment["segment"], "excursion")
         self.assertEqual(imported_client["acquisition_channel"], "tripster")
 
+    def item_ids(self, include_deleted=False):
+        with application_module.app.app_context():
+            query = "SELECT id, deleted_at, tripster_dismissed FROM schedule_items ORDER BY id"
+            return [dict(r) for r in application_module.get_db().execute(query).fetchall()]
+
+    def dismiss(self, item_id):
+        self.login()
+        with patch.object(application_module, "fetch_tripster_orders") as fetcher, \
+                patch("integrations.tripster.requests.get") as api_get, \
+                patch("integrations.tripster.requests.post", create=True) as api_post:
+            response = self.client.post(f"/schedule/items/{item_id}/tripster/dismiss")
+        # deleting is purely local: the Tripster API is never called
+        fetcher.assert_not_called()
+        api_get.assert_not_called()
+        api_post.assert_not_called()
+        return response
+
+    def test_unassigned_tripster_card_can_be_deleted_and_stays_deleted_on_resync(self):
+        order = self.order()
+        self.sync([order])
+        item = self.item_ids()[0]
+        response = self.dismiss(item["id"])
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["ok"])
+        gone = self.item_ids()[0]
+        self.assertIsNotNone(gone["deleted_at"])
+        self.assertEqual(gone["tripster_dismissed"], 1)
+        page = self.client.get("/schedule?date=2026-09-10").get_data(as_text=True)
+        self.assertIn("Заказ Tripster удалён из расписания", page)
+        self.assertNotIn("Tripster · экскурсия #321", page.split("schedule-board", 1)[-1].split("scheduleItems", 1)[0])
+
+        # the same orders arriving again (every sync re-reads them) don't bring it back
+        self.sync([order])
+        self.sync([order], follow_redirects=False)
+        again = self.item_ids()
+        self.assertEqual(len(again), 1)
+        self.assertIsNotNone(again[0]["deleted_at"])
+        with application_module.app.app_context():
+            participants = application_module.get_db().execute(
+                "SELECT COUNT(*) FROM schedule_participants WHERE schedule_item_id = ?", (item["id"],)
+            ).fetchone()[0]
+        self.assertEqual(participants, 1)  # its data was left untouched
+
+    def test_a_new_order_for_a_deleted_group_slot_brings_the_card_back(self):
+        self.add_mapping_service()  # makes orders of experience 321 group orders
+        first = self.order(7001)
+        self.sync([first])
+        item_id = self.item_ids()[0]["id"]
+        self.dismiss(item_id)
+        second = self.order(7002)
+        second["traveler"]["phone"] = self.PHONES[1]
+        self.sync([first, second])
+        items = self.item_ids()
+        self.assertEqual(len(items), 1)
+        self.assertIsNone(items[0]["deleted_at"])
+        self.assertEqual(items[0]["tripster_dismissed"], 0)
+
+    def test_only_unresolved_unassigned_unpaid_tripster_cards_can_be_dismissed(self):
+        self.sync([self.order(7001), self.order(7002, experience_id=322)])
+        first, second = [row["id"] for row in self.item_ids()]
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("UPDATE schedule_items SET tripster_resolved = 1 WHERE id = ?", (first,))
+            employee_id = db.execute("SELECT id FROM employees LIMIT 1").fetchone()
+            db.commit()
+        self.assertEqual(self.dismiss(first).status_code, 400)  # resolved
+        self.assertIsNone(self.item_ids()[0]["deleted_at"])
+
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            client_id = db.execute("SELECT client_id FROM schedule_participants WHERE schedule_item_id = ?",
+                                   (second,)).fetchone()[0]
+            participant_id = db.execute("SELECT id FROM schedule_participants WHERE schedule_item_id = ?",
+                                        (second,)).fetchone()[0]
+            db.execute(
+                "INSERT INTO schedule_manual_payments (schedule_item_id, participant_id, amount, "
+                "payment_method, created_at) VALUES (?, ?, 100, 'cash', '2026-09-01 10:00')",
+                (second, participant_id),
+            )
+            db.commit()
+        self.assertEqual(self.dismiss(second).status_code, 400)  # has a payment
+        self.assertIsNone(self.item_ids()[1]["deleted_at"])
+        self.assertEqual(self.dismiss(999999).status_code, 400)  # unknown
+
+    def test_internal_cards_cannot_be_dismissed_this_way(self):
+        self.login()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = db.execute(
+                "INSERT INTO schedule_items (kind, boat, service_name, starts_at, ends_at, revenue, "
+                "status, source, created_at, updated_at) VALUES ('booking', 'Бодрый Первый', 'Малый тур', "
+                "'2026-09-10 10:00', '2026-09-10 11:00', 0, 'scheduled', 'internal', "
+                "'2026-09-01 09:00', '2026-09-01 09:00')"
+            ).lastrowid
+            db.commit()
+        self.assertEqual(self.dismiss(item_id).status_code, 400)
+
+    def test_dismiss_button_is_in_the_tripster_dialog(self):
+        self.sync([self.order()])
+        page = self.client.get("/schedule?date=2026-09-10").get_data(as_text=True)
+        self.assertIn("Удалить заказ из расписания", page)
+        self.assertIn("/tripster/dismiss", page)
+
     def test_unassigned_card_can_be_attached_and_reimport_keeps_target(self):
         order = self.order(price={
             "value": 12000,

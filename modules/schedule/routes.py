@@ -648,6 +648,27 @@ def create_schedule_blueprint(
             ),
         })
 
+    @blueprint.route(
+        "/schedule/items/<int:item_id>/tripster/dismiss", methods=["POST"]
+    )
+    @manage_required
+    def dismiss_tripster_item(item_id):
+        if session.get("demo_tenant_id"):
+            abort(404)
+        db = get_db()
+        item = repository.get_item(db, item_id)
+        day = item["starts_at"][:10] if item else None
+        success, message = tripster_services.dismiss_item(
+            db, item_id, services.current_timestamp()
+        )
+        if not success:
+            return jsonify({"ok": False, "message": message}), 400
+        set_notice(message, True)
+        return jsonify({
+            "ok": True, "message": message,
+            "redirect_url": url_for("schedule.index", date=day, employee="all"),
+        })
+
     @blueprint.route("/schedule/weather/sync", methods=["POST"])
     @manage_required
     def sync_weather():

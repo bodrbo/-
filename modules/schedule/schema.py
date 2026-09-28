@@ -29,6 +29,13 @@ def init_schema(conn):
     item_columns = {
         row[1] for row in conn.execute("PRAGMA table_info(schedule_items)")
     }
+    if "tripster_dismissed" not in item_columns:
+        # An unassigned Tripster intake card the admin deleted: it stays
+        # deleted while the sync keeps re-reading the same orders, and only a
+        # genuinely new order for the same slot brings it back.
+        conn.execute(
+            "ALTER TABLE schedule_items ADD COLUMN tripster_dismissed INTEGER NOT NULL DEFAULT 0"
+        )
     if "payroll_closed_at" not in item_columns:
         # Boat-less items (city excursions) can't become a trips row; this
         # marks that their crew pay was written straight into entries.
