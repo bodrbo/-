@@ -11205,6 +11205,66 @@ def tuning_order_board(order_id):
     )
 
 
+@app.route("/tuning/assignments/<int:assignment_id>/dates", methods=["POST"])
+@admin_login_required
+def update_tuning_assignment_dates(assignment_id):
+    """Admin correction of a task's assignment and completion dates. The
+    completion date only exists while the task is "Выполнена" (it can be
+    cleared there); the time of day is kept. Payroll is not touched — the
+    payout keeps the date it was made on."""
+    db = get_db()
+    assignment = db.execute(
+        "SELECT tia.*, ti.order_id FROM tuning_item_assignments tia "
+        "JOIN tuning_order_items ti ON ti.id = tia.item_id WHERE tia.id = ?",
+        (assignment_id,),
+    ).fetchone()
+    if assignment is None:
+        return redirect(url_for("tuning_index"))
+    board = url_for("tuning_order_board", order_id=assignment["order_id"]) + (
+        f"#board-work-{assignment['item_id']}"
+    )
+
+    def parse_day(raw):
+        raw = (raw or "").strip()
+        if not raw:
+            return None
+        try:
+            return dt.date.fromisoformat(raw).isoformat()
+        except ValueError:
+            raise ValueError
+
+    try:
+        assigned_day = parse_day(request.form.get("assigned_date"))
+        completed_day = parse_day(request.form.get("completed_date"))
+    except ValueError:
+        session["tuning_board_error"] = "Укажите корректные даты."
+        return redirect(board)
+    if assigned_day is None:
+        assigned_day = assignment["assigned_at"][:10]
+    if assignment["assignment_status"] != "done":
+        completed_day = None  # nothing to record for a task that isn't done
+    if completed_day is not None and completed_day < assigned_day:
+        session["tuning_board_error"] = "Дата выполнения не может быть раньше даты поручения."
+        return redirect(board)
+
+    def with_time(new_day, old_value, default="09:00"):
+        old_time = (old_value or "")[11:16] or default
+        return f"{new_day} {old_time}"
+
+    new_assigned = with_time(assigned_day, assignment["assigned_at"])
+    new_completed = (
+        with_time(completed_day, assignment["completed_at"], "18:00")
+        if completed_day is not None else None
+    )
+    db.execute(
+        "UPDATE tuning_item_assignments SET assigned_at = ?, completed_at = ? WHERE id = ?",
+        (new_assigned, new_completed, assignment_id),
+    )
+    db.commit()
+    session["tuning_board_notice"] = "Даты задачи обновлены."
+    return redirect(board)
+
+
 @app.route("/tuning/assignments/<int:assignment_id>/revoke", methods=["POST"])
 @admin_login_required
 def revoke_tuning_assignment(assignment_id):

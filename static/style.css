@@ -11979,3 +11979,11 @@ button.partner-open-price-save svg {
 .board-task-revoke-form .icon-btn.danger:hover { background: var(--danger); color: #fff8f4; border-color: var(--danger); }
 
 .board-task-dates { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 3px 0 2px; color: var(--ink-soft); font-size: 11px; }
+
+.board-task-dates { align-items: flex-end; margin: 4px 0 2px; }
+.board-task-dates label { display: grid; gap: 1px; font-size: 10px; color: var(--ink-soft); }
+.board-task-dates input[type=date] { height: 27px; padding: 0 4px; font-size: 12px; min-width: 0; }
+.board-task-dates input[type=date]:disabled { opacity: .55; }
+.board-task-dates .icon-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 27px; height: 27px; margin: 0; padding: 0; border-radius: 6px; border: 1px solid var(--hairline); background: transparent; color: var(--ink-soft); cursor: pointer; }
+.board-task-dates .icon-btn svg { width: 13px; height: 13px; }
+.board-task-dates .icon-btn.approve:hover { background: var(--success); color: #fff8f4; border-color: var(--success); }

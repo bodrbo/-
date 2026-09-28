@@ -671,8 +671,8 @@ class TuningTaskDatesTests(_TuningTaskFixture, unittest.TestCase):
         self.assertEqual(task["assigned_at"][:10], today)
         self.assertIsNone(task["completed_at"])
         page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
-        self.assertIn("Поручена:", page)
-        self.assertIn("Выполнена: —", page)
+        self.assertIn("Поручена", page)
+        self.assertIn('name="completed_date"', page)
 
         self.set_status(task["id"], "accepted")
         self.assertIsNone(self.assignment(self.EMPLOYEE_A)["completed_at"])
@@ -680,7 +680,7 @@ class TuningTaskDatesTests(_TuningTaskFixture, unittest.TestCase):
         done = self.assignment(self.EMPLOYEE_A)
         self.assertEqual(done["completed_at"][:10], today)
         page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
-        self.assertNotIn("Выполнена: —", page)
+        self.assertIn(f'name="completed_date" value="{today}"', page)
 
     def test_completion_date_is_kept_while_done_and_cleared_when_an_unpaid_task_is_reopened(self):
         self.assign(self.EMPLOYEE_A, 100, 2)
@@ -712,6 +712,59 @@ class TuningTaskDatesTests(_TuningTaskFixture, unittest.TestCase):
         self.assertIsNotNone(stamped["entry_id"])
         self.set_status(task_id, "in_progress")
         self.assertEqual(self.assignment(self.EMPLOYEE_A)["completed_at"], stamped["completed_at"])
+
+    def edit_dates(self, task_id, assigned="", completed=""):
+        self.login_admin()
+        return self.client.post(
+            f"/tuning/assignments/{task_id}/dates",
+            data={"assigned_date": assigned, "completed_date": completed},
+        )
+
+    def test_dates_can_be_edited_keeping_the_time_of_day(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task_id = self.assignment(self.EMPLOYEE_A)["id"]
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "UPDATE tuning_item_assignments SET assigned_at = '2026-09-01 10:30', "
+                "assignment_status = 'done', completed_at = '2026-09-03 17:45' WHERE id = ?", (task_id,)
+            )
+            db.commit()
+        response = self.edit_dates(task_id, "2026-08-28", "2026-09-05")
+        self.assertEqual(response.status_code, 302)
+        task = self.assignment(self.EMPLOYEE_A)
+        self.assertEqual(task["assigned_at"], "2026-08-28 10:30")
+        self.assertEqual(task["completed_at"], "2026-09-05 17:45")
+        self.assertIn("Даты задачи обновлены", self.client.get(
+            f"/tuning/{self.order_id}/board").get_data(as_text=True))
+        # the completion date can be cleared on a done task
+        self.edit_dates(task_id, "2026-08-28", "")
+        self.assertIsNone(self.assignment(self.EMPLOYEE_A)["completed_at"])
+
+    def test_invalid_or_inconsistent_dates_are_rejected(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task_id = self.assignment(self.EMPLOYEE_A)["id"]
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("UPDATE tuning_item_assignments SET assigned_at = '2026-09-01 10:30', "
+                       "assignment_status = 'done', completed_at = '2026-09-03 17:45' WHERE id = ?", (task_id,))
+            db.commit()
+        before = self.assignment(self.EMPLOYEE_A)
+        self.edit_dates(task_id, "not-a-date", "2026-09-05")
+        self.edit_dates(task_id, "2026-09-10", "2026-09-05")  # completed before assigned
+        after = self.assignment(self.EMPLOYEE_A)
+        self.assertEqual((after["assigned_at"], after["completed_at"]),
+                         (before["assigned_at"], before["completed_at"]))
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("не может быть раньше", page)
+
+    def test_a_task_that_is_not_done_has_no_completion_date_to_edit(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task_id = self.assignment(self.EMPLOYEE_A)["id"]
+        self.edit_dates(task_id, "2026-08-20", "2026-09-05")
+        task = self.assignment(self.EMPLOYEE_A)
+        self.assertEqual(task["assigned_at"][:10], "2026-08-20")
+        self.assertIsNone(task["completed_at"])
 
     def test_team_dashboard_shows_the_dates(self):
         self.assign(self.EMPLOYEE_A, 100, 2)

@@ -125,10 +125,20 @@
               </form>
             </div>
             <strong>{{ a.employee_name }}</strong>
-            <div class="board-task-dates">
-              <span title="{{ a.assigned_at }}">Поручена: {{ a.assigned_at[:10]|ru_date }}</span>
-              <span title="{{ a.completed_at or '' }}">Выполнена: {{ a.completed_at[:10]|ru_date if a.completed_at else '—' }}</span>
-            </div>
+            <form action="{{ url_for('update_tuning_assignment_dates', assignment_id=a.id) }}" method="post"
+                  class="board-task-dates">
+              <label>Поручена
+                <input type="date" name="assigned_date" value="{{ a.assigned_at[:10] }}" required>
+              </label>
+              <label>Выполнена
+                <input type="date" name="completed_date" value="{{ a.completed_at[:10] if a.completed_at else '' }}"
+                       {{ 'disabled' if a.assignment_status != 'done' }}
+                       {% if a.assignment_status != 'done' %}title="Дата появится, когда задача станет «Выполнена»"{% endif %}>
+              </label>
+              <button type="submit" class="icon-btn approve" title="Сохранить даты" aria-label="Сохранить даты">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5l4 4 8-9"/></svg>
+              </button>
+            </form>
             {% if a.entry_id %}
             <div class="hint" style="margin:2px 0 0;">
               {{ a.rate|float|round(2) }} ₽ × {{ a.norm_hours|float|round(2) }} ч = {{ (a.rate * a.norm_hours)|money }} ₽ · выплачено
