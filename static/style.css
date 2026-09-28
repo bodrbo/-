@@ -11964,3 +11964,9 @@ button.partner-open-price-save svg {
   .schedule-card[data-stack-index] { left: calc(3px + var(--stack-i, 0) * 7px); }
   .schedule-card-stack { display: none; }
 }
+
+.goods-warehouse-form { display: flex; align-items: center; gap: 4px; margin: 4px 0 0; }
+.goods-warehouse-form select { width: auto; max-width: 210px; height: 27px; padding: 0 6px; font-size: 12px; }
+.goods-warehouse-form .icon-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 27px; height: 27px; margin: 0; padding: 0; border-radius: 6px; border: 1px solid var(--hairline); background: transparent; color: var(--ink-soft); cursor: pointer; }
+.goods-warehouse-form .icon-btn svg { width: 13px; height: 13px; }
+.goods-warehouse-form .icon-btn.approve:hover { background: var(--success); color: #fff8f4; border-color: var(--success); }

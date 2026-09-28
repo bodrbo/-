@@ -10438,6 +10438,7 @@ def edit_tuning_order(order_id):
         assignable_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
         goods = db.execute(
             "SELECT tuning_order_products.*, supply_warehouses.name AS writeoff_warehouse_name, "
+            "supply_writeoffs.warehouse_id AS writeoff_warehouse_id, "
             "chosen.name AS chosen_warehouse_name "
             "FROM tuning_order_products "
             "LEFT JOIN supply_writeoffs ON supply_writeoffs.tuning_order_product_id = tuning_order_products.id "
@@ -11731,6 +11732,76 @@ def set_tuning_order_product_price(order_id, row_id):
     _recompute_order_totals(db, order_id)
     session["tuning_goods_notice"] = "Цена товара в заказе обновлена."
     return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
+
+
+@app.route("/tuning/<int:order_id>/products/<int:row_id>/warehouse", methods=["POST"])
+@admin_login_required
+def set_tuning_order_product_warehouse(order_id, row_id):
+    """Changes the write-off warehouse of a goods line — also for lines that
+    were already written off (including ones written off before warehouses
+    could be chosen): the stock moves from the old warehouse to the new one.
+    Empty = "Не списывать": an existing write-off is undone and the stock
+    returned."""
+    db = get_db()
+    line = db.execute(
+        "SELECT * FROM tuning_order_products WHERE id = ? AND order_id = ?", (row_id, order_id)
+    ).fetchone()
+    back = url_for("edit_tuning_order", order_id=order_id) + "#goods"
+    if line is None:
+        return redirect(url_for("edit_tuning_order", order_id=order_id))
+    raw = request.form.get("warehouse_id", "").strip()
+    new_id = None
+    if raw:
+        warehouse = db.execute(
+            "SELECT id, name FROM supply_warehouses WHERE id = ?",
+            (int(raw) if raw.isdigit() else -1,),
+        ).fetchone()
+        if warehouse is None:
+            session["tuning_goods_error"] = "Выбранный склад не найден."
+            return redirect(back)
+        new_id = warehouse["id"]
+
+    writeoff = db.execute(
+        "SELECT * FROM supply_writeoffs WHERE tuning_order_product_id = ?", (row_id,)
+    ).fetchone()
+    if writeoff is not None and new_id is not None and new_id != writeoff["warehouse_id"]:
+        target = db.execute(
+            "SELECT * FROM supply_stock WHERE product_id = ? AND warehouse_id = ?",
+            (writeoff["product_id"], new_id),
+        ).fetchone()
+        if target is None or target["quantity"] < writeoff["quantity"] - 1e-9:
+            have = target["quantity"] if target is not None else 0
+            session["tuning_goods_error"] = (
+                f"«{line['product_name']}» не перенесён: на выбранном складе {have:g}, "
+                f"нужно {writeoff['quantity']:g}."
+            )
+            return redirect(back)
+        db.execute(
+            "UPDATE supply_stock SET quantity = quantity + ? WHERE product_id = ? AND warehouse_id = ?",
+            (writeoff["quantity"], writeoff["product_id"], writeoff["warehouse_id"]),
+        )
+        db.execute(
+            "UPDATE supply_stock SET quantity = quantity - ? WHERE id = ?",
+            (writeoff["quantity"], target["id"]),
+        )
+        db.execute(
+            "UPDATE supply_writeoffs SET warehouse_id = ? WHERE id = ?", (new_id, writeoff["id"])
+        )
+        _maybe_create_low_stock_request(db, writeoff["product_id"])
+    elif writeoff is not None and new_id is None:
+        db.execute(
+            "UPDATE supply_stock SET quantity = quantity + ? WHERE product_id = ? AND warehouse_id = ?",
+            (writeoff["quantity"], writeoff["product_id"], writeoff["warehouse_id"]),
+        )
+        db.execute("DELETE FROM supply_writeoffs WHERE id = ?", (writeoff["id"],))
+    db.execute(
+        "UPDATE tuning_order_products SET warehouse_id = ? WHERE id = ?", (new_id, row_id)
+    )
+    db.commit()
+    # A line that isn't written off yet gets booked now if the order is in work.
+    _sync_order_goods_writeoff(db, order_id)
+    session["tuning_goods_notice"] = "Склад списания обновлён."
+    return redirect(back)
 
 
 @app.route("/tuning/<int:order_id>/products/<int:row_id>/remove", methods=["POST"])

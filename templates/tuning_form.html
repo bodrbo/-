@@ -461,6 +461,23 @@
               {% elif g.chosen_warehouse_name %}
               <div class="hint" style="margin:2px 0 0 0;">Склад списания «{{ g.chosen_warehouse_name }}» — спишется, когда заказ будет «В работе»</div>
               {% endif %}
+              {% if goods_warehouses %}
+              {% set current_warehouse = g.writeoff_warehouse_id or g.warehouse_id %}
+              <form action="{{ url_for('set_tuning_order_product_warehouse', order_id=edit_order.id, row_id=g.id) }}"
+                    method="post" class="goods-warehouse-form">
+                <select name="warehouse_id" aria-label="Склад списания" title="Склад списания">
+                  <option value="">Не списывать</option>
+                  {% for w in goods_warehouses %}
+                  <option value="{{ w.id }}" {{ 'selected' if current_warehouse == w.id }}>{{ w.name }}</option>
+                  {% endfor %}
+                </select>
+                <button type="submit" class="icon-btn approve" title="Сохранить склад списания">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 10.5l4 4 8-9"/>
+                  </svg>
+                </button>
+              </form>
+              {% endif %}
             </td>
             <td class="amount">{{ g.quantity|float|round(2) }} {{ cost_units|selectattr('value', 'equalto', g.unit)|map(attribute='label')|first }}</td>
             <td class="amount">

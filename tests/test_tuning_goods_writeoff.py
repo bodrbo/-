@@ -158,6 +158,98 @@ class TuningGoodsWriteoffTests(unittest.TestCase):
         self.assertEqual(self.stock(), 10)
         self.assertEqual(self.writeoffs(), [])
 
+    def line_id(self):
+        with application_module.app.app_context():
+            return application_module.get_db().execute(
+                "SELECT id FROM tuning_order_products WHERE order_id = ?", (self.order_id,)
+            ).fetchone()["id"]
+
+    def other_stock(self):
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT quantity FROM supply_stock WHERE product_id = ? AND warehouse_id = ?",
+                (self.product_id, self.other_warehouse_id),
+            ).fetchone()
+            return row["quantity"] if row else None
+
+    def change_warehouse(self, warehouse):
+        return self.client.post(
+            f"/tuning/{self.order_id}/products/{self.line_id()}/warehouse",
+            data={"warehouse_id": "" if warehouse is None else str(warehouse)},
+        )
+
+    def give_other_stock(self, quantity):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT OR REPLACE INTO supply_stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)",
+                (self.product_id, self.other_warehouse_id, quantity),
+            )
+            db.commit()
+
+    def test_an_existing_writeoff_can_be_moved_to_another_warehouse(self):
+        self.set_status("in_progress")
+        self.add(warehouse=self.warehouse_id)
+        self.assertEqual(self.stock(), 7)
+        self.give_other_stock(5)
+        self.change_warehouse(self.other_warehouse_id)
+        self.assertEqual(self.stock(), 10)        # returned
+        self.assertEqual(self.other_stock(), 2)   # taken from the new one
+        rows = self.writeoffs()
+        self.assertEqual([r["warehouse_id"] for r in rows], [self.other_warehouse_id])
+        self.assertIn("Списано со склада «goods-writeoff-test склад 2»", self.page())
+        # the same choice again is a no-op
+        self.change_warehouse(self.other_warehouse_id)
+        self.assertEqual(self.other_stock(), 2)
+        # "Не списывать" undoes the write-off
+        self.change_warehouse(None)
+        self.assertEqual(self.other_stock(), 5)
+        self.assertEqual(self.writeoffs(), [])
+
+    def test_moving_is_refused_when_the_new_warehouse_lacks_stock(self):
+        self.set_status("in_progress")
+        self.add(warehouse=self.warehouse_id)
+        self.give_other_stock(1)
+        self.change_warehouse(self.other_warehouse_id)
+        self.assertEqual(self.stock(), 7)
+        self.assertEqual(self.other_stock(), 1)
+        self.assertEqual([r["warehouse_id"] for r in self.writeoffs()], [self.warehouse_id])
+        self.assertIn("не перенесён", self.page())
+
+    def test_legacy_writeoff_without_a_chosen_warehouse_can_be_edited(self):
+        # a line written off by the old automatic logic: writeoff row, no warehouse_id
+        self.set_status("done")
+        self.add(warehouse=None)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO supply_writeoffs (product_id, warehouse_id, quantity, reason, created_at, "
+                "cost_price, amount, tuning_order_product_id) VALUES (?, ?, 3, 'Продано в заказе', "
+                "'2026-09-10 10:00', 100, 300, ?)", (self.product_id, self.warehouse_id, self.line_id()),
+            )
+            db.execute(
+                "UPDATE supply_stock SET quantity = 7 WHERE product_id = ? AND warehouse_id = ?",
+                (self.product_id, self.warehouse_id),
+            )
+            db.commit()
+        self.assertIn("Списано со склада", self.page())
+        self.give_other_stock(4)
+        self.change_warehouse(self.other_warehouse_id)
+        self.assertEqual(self.stock(), 10)
+        self.assertEqual(self.other_stock(), 1)
+        self.assertEqual([r["warehouse_id"] for r in self.writeoffs()], [self.other_warehouse_id])
+        # the order is "done": the write-off stays, not undone by the status sync
+        with application_module.app.app_context():
+            application_module._sync_order_accounting(application_module.get_db(), self.order_id)
+        self.assertEqual(self.other_stock(), 1)
+
+    def test_choosing_a_warehouse_for_an_unwritten_line_in_work_books_it(self):
+        self.set_status("in_progress")
+        self.add(warehouse=None)
+        self.change_warehouse(self.warehouse_id)
+        self.assertEqual(self.stock(), 7)
+        self.assertEqual(len(self.writeoffs()), 1)
+
     def test_bulk_status_change_triggers_the_writeoff(self):
         self.add(warehouse=self.warehouse_id)
         self.client.post(
