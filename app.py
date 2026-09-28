@@ -11210,9 +11210,10 @@ def tuning_order_board(order_id):
 def revoke_tuning_assignment(assignment_id):
     """Takes a task back from one employee (the assignment row is removed,
     together with its placement on the tuning schedule, and the employee is
-    told). Refused when the task is already paid out or the employee wrote
-    materials off against it — those are facts that would be orphaned; the
-    admin has to sort them out first."""
+    told). A task that was already paid out can be revoked too: its payroll
+    entry is deleted. Refused only when the employee wrote materials off
+    against it — that stock movement would be orphaned, the admin has to
+    sort it out first."""
     db = get_db()
     assignment = db.execute(
         "SELECT tia.*, ti.order_id, ti.work_name FROM tuning_item_assignments tia "
@@ -11224,12 +11225,6 @@ def revoke_tuning_assignment(assignment_id):
     board = url_for("tuning_order_board", order_id=assignment["order_id"]) + (
         f"#board-work-{assignment['item_id']}"
     )
-    if assignment["entry_id"]:
-        session["tuning_board_error"] = (
-            f"Задача «{assignment['work_name']}» у {assignment['employee_name']} уже оплачена — "
-            "её нельзя отозвать."
-        )
-        return redirect(board)
     used_materials = db.execute(
         "SELECT COUNT(*) FROM supply_writeoffs WHERE tuning_item_assignment_id = ?",
         (assignment_id,),
@@ -11248,8 +11243,24 @@ def revoke_tuning_assignment(assignment_id):
     for task_id in schedule_task_ids:
         db.execute("DELETE FROM tuning_schedule_task_days WHERE task_id = ?", (task_id,))
         db.execute("DELETE FROM tuning_schedule_tasks WHERE id = ?", (task_id,))
+    payout_removed = None
+    if assignment["entry_id"]:
+        entry = db.execute(
+            "SELECT amount, work_date, employee FROM entries WHERE id = ?", (assignment["entry_id"],)
+        ).fetchone()
+        if entry is not None:
+            payout_removed = entry
+            db.execute("DELETE FROM entries WHERE id = ?", (assignment["entry_id"],))
     db.execute("DELETE FROM tuning_item_assignments WHERE id = ?", (assignment_id,))
     db.commit()
+    settled_week = False
+    if payout_removed is not None:
+        work_day = dt.date.fromisoformat(payout_removed["work_date"][:10])
+        monday = (work_day - dt.timedelta(days=work_day.weekday())).isoformat()
+        settled_week = db.execute(
+            "SELECT 1 FROM payments WHERE employee = ? AND period_key = ?",
+            (assignment["employee_name"], monday),
+        ).fetchone() is not None
     try:
         send_telegram_notification_to_employee(
             db, assignment["employee_name"],
@@ -11258,9 +11269,15 @@ def revoke_tuning_assignment(assignment_id):
         )
     except Exception:
         pass  # the notification is best-effort; the revoke itself is done
-    session["tuning_board_notice"] = (
-        f"Задача «{assignment['work_name']}» отозвана у {assignment['employee_name']}."
-    )
+    notice = f"Задача «{assignment['work_name']}» отозвана у {assignment['employee_name']}."
+    if payout_removed is not None:
+        notice += f" Выплата {format_money(payout_removed['amount'])} ₽ удалена."
+        if settled_week:
+            notice += (
+                " Внимание: неделя этой выплаты уже отмечена оплаченной — "
+                "сверьте расчёты с сотрудником."
+            )
+    session["tuning_board_notice"] = notice
     return redirect(board)
 
 

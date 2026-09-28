@@ -114,17 +114,15 @@
                   {% endfor %}
                 </select>
               </form>
-              {% if not a.entry_id %}
               <form action="{{ url_for('revoke_tuning_assignment', assignment_id=a.id) }}" method="post"
                     class="board-task-revoke-form"
-                    onsubmit="return confirm('Отозвать задачу у {{ a.employee_name }}? Она исчезнет из его списка задач.');">
+                    onsubmit="return confirm('Отозвать задачу у {{ a.employee_name }}? Она исчезнет из его списка задач.{% if a.entry_id %} Уже начисленная выплата ({{ (a.rate * a.norm_hours)|money }} ₽) будет удалена.{% endif %}');">
                 <button type="submit" class="icon-btn danger" title="Отозвать задачу" aria-label="Отозвать задачу у {{ a.employee_name }}">
                   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M5 5l10 10M15 5L5 15"/>
                   </svg>
                 </button>
               </form>
-              {% endif %}
             </div>
             <strong>{{ a.employee_name }}</strong>
             <div class="board-task-dates">

@@ -518,33 +518,77 @@ class TuningTaskRevokeTests(_TuningTaskFixture, unittest.TestCase):
         team = self.client.get("/team/").get_data(as_text=True)
         self.assertNotIn("Полировка корпуса", team)
 
-    def test_the_board_offers_the_revoke_button_for_unpaid_tasks(self):
-        self.assign(self.EMPLOYEE_A, 100, 2)
-        assignment_id = self.assignment_ids()[self.EMPLOYEE_A]
+    def test_the_board_offers_the_revoke_button_for_every_task(self):
+        self.assign_many([(self.EMPLOYEE_A, 100, 2), (self.EMPLOYEE_B, 100, 1)])
+        ids = self.assignment_ids()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            entry_id = db.execute(
+                "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
+                "VALUES (?, 'Полировка корпуса', 100, 1, 100, '2026-09-01', '2026-09-01 12:00')",
+                (self.EMPLOYEE_B,),
+            ).lastrowid
+            db.execute("UPDATE tuning_item_assignments SET entry_id = ?, assignment_status = 'done' "
+                       "WHERE id = ?", (entry_id, ids[self.EMPLOYEE_B]))
+            db.commit()
         page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
-        self.assertIn(f"/tuning/assignments/{assignment_id}/revoke", page)
+        for assignment_id in ids.values():
+            self.assertIn(f"/tuning/assignments/{assignment_id}/revoke", page)
+        self.assertIn("Уже начисленная выплата", page)  # only the paid task warns
 
-    def test_paid_tasks_cannot_be_revoked(self):
+    def paid_task(self, work_date="2026-09-01"):
         self.assign(self.EMPLOYEE_A, 100, 2)
         assignment_id = self.assignment_ids()[self.EMPLOYEE_A]
         with application_module.app.app_context():
             db = application_module.get_db()
             entry_id = db.execute(
                 "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
-                "VALUES (?, 'Полировка корпуса', 100, 2, 200, '2026-09-01', '2026-09-01 12:00')",
-                (self.EMPLOYEE_A,),
+                "VALUES (?, 'Полировка корпуса', 100, 2, 200, ?, '2026-09-01 12:00')",
+                (self.EMPLOYEE_A, work_date),
             ).lastrowid
             db.execute(
                 "UPDATE tuning_item_assignments SET entry_id = ?, assignment_status = 'done' WHERE id = ?",
                 (entry_id, assignment_id),
             )
             db.commit()
+        return assignment_id, entry_id
+
+    def entry_exists(self, entry_id):
+        with application_module.app.app_context():
+            return application_module.get_db().execute(
+                "SELECT 1 FROM entries WHERE id = ?", (entry_id,)
+            ).fetchone() is not None
+
+    def test_a_paid_task_can_be_revoked_and_its_payout_is_deleted(self):
+        assignment_id, entry_id = self.paid_task()
         response, notifier = self.revoke(assignment_id)
-        self.assertIn(self.EMPLOYEE_A, self.assignment_ids())
-        notifier.assert_not_called()
+        self.assertNotIn(self.EMPLOYEE_A, self.assignment_ids())
+        self.assertFalse(self.entry_exists(entry_id))
+        notifier.assert_called_once()
         page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
-        self.assertIn("уже оплачена", page)
-        self.assertNotIn(f"/tuning/assignments/{assignment_id}/revoke", page)
+        self.assertIn("Выплата 200 ₽ удалена", page)
+        self.assertNotIn("неделя этой выплаты уже отмечена оплаченной", page)
+
+    def test_revoking_a_payout_from_a_settled_week_warns(self):
+        assignment_id, entry_id = self.paid_task(work_date="2026-09-02")  # week of Mon 2026-08-31
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO payments (employee, period_key, paid_at) VALUES (?, '2026-08-31', "
+                "'2026-09-08 10:00')", (self.EMPLOYEE_A,),
+            )
+            db.commit()
+        try:
+            self.revoke(assignment_id)
+            self.assertFalse(self.entry_exists(entry_id))
+            page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+            self.assertIn("неделя этой выплаты уже отмечена оплаченной", page)
+        finally:
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                db.execute("DELETE FROM payments WHERE employee = ? AND period_key = '2026-08-31'",
+                           (self.EMPLOYEE_A,))
+                db.commit()
 
     def test_tasks_with_written_off_materials_cannot_be_revoked(self):
         self.assign(self.EMPLOYEE_A, 100, 2)
