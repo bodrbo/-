@@ -428,6 +428,9 @@
         <div class="hint" style="margin:0;">
           Ставка: {{ task.rate|float|round(2) }} ₽ · Нормочасы: {{ task.norm_hours|float|round(2) }}
         </div>
+        <div class="hint" style="margin:0;">
+          Поручена: {{ task.assigned_at[:10]|ru_date }}{% if task.completed_at %} · Выполнена: {{ task.completed_at[:10]|ru_date }}{% endif %}
+        </div>
         {% if task.comment %}
         <div class="task-card-comment">
           <span>Комментарий</span>

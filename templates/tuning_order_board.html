@@ -127,6 +127,10 @@
               {% endif %}
             </div>
             <strong>{{ a.employee_name }}</strong>
+            <div class="board-task-dates">
+              <span title="{{ a.assigned_at }}">Поручена: {{ a.assigned_at[:10]|ru_date }}</span>
+              <span title="{{ a.completed_at or '' }}">Выполнена: {{ a.completed_at[:10]|ru_date if a.completed_at else '—' }}</span>
+            </div>
             {% if a.entry_id %}
             <div class="hint" style="margin:2px 0 0;">
               {{ a.rate|float|round(2) }} ₽ × {{ a.norm_hours|float|round(2) }} ч = {{ (a.rate * a.norm_hours)|money }} ₽ · выплачено

@@ -2055,6 +2055,36 @@ def init_db(db_path=None, include_bootstrap_data=True):
             "ALTER TABLE tuning_item_assignments "
             "ADD COLUMN comment TEXT NOT NULL DEFAULT ''"
         )
+    if "completed_at" not in tuning_assignment_cols:
+        # The task's completion date (assigned_at is its assignment date).
+        # Stamped by the triggers below whenever the status becomes "done",
+        # whichever code path changed it (order board, team dashboard,
+        # tuning schedule); cleared if an unpaid task is reopened.
+        conn.execute("ALTER TABLE tuning_item_assignments ADD COLUMN completed_at TEXT")
+        conn.execute(
+            "UPDATE tuning_item_assignments SET completed_at = COALESCE(responded_at, assigned_at) "
+            "WHERE assignment_status = 'done'"
+        )
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS set_tuning_assignment_completed_at "
+        "AFTER UPDATE OF assignment_status ON tuning_item_assignments "
+        "WHEN NEW.assignment_status = 'done' AND (NEW.completed_at IS NULL OR NEW.completed_at = '') "
+        "BEGIN UPDATE tuning_item_assignments "
+        "SET completed_at = strftime('%Y-%m-%d %H:%M', 'now', 'localtime') WHERE id = NEW.id; END"
+    )
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS set_tuning_assignment_completed_at_on_insert "
+        "AFTER INSERT ON tuning_item_assignments "
+        "WHEN NEW.assignment_status = 'done' AND (NEW.completed_at IS NULL OR NEW.completed_at = '') "
+        "BEGIN UPDATE tuning_item_assignments "
+        "SET completed_at = strftime('%Y-%m-%d %H:%M', 'now', 'localtime') WHERE id = NEW.id; END"
+    )
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS clear_tuning_assignment_completed_at "
+        "AFTER UPDATE OF assignment_status ON tuning_item_assignments "
+        "WHEN NEW.assignment_status != 'done' AND NEW.completed_at IS NOT NULL AND NEW.entry_id IS NULL "
+        "BEGIN UPDATE tuning_item_assignments SET completed_at = NULL WHERE id = NEW.id; END"
+    )
     init_notification_schema(conn)
     init_excursion_services_schema(conn)
     init_schedule_schema(conn)

@@ -515,7 +515,7 @@ class TuningTaskRevokeTests(_TuningTaskFixture, unittest.TestCase):
         self.assertIn(f"отозвана у {self.EMPLOYEE_A}", page)
         # the tuningman no longer sees it
         self.login_team(self.USERNAME_A, self.EMPLOYEE_A)
-        team = self.client.get("/team").get_data(as_text=True)
+        team = self.client.get("/team/").get_data(as_text=True)
         self.assertNotIn("Полировка корпуса", team)
 
     def test_the_board_offers_the_revoke_button_for_unpaid_tasks(self):
@@ -606,6 +606,74 @@ class TuningTaskRevokeTests(_TuningTaskFixture, unittest.TestCase):
         response, notifier = self.revoke(999999)
         self.assertEqual(response.status_code, 302)
         notifier.assert_not_called()
+
+
+class TuningTaskDatesTests(_TuningTaskFixture, unittest.TestCase):
+    def assignment(self, employee):
+        with application_module.app.app_context():
+            return dict(application_module.get_db().execute(
+                "SELECT * FROM tuning_item_assignments WHERE item_id = ? AND employee_name = ?",
+                (self.item_id, employee),
+            ).fetchone())
+
+    def set_status(self, assignment_id, status):
+        self.login_admin()
+        self.client.post(f"/tuning/assignments/{assignment_id}/status", data={"status": status})
+
+    def test_dates_are_stamped_automatically(self):
+        today = application_module.dt.date.today().isoformat()
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task = self.assignment(self.EMPLOYEE_A)
+        self.assertEqual(task["assigned_at"][:10], today)
+        self.assertIsNone(task["completed_at"])
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("Поручена:", page)
+        self.assertIn("Выполнена: —", page)
+
+        self.set_status(task["id"], "accepted")
+        self.assertIsNone(self.assignment(self.EMPLOYEE_A)["completed_at"])
+        self.set_status(task["id"], "done")
+        done = self.assignment(self.EMPLOYEE_A)
+        self.assertEqual(done["completed_at"][:10], today)
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertNotIn("Выполнена: —", page)
+
+    def test_completion_date_is_kept_while_done_and_cleared_when_an_unpaid_task_is_reopened(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task_id = self.assignment(self.EMPLOYEE_A)["id"]
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("UPDATE tuning_item_assignments SET assignment_status = 'done', "
+                       "completed_at = '2026-01-05 10:00' WHERE id = ?", (task_id,))
+            db.commit()
+        self.assertEqual(self.assignment(self.EMPLOYEE_A)["completed_at"], "2026-01-05 10:00")
+        # re-saving the same status does not restamp
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("UPDATE tuning_item_assignments SET assignment_status = 'done' WHERE id = ?", (task_id,))
+            db.commit()
+        self.assertEqual(self.assignment(self.EMPLOYEE_A)["completed_at"], "2026-01-05 10:00")
+        # reopened (and not paid) -> cleared
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("UPDATE tuning_item_assignments SET assignment_status = 'in_progress' WHERE id = ?", (task_id,))
+            db.commit()
+        self.assertIsNone(self.assignment(self.EMPLOYEE_A)["completed_at"])
+
+    def test_a_paid_task_keeps_its_completion_date_when_moved_back(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task_id = self.assignment(self.EMPLOYEE_A)["id"]
+        self.set_status(task_id, "done")  # pays it out, stamps the date
+        stamped = self.assignment(self.EMPLOYEE_A)
+        self.assertIsNotNone(stamped["entry_id"])
+        self.set_status(task_id, "in_progress")
+        self.assertEqual(self.assignment(self.EMPLOYEE_A)["completed_at"], stamped["completed_at"])
+
+    def test_team_dashboard_shows_the_dates(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        self.login_team(self.USERNAME_A, self.EMPLOYEE_A)
+        page = self.client.get("/team/").get_data(as_text=True)
+        self.assertIn("Поручена:", page)
 
 
 if __name__ == "__main__":
