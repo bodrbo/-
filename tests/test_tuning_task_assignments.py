@@ -483,5 +483,130 @@ class TuningLaborBudgetTests(_TuningTaskFixture, unittest.TestCase):
         self.assertIn("Остаток бюджета на труд", html)
 
 
+class TuningTaskRevokeTests(_TuningTaskFixture, unittest.TestCase):
+    def assignment_ids(self):
+        with application_module.app.app_context():
+            return {
+                row["employee_name"]: row["id"] for row in application_module.get_db().execute(
+                    "SELECT id, employee_name FROM tuning_item_assignments WHERE item_id = ?",
+                    (self.item_id,),
+                ).fetchall()
+            }
+
+    def revoke(self, assignment_id):
+        self.login_admin()
+        with mock.patch.object(
+            application_module, "send_telegram_notification_to_employee"
+        ) as notifier:
+            response = self.client.post(f"/tuning/assignments/{assignment_id}/revoke")
+        return response, notifier
+
+    def test_revoking_removes_only_that_employees_task_and_tells_them(self):
+        self.assign_many([(self.EMPLOYEE_A, 100, 2), (self.EMPLOYEE_B, 150, 1)])
+        ids = self.assignment_ids()
+        response, notifier = self.revoke(ids[self.EMPLOYEE_A])
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/board", response.headers["Location"])
+        self.assertEqual(list(self.assignment_ids()), [self.EMPLOYEE_B])
+        notifier.assert_called_once()
+        self.assertEqual(notifier.call_args.args[1], self.EMPLOYEE_A)
+        self.assertIn("Задача отозвана", notifier.call_args.args[2])
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn(f"отозвана у {self.EMPLOYEE_A}", page)
+        # the tuningman no longer sees it
+        self.login_team(self.USERNAME_A, self.EMPLOYEE_A)
+        team = self.client.get("/team").get_data(as_text=True)
+        self.assertNotIn("Полировка корпуса", team)
+
+    def test_the_board_offers_the_revoke_button_for_unpaid_tasks(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        assignment_id = self.assignment_ids()[self.EMPLOYEE_A]
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn(f"/tuning/assignments/{assignment_id}/revoke", page)
+
+    def test_paid_tasks_cannot_be_revoked(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        assignment_id = self.assignment_ids()[self.EMPLOYEE_A]
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            entry_id = db.execute(
+                "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
+                "VALUES (?, 'Полировка корпуса', 100, 2, 200, '2026-09-01', '2026-09-01 12:00')",
+                (self.EMPLOYEE_A,),
+            ).lastrowid
+            db.execute(
+                "UPDATE tuning_item_assignments SET entry_id = ?, assignment_status = 'done' WHERE id = ?",
+                (entry_id, assignment_id),
+            )
+            db.commit()
+        response, notifier = self.revoke(assignment_id)
+        self.assertIn(self.EMPLOYEE_A, self.assignment_ids())
+        notifier.assert_not_called()
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("уже оплачена", page)
+        self.assertNotIn(f"/tuning/assignments/{assignment_id}/revoke", page)
+
+    def test_tasks_with_written_off_materials_cannot_be_revoked(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        assignment_id = self.assignment_ids()[self.EMPLOYEE_A]
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            warehouse_id = db.execute(
+                "INSERT INTO supply_warehouses (name, created_at) VALUES ('revoke-test', '2026-09-01 10:00')"
+            ).lastrowid
+            product_id = db.execute(
+                "INSERT INTO supply_products (name, cost_price, cost_unit, sale_price, created_at) "
+                "VALUES ('revoke-test товар', 10, 'piece', 20, '2026-09-01 10:00')"
+            ).lastrowid
+            db.execute(
+                "INSERT INTO supply_writeoffs (product_id, warehouse_id, quantity, reason, created_at, "
+                "cost_price, amount, tuning_item_assignment_id) VALUES (?, ?, 1, 'Использовано в работе', "
+                "'2026-09-01 12:00', 10, 10, ?)", (product_id, warehouse_id, assignment_id),
+            )
+            db.commit()
+        try:
+            self.revoke(assignment_id)
+            self.assertIn(self.EMPLOYEE_A, self.assignment_ids())
+            page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+            self.assertIn("списаны материалы", page)
+        finally:
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                db.execute("DELETE FROM supply_writeoffs WHERE tuning_item_assignment_id = ?", (assignment_id,))
+                db.execute("DELETE FROM supply_products WHERE name = 'revoke-test товар'")
+                db.execute("DELETE FROM supply_warehouses WHERE name = 'revoke-test'")
+                db.commit()
+
+    def test_revoking_also_clears_its_placement_on_the_tuning_schedule(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        assignment_id = self.assignment_ids()[self.EMPLOYEE_A]
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            task_id = db.execute(
+                "INSERT INTO tuning_schedule_tasks (assignment_id, employee_name, title, rate, created_at) "
+                "VALUES (?, ?, 'Полировка корпуса', 100, '2026-09-01 10:00')",
+                (assignment_id, self.EMPLOYEE_A),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO tuning_schedule_task_days (task_id, work_date, start_time, planned_hours) "
+                "VALUES (?, '2026-09-02', '09:00', 2)", (task_id,),
+            )
+            db.commit()
+        self.revoke(assignment_id)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM tuning_schedule_tasks WHERE assignment_id = ?", (assignment_id,)
+            ).fetchone()[0], 0)
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM tuning_schedule_task_days WHERE task_id = ?", (task_id,)
+            ).fetchone()[0], 0)
+
+    def test_revoking_an_unknown_task_is_harmless(self):
+        response, notifier = self.revoke(999999)
+        self.assertEqual(response.status_code, 302)
+        notifier.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

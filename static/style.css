@@ -11970,3 +11970,10 @@ button.partner-open-price-save svg {
 .goods-warehouse-form .icon-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 27px; height: 27px; margin: 0; padding: 0; border-radius: 6px; border: 1px solid var(--hairline); background: transparent; color: var(--ink-soft); cursor: pointer; }
 .goods-warehouse-form .icon-btn svg { width: 13px; height: 13px; }
 .goods-warehouse-form .icon-btn.approve:hover { background: var(--success); color: #fff8f4; border-color: var(--success); }
+
+.board-task-header { display: flex; align-items: center; gap: 6px; }
+.board-task-header .status-select-form { flex: 1; min-width: 0; }
+.board-task-revoke-form { margin: 0; }
+.board-task-revoke-form .icon-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 27px; height: 27px; margin: 0; padding: 0; border-radius: 6px; border: 1px solid var(--hairline); background: transparent; color: var(--ink-soft); cursor: pointer; }
+.board-task-revoke-form .icon-btn svg { width: 13px; height: 13px; }
+.board-task-revoke-form .icon-btn.danger:hover { background: var(--danger); color: #fff8f4; border-color: var(--danger); }

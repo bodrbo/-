@@ -11170,7 +11170,68 @@ def tuning_order_board(order_id):
         active_page="tuning",
         sub_page="subcontracts" if order["source"] == SUBCONTRACT_REQUEST_SOURCE else "orders",
         budget_warning=session.pop("tuning_budget_warning", None),
+        board_notice=session.pop("tuning_board_notice", None),
+        board_error=session.pop("tuning_board_error", None),
     )
+
+
+@app.route("/tuning/assignments/<int:assignment_id>/revoke", methods=["POST"])
+@admin_login_required
+def revoke_tuning_assignment(assignment_id):
+    """Takes a task back from one employee (the assignment row is removed,
+    together with its placement on the tuning schedule, and the employee is
+    told). Refused when the task is already paid out or the employee wrote
+    materials off against it — those are facts that would be orphaned; the
+    admin has to sort them out first."""
+    db = get_db()
+    assignment = db.execute(
+        "SELECT tia.*, ti.order_id, ti.work_name FROM tuning_item_assignments tia "
+        "JOIN tuning_order_items ti ON ti.id = tia.item_id WHERE tia.id = ?",
+        (assignment_id,),
+    ).fetchone()
+    if assignment is None:
+        return redirect(url_for("tuning_index"))
+    board = url_for("tuning_order_board", order_id=assignment["order_id"]) + (
+        f"#board-work-{assignment['item_id']}"
+    )
+    if assignment["entry_id"]:
+        session["tuning_board_error"] = (
+            f"Задача «{assignment['work_name']}» у {assignment['employee_name']} уже оплачена — "
+            "её нельзя отозвать."
+        )
+        return redirect(board)
+    used_materials = db.execute(
+        "SELECT COUNT(*) FROM supply_writeoffs WHERE tuning_item_assignment_id = ?",
+        (assignment_id,),
+    ).fetchone()[0]
+    if used_materials:
+        session["tuning_board_error"] = (
+            f"По задаче {assignment['employee_name']} списаны материалы ({used_materials}) — "
+            "сначала верните их, затем отзовите задачу."
+        )
+        return redirect(board)
+    schedule_task_ids = [
+        row["id"] for row in db.execute(
+            "SELECT id FROM tuning_schedule_tasks WHERE assignment_id = ?", (assignment_id,)
+        ).fetchall()
+    ]
+    for task_id in schedule_task_ids:
+        db.execute("DELETE FROM tuning_schedule_task_days WHERE task_id = ?", (task_id,))
+        db.execute("DELETE FROM tuning_schedule_tasks WHERE id = ?", (task_id,))
+    db.execute("DELETE FROM tuning_item_assignments WHERE id = ?", (assignment_id,))
+    db.commit()
+    try:
+        send_telegram_notification_to_employee(
+            db, assignment["employee_name"],
+            f"Задача отозвана: «{assignment['work_name']}» (заказ №{assignment['order_id']}). "
+            "Выполнять её больше не нужно.",
+        )
+    except Exception:
+        pass  # the notification is best-effort; the revoke itself is done
+    session["tuning_board_notice"] = (
+        f"Задача «{assignment['work_name']}» отозвана у {assignment['employee_name']}."
+    )
+    return redirect(board)
 
 
 @app.route("/tuning/<int:order_id>/item/<int:item_id>/photo", methods=["POST"])
