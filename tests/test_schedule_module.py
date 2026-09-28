@@ -778,6 +778,43 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             db.execute("DELETE FROM schedule_day_crew WHERE work_date = ?", (past,))
             db.commit()
 
+    def _insert_item_for(self, employee_id, name, starts_at, ends_at):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = db.execute(
+                "INSERT INTO schedule_items (kind, boat, service_name, starts_at, ends_at, revenue, "
+                "customer_name, customer_phone, status, source, created_at, updated_at) "
+                "VALUES ('booking', 'Бодрый Первый', ?, ?, ?, 1000, 'Клиент', '+7', 'scheduled', "
+                "'internal', '2026-09-01 09:00', '2026-09-01 09:00')",
+                (name, starts_at, ends_at),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO schedule_assignments (schedule_item_id, employee_id, employee_name, role, "
+                "created_at) VALUES (?, ?, (SELECT name FROM employees WHERE id = ?), 'captain', "
+                "'2026-09-01 09:00')", (item_id, employee_id, employee_id),
+            )
+            db.commit()
+            return item_id
+
+    def test_overlapping_trips_of_one_employee_are_stacked(self):
+        self.login()
+        first = self._insert_item_for(self.daniil_id, "Малый тур", "2026-09-05 10:00", "2026-09-05 12:00")
+        second = self._insert_item_for(self.daniil_id, "Средний тур", "2026-09-05 11:00", "2026-09-05 13:00")
+        third = self._insert_item_for(self.daniil_id, "Вечерний тур", "2026-09-05 16:00", "2026-09-05 17:00")
+        other = self._insert_item_for(self.platon_id, "Малый тур", "2026-09-05 10:30", "2026-09-05 11:30")
+        page = self.client.get("/schedule?date=2026-09-05").get_data(as_text=True)
+        self.assertIn(f'data-stack-ids="{first},{second}"', page)
+        self.assertIn('data-stack-index="0"', page)
+        self.assertIn('data-stack-index="1"', page)
+        self.assertIn('data-stack-size="2"', page)
+        # a lone trip (even in the same column later that day) and another
+        # employee's trip are not part of any stack
+        import re
+        for lone in (third, other):
+            card = re.search(rf'<button[^>]*data-schedule-item-id="{lone}"[^>]*>', page).group(0)
+            self.assertNotIn("data-stack-ids", card)
+        self.assertIn("Какой рейс открыть?", page)
+
     def test_schedule_routes_notify_on_assignment_change_and_deletion(self):
         self.login()
         with patch.object(

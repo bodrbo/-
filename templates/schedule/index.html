@@ -185,10 +185,11 @@
                     class="schedule-card {{ card.kind }} {{ 'is-compact' if card.height_px < 50 else 'is-medium' if card.height_px < 105 }}{{ ' has-bad-weather' if card.weather and card.weather.is_bad }}{{ ' is-tripster-intake' if card.source == 'tripster' and not card.tripster_resolved and not card.assignments }}"
                     data-schedule-item-id="{{ card.id }}"
                     data-assignment-employee-id="{{ employee.id }}"
+                    {% if card.stack_size > 1 %}data-stack-index="{{ card.stack_index }}" data-stack-size="{{ card.stack_size }}" data-stack-ids="{{ card.stack_ids_csv }}"{% endif %}
                     {% if can_manage %}data-move-url="{{ url_for('schedule.move_item', item_id=card.id) }}"{% endif %}
-                    style="top: {{ card.top_px }}px; height: {{ card.height_px }}px; --schedule-card-color: {{ card.boat_color }}; --schedule-card-ink: {{ card.boat_ink }}"
-                    title="{{ card.start_time }}–{{ card.end_time }} · {{ card.service_name }}{% if card.activity_type == 'boat' %} · {{ card.boat_label }}{% endif %}{% if card.weather and card.weather.is_bad %} · Неблагоприятный прогноз: {{ card.weather.reasons|join(', ') }}{% endif %}"
-                    {% if can_manage %}onpointerdown="startScheduleDrag(event, this)" onclick="handleScheduleCardClick(event, {{ card.id }})"{% elif can_view_clients %}onclick="event.stopPropagation(); openScheduleView({{ card.id }})"{% endif %}>
+                    style="top: {{ card.top_px }}px; height: {{ card.height_px }}px; --schedule-card-color: {{ card.boat_color }}; --schedule-card-ink: {{ card.boat_ink }}{% if card.stack_size > 1 %}; --stack-i: {{ [card.stack_index, 4]|min }}; z-index: {{ 2 + card.stack_index }}{% endif %}"
+                    title="{{ card.start_time }}–{{ card.end_time }} · {{ card.service_name }}{% if card.activity_type == 'boat' %} · {{ card.boat_label }}{% endif %}{% if card.weather and card.weather.is_bad %} · Неблагоприятный прогноз: {{ card.weather.reasons|join(', ') }}{% endif %}{% if card.stack_size > 1 %} · В это время у сотрудника рейсов: {{ card.stack_size }} (нажмите, чтобы выбрать){% endif %}"
+                    {% if can_manage %}onpointerdown="startScheduleDrag(event, this)" onclick="handleScheduleCardClick(event, {{ card.id }})"{% elif can_view_clients %}onclick="event.stopPropagation(); if (openScheduleStackChoice(this)) return; openScheduleView({{ card.id }})"{% endif %}>
               <span class="schedule-card-main">
                 <strong>{{ card.service_name }}</strong>
                 {% if card.activity_type == 'boat' %}<span class="schedule-card-boat">
@@ -202,6 +203,7 @@
                 {% endif %}
               </span>
               <span class="schedule-card-side">
+                {% if card.stack_size > 1 %}<span class="schedule-card-stack" aria-hidden="true">{{ card.stack_size }} рейса</span>{% endif %}
                 <span class="schedule-card-kind">{{ card.kind_label }}</span>
                 {% if card.weather %}
                 <span class="schedule-card-weather{{ ' is-bad' if card.weather.is_bad }}">
@@ -583,6 +585,25 @@
       <p class="schedule-tripster-preserve-note">
         Предоплата и сумма к доплате сохраняются в обоих вариантах и продолжат обновляться при импорте Tripster.
       </p>
+    </div>
+  </section>
+</div>
+{% endif %}
+
+{% if can_manage or can_view_clients %}
+<div class="schedule-modal" id="scheduleStackModal" hidden>
+  <div class="schedule-modal-backdrop" onclick="closeScheduleStackChoice()"></div>
+  <section class="schedule-modal-card schedule-stack-card" role="dialog" aria-modal="true" aria-labelledby="scheduleStackTitle">
+    <header class="schedule-modal-header">
+      <div>
+        <span>Совпадение по времени</span>
+        <h2 id="scheduleStackTitle">Какой рейс открыть?</h2>
+      </div>
+      <button type="button" class="schedule-modal-close" onclick="closeScheduleStackChoice()" aria-label="Закрыть">×</button>
+    </header>
+    <div class="schedule-stack-body">
+      <p class="hint">У сотрудника в это время несколько рейсов. Выберите карточку.</p>
+      <div id="scheduleStackList" class="schedule-stack-list"></div>
     </div>
   </section>
 </div>
@@ -1488,6 +1509,13 @@
   function handleScheduleCardClick(event, itemId) {
     event.stopPropagation();
     if (scheduleDraggedCards.has(event.currentTarget)) return;
+    if (openScheduleStackChoice(event.currentTarget)) return;
+    scheduleActivateCard(itemId);
+  }
+  // What clicking a single card does: managers open the detail (or the
+  // distribution dialog for an unresolved external order), crew view only.
+  function scheduleActivateCard(itemId) {
+    if (!scheduleCanManage) { openScheduleView(itemId); return; }
     const item = scheduleItems.find(candidate => candidate.id === itemId);
     {% if not is_demo_tenant %}
     if (isUnresolvedTripsterItem(item)) {
@@ -1496,6 +1524,54 @@
     }{% endif %}
     openScheduleDetail(itemId);
   }
+  // Several trips of one employee at the same time are drawn as a fanned
+  // stack; clicking any of them first asks which trip to open.
+  let scheduleStackTrigger = null;
+  function openScheduleStackChoice(card) {
+    const ids = (card && card.dataset.stackIds || '').split(',').map(Number).filter(Boolean);
+    if (ids.length < 2) return false;
+    const modal = document.getElementById('scheduleStackModal');
+    if (!modal) return false;
+    const list = document.getElementById('scheduleStackList');
+    list.innerHTML = '';
+    ids.forEach(id => {
+      const item = scheduleItems.find(candidate => candidate.id === id);
+      if (!item) return;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'schedule-stack-option';
+      button.style.setProperty('--schedule-card-color', item.boat_color || '#607d8b');
+      const guests = item.kind === 'event'
+        ? `${item.participants_count || 0}/${item.capacity || '—'} мест`
+        : (item.guests_count ? `${item.guests_count} гостей` : 'Количество гостей неизвестно');
+      button.innerHTML = `
+        <b>${scheduleEscapeHtml(item.start_time)}–${scheduleEscapeHtml(item.end_time)}</b>
+        <span>${scheduleEscapeHtml(item.service_name)}</span>
+        <small>${scheduleEscapeHtml(item.boat_label || item.boat || '')} · ${scheduleEscapeHtml(item.kind_label || '')} · ${scheduleEscapeHtml(guests)} · №${item.id}</small>`;
+      button.addEventListener('click', () => {
+        closeScheduleStackChoice(false);
+        scheduleActivateCard(id);
+      });
+      list.appendChild(button);
+    });
+    scheduleStackTrigger = document.activeElement;
+    modal.hidden = false;
+    const first = list.querySelector('button');
+    if (first) first.focus();
+    return true;
+  }
+  function closeScheduleStackChoice(restoreFocus = true) {
+    const modal = document.getElementById('scheduleStackModal');
+    if (!modal || modal.hidden) return;
+    modal.hidden = true;
+    if (restoreFocus && scheduleStackTrigger && scheduleStackTrigger !== document.body) {
+      scheduleStackTrigger.focus();
+    }
+    scheduleStackTrigger = null;
+  }
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') closeScheduleStackChoice();
+  });
 
   // --- Trip detail view: read-only summary + collapsible client list +
   // quick-add for group excursions. Both trip kinds use the same collapsed

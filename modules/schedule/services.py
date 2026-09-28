@@ -1749,6 +1749,39 @@ def readonly_item_details(items):
     return result
 
 
+def _mark_overlapping_cards(cards):
+    """Cards of ONE employee column that share time (their drawn intervals
+    overlap, directly or through a chain) form a stack: every member gets its
+    position in the stack, the stack size and the ids of all members, so the
+    board can fan them out like an accordion and let the user pick which one
+    to open. Cards not overlapping anything get stack_size 1."""
+    ordered = sorted(cards, key=lambda card: (card["top_px"], card["id"]))
+    cluster = []
+    cluster_end = None
+
+    def close_cluster():
+        ids = [member["id"] for member in cluster]
+        for index, member in enumerate(cluster):
+            member["stack_index"] = index
+            member["stack_size"] = len(cluster)
+            member["stack_ids"] = ids
+            member["stack_ids_csv"] = ",".join(str(item_id) for item_id in ids)
+
+    for card in ordered:
+        bottom = card["top_px"] + card["height_px"]
+        if cluster and card["top_px"] < cluster_end - 0.01:
+            cluster.append(card)
+            cluster_end = max(cluster_end, bottom)
+            continue
+        if cluster:
+            close_cluster()
+        cluster = [card]
+        cluster_end = bottom
+    if cluster:
+        close_cluster()
+    cards.sort(key=lambda card: (card["top_px"], card["id"]))
+
+
 def day_view(
     db,
     day,
@@ -1888,6 +1921,8 @@ def day_view(
                 2,
             )
             cards_by_employee[employee_id].append(card)
+    for cards in cards_by_employee.values():
+        _mark_overlapping_cards(cards)
 
     hour_marks = []
     for minute in range(earliest, latest + 1, 60):

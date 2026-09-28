@@ -11927,3 +11927,40 @@ button.partner-open-price-save svg {
 .partner-scheme-form .icon-btn svg { width: 13px; height: 13px; }
 .partner-scheme-form .icon-btn.approve:hover { background: var(--success); color: #fff8f4; border-color: var(--success); }
 .partner-scheme-summary { display: block; margin-top: 3px; font-size: 11px; }
+
+/* Trips of one employee at the same time: fanned like an accordion */
+.schedule-card[data-stack-index] {
+  left: calc(7px + var(--stack-i, 0) * 12px);
+  box-shadow: -4px 6px 14px -8px rgba(15,42,53,.75);
+  outline: 1px solid rgba(255,255,255,.55);
+  outline-offset: -1px;
+}
+.schedule-card[data-stack-index]:hover { z-index: 20 !important; }
+.schedule-card-stack {
+  align-self: flex-end;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(0,0,0,.28);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.schedule-stack-card { max-width: 460px; }
+.schedule-stack-body { padding: 16px 20px 20px; }
+.schedule-stack-list { display: grid; gap: 8px; margin-top: 10px; }
+.schedule-stack-option {
+  display: grid; gap: 2px; text-align: left; width: 100%;
+  padding: 10px 12px 10px 14px; border: 1px solid var(--hairline);
+  border-left: 5px solid var(--schedule-card-color, #607d8b);
+  border-radius: 8px; background: var(--paper, #fff); color: var(--ink);
+  cursor: pointer; font: inherit;
+}
+.schedule-stack-option:hover, .schedule-stack-option:focus-visible { background: var(--paper-alt, #f3f5f7); }
+.schedule-stack-option b { font-size: 13px; }
+.schedule-stack-option span { font-size: 14px; font-weight: 600; }
+.schedule-stack-option small { color: var(--ink-soft); font-size: 11px; }
+@media (max-width: 620px) {
+  .schedule-card[data-stack-index] { left: calc(3px + var(--stack-i, 0) * 7px); }
+  .schedule-card-stack { display: none; }
+}
