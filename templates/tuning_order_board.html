@@ -132,8 +132,8 @@
               </label>
               <label>Выполнена
                 <input type="date" name="completed_date" value="{{ a.completed_at[:10] if a.completed_at else '' }}"
-                       {{ 'disabled' if a.assignment_status != 'done' }}
-                       {% if a.assignment_status != 'done' %}title="Дата появится, когда задача станет «Выполнена»"{% endif %}>
+                       {{ 'disabled' if a.assignment_status != 'done' and not a.entry_id }}
+                       {% if a.assignment_status != 'done' and not a.entry_id %}title="Дата появится, когда задача станет «Выполнена»"{% endif %}>
               </label>
               <button type="submit" class="icon-btn approve" title="Сохранить даты" aria-label="Сохранить даты">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5l4 4 8-9"/></svg>

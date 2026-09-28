@@ -11242,8 +11242,8 @@ def update_tuning_assignment_dates(assignment_id):
         return redirect(board)
     if assigned_day is None:
         assigned_day = assignment["assigned_at"][:10]
-    if assignment["assignment_status"] != "done":
-        completed_day = None  # nothing to record for a task that isn't done
+    if assignment["assignment_status"] != "done" and not assignment["entry_id"]:
+        completed_day = None  # nothing to record for a task that isn't done and unpaid
     if completed_day is not None and completed_day < assigned_day:
         session["tuning_board_error"] = "Дата выполнения не может быть раньше даты поручения."
         return redirect(board)

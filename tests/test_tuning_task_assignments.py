@@ -798,6 +798,33 @@ class TuningTaskDatesTests(_TuningTaskFixture, unittest.TestCase):
                 db.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
                 db.commit()
 
+    def test_a_paid_task_moved_back_from_done_still_moves_its_payout(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task_id = self.assignment(self.EMPLOYEE_A)["id"]
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            entry_id = db.execute(
+                "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
+                "VALUES (?, 'Полировка корпуса', 100, 2, 200, '2026-09-08', '2026-09-08 12:00')",
+                (self.EMPLOYEE_A,),
+            ).lastrowid
+            db.execute(
+                "UPDATE tuning_item_assignments SET entry_id = ?, assignment_status = 'in_progress', "
+                "assigned_at = '2026-08-01 09:00', completed_at = '2026-09-08 18:00' WHERE id = ?",
+                (entry_id, task_id),
+            )
+            db.commit()
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertNotIn("Дата появится, когда задача", page)
+        self.edit_dates(task_id, "2026-08-01", "2026-09-03")
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            work_date = db.execute("SELECT work_date FROM entries WHERE id = ?", (entry_id,)).fetchone()[0]
+            db.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
+            db.commit()
+        self.assertEqual(work_date, "2026-09-03")
+        self.assertEqual(self.assignment(self.EMPLOYEE_A)["completed_at"][:10], "2026-09-03")
+
     def test_invalid_or_inconsistent_dates_are_rejected(self):
         self.assign(self.EMPLOYEE_A, 100, 2)
         task_id = self.assignment(self.EMPLOYEE_A)["id"]
