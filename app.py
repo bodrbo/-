@@ -3302,6 +3302,14 @@ def init_db(db_path=None, include_bootstrap_data=True):
         conn.execute("ALTER TABLE tuning_boat_profiles ADD COLUMN brand TEXT")
     if "power_hp" not in boat_profile_cols:
         conn.execute("ALTER TABLE tuning_boat_profiles ADD COLUMN power_hp REAL")
+    # Motor-only fixed specs the compatible-consumables matching will rely on
+    # (engine oil grade, crankcase and gearbox (lower unit) capacities, litres).
+    if "oil_viscosity" not in boat_profile_cols:
+        conn.execute("ALTER TABLE tuning_boat_profiles ADD COLUMN oil_viscosity TEXT")
+    if "crankcase_volume_l" not in boat_profile_cols:
+        conn.execute("ALTER TABLE tuning_boat_profiles ADD COLUMN crankcase_volume_l REAL")
+    if "gearbox_volume_l" not in boat_profile_cols:
+        conn.execute("ALTER TABLE tuning_boat_profiles ADD COLUMN gearbox_volume_l REAL")
     if "equipment_type" not in boat_profile_cols:
         conn.execute(
             "ALTER TABLE tuning_boat_profiles ADD COLUMN "
@@ -8778,6 +8786,35 @@ def update_tuning_boat_profile(profile_id):
                 )
                 return redirect(url_for(profile_endpoint, profile_id=profile_id))
 
+    # Motor-only fixed specs: oil viscosity (a grade such as "10W-40" or
+    # "SAE 30"), and the crankcase and gearbox volumes in litres.
+    oil_viscosity = profile["oil_viscosity"]
+    crankcase_volume_l = profile["crankcase_volume_l"]
+    gearbox_volume_l = profile["gearbox_volume_l"]
+    if profile["equipment_type"] == "motor":
+        oil_viscosity = " ".join(request.form.get("oil_viscosity", "").split()) or None
+        if oil_viscosity is not None and len(oil_viscosity) > 40:
+            session["boat_profile_error"] = "Вязкость масла — не более 40 символов."
+            return redirect(url_for(profile_endpoint, profile_id=profile_id))
+        parsed_volumes = {}
+        for field_name, label in (
+            ("crankcase_volume_l", "Объём картера"),
+            ("gearbox_volume_l", "Объём редуктора"),
+        ):
+            raw_value = request.form.get(field_name, "").strip().replace(",", ".")
+            if not raw_value:
+                parsed_volumes[field_name] = None
+                continue
+            try:
+                parsed_volumes[field_name] = float(raw_value)
+                if not 0 < parsed_volumes[field_name] <= 1000:
+                    raise ValueError
+            except ValueError:
+                session["boat_profile_error"] = f"{label} должен быть положительным числом в литрах."
+                return redirect(url_for(profile_endpoint, profile_id=profile_id))
+        crankcase_volume_l = parsed_volumes["crankcase_volume_l"]
+        gearbox_volume_l = parsed_volumes["gearbox_volume_l"]
+
     photo_filename = profile["photo_filename"]
     photo = request.files.get("photo")
     if photo and photo.filename:
@@ -8814,11 +8851,13 @@ def update_tuning_boat_profile(profile_id):
         "UPDATE tuning_boat_profiles "
         "SET specifications = ?, specifications_source_url = ?, "
         "specifications_source_name = ?, photo_filename = ?, model_3d_filename = ?, "
-        "length_m = ?, width_m = ?, brand = ?, power_hp = ?, updated_at = ? "
+        "length_m = ?, width_m = ?, brand = ?, power_hp = ?, oil_viscosity = ?, "
+        "crankcase_volume_l = ?, gearbox_volume_l = ?, updated_at = ? "
         "WHERE id = ?",
         (
             specifications, source_url, source_name, photo_filename, model_3d_filename,
-            length_m, width_m, brand, power_hp, now, profile_id,
+            length_m, width_m, brand, power_hp, oil_viscosity,
+            crankcase_volume_l, gearbox_volume_l, now, profile_id,
         ),
     )
     db.commit()

@@ -577,11 +577,26 @@
             <input id="motorPowerHp" type="text" inputmode="decimal" name="power_hp"
                    value="{{ boat_profile.power_hp or '' }}" placeholder="Например, 30">
           </div>
+          <div class="field field-narrow">
+            <label for="motorOilViscosity">Вязкость масла</label>
+            <input id="motorOilViscosity" type="text" name="oil_viscosity" maxlength="40"
+                   value="{{ boat_profile.oil_viscosity or '' }}" placeholder="Например, 10W-40">
+          </div>
+          <div class="field field-narrow">
+            <label for="motorCrankcaseVolume">Объём картера, л</label>
+            <input id="motorCrankcaseVolume" type="text" inputmode="decimal" name="crankcase_volume_l"
+                   value="{{ ('%g'|format(boat_profile.crankcase_volume_l)) if boat_profile.crankcase_volume_l else '' }}" placeholder="Например, 1,5">
+          </div>
+          <div class="field field-narrow">
+            <label for="motorGearboxVolume">Объём редуктора, л</label>
+            <input id="motorGearboxVolume" type="text" inputmode="decimal" name="gearbox_volume_l"
+                   value="{{ ('%g'|format(boat_profile.gearbox_volume_l)) if boat_profile.gearbox_volume_l else '' }}" placeholder="Например, 0,35">
+          </div>
           <div class="field field-submit">
             <button type="submit">Сохранить</button>
           </div>
         </div>
-        <p class="hint">Марка и мощность используются, чтобы подобрать совместимые расходники из каталога снабжения (см. ниже).</p>
+        <p class="hint">Марка, мощность, вязкость масла и объёмы картера и редуктора — фиксированные характеристики: по ним подбираются совместимые расходники из каталога снабжения (см. ниже).</p>
         {% endif %}
 
         <div class="boat-profile-specifications">
