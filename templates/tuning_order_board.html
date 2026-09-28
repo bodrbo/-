@@ -70,6 +70,14 @@
   {% if budget_warning %}
   <div class="alert" role="alert">{{ budget_warning }}</div>
   {% endif %}
+  {% if payouts_missing %}
+  <div class="alert" role="alert">
+    У выполненных задач нет выплаты: {{ payouts_missing }}.
+    <form action="{{ url_for('repair_tuning_order_payouts', order_id=order.id) }}" method="post" style="display:inline;margin-left:8px;">
+      <button type="submit" class="btn-secondary">Начислить недостающие выплаты</button>
+    </form>
+  </div>
+  {% endif %}
   {% if board_error %}
   <div class="alert" role="alert">{{ board_error }}</div>
   {% endif %}
@@ -125,6 +133,7 @@
               </form>
             </div>
             <strong>{{ a.employee_name }}</strong>
+            {% if a.payout_missing %}<span class="status-badge status-cancelled" title="Задача выполнена, но записи о выплате нет">Нет выплаты</span>{% endif %}
             <form action="{{ url_for('update_tuning_assignment_dates', assignment_id=a.id) }}" method="post"
                   class="board-task-dates">
               <label>Поручена

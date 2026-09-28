@@ -4571,6 +4571,10 @@ def add_manager_fee():
 def delete_entry(entry_id):
     db = get_db()
     db.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
+    # A tuning task that was paid through this entry is no longer paid: drop
+    # the dangling link so the board shows it (and can re-create the payout).
+    db.execute("UPDATE tuning_item_assignments SET entry_id = NULL WHERE entry_id = ?", (entry_id,))
+    db.execute("UPDATE tuning_schedule_tasks SET entry_id = NULL WHERE entry_id = ?", (entry_id,))
     db.commit()
     return redirect(url_for("index"))
 
@@ -10919,15 +10923,24 @@ def set_tuning_order_status(order_id):
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
-def _pay_tuning_assignment(db, assignment):
+def _tuning_assignment_has_payout(db, assignment):
+    """True only if the task's payroll entry still exists — an entry deleted on
+    the Зарплаты page must not keep counting as "paid"."""
+    return bool(assignment["entry_id"]) and db.execute(
+        "SELECT 1 FROM entries WHERE id = ?", (assignment["entry_id"],)
+    ).fetchone() is not None
+
+
+def _pay_tuning_assignment(db, assignment, work_date=None):
     """Pays out rate x norm-hours for one tuning-task assignment the moment
     it's marked "done" — a single assignee, not the whole work item, since
     several people can be assigned the same item and each gets paid for
     their own task independently as they finish it. Guarded by entry_id so
     re-saving "done" (or toggling back and forth) can't pay twice. Called
     from both the admin's own status change (set_tuning_assignment_status)
-    and the tuningman's own (team_tuning_task_set_status)."""
-    if assignment["entry_id"]:
+    and the tuningman's own (team_tuning_task_set_status). work_date
+    backdates the payout (default: today)."""
+    if _tuning_assignment_has_payout(db, assignment):
         return
     item = db.execute(
         "SELECT * FROM tuning_order_items WHERE id = ?", (assignment["item_id"],)
@@ -10941,12 +10954,41 @@ def _pay_tuning_assignment(db, assignment):
         "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at, project_id) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (assignment["employee_name"], item["work_name"], assignment["rate"], assignment["norm_hours"],
-         amount, dt.date.today().isoformat(), now, project_id),
+         amount, work_date or dt.date.today().isoformat(), now, project_id),
     )
     db.execute(
         "UPDATE tuning_item_assignments SET entry_id = ? WHERE id = ?",
         (cur.lastrowid, assignment["id"]),
     )
+
+
+def _repair_tuning_assignment_payouts(db, order_id=None):
+    """Creates the payroll entries that finished ("Выполнена") tasks are
+    missing — the task was done but its payout doesn't exist (never created,
+    or deleted on the Зарплаты page). The payout is dated with the task's
+    completion date (falling back to today). Returns the created payouts as
+    (employee, amount, date) tuples. Caller commits."""
+    query = (
+        "SELECT tia.* FROM tuning_item_assignments tia "
+        "JOIN tuning_order_items ti ON ti.id = tia.item_id "
+        "WHERE tia.assignment_status = 'done'"
+    )
+    params = []
+    if order_id is not None:
+        query += " AND ti.order_id = ?"
+        params.append(order_id)
+    created = []
+    for assignment in db.execute(query + " ORDER BY tia.id", params).fetchall():
+        if _tuning_assignment_has_payout(db, assignment):
+            continue
+        work_date = (assignment["completed_at"] or "")[:10] or None
+        _pay_tuning_assignment(db, assignment, work_date=work_date)
+        created.append((
+            assignment["employee_name"],
+            assignment["rate"] * assignment["norm_hours"],
+            work_date or dt.date.today().isoformat(),
+        ))
+    return created
 
 
 def _pay_free_tuning_schedule_task(db, task, total_hours):
@@ -11191,9 +11233,21 @@ def tuning_order_board(order_id):
     if order is None:
         return redirect(url_for("tuning_index"))
     items = _tuning_order_items_with_assignments(db, order_id)
+    payouts_missing = 0
+    for item in items:
+        for assignment in item["assignments"]:
+            # An entry id whose entry is gone (deleted on the Зарплаты page)
+            # is not a payout.
+            if assignment["entry_id"] and not _tuning_assignment_has_payout(db, assignment):
+                assignment["entry_id"] = None
+            assignment["payout_missing"] = (
+                assignment["assignment_status"] == "done" and not assignment["entry_id"]
+            )
+            payouts_missing += 1 if assignment["payout_missing"] else 0
     assignable_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
     return render_template(
         "tuning_order_board.html",
+        payouts_missing=payouts_missing,
         order=order, items=items, work_statuses=WORK_STATUSES,
         assignment_statuses=ASSIGNMENT_STATUSES,
         assignable_employees=assignable_employees,
@@ -11203,6 +11257,24 @@ def tuning_order_board(order_id):
         board_notice=session.pop("tuning_board_notice", None),
         board_error=session.pop("tuning_board_error", None),
     )
+
+
+@app.route("/tuning/<int:order_id>/board/repair-payouts", methods=["POST"])
+@admin_login_required
+def repair_tuning_order_payouts(order_id):
+    """Creates the payouts of this order's finished tasks that have none."""
+    db = get_db()
+    created = _repair_tuning_assignment_payouts(db, order_id)
+    db.commit()
+    if created:
+        total = sum(amount for _employee, amount, _day in created)
+        session["tuning_board_notice"] = (
+            f"Создано выплат: {len(created)} на {format_money(total)} ₽ "
+            "(датой выполнения задачи)."
+        )
+    else:
+        session["tuning_board_notice"] = "Недостающих выплат нет."
+    return redirect(url_for("tuning_order_board", order_id=order_id))
 
 
 @app.route("/tuning/assignments/<int:assignment_id>/dates", methods=["POST"])
@@ -11262,7 +11334,21 @@ def update_tuning_assignment_dates(assignment_id):
         (new_assigned, new_completed, assignment_id),
     )
     notice = "Даты задачи обновлены."
-    if assignment["entry_id"] and completed_day is not None:
+    if (
+        assignment["assignment_status"] == "done"
+        and not _tuning_assignment_has_payout(db, assignment)
+    ):
+        # A finished task with no payout: create it, dated with the
+        # completion date that was just set.
+        fresh = db.execute(
+            "SELECT * FROM tuning_item_assignments WHERE id = ?", (assignment_id,)
+        ).fetchone()
+        _pay_tuning_assignment(db, fresh, work_date=completed_day or None)
+        notice += (
+            f" У задачи не было выплаты — создана на {format_money(assignment['rate'] * assignment['norm_hours'])} ₽"
+            f" ({format_ru_date(completed_day) if completed_day else 'сегодняшней датой'})."
+        )
+    elif assignment["entry_id"] and completed_day is not None:
         entry = db.execute(
             "SELECT work_date, employee FROM entries WHERE id = ?", (assignment["entry_id"],)
         ).fetchone()

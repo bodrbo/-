@@ -825,6 +825,84 @@ class TuningTaskDatesTests(_TuningTaskFixture, unittest.TestCase):
         self.assertEqual(work_date, "2026-09-03")
         self.assertEqual(self.assignment(self.EMPLOYEE_A)["completed_at"][:10], "2026-09-03")
 
+    def done_task_without_payout(self, employee=None, dangling_entry=False):
+        self.assign(employee or self.EMPLOYEE_A, 100, 2)
+        task_id = self.assignment(employee or self.EMPLOYEE_A)["id"]
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "UPDATE tuning_item_assignments SET assignment_status = 'done', "
+                "assigned_at = '2026-08-01 09:00', completed_at = '2026-08-20 15:00', entry_id = ? WHERE id = ?",
+                (999999 if dangling_entry else None, task_id),
+            )
+            db.commit()
+        return task_id
+
+    def payouts_of(self, employee):
+        with application_module.app.app_context():
+            return [dict(r) for r in application_module.get_db().execute(
+                "SELECT * FROM entries WHERE employee = ? AND work_type = 'Полировка корпуса'", (employee,)
+            ).fetchall()]
+
+    def test_saving_dates_creates_the_missing_payout_of_a_done_task(self):
+        task_id = self.done_task_without_payout()
+        self.assertEqual(self.payouts_of(self.EMPLOYEE_A), [])
+        self.edit_dates(task_id, "2026-08-01", "2026-08-18")
+        rows = self.payouts_of(self.EMPLOYEE_A)
+        self.assertEqual([(r["work_date"], r["amount"]) for r in rows], [("2026-08-18", 200.0)])
+        self.assertIsNotNone(self.assignment(self.EMPLOYEE_A)["entry_id"])
+        self.assertIn("У задачи не было выплаты", self.client.get(
+            f"/tuning/{self.order_id}/board").get_data(as_text=True))
+        # saving again does not pay twice
+        self.edit_dates(task_id, "2026-08-01", "2026-08-19")
+        self.assertEqual(len(self.payouts_of(self.EMPLOYEE_A)), 1)
+        self.assertEqual(self.payouts_of(self.EMPLOYEE_A)[0]["work_date"], "2026-08-19")
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM entries WHERE employee = ?", (self.EMPLOYEE_A,))
+            db.commit()
+
+    def test_board_flags_and_repairs_done_tasks_without_a_payout(self):
+        self.done_task_without_payout(self.EMPLOYEE_A)
+        self.done_task_without_payout(self.EMPLOYEE_B, dangling_entry=True)
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("У выполненных задач нет выплаты: 2", page)
+        self.assertEqual(page.count("Нет выплаты"), 2)
+        response = self.client.post(f"/tuning/{self.order_id}/board/repair-payouts")
+        self.assertEqual(response.status_code, 302)
+        for employee, day in ((self.EMPLOYEE_A, "2026-08-20"), (self.EMPLOYEE_B, "2026-08-20")):
+            rows = self.payouts_of(employee)
+            self.assertEqual([(r["work_date"], r["amount"]) for r in rows], [(day, 200.0)])
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("Создано выплат: 2", page)
+        self.assertNotIn("У выполненных задач нет выплаты", page)
+        # repeating changes nothing
+        self.client.post(f"/tuning/{self.order_id}/board/repair-payouts")
+        self.assertEqual(len(self.payouts_of(self.EMPLOYEE_A)), 1)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM entries WHERE employee IN (?, ?)", (self.EMPLOYEE_A, self.EMPLOYEE_B))
+            db.commit()
+
+    def test_deleting_a_payout_on_the_payroll_page_unlinks_the_task_and_it_can_be_repaid(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task_id = self.assignment(self.EMPLOYEE_A)["id"]
+        self.set_status(task_id, "done")  # pays it out
+        entry_id = self.assignment(self.EMPLOYEE_A)["entry_id"]
+        self.assertIsNotNone(entry_id)
+        response = self.client.post(f"/delete/{entry_id}")
+        self.assertIsNone(self.assignment(self.EMPLOYEE_A)["entry_id"])
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("Нет выплаты", page)
+        # marking it done again pays it again now that the link is clean
+        self.set_status(task_id, "in_progress")
+        self.set_status(task_id, "done")
+        self.assertEqual(len(self.payouts_of(self.EMPLOYEE_A)), 1)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM entries WHERE employee = ?", (self.EMPLOYEE_A,))
+            db.commit()
+
     def test_invalid_or_inconsistent_dates_are_rejected(self):
         self.assign(self.EMPLOYEE_A, 100, 2)
         task_id = self.assignment(self.EMPLOYEE_A)["id"]
