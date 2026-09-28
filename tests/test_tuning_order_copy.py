@@ -247,7 +247,7 @@ class TuningOrderCopyTests(unittest.TestCase):
 
         edit_html = self.client.get(response.headers["Location"]).get_data(as_text=True)
         self.assertIn(f"Создана копия заказа №{self.source_order_id}", edit_html)
-        self.assertIn("Предварительный расчёт", edit_html)
+        self.assertIn("На согласовании", edit_html)
 
     def test_order_list_exposes_compact_copy_action(self):
         html = self.client.get("/tuning").get_data(as_text=True)

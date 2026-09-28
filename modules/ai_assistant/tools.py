@@ -15,7 +15,9 @@ from .knowledge import guide_for
 
 TUNING_STATUS_LABELS = {
     "new_request": "Новая заявка",
-    "estimate": "Предварительный расчёт",
+    "awaiting_estimate": "Ждет расчет",
+    "estimate": "На согласовании",
+    "approved": "Согласовано",
     "in_progress": "В работе",
     "qc": "Проходит независимый контроль качества",
     "done": "Выполнен",

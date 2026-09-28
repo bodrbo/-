@@ -251,7 +251,7 @@ class TuningPartnerDashboardTests(unittest.TestCase):
         self.assertEqual(order["client_id"], self.partner_id)
         self.assertEqual(order["client_name"], "Верфь Север")
         self.assertEqual(order["phone"], "+79991112233")
-        self.assertEqual(order["status"], "estimate")
+        self.assertEqual(order["status"], "awaiting_estimate")
         self.assertEqual(order["source"], "partner_request")
         self.assertEqual(order["sale_channel"], "direct")
         self.assertEqual(order["subtotal"], 0)
@@ -470,7 +470,7 @@ class TuningPartnerDashboardTests(unittest.TestCase):
         self.assertEqual(order["client_name"], "Обычный клиент")
         self.assertEqual(order["phone"], "")
         self.assertEqual(order["partner_id"], self.partner_id)
-        self.assertEqual(order["status"], "estimate")
+        self.assertEqual(order["status"], "awaiting_estimate")
         self.assertTrue(order["source_ref"].startswith(
             f"subcontract:{self.partner_id}:"
         ))

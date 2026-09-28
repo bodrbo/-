@@ -1437,7 +1437,13 @@ EQUIPMENT_TYPES = [
 
 ORDER_STATUSES = [
     {"value": "new_request", "label": "Новая заявка"},
-    {"value": "estimate", "label": "Предварительный расчёт"},
+    # Requests whose work still has to be priced.
+    {"value": "awaiting_estimate", "label": "Ждет расчет"},
+    # The stored value stays "estimate" (it is the default and lives in old
+    # rows): "На согласовании" is what "Предварительный расчёт" used to be.
+    {"value": "estimate", "label": "На согласовании"},
+    # Work agreed, the boat isn't taken into work yet.
+    {"value": "approved", "label": "Согласовано"},
     {"value": "in_progress", "label": "В работе"},
     {"value": "qc", "label": "Проходит независимый контроль качества"},
     {"value": "done", "label": "Выполнен"},
@@ -1446,10 +1452,14 @@ ORDER_STATUSES = [
 ]
 TUNING_ACTIVE_TOTAL_STATUSES = frozenset((
     "new_request",
+    "awaiting_estimate",
     "estimate",
+    "approved",
     "in_progress",
 ))
 DEFAULT_ORDER_STATUS = "estimate"
+# A request sent by a partner (or passed to one) arrives with unpriced work.
+REQUEST_ORDER_STATUS = "awaiting_estimate"
 # The two statuses that mark an order as actually finished — completed_at is
 # stamped once on first arrival here and left untouched while the status
 # stays within this set (e.g. "done" -> "handed_over").
@@ -12238,7 +12248,7 @@ def _create_partner_estimate_order(
             data["motor_model"],
             data["motor_serial_number"],
             client["phone"] or "",
-            DEFAULT_ORDER_STATUS,
+            REQUEST_ORDER_STATUS,
             data["order_date"],
             now,
             now,

@@ -224,7 +224,7 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertEqual(card_value("Сумма активных заказов"), "66 000,00 ₽")
         self.assertEqual(card_value("Сумма выполненных заказов"), "44 000,00 ₽")
         self.assertNotIn("Сумма по всем заказам", html)
-        self.assertIn("Новая заявка · Предварительный расчёт · В работе", html)
+        self.assertIn("Новая заявка · Ждет расчет · На согласовании · Согласовано · В работе", html)
         self.assertLess(
             html.index('class="totals-grid"'),
             html.index('class="panel tuning-orders-filter"'),

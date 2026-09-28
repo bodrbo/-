@@ -3969,6 +3969,10 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .status-badge.status-pending::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2362707f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='M8 4.8V8l2.4 1.4'/%3E%3C/svg%3E");
 }
+.status-badge.status-awaiting_estimate { background: rgba(214, 137, 16, 0.16); color: #b9770e; }
+.status-badge.status-awaiting_estimate::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23b9770e' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 3h8M4 13h8M5 3v2.2c0 1 .8 1.8 1.8 2.8-1 1-1.8 1.8-1.8 2.8V13M11 3v2.2c0 1-.8 1.8-1.8 2.8 1 1 1.8 1.8 1.8 2.8V13'/%3E%3C/svg%3E");
+}
 .status-badge.status-approved { background: rgba(46, 134, 193, 0.16); color: var(--brass-strong); }
 .status-badge.status-approved::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232e86c1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5'/%3E%3C/svg%3E");
