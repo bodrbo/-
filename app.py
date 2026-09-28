@@ -16422,12 +16422,48 @@ def team_checklist_add_defects(checklist_id):
 # расчётному счёту из Т-Банка (см. TBANK_API_TOKEN/TBANK_ACCOUNT_NUMBER
 # выше). Пока подключение не настроено, раздел просто показывает заглушку.
 # ---------------------------------------------------------------------
+_TBANK_CA_BUNDLE_PATH = None
+RUSSIAN_TRUSTED_ROOT_CA_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "certs", "russian_trusted_root_ca.pem"
+)
+
+
+def _tbank_verify():
+    """CA bundle for requests to the T-Bank API. business.tbank.ru serves a
+    certificate issued under the Russian Trusted Root CA (Минцифры), which the
+    public bundle (certifi) doesn't contain — without it every call fails with
+    CERTIFICATE_VERIFY_FAILED "self signed certificate in certificate chain".
+    Returns a file with certifi's bundle plus that root, built once; falls back
+    to normal verification (True) if it can't be built. TBANK_CA_BUNDLE
+    overrides the file."""
+    global _TBANK_CA_BUNDLE_PATH
+    override = os.environ.get("TBANK_CA_BUNDLE")
+    if override:
+        return override
+    if _TBANK_CA_BUNDLE_PATH and os.path.exists(_TBANK_CA_BUNDLE_PATH):
+        return _TBANK_CA_BUNDLE_PATH
+    try:
+        import certifi
+        import tempfile
+        with open(certifi.where(), "rb") as public_bundle, \
+                open(RUSSIAN_TRUSTED_ROOT_CA_PATH, "rb") as russian_root:
+            combined = public_bundle.read().rstrip(b"\n") + b"\n" + russian_root.read()
+        handle, path = tempfile.mkstemp(prefix="tbank-ca-", suffix=".pem")
+        with os.fdopen(handle, "wb") as out:
+            out.write(combined)
+        _TBANK_CA_BUNDLE_PATH = path
+        return path
+    except Exception:
+        return True
+
+
 def _tbank_request(path, params, token=None):
     resp = requests.get(
         f"{TBANK_API_BASE}{path}",
         headers={"Authorization": f"Bearer {token or TBANK_API_TOKEN}"},
         params=params,
         timeout=30,
+        verify=_tbank_verify(),
     )
     if resp.status_code >= 400:
         raise RuntimeError(f"Т-Банк вернул ошибку {resp.status_code}: {resp.text[:500]}")
@@ -16440,6 +16476,7 @@ def _tbank_request_post(path, payload, token=None):
         headers={"Authorization": f"Bearer {token or TBANK_API_TOKEN}", "Content-Type": "application/json"},
         json=payload,
         timeout=30,
+        verify=_tbank_verify(),
     )
     if resp.status_code >= 400:
         raise RuntimeError(f"Т-Банк вернул ошибку {resp.status_code}: {resp.text[:500]}")
