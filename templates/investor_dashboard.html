@@ -50,9 +50,12 @@
 
   <div class="investor-bar">
     <span class="investor-name">{{ investor_name }}{% if boats %} · {{ boats|join(', ') }}{% endif %}</span>
-    <form action="{{ url_for('investor_logout') }}" method="post">
-      <button type="submit" class="btn-secondary">Выйти</button>
-    </form>
+    <div class="investor-bar-actions">
+      <a href="{{ url_for('schedule.index') }}" class="btn-secondary">Расписание</a>
+      <form action="{{ url_for('investor_logout') }}" method="post">
+        <button type="submit" class="btn-secondary">Выйти</button>
+      </form>
+    </div>
   </div>
 
   {% if investment_metrics %}

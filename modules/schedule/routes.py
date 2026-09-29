@@ -41,6 +41,7 @@ def create_schedule_blueprint(
     delete_linked_trip=None,
     update_linked_trip_time=None,
     receipts=None,
+    is_investor_view=lambda: False,
 ):
     blueprint = Blueprint("schedule", __name__)
 
@@ -73,8 +74,13 @@ def create_schedule_blueprint(
         day = services.parse_day(request.args.get("date"))
         selected_employee = request.args.get("employee", "all")
         team_view = is_team_view()
+        investor_view = is_investor_view()
         demo_view = bool(session.get("demo_tenant_id"))
-        can_view_clients = team_view and can_view_team_clients()
+        # Investors get the same full read-only client/crew manifest a
+        # captain would (see readonly_item_details) — they view everything,
+        # change nothing (no mutating route accepts an investor session).
+        can_view_clients = (team_view and can_view_team_clients()) or investor_view
+        can_manage = not team_view and not investor_view
         context = services.day_view(
             db,
             day,
@@ -108,12 +114,13 @@ def create_schedule_blueprint(
             notice=session.pop("schedule_notice", None),
             manager_view=is_manager_view(),
             team_view=team_view,
-            can_manage=not team_view,
+            investor_view=investor_view,
+            can_manage=can_manage,
             can_view_clients=can_view_clients,
             schedule_items_json=(
                 services.readonly_item_details(context["items"])
                 if can_view_clients
-                else [] if team_view
+                else [] if not can_manage
                 else context["items"]
             ),
             tripster_configured=not demo_view and tripster_configured(),

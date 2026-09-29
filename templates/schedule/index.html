@@ -7,7 +7,8 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
 </head>
-<body class="schedule-body{{ ' is-read-only' if team_view }}{{ ' can-view-clients' if can_view_clients }}">
+{% set read_only_view = team_view or investor_view %}
+<body class="schedule-body{{ ' is-read-only' if read_only_view }}{{ ' can-view-clients' if can_view_clients }}">
 <div class="page-loader hidden" id="pageLoader" aria-hidden="true">
   <div class="loader-body">
     <svg class="propeller" viewBox="0 0 100 100">
@@ -25,26 +26,28 @@
   <div class="topbar-inner">
     <div class="topbar-top-row">
       <div class="brand">{% include '_topbar_brand.html' %}</div>
-      {% if not team_view %}<button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+      {% if not read_only_view %}<button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>
       </button>{% endif %}
     </div>
-    {% if not team_view %}{% include '_admin_main_nav.html' %}{% endif %}
+    {% if not read_only_view %}{% include '_admin_main_nav.html' %}{% endif %}
     <div class="title-block">
       {% if manager_view %}<span class="kicker">Менеджер по работе с клиентами</span>{% endif %}
       {% if team_view %}<span class="kicker">Личный кабинет сотрудника · режим просмотра</span>{% endif %}
+      {% if investor_view %}<span class="kicker">Личный кабинет инвестора · режим просмотра</span>{% endif %}
       <h1>Расписание рейсов</h1>
-      <p>{{ 'Рейсы, катера и состав экипажа' if team_view else 'Оперативное управление катерами и экипажами' }}</p>
+      <p>{{ 'Рейсы, катера и состав экипажа' if read_only_view else 'Оперативное управление катерами и экипажами' }}</p>
     </div>
     <div class="topbar-actions">
       {% if team_view %}<a href="{{ url_for('team_dashboard') }}" class="btn-secondary">Личный кабинет</a>{% endif %}
-      <form action="{{ url_for('team_logout') if manager_view or team_view else url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
+      {% if investor_view %}<a href="{{ url_for('investor_dashboard') }}" class="btn-secondary">Личный кабинет</a>{% endif %}
+      <form action="{{ url_for('investor_logout') if investor_view else url_for('team_logout') if manager_view or team_view else url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
     </div>
   </div>
 </header>
 
 <main class="schedule-shell">
-  {% if not manager_view and not team_view %}{% include '_schedule_subnav.html' %}{% endif %}
+  {% if not manager_view and not read_only_view %}{% include '_schedule_subnav.html' %}{% endif %}
   {% if notice %}
   <div class="schedule-notice {{ notice.type }}" role="status">
     <span>{{ notice.message }}</span>

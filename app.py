@@ -4211,11 +4211,22 @@ def _can_view_schedule_clients(db=None):
     )
 
 
+def _is_investor_view():
+    """An investor's own login, not an admin/manager/crew one. Only read-only
+    routes (schedule_viewer_or_manager_or_admin_required) check this — every
+    mutating schedule/trip route stays behind its own admin/manager
+    decorator, which an investor session never satisfies."""
+    return bool(session.get("investor_id"))
+
+
 def schedule_viewer_or_manager_or_admin_required(view):
-    """Allow crew to view the board without granting schedule mutations."""
+    """Allow crew and investors to view the board without granting schedule
+    mutations (investors: see everything, change nothing)."""
     @wraps(view)
     def wrapped(*args, **kwargs):
         if _active_admin_account() is not None or _is_customer_manager():
+            return view(*args, **kwargs)
+        if _is_investor_view():
             return view(*args, **kwargs)
         if _is_schedule_team_view():
             return view(*args, **kwargs)
@@ -5392,6 +5403,7 @@ app.register_blueprint(
         is_manager_view=_is_customer_manager,
         is_team_view=_is_schedule_team_view,
         can_view_team_clients=_can_view_schedule_clients,
+        is_investor_view=_is_investor_view,
         boats=fleet_boats_for_db,
         boat_colors=fleet_schedule_colors_for_db,
         avatar_url=find_avatar_url,
