@@ -15,6 +15,7 @@
 """
 
 import os
+import re
 import sys
 import json
 import html
@@ -815,8 +816,20 @@ def format_money(value, decimals=0):
     return formatted.replace(",", " ")
 
 
+def messenger_phone_digits(phone):
+    """Normalize a phone to the digits-only form wa.me/t.me links expect,
+    same rule as the schedule module's scheduleNormalizePhone() in JS."""
+    digits = re.sub(r"\D", "", phone or "")
+    if len(digits) == 11 and digits[0] in "78":
+        return "7" + digits[1:]
+    if len(digits) == 10:
+        return "7" + digits
+    return digits
+
+
 app.jinja_env.filters["ru_date"] = format_ru_date
 app.jinja_env.filters["money"] = format_money
+app.jinja_env.filters["messenger_phone_digits"] = messenger_phone_digits
 
 # ---------------------------------------------------------------------
 # Yclients — импорт рейсов. Токены НЕ храним в коде (секреты) — задайте их

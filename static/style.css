@@ -5657,6 +5657,28 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
    preferred channel apart at a glance, not just on mouseover. */
 .schedule-detail-client-messengers .icon-btn.whatsapp.is-preferred { background: #25d366; border-color: #25d366; border-style: solid; color: #fff; }
 .schedule-detail-client-messengers .icon-btn.telegram.is-preferred { background: #29a9eb; border-color: #29a9eb; border-style: solid; color: #fff; }
+/* Same wa.me/t.me quick-contact buttons, reused in the tuning order card's
+   summary block (order-summary-item "Клиент") — same look, own scope. */
+.order-summary-client-messengers { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; }
+.order-summary-client-messengers .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1.5px dashed var(--hairline);
+  background: transparent;
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+.order-summary-client-messengers .icon-btn svg { width: 14px; height: 14px; }
+.order-summary-client-messengers .icon-btn.whatsapp:hover { background: #25d366; border-color: #25d366; color: #fff; }
+.order-summary-client-messengers .icon-btn.telegram:hover { background: #29a9eb; border-color: #29a9eb; color: #fff; }
+.order-summary-client-messengers .icon-btn.whatsapp.is-preferred { background: #25d366; border-color: #25d366; border-style: solid; color: #fff; }
+.order-summary-client-messengers .icon-btn.telegram.is-preferred { background: #29a9eb; border-color: #29a9eb; border-style: solid; color: #fff; }
 .schedule-detail-client-addons { margin: 10px 0; padding: 10px; border: 1px solid var(--hairline); border-radius: 8px; background: #f8fafc; }
 .schedule-detail-client-addons p { margin: 0 0 6px; }
 .schedule-detail-client-payments { margin: 10px 0; padding: 10px; border: 1px solid var(--hairline); border-radius: 8px; background: #f8fafc; }
