@@ -932,6 +932,16 @@
                  value="{{ form_values.phone if form_values else '' }}">
           <span class="field-context">Необязательно</span>
         </div>
+        <div class="field field-narrow">
+          <label for="preferred_contact_method">Канал связи</label>
+          <select id="preferred_contact_method" name="preferred_contact_method">
+            <option value="" {{ 'selected' if not form_values or not form_values.preferred_contact_method }}>Не указан</option>
+            {% for method in client_contact_methods %}
+            <option value="{{ method.value }}" {{ 'selected' if form_values and form_values.preferred_contact_method == method.value }}>{{ method.label }}</option>
+            {% endfor %}
+          </select>
+          <span class="field-context">Как удобнее связаться с клиентом</span>
+        </div>
         <fieldset class="field equipment-type-field">
           <legend>Тип техники</legend>
           <div class="equipment-type-switch">

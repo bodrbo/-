@@ -5666,6 +5666,14 @@ def _process_tuning_form(
         sale_channel = ""
     if not sale_channel:
         sale_channel = "direct"
+    # Same "канал связи" the schedule module already uses (CLIENT_CONTACT_METHODS,
+    # clients.preferred_contact_method) — an unrecognised value is dropped rather
+    # than blocking the save, same laxness as the sale channel fallback above.
+    preferred_contact_method = form.get("preferred_contact_method", "").strip()
+    if preferred_contact_method not in {
+        method["value"] for method in CLIENT_CONTACT_METHODS
+    }:
+        preferred_contact_method = ""
 
     if not client_name:
         errors.append("Укажите ФИО клиента.")
@@ -5804,7 +5812,8 @@ def _process_tuning_form(
         boat_motors=boat_motors, phone=phone,
         order_date=order_date, deadline_date=deadline_date,
         acceptance_date=acceptance_date,
-        sale_channel=sale_channel, discount_type=discount_type, discount_value=discount_value,
+        sale_channel=sale_channel, preferred_contact_method=preferred_contact_method,
+        discount_type=discount_type, discount_value=discount_value,
         # discount_pct is kept only for older code/rows that still read it —
         # 0 when the discount is a fixed amount, since it isn't a percent.
         discount_pct=discount_value if discount_type == "percent" else 0.0,
@@ -5924,8 +5933,17 @@ def _boat_motor_form_values(form):
     ]
 
 
-def _get_or_create_client(db, phone, client_name, boat_model, client_id=None):
-    """Resolve a selected client, then an unambiguous phone, or create one."""
+def _get_or_create_client(
+    db, phone, client_name, boat_model, client_id=None, preferred_contact_method=None
+):
+    """Resolve a selected client, then an unambiguous phone, or create one.
+
+    preferred_contact_method is the same "канал связи" mechanic the schedule
+    module already has (CLIENT_CONTACT_METHODS, clients.preferred_contact_method)
+    — left alone (None) for callers that don't have that field on their form
+    (site/Tilda leads); when the tuning order form does have it, it's written
+    unconditionally, same as schedule does for a participant — an empty
+    selection there means "не указан", not "leave whatever was there"."""
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     row = None
     if client_id is not None:
@@ -5945,21 +5963,39 @@ def _get_or_create_client(db, phone, client_name, boat_model, client_id=None):
             if len(named) == 1:
                 row = named[0]
     if row:
-        db.execute(
-            "UPDATE clients SET client_name = ?, boat_model = ?, phone = ? WHERE id = ?",
-            (
-                client_name, boat_model or row["boat_model"],
-                phone or row["phone"], row["id"],
-            ),
-        )
+        if preferred_contact_method is None:
+            db.execute(
+                "UPDATE clients SET client_name = ?, boat_model = ?, phone = ? WHERE id = ?",
+                (
+                    client_name, boat_model or row["boat_model"],
+                    phone or row["phone"], row["id"],
+                ),
+            )
+        else:
+            db.execute(
+                "UPDATE clients SET client_name = ?, boat_model = ?, phone = ?, "
+                "preferred_contact_method = ? WHERE id = ?",
+                (
+                    client_name, boat_model or row["boat_model"],
+                    phone or row["phone"], preferred_contact_method, row["id"],
+                ),
+            )
         ensure_client_segment(db, row["id"], TUNING_SEGMENT, now)
         return row["id"]
     token = secrets.token_urlsafe(16)
-    cur = db.execute(
-        "INSERT INTO clients (client_name, boat_model, phone, token, created_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (client_name, boat_model, phone, token, now),
-    )
+    if preferred_contact_method is None:
+        cur = db.execute(
+            "INSERT INTO clients (client_name, boat_model, phone, token, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (client_name, boat_model, phone, token, now),
+        )
+    else:
+        cur = db.execute(
+            "INSERT INTO clients "
+            "(client_name, boat_model, phone, token, created_at, preferred_contact_method) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (client_name, boat_model, phone, token, now, preferred_contact_method),
+        )
     ensure_client_segment(db, cur.lastrowid, TUNING_SEGMENT, now)
     return cur.lastrowid
 
@@ -10118,6 +10154,7 @@ def add_tuning_order():
         return render_template(
             "tuning_form.html", edit_order=None, errors=None, form_values=None,
             items_prefill=None, boat_motors_prefill=[], sale_channels=_sales_channel_choices(db),
+            client_contact_methods=CLIENT_CONTACT_METHODS,
             active_page="tuning", sub_page="orders",
             today=dt.date.today().isoformat(),
             boat_model_choices=_tuning_boat_model_choices(db),
@@ -10137,7 +10174,9 @@ def add_tuning_order():
         return render_template(
             "tuning_form.html", edit_order=None, errors=errors, form_values=request.form,
             items_prefill=None, boat_motors_prefill=_boat_motor_form_values(request.form),
-            sale_channels=_sales_channel_choices(db), active_page="tuning", sub_page="orders",
+            sale_channels=_sales_channel_choices(db),
+            client_contact_methods=CLIENT_CONTACT_METHODS,
+            active_page="tuning", sub_page="orders",
             today=dt.date.today().isoformat(),
             boat_model_choices=_tuning_boat_model_choices(db),
             motor_model_choices=_tuning_motor_model_choices(db),
@@ -10147,7 +10186,7 @@ def add_tuning_order():
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     client_id = _get_or_create_client(
         db, data["phone"], data["client_name"], data["boat_model"],
-        data["client_id"],
+        data["client_id"], preferred_contact_method=data["preferred_contact_method"],
     )
     cur = db.execute(
         "INSERT INTO tuning_orders (client_id, client_name, equipment_type, boat_model, "
@@ -10626,6 +10665,14 @@ def edit_tuning_order(order_id):
         yookassa_payments = db.execute(
             "SELECT * FROM tuning_yookassa_payments WHERE order_id = ? ORDER BY id DESC", (order_id,)
         ).fetchall()
+        client_preferred_contact_method = ""
+        if order["client_id"] is not None:
+            client_row = db.execute(
+                "SELECT preferred_contact_method FROM clients WHERE id = ?",
+                (order["client_id"],),
+            ).fetchone()
+            if client_row is not None:
+                client_preferred_contact_method = client_row["preferred_contact_method"] or ""
         form_values = {
             "client_id": order["client_id"] or "",
             "client_name": order["client_name"],
@@ -10635,6 +10682,7 @@ def edit_tuning_order(order_id):
             "motor_model": order["motor_model"],
             "motor_serial_number": order["motor_serial_number"],
             "sale_channel": order["sale_channel"], "phone": order["phone"],
+            "preferred_contact_method": client_preferred_contact_method,
             "order_date": order["order_date"], "deadline_date": order["deadline_date"] or "",
             "acceptance_date": order["acceptance_date"] or "",
             "discount_type": order["discount_type"], "discount_value": order["discount_value"],
@@ -10658,7 +10706,9 @@ def edit_tuning_order(order_id):
             "tuning_form.html", edit_order=order, errors=None, form_values=form_values,
             deadline_view=deadline_view,
             items_prefill=items, boat_motors_prefill=boat_motors,
-            sale_channels=_sales_channel_choices(db), active_page="tuning", sub_page=tuning_sub_page,
+            sale_channels=_sales_channel_choices(db),
+            client_contact_methods=CLIENT_CONTACT_METHODS,
+            active_page="tuning", sub_page=tuning_sub_page,
             today=dt.date.today().isoformat(),
             payments=payments, paid_amount=paid_amount, remaining=remaining,
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
@@ -10718,7 +10768,9 @@ def edit_tuning_order(order_id):
                 order["deadline_date"], order["completed_at"], order["status"]
             ),
             items_prefill=None, boat_motors_prefill=_boat_motor_form_values(request.form),
-            sale_channels=_sales_channel_choices(db), active_page="tuning", sub_page=tuning_sub_page,
+            sale_channels=_sales_channel_choices(db),
+            client_contact_methods=CLIENT_CONTACT_METHODS,
+            active_page="tuning", sub_page=tuning_sub_page,
             today=dt.date.today().isoformat(),
             payments=payments, paid_amount=paid_amount, remaining=remaining,
             order_statuses=ORDER_STATUSES, work_statuses=WORK_STATUSES,
@@ -10739,7 +10791,7 @@ def edit_tuning_order(order_id):
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     client_id = _get_or_create_client(
         db, data["phone"], data["client_name"], data["boat_model"],
-        data["client_id"],
+        data["client_id"], preferred_contact_method=data["preferred_contact_method"],
     )
     db.execute(
         "UPDATE tuning_orders SET client_id=?, client_name=?, equipment_type=?, boat_model=?, "
