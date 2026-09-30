@@ -10711,9 +10711,11 @@ def edit_tuning_order(order_id):
         # Only when the date was just set/changed — an admin who removed
         # the boat from the map by hand isn't overruled on every later save.
         _auto_place_boat_on_shop_map(db, {"id": order_id})
-    return redirect(url_for(
-        "tuning_subcontracts" if is_subcontract else "tuning_index"
-    ))
+    # Saving this form is most often "add/remove a work item and hit
+    # Сохранить" — staying on the same order card (anchored at the works
+    # block, not the page top) keeps that in view instead of dumping the
+    # admin back into the full orders table every time.
+    return redirect(url_for("edit_tuning_order", order_id=order_id) + "#work-container")
 
 
 def _delete_tuning_order_records(db, order_ids):
