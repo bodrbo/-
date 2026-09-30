@@ -280,12 +280,21 @@
     <span><i style="background:var(--ink-soft);"></i>Не оплачено — {{ remaining|money }} ₽</span>
   </div>
 
-  <details class="panel collapsible-panel" open>
+  <details class="panel collapsible-panel" open id="documents">
     <summary><span>Документы</span><span class="chev" aria-hidden="true"></span></summary>
     <div class="collapsible-body">
 
-    {% if edit_order.equipment_type == 'boat' and hull_sheets %}
+    {% if document_error %}
+    <div class="alert" role="alert">{{ document_error }}</div>
+    {% endif %}
+    {% if document_notice %}
+    <div class="alert alert-success" role="status">{{ document_notice }}</div>
+    {% endif %}
+
+    {% set ship_tickets = ship_tickets|default([]) %}
+    {% if (edit_order.equipment_type == 'boat' and hull_sheets) or ship_tickets %}
     <div class="doc-list">
+      {% if edit_order.equipment_type == 'boat' %}
       {% for hs in hull_sheets %}
       <div class="doc-item">
         <a href="{{ url_for('hull_diagnostic_sheet', sheet_id=hs.id) }}" class="doc-link">
@@ -301,6 +310,29 @@
             <button type="submit" class="icon-btn danger" title="Отвязать">
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
+              </svg>
+            </button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+      {% endif %}
+      {% for ticket in ship_tickets %}
+      <div class="doc-item">
+        <a href="{{ url_for('download_tuning_ship_ticket', order_id=edit_order.id, ticket_id=ticket.id) }}"
+           class="doc-link" target="_blank" rel="noopener">
+          <svg class="doc-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 2.5h6.5l3.5 3.5V17a1 1 0 01-1 1H5a1 1 0 01-1-1V3.5a1 1 0 011-1z"/>
+            <path d="M11.5 2.5v3.5H15"/>
+          </svg>
+          Судовой билет — {{ ticket.original_filename }}
+        </a>
+        <div class="row-actions">
+          <form action="{{ url_for('delete_tuning_ship_ticket', order_id=edit_order.id, ticket_id=ticket.id) }}" method="post"
+                onsubmit="return confirm('Удалить этот файл?');">
+            <button type="submit" class="icon-btn danger" title="Удалить">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 5l10 10M15 5L5 15"/>
               </svg>
             </button>
           </form>
@@ -331,6 +363,16 @@
             {% endif %}
             <form action="{{ url_for('create_and_link_hull_sheet', order_id=edit_order.id) }}" method="post">
               <button type="submit" class="btn-secondary">Создать новый</button>
+            </form>
+          </div>
+        </details>
+        <details class="doc-type">
+          <summary>Судовой билет</summary>
+          <div class="doc-type-body">
+            <form action="{{ url_for('upload_tuning_ship_ticket', order_id=edit_order.id) }}" method="post"
+                  enctype="multipart/form-data" class="doc-type-row">
+              <input type="file" name="ship_ticket" accept=".pdf,.doc,.docx,image/*" required>
+              <button type="submit" class="btn-secondary">Загрузить</button>
             </form>
           </div>
         </details>

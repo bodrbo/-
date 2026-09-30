@@ -42,6 +42,7 @@ from modules.fleet import create_fleet_blueprint
 from modules.fleet.constants import (
     BOATS,
     BOAT_COLORS,
+    BOAT_DOCUMENT_EXTENSIONS,
     CHECKLIST_QUESTIONS,
     CHECKLIST_TYPE_LABELS,
     DEFECT_ASSIGNABLE_POSITIONS,
@@ -2683,6 +2684,21 @@ def init_db(db_path=None, include_bootstrap_data=True):
     sheet_cols = [row[1] for row in conn.execute("PRAGMA table_info(hull_diagnostic_sheets)").fetchall()]
     if "tuning_order_id" not in sheet_cols:
         conn.execute("ALTER TABLE hull_diagnostic_sheets ADD COLUMN tuning_order_id INTEGER")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tuning_order_ship_tickets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            filename TEXT NOT NULL,
+            original_filename TEXT NOT NULL,
+            uploaded_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tuning_order_ship_tickets_order "
+        "ON tuning_order_ship_tickets (order_id)"
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS hull_diagnostic_defects (
@@ -10022,6 +10038,76 @@ def unlink_hull_sheet(order_id, sheet_id):
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 
+@app.route("/tuning/edit/<int:order_id>/ship-ticket", methods=["POST"])
+@admin_login_required
+def upload_tuning_ship_ticket(order_id):
+    db = get_db()
+    order = db.execute(
+        "SELECT equipment_type FROM tuning_orders WHERE id = ?", (order_id,)
+    ).fetchone()
+    if order is None:
+        return redirect(url_for("tuning_index"))
+    back = url_for("edit_tuning_order", order_id=order_id) + "#documents"
+    if order["equipment_type"] != "boat":
+        return redirect(back)
+    uploaded_file = request.files.get("ship_ticket")
+    if not uploaded_file or not uploaded_file.filename:
+        session["tuning_document_error"] = "Выберите файл судового билета."
+        return redirect(back)
+    extension = os.path.splitext(uploaded_file.filename)[1].lower()
+    if extension not in BOAT_DOCUMENT_EXTENSIONS:
+        session["tuning_document_error"] = (
+            "Судовой билет должен быть файлом PDF, JPG, PNG, WebP, DOC или DOCX."
+        )
+        return redirect(back)
+    tickets_dir = os.path.join(app.static_folder, "tuning_ship_tickets")
+    os.makedirs(tickets_dir, exist_ok=True)
+    filename = f"{secrets.token_hex(8)}{extension}"
+    uploaded_file.save(os.path.join(tickets_dir, filename))
+    db.execute(
+        "INSERT INTO tuning_order_ship_tickets "
+        "(order_id, filename, original_filename, uploaded_at) VALUES (?, ?, ?, ?)",
+        (order_id, filename, uploaded_file.filename, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+    )
+    db.commit()
+    session["tuning_document_notice"] = "Судовой билет загружен."
+    return redirect(back)
+
+
+@app.route("/tuning/edit/<int:order_id>/ship-ticket/<int:ticket_id>")
+@admin_login_required
+def download_tuning_ship_ticket(order_id, ticket_id):
+    ticket = get_db().execute(
+        "SELECT * FROM tuning_order_ship_tickets WHERE id = ? AND order_id = ?",
+        (ticket_id, order_id),
+    ).fetchone()
+    if ticket is None:
+        return redirect(url_for("edit_tuning_order", order_id=order_id))
+    tickets_dir = os.path.join(app.static_folder, "tuning_ship_tickets")
+    return send_from_directory(
+        tickets_dir, ticket["filename"], download_name=ticket["original_filename"],
+    )
+
+
+@app.route("/tuning/edit/<int:order_id>/ship-ticket/<int:ticket_id>/delete", methods=["POST"])
+@admin_login_required
+def delete_tuning_ship_ticket(order_id, ticket_id):
+    db = get_db()
+    ticket = db.execute(
+        "SELECT * FROM tuning_order_ship_tickets WHERE id = ? AND order_id = ?",
+        (ticket_id, order_id),
+    ).fetchone()
+    if ticket is not None:
+        try:
+            os.remove(os.path.join(app.static_folder, "tuning_ship_tickets", ticket["filename"]))
+        except OSError:
+            pass
+        db.execute("DELETE FROM tuning_order_ship_tickets WHERE id = ?", (ticket_id,))
+        db.commit()
+        session["tuning_document_notice"] = "Судовой билет удалён."
+    return redirect(url_for("edit_tuning_order", order_id=order_id) + "#documents")
+
+
 @app.route("/tuning/add", methods=["GET", "POST"])
 @admin_login_required
 def add_tuning_order():
@@ -10562,6 +10648,9 @@ def edit_tuning_order(order_id):
         available_hull_sheets = db.execute(
             "SELECT * FROM hull_diagnostic_sheets WHERE tuning_order_id IS NULL ORDER BY boat_name"
         ).fetchall()
+        ship_tickets = db.execute(
+            "SELECT * FROM tuning_order_ship_tickets WHERE order_id = ? ORDER BY id", (order_id,)
+        ).fetchall()
         work_photos_by_item = {item["id"]: get_work_item_photos(db, item["id"]) for item in items}
         notes = _order_notes(db, order_id)
         reminder_recipients = _note_reminder_recipients(db)
@@ -10577,6 +10666,9 @@ def edit_tuning_order(order_id):
             yookassa_error=session.pop("yookassa_error", None),
             yookassa_notice=session.pop("yookassa_notice", None),
             hull_sheets=hull_sheets, available_hull_sheets=available_hull_sheets,
+            ship_tickets=ship_tickets,
+            document_error=session.pop("tuning_document_error", None),
+            document_notice=session.pop("tuning_document_notice", None),
             work_photos_by_item=work_photos_by_item,
             assignable_employees=assignable_employees,
             goods=goods, goods_subtotal=goods_subtotal, work_subtotal=work_subtotal,
@@ -10722,6 +10814,17 @@ def _delete_tuning_order_records(db, order_ids):
     parameters = [(order_id,) for order_id in order_ids]
     db.executemany("DELETE FROM trips WHERE tuning_order_id = ?", parameters)
     db.executemany("DELETE FROM partner_commissions WHERE order_id = ?", parameters)
+    tickets_dir = os.path.join(app.static_folder, "tuning_ship_tickets")
+    placeholders = ",".join("?" for _order_id in order_ids)
+    for ticket in db.execute(
+        f"SELECT filename FROM tuning_order_ship_tickets WHERE order_id IN ({placeholders})",
+        order_ids,
+    ).fetchall():
+        try:
+            os.remove(os.path.join(tickets_dir, ticket["filename"]))
+        except OSError:
+            pass
+    db.executemany("DELETE FROM tuning_order_ship_tickets WHERE order_id = ?", parameters)
     for table_name in (
         "tuning_order_items",
         "tuning_payments",
