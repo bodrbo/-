@@ -796,6 +796,74 @@ def get_work_item_photos(db, item_id):
     ]
 
 
+YANDEX_DISK_PUBLIC_API = "https://cloud-api.yandex.net/v1/disk/public/resources"
+
+
+def get_work_item_videos(db, order_id, item_id):
+    """All Yandex.Disk-hosted videos attached to a tuning_order_items row —
+    {id, display_name, comment, play_url}. The video bytes never touch our
+    own hosting: play_url is a redirect endpoint that resolves a fresh
+    signed Yandex.Disk download link on every request (those links expire,
+    so nothing is cached here)."""
+    rows = db.execute(
+        "SELECT id, display_name, comment FROM work_item_videos WHERE item_id = ? ORDER BY id",
+        (item_id,),
+    ).fetchall()
+    return [
+        {
+            "id": r["id"], "display_name": r["display_name"], "comment": r["comment"],
+            "play_url": url_for(
+                "play_tuning_item_video", order_id=order_id, item_id=item_id, video_id=r["id"]
+            ),
+            "delete_url": url_for(
+                "delete_tuning_item_video", order_id=order_id, item_id=item_id, video_id=r["id"]
+            ),
+        }
+        for r in rows
+    ]
+
+
+def _resolve_yandex_disk_public_metadata(public_key):
+    """Look up a Яндекс.Диск public link's metadata to validate it before
+    saving — raises RuntimeError with a ready-to-show Russian message for
+    any problem (bad link, private/removed file, a folder instead of a
+    file, a non-video file, or Yandex being unreachable)."""
+    try:
+        resp = requests.get(
+            YANDEX_DISK_PUBLIC_API, params={"public_key": public_key}, timeout=10,
+        )
+    except requests.RequestException:
+        raise RuntimeError("Не удалось обратиться к Яндекс.Диску — проверьте ссылку и попробуйте снова.")
+    if resp.status_code == 404:
+        raise RuntimeError("Яндекс.Диск не нашёл файл по этой ссылке — убедитесь, что она публичная.")
+    if not resp.ok:
+        raise RuntimeError(f"Яндекс.Диск вернул ошибку ({resp.status_code}) — попробуйте позже.")
+    data = resp.json()
+    if data.get("type") != "file":
+        raise RuntimeError("Ссылка должна вести на отдельный файл, а не на папку.")
+    if data.get("media_type") != "video":
+        raise RuntimeError("Файл по этой ссылке не похож на видео.")
+    return data
+
+
+def _resolve_yandex_disk_download_href(public_key):
+    """A fresh, short-lived direct download URL for a Яндекс.Диск public
+    file. Re-resolved on every play request — these signed links expire
+    after a while, so none is ever stored."""
+    try:
+        resp = requests.get(
+            f"{YANDEX_DISK_PUBLIC_API}/download", params={"public_key": public_key}, timeout=10,
+        )
+    except requests.RequestException:
+        raise RuntimeError("Не удалось обратиться к Яндекс.Диску.")
+    if not resp.ok:
+        raise RuntimeError(f"Яндекс.Диск вернул ошибку ({resp.status_code}).")
+    href = resp.json().get("href")
+    if not href:
+        raise RuntimeError("Яндекс.Диск не вернул ссылку на файл.")
+    return href
+
+
 def format_money(value, decimals=0):
     """Format a number with a thin space as the thousands separator and,
     when decimals > 0, a comma as the decimal separator (Russian convention
@@ -3428,6 +3496,18 @@ def init_db(db_path=None, include_bootstrap_data=True):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             item_id INTEGER NOT NULL,
             filename TEXT NOT NULL,
+            comment TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS work_item_videos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id INTEGER NOT NULL,
+            yandex_public_key TEXT NOT NULL,
+            display_name TEXT,
             comment TEXT,
             created_at TEXT NOT NULL
         )
@@ -10713,6 +10793,9 @@ def edit_tuning_order(order_id):
             "SELECT * FROM tuning_order_ship_tickets WHERE order_id = ? ORDER BY id", (order_id,)
         ).fetchall()
         work_photos_by_item = {item["id"]: get_work_item_photos(db, item["id"]) for item in items}
+        work_videos_by_item = {
+            item["id"]: get_work_item_videos(db, order_id, item["id"]) for item in items
+        }
         notes = _order_notes(db, order_id)
         reminder_recipients = _note_reminder_recipients(db)
         return render_template(
@@ -10733,6 +10816,9 @@ def edit_tuning_order(order_id):
             document_error=session.pop("tuning_document_error", None),
             document_notice=session.pop("tuning_document_notice", None),
             work_photos_by_item=work_photos_by_item,
+            work_videos_by_item=work_videos_by_item,
+            video_error=session.pop("tuning_video_error", None),
+            video_notice=session.pop("tuning_video_notice", None),
             assignable_employees=assignable_employees,
             goods=goods, goods_subtotal=goods_subtotal, work_subtotal=work_subtotal,
             catalog_products=catalog_products,
@@ -10841,6 +10927,7 @@ def edit_tuning_order(order_id):
     for removed_id in existing_ids - submitted_ids:
         db.execute("DELETE FROM tuning_item_assignments WHERE item_id = ?", (removed_id,))
         db.execute("DELETE FROM work_item_photos WHERE item_id = ?", (removed_id,))
+        db.execute("DELETE FROM work_item_videos WHERE item_id = ?", (removed_id,))
         db.execute("DELETE FROM tuning_order_items WHERE id = ?", (removed_id,))
     for item in data["items"]:
         if item["item_id"] in existing_ids:
@@ -11661,6 +11748,73 @@ def upload_tuning_item_photo(order_id, item_id):
             )
             db.commit()
     return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
+@app.route("/tuning/<int:order_id>/item/<int:item_id>/video", methods=["POST"])
+@admin_login_required
+def upload_tuning_item_video(order_id, item_id):
+    """The video itself stays on the admin's own Яндекс.Диск — we only
+    store the public link they paste here and validate it up front, so a
+    typo or a private/non-video file is caught immediately instead of
+    failing silently the first time someone tries to play it."""
+    db = get_db()
+    item = db.execute(
+        "SELECT id FROM tuning_order_items WHERE id = ? AND order_id = ?", (item_id, order_id)
+    ).fetchone()
+    anchor = url_for("edit_tuning_order", order_id=order_id) + "#work-container"
+    if item is None:
+        return redirect(anchor)
+    yandex_url = request.form.get("yandex_url", "").strip()
+    comment = request.form.get("comment", "").strip()
+    if not yandex_url:
+        session["tuning_video_error"] = "Вставьте ссылку на видео с Яндекс.Диска."
+        return redirect(anchor)
+    try:
+        metadata = _resolve_yandex_disk_public_metadata(yandex_url)
+    except RuntimeError as exc:
+        session["tuning_video_error"] = str(exc)
+        return redirect(anchor)
+    db.execute(
+        "INSERT INTO work_item_videos (item_id, yandex_public_key, display_name, comment, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (item_id, yandex_url, metadata.get("name"), comment or None,
+         dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+    )
+    db.commit()
+    session["tuning_video_notice"] = "Видео добавлено."
+    return redirect(anchor)
+
+
+@app.route("/tuning/<int:order_id>/item/<int:item_id>/video/<int:video_id>/play")
+@admin_login_required
+def play_tuning_item_video(order_id, item_id, video_id):
+    """Resolves a fresh signed Яндекс.Диск download URL and redirects the
+    browser straight to it, so the video streams from Yandex, not from our
+    hosting — the whole point of keeping it off our server."""
+    db = get_db()
+    video = db.execute(
+        "SELECT yandex_public_key FROM work_item_videos WHERE id = ? AND item_id = ?",
+        (video_id, item_id),
+    ).fetchone()
+    if video is None:
+        abort(404)
+    try:
+        href = _resolve_yandex_disk_download_href(video["yandex_public_key"])
+    except RuntimeError as exc:
+        abort(502, description=str(exc))
+    return redirect(href)
+
+
+@app.route("/tuning/<int:order_id>/item/<int:item_id>/video/<int:video_id>/delete", methods=["POST"])
+@admin_login_required
+def delete_tuning_item_video(order_id, item_id, video_id):
+    db = get_db()
+    db.execute(
+        "DELETE FROM work_item_videos WHERE id = ? AND item_id = ?", (video_id, item_id)
+    )
+    db.commit()
+    session["tuning_video_notice"] = "Видео удалено."
+    return redirect(url_for("edit_tuning_order", order_id=order_id) + "#work-container")
 
 
 @app.route("/tuning/<int:order_id>/pay", methods=["POST"])

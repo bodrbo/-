@@ -7708,7 +7708,8 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   max-width: 90vw;
   max-height: 90vh;
 }
-.photo-modal-inner img {
+.photo-modal-inner img,
+.photo-modal-inner video {
   display: block;
   max-width: 90vw;
   max-height: 90vh;

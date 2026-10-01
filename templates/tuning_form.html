@@ -406,6 +406,12 @@
   <details class="panel collapsible-panel" open>
     <summary><span>Статусы работ</span><span class="chev" aria-hidden="true"></span></summary>
     <div class="collapsible-body">
+    {% if video_error %}
+    <div class="alert" role="alert">{{ video_error }}</div>
+    {% endif %}
+    {% if video_notice %}
+    <div class="alert alert-success" role="status">{{ video_notice }}</div>
+    {% endif %}
     {% if edit_order.source == 'subcontract_request' %}
     <div class="partner-price-lock" role="note">
       Клиент: {{ edit_order.client_name }}. Партнёр: {{ subcontract_partner.client_name if subcontract_partner else 'не назначен' }}.
@@ -415,7 +421,7 @@
     {% if items_prefill %}
     <div class="table-scroll">
       <table class="records">
-        <thead><tr><th>Работа</th><th>{{ 'Открытая цена, ₽' if edit_order.source == 'subcontract_request' else 'Цена, ₽' }}</th>{% if edit_order.source == 'subcontract_request' %}<th>Закрытая цена, ₽</th>{% endif %}<th>Статус</th><th>Задачи</th><th>Фото</th></tr></thead>
+        <thead><tr><th>Работа</th><th>{{ 'Открытая цена, ₽' if edit_order.source == 'subcontract_request' else 'Цена, ₽' }}</th>{% if edit_order.source == 'subcontract_request' %}<th>Закрытая цена, ₽</th>{% endif %}<th>Статус</th><th>Задачи</th><th>Медиа</th></tr></thead>
         <tbody>
           {% for item in items_prefill %}
           <tr class="{{ 'row-removed' if item.status == 'removed' }}">
@@ -474,6 +480,24 @@
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M3 7a1.6 1.6 0 011.6-1.6h1.1l.7-1.2h5.2l.7 1.2h1.1A1.6 1.6 0 0117 7v7a1.6 1.6 0 01-1.6 1.6H4.6A1.6 1.6 0 013 14V7z"/>
                   <circle cx="10" cy="10.5" r="2.7"/>
+                </svg>
+              </button>
+              {% set videos = work_videos_by_item.get(item.id, []) if work_videos_by_item is defined else [] %}
+              {% if videos %}
+              <button type="button" class="icon-btn" title="Открыть видео ({{ videos|length }})"
+                      onclick='openVideoModal({{ videos|tojson }})'>
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="2" y="4.5" width="12" height="11" rx="1.6"/>
+                  <path d="M14 8.3l3.6-2.4a.6.6 0 01.9.5v7.2a.6.6 0 01-.9.5L14 11.7" stroke-linejoin="round"/>
+                </svg>
+              </button>
+              {% endif %}
+              <button type="button" class="icon-btn" title="Добавить видео (ссылка на Яндекс.Диск)"
+                      onclick='openVideoUploadModal({{ url_for("upload_tuning_item_video", order_id=edit_order.id, item_id=item.id)|tojson }})'>
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="2" y="4.5" width="12" height="11" rx="1.6"/>
+                  <path d="M14 8.3l3.6-2.4a.6.6 0 01.9.5v7.2a.6.6 0 01-.9.5L14 11.7" stroke-linejoin="round"/>
+                  <path d="M8 8v4M6 10h4" stroke-linecap="round"/>
                 </svg>
               </button>
             </td>
@@ -1215,6 +1239,61 @@
     </div>
   </div>
 
+  <div id="video-modal" class="photo-modal hidden" onclick="if (event.target === this) closeVideoModal();">
+    <div class="photo-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closeVideoModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <button type="button" id="video-modal-prev" class="photo-modal-nav photo-modal-nav-prev hidden" onclick="showPrevVideo()" aria-label="Предыдущее видео">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5l-6 5 6 5"/>
+        </svg>
+      </button>
+      <button type="button" id="video-modal-next" class="photo-modal-nav photo-modal-nav-next hidden" onclick="showNextVideo()" aria-label="Следующее видео">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 5l6 5-6 5"/>
+        </svg>
+      </button>
+      <span id="video-modal-counter" class="photo-modal-counter hidden"></span>
+      <video id="video-modal-player" controls></video>
+      <p id="video-modal-name" class="photo-modal-comment hidden"></p>
+      <p id="video-modal-comment" class="photo-modal-comment hidden"></p>
+      <form id="video-modal-delete-form" method="post"
+            onsubmit="return confirm('Удалить это видео из заказа? Сам файл на Яндекс.Диске не затрагивается.');"
+            style="margin-top:10px;">
+        <button type="submit" class="btn-secondary">Удалить из заказа</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="video-upload-modal" class="photo-modal hidden" onclick="if (event.target === this) closeVideoUploadModal();">
+    <div class="photo-modal-inner photo-upload-modal-inner">
+      <button type="button" class="photo-modal-close" onclick="closeVideoUploadModal()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <form id="video-upload-form" method="post">
+        <div class="field">
+          <label for="video-upload-url">Ссылка на видео (Яндекс.Диск)</label>
+          <input type="url" id="video-upload-url" name="yandex_url"
+                 placeholder="https://disk.yandex.ru/i/…" required>
+          <p class="hint">Загрузите видео на свой Яндекс.Диск, откройте «Поделиться» → «Скопировать ссылку» и вставьте её сюда. Ссылка должна оставаться публичной.</p>
+        </div>
+        <div class="field" style="margin-top:14px;">
+          <label for="video-upload-comment">Комментарий</label>
+          <textarea id="video-upload-comment" name="comment" class="photo-comment-input"
+                    placeholder="Например: демонстрация работы после настройки"></textarea>
+        </div>
+        <div class="field field-submit" style="margin-top:14px;">
+          <button type="submit">Добавить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div id="assign-modal" class="photo-modal hidden" onclick="if (event.target === this) closeAssignModal();">
     <div class="photo-modal-inner">
       <button type="button" class="photo-modal-close" onclick="closeAssignModal()" aria-label="Закрыть">
@@ -1492,13 +1571,95 @@ function closePhotoUploadModal() {
   document.getElementById('photo-upload-modal').classList.add('hidden');
 }
 
+var videoModalVideos = [];
+var videoModalIndex = 0;
+
+function openVideoModal(videos) {
+  videoModalVideos = videos || [];
+  videoModalIndex = 0;
+  renderVideoModal();
+  document.getElementById('video-modal').classList.remove('hidden');
+}
+
+function renderVideoModal() {
+  var video = videoModalVideos[videoModalIndex];
+  if (!video) return;
+  var player = document.getElementById('video-modal-player');
+  player.pause();
+  player.src = video.play_url;
+
+  var nameEl = document.getElementById('video-modal-name');
+  if (video.display_name) {
+    nameEl.textContent = video.display_name;
+    nameEl.classList.remove('hidden');
+  } else {
+    nameEl.classList.add('hidden');
+  }
+
+  var commentEl = document.getElementById('video-modal-comment');
+  if (video.comment) {
+    commentEl.textContent = video.comment;
+    commentEl.classList.remove('hidden');
+  } else {
+    commentEl.classList.add('hidden');
+  }
+
+  document.getElementById('video-modal-delete-form').action = video.delete_url;
+
+  var multiple = videoModalVideos.length > 1;
+  document.getElementById('video-modal-prev').classList.toggle('hidden', !multiple);
+  document.getElementById('video-modal-next').classList.toggle('hidden', !multiple);
+  var counterEl = document.getElementById('video-modal-counter');
+  if (multiple) {
+    counterEl.textContent = (videoModalIndex + 1) + ' / ' + videoModalVideos.length;
+    counterEl.classList.remove('hidden');
+  } else {
+    counterEl.classList.add('hidden');
+  }
+}
+
+function showPrevVideo() {
+  videoModalIndex = (videoModalIndex - 1 + videoModalVideos.length) % videoModalVideos.length;
+  renderVideoModal();
+}
+
+function showNextVideo() {
+  videoModalIndex = (videoModalIndex + 1) % videoModalVideos.length;
+  renderVideoModal();
+}
+
+function closeVideoModal() {
+  var player = document.getElementById('video-modal-player');
+  player.pause();
+  player.removeAttribute('src');
+  player.load();
+  document.getElementById('video-modal').classList.add('hidden');
+  videoModalVideos = [];
+}
+
+function openVideoUploadModal(actionUrl) {
+  document.getElementById('video-upload-form').action = actionUrl;
+  document.getElementById('video-upload-comment').value = '';
+  document.getElementById('video-upload-url').value = '';
+  document.getElementById('video-upload-modal').classList.remove('hidden');
+}
+
+function closeVideoUploadModal() {
+  document.getElementById('video-upload-modal').classList.add('hidden');
+}
+
 document.addEventListener('keydown', function (e) {
-  var modalOpen = !document.getElementById('photo-modal').classList.contains('hidden');
-  if (modalOpen && e.key === 'ArrowLeft') showPrevPhoto();
-  if (modalOpen && e.key === 'ArrowRight') showNextPhoto();
+  var photoModalOpen = !document.getElementById('photo-modal').classList.contains('hidden');
+  if (photoModalOpen && e.key === 'ArrowLeft') showPrevPhoto();
+  if (photoModalOpen && e.key === 'ArrowRight') showNextPhoto();
+  var videoModalOpen = !document.getElementById('video-modal').classList.contains('hidden');
+  if (videoModalOpen && e.key === 'ArrowLeft') showPrevVideo();
+  if (videoModalOpen && e.key === 'ArrowRight') showNextVideo();
   if (e.key === 'Escape') {
     closePhotoModal();
     closePhotoUploadModal();
+    closeVideoModal();
+    closeVideoUploadModal();
     closeAssignModal();
     closeCreateProductModal();
   }
