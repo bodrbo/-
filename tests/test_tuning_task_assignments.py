@@ -935,5 +935,89 @@ class TuningTaskDatesTests(_TuningTaskFixture, unittest.TestCase):
         self.assertIn("Поручена:", page)
 
 
+class TuningTaskCommentEditTests(_TuningTaskFixture, unittest.TestCase):
+    def assignment(self, employee):
+        with application_module.app.app_context():
+            return dict(application_module.get_db().execute(
+                "SELECT * FROM tuning_item_assignments WHERE item_id = ? AND employee_name = ?",
+                (self.item_id, employee),
+            ).fetchone())
+
+    def comment_of(self, employee):
+        return self.assignment(employee)["comment"]
+
+    def save_comment(self, assignment_id, comment):
+        self.login_admin()
+        return self.client.post(
+            f"/tuning/assignments/{assignment_id}/comment", data={"comment": comment}
+        )
+
+    def test_a_comment_can_be_added_to_a_task_created_without_one(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task_id = self.assignment(self.EMPLOYEE_A)["id"]
+        self.assertFalse(self.comment_of(self.EMPLOYEE_A))
+        response = self.save_comment(task_id, "  Не забыть про прокладку  ")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/board", response.headers["Location"])
+        self.assertEqual(self.comment_of(self.EMPLOYEE_A), "Не забыть про прокладку")
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("Комментарий сохранён", page)
+        self.assertIn("Не забыть про прокладку", page)
+
+    def test_an_existing_comment_can_be_edited_and_cleared(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task_id = self.assignment(self.EMPLOYEE_A)["id"]
+        self.save_comment(task_id, "Старый текст")
+        self.save_comment(task_id, "Новый текст")
+        self.assertEqual(self.comment_of(self.EMPLOYEE_A), "Новый текст")
+        self.save_comment(task_id, "")
+        self.assertEqual(self.comment_of(self.EMPLOYEE_A), "")
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("Комментарий удалён", page)
+
+    def test_the_comment_only_changes_that_employees_task(self):
+        self.assign_many([(self.EMPLOYEE_A, 100, 1), (self.EMPLOYEE_B, 100, 1)])
+        self.save_comment(self.assignment(self.EMPLOYEE_A)["id"], "Только для А")
+        self.assertEqual(self.comment_of(self.EMPLOYEE_A), "Только для А")
+        self.assertFalse(self.comment_of(self.EMPLOYEE_B))
+
+    def test_too_long_comment_is_rejected_and_old_one_kept(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task_id = self.assignment(self.EMPLOYEE_A)["id"]
+        self.save_comment(task_id, "Короткий")
+        self.save_comment(task_id, "я" * 2001)
+        self.assertEqual(self.comment_of(self.EMPLOYEE_A), "Короткий")
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("слишком длинный", page)
+
+    def test_a_paid_task_comment_is_editable_too(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task_id = self.assignment(self.EMPLOYEE_A)["id"]
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            entry_id = db.execute(
+                "INSERT INTO entries (employee, work_type, rate, quantity, amount, "
+                "work_date, created_at) VALUES (?, 'Полировка корпуса', 100, 2, 200, "
+                "'2026-09-01', '2026-09-01 12:00')",
+                (self.EMPLOYEE_A,),
+            ).lastrowid
+            db.execute(
+                "UPDATE tuning_item_assignments SET entry_id = ?, assignment_status = 'done' "
+                "WHERE id = ?", (entry_id, task_id),
+            )
+            db.commit()
+        self.save_comment(task_id, "Сделано, принято клиентом")
+        self.assertEqual(self.comment_of(self.EMPLOYEE_A), "Сделано, принято клиентом")
+
+    def test_the_board_offers_comment_editing_for_every_task(self):
+        self.assign_many([(self.EMPLOYEE_A, 100, 1), (self.EMPLOYEE_B, 100, 1)])
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        for employee in (self.EMPLOYEE_A, self.EMPLOYEE_B):
+            self.assertIn(
+                f"/tuning/assignments/{self.assignment(employee)['id']}/comment", page
+            )
+        self.assertIn("+ Добавить комментарий", page)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -165,6 +165,14 @@
             </form>
             <div class="hint" style="margin:2px 0 0;">= {{ (a.rate * a.norm_hours)|money }} ₽</div>
             {% endif %}
+            <details class="board-task-comment">
+              <summary>{{ 'Комментарий' if a.comment else '+ Добавить комментарий' }}</summary>
+              <form action="{{ url_for('update_tuning_assignment_comment', assignment_id=a.id) }}" method="post">
+                <textarea name="comment" rows="3" maxlength="2000"
+                          aria-label="Комментарий к задаче">{{ a.comment or '' }}</textarea>
+                <button type="submit" class="btn-secondary board-task-rate-save">Сохранить</button>
+              </form>
+            </details>
             {% if a.comment %}<p class="assignment-comment-preview">{{ a.comment }}</p>{% endif %}
           </div>
         </div>

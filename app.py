@@ -11446,6 +11446,34 @@ def update_tuning_assignment_terms(assignment_id):
     return redirect(url_for("tuning_order_board", order_id=assignment["order_id"]))
 
 
+@app.route("/tuning/assignments/<int:assignment_id>/comment", methods=["POST"])
+@admin_login_required
+def update_tuning_assignment_comment(assignment_id):
+    """Add or edit (or clear) the comment on an already-created task. Allowed
+    at any status, paid or not — it's a note, not a financial term."""
+    db = get_db()
+    assignment = db.execute(
+        "SELECT tia.id, ti.order_id FROM tuning_item_assignments tia "
+        "JOIN tuning_order_items ti ON ti.id = tia.item_id WHERE tia.id = ?",
+        (assignment_id,),
+    ).fetchone()
+    if assignment is None:
+        return redirect(url_for("tuning_index"))
+    board = url_for("tuning_order_board", order_id=assignment["order_id"])
+    comment = request.form.get("comment", "").strip()
+    if len(comment) > TASK_ASSIGNMENT_COMMENT_MAX_LENGTH:
+        session["tuning_board_error"] = (
+            f"Комментарий слишком длинный (максимум {TASK_ASSIGNMENT_COMMENT_MAX_LENGTH} символов)."
+        )
+        return redirect(board)
+    db.execute(
+        "UPDATE tuning_item_assignments SET comment = ? WHERE id = ?", (comment, assignment_id)
+    )
+    db.commit()
+    session["tuning_board_notice"] = "Комментарий сохранён." if comment else "Комментарий удалён."
+    return redirect(board)
+
+
 @app.route("/tuning/assignments/<int:assignment_id>/status", methods=["POST"])
 @admin_login_required
 def set_tuning_assignment_status(assignment_id):
