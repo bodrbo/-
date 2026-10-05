@@ -21,6 +21,9 @@ Usage:
     python3 scripts/fix_card_1936_stale_trip_498.py            # dry run
     python3 scripts/fix_card_1936_stale_trip_498.py --apply
     python3 scripts/fix_card_1936_stale_trip_498.py --apply --allow-settled-week
+    python3 scripts/fix_card_1936_stale_trip_498.py --apply --close-now
+(--close-now runs the same auto-close pass cron does right after the fix —
+for every card ready to close, not only #1936 — instead of waiting for cron.)
 """
 
 import datetime as dt
@@ -48,6 +51,8 @@ load_env_file(PROJECT_ROOT.parent / ".env")
 load_env_file(PROJECT_ROOT / ".env")
 
 import app as application_module  # noqa: E402
+from modules.payroll_rates import repository as payroll_rates_repository  # noqa: E402
+from modules.schedule import services as schedule_services  # noqa: E402
 
 CARD_ID = 1936
 TRIP_ID = 498
@@ -64,6 +69,7 @@ def abort(message):
 def main():
     apply = "--apply" in sys.argv[1:]
     allow_settled_week = "--allow-settled-week" in sys.argv[1:]
+    close_now = "--close-now" in sys.argv[1:]
     with application_module.app.app_context():
         db = application_module.get_db()
 
@@ -138,9 +144,35 @@ def main():
                 "выплачено на эту сумму больше, чем начислено — зачтите её в следующей выплате "
                 "или договоритесь о возврате."
             )
-        print("\nГотово. Рейс №498 удалён, карточка №1936 отвязана. Автозакрытие подхватит её "
-              "при ближайшем запуске по расписанию (cron); проверка:\n"
-              "  python3 scripts/diagnose_schedule_item_closing.py 1936")
+        print(f"\nГотово. Рейс №{TRIP_ID} удалён, карточка №{CARD_ID} отвязана.")
+        if not close_now:
+            print("Автозакрытие подхватит её при ближайшем запуске по расписанию (cron); проверка:\n"
+                  "  python3 scripts/diagnose_schedule_item_closing.py 1936")
+            return 0
+
+        stats = schedule_services.auto_close_schedule_items(
+            db, application_module._create_trip_from_schedule_payload,
+            payroll_rates_repository.get_excursion_role_rate,
+            apply_minimum_shift=application_module._apply_schedule_minimum_shift,
+        )
+        print(f"Автозакрытие: закрыто {stats['closed']}, на проверку {stats['needs_review']}, "
+              f"пропущено {stats['skipped']}.")
+        for line in stats["skipped_details"]:
+            print("   пропущено:", line)
+        card = db.execute("SELECT accounting_trip_id FROM schedule_items WHERE id = ?", (CARD_ID,)).fetchone()
+        if card["accounting_trip_id"] is None:
+            print(f"Карточка №{CARD_ID} НЕ закрыта — причина в списке пропущенных выше.")
+            return 1
+        new_trip = db.execute("SELECT * FROM trips WHERE id = ?", (card["accounting_trip_id"],)).fetchone()
+        print(f"Новый рейс №{new_trip['id']}: {new_trip['boat']}, {new_trip['trip_date']} "
+              f"{new_trip['trip_time']}, выручка {new_trip['revenue']}, "
+              f"needs_review={new_trip['needs_review']}")
+        for e in db.execute(
+            "SELECT e.* FROM trip_labor tl JOIN entries e ON e.id = tl.entry_id WHERE tl.trip_id = ?",
+            (new_trip["id"],),
+        ).fetchall():
+            print(f"   начисление: {e['employee']} | {e['quantity']} ч × {e['rate']} = {e['amount']} ₽ "
+                  f"| {e['work_date']}")
     return 0
 
 
