@@ -248,7 +248,12 @@ def create_linked_task(db, item, employee_name, rate, comment, day_rows, create_
     if errors:
         return False, " ".join(errors), None
     total_hours = sum(hours for _, _, hours in clean_days)
-    assignment_id = create_order_assignment(db, item, employee_name, rate, total_hours, comment)
+    work_dates = sorted(work_date for work_date, _, _ in clean_days)
+    due = {"due_from": work_dates[0], "due_to": work_dates[-1] if work_dates[-1] != work_dates[0] else None} \
+        if work_dates else {}
+    assignment_id = create_order_assignment(
+        db, item, employee_name, rate, total_hours, comment, **due
+    )
     task_id = repository.create_task(
         db, assignment_id, employee_name, item["work_name"], rate, comment, current_timestamp()
     )

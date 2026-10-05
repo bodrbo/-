@@ -1339,6 +1339,19 @@
           </template>
           <button type="button" class="btn-add" onclick="addAssignEmployeeRow()">Добавить сотрудника</button>
         </div>
+        <div class="field field-wide">
+          <span>Срок исполнения</span>
+          <div class="assign-due-row">
+            <label>Дата (или начало периода)
+              <input type="date" name="due_from" id="assign-due-from"
+                     onchange="document.getElementById('assign-due-to').min = this.value">
+            </label>
+            <label>Конец периода
+              <input type="date" name="due_to" id="assign-due-to">
+            </label>
+          </div>
+          <p class="hint" style="margin:0;">Одна дата — задачу нужно сделать в этот день; обе — за этот период. Можно не указывать.</p>
+        </div>
         <div class="field">
           <label for="assign-comment">Комментарий к задаче</label>
           <textarea id="assign-comment" name="comment" rows="4" maxlength="2000"
@@ -1472,6 +1485,9 @@ function openAssignModal(actionUrl, description) {
     }
   });
   document.getElementById('assign-comment').value = '';
+  document.getElementById('assign-due-from').value = '';
+  document.getElementById('assign-due-to').value = '';
+  document.getElementById('assign-due-to').min = '';
   document.getElementById('assign-modal').classList.remove('hidden');
 }
 

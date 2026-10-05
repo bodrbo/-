@@ -686,14 +686,17 @@ class TuningTaskDatesTests(_TuningTaskFixture, unittest.TestCase):
         self.login_admin()
         self.client.post(f"/tuning/assignments/{assignment_id}/status", data={"status": status})
 
-    def test_dates_are_stamped_automatically(self):
+    def test_the_completion_date_is_stamped_automatically_and_creation_date_is_not_shown(self):
         today = application_module.dt.date.today().isoformat()
         self.assign(self.EMPLOYEE_A, 100, 2)
         task = self.assignment(self.EMPLOYEE_A)
-        self.assertEqual(task["assigned_at"][:10], today)
         self.assertIsNone(task["completed_at"])
+        self.assertIsNone(task["due_from"])
         page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
-        self.assertIn("Поручена", page)
+        self.assertNotIn("Поручена", page)
+        self.assertNotIn('name="assigned_date"', page)
+        self.assertIn('name="due_from"', page)
+        self.assertIn('name="due_to"', page)
         self.assertIn('name="completed_date"', page)
 
         self.set_status(task["id"], "accepted")
@@ -735,11 +738,11 @@ class TuningTaskDatesTests(_TuningTaskFixture, unittest.TestCase):
         self.set_status(task_id, "in_progress")
         self.assertEqual(self.assignment(self.EMPLOYEE_A)["completed_at"], stamped["completed_at"])
 
-    def edit_dates(self, task_id, assigned="", completed=""):
+    def edit_dates(self, task_id, due_from="", completed="", due_to=""):
         self.login_admin()
         return self.client.post(
             f"/tuning/assignments/{task_id}/dates",
-            data={"assigned_date": assigned, "completed_date": completed},
+            data={"due_from": due_from, "due_to": due_to, "completed_date": completed},
         )
 
     def test_dates_can_be_edited_keeping_the_time_of_day(self):
@@ -752,10 +755,11 @@ class TuningTaskDatesTests(_TuningTaskFixture, unittest.TestCase):
                 "assignment_status = 'done', completed_at = '2026-09-03 17:45' WHERE id = ?", (task_id,)
             )
             db.commit()
-        response = self.edit_dates(task_id, "2026-08-28", "2026-09-05")
+        response = self.edit_dates(task_id, "2026-08-28", "2026-09-05", due_to="2026-08-31")
         self.assertEqual(response.status_code, 302)
         task = self.assignment(self.EMPLOYEE_A)
-        self.assertEqual(task["assigned_at"], "2026-08-28 10:30")
+        self.assertEqual((task["due_from"], task["due_to"]), ("2026-08-28", "2026-08-31"))
+        self.assertEqual(task["assigned_at"], "2026-09-01 10:30")  # creation stamp is never edited
         self.assertEqual(task["completed_at"], "2026-09-05 17:45")
         self.assertIn("Даты задачи обновлены", self.client.get(
             f"/tuning/{self.order_id}/board").get_data(as_text=True))
@@ -935,26 +939,136 @@ class TuningTaskDatesTests(_TuningTaskFixture, unittest.TestCase):
             db.commit()
         before = self.assignment(self.EMPLOYEE_A)
         self.edit_dates(task_id, "not-a-date", "2026-09-05")
-        self.edit_dates(task_id, "2026-09-10", "2026-09-05")  # completed before assigned
+        self.edit_dates(task_id, "2026-09-10", "garbage", due_to="2026-09-12")
         after = self.assignment(self.EMPLOYEE_A)
-        self.assertEqual((after["assigned_at"], after["completed_at"]),
-                         (before["assigned_at"], before["completed_at"]))
+        self.assertEqual(
+            (after["due_from"], after["due_to"], after["completed_at"]),
+            (before["due_from"], before["due_to"], before["completed_at"]),
+        )
         page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
-        self.assertIn("не может быть раньше", page)
+        self.assertIn("Укажите корректные даты", page)
 
     def test_a_task_that_is_not_done_has_no_completion_date_to_edit(self):
         self.assign(self.EMPLOYEE_A, 100, 2)
         task_id = self.assignment(self.EMPLOYEE_A)["id"]
         self.edit_dates(task_id, "2026-08-20", "2026-09-05")
         task = self.assignment(self.EMPLOYEE_A)
-        self.assertEqual(task["assigned_at"][:10], "2026-08-20")
+        self.assertEqual(task["due_from"], "2026-08-20")
         self.assertIsNone(task["completed_at"])
 
-    def test_team_dashboard_shows_the_dates(self):
+    def test_team_dashboard_shows_the_due_date_or_period_instead_of_the_creation_date(self):
         self.assign(self.EMPLOYEE_A, 100, 2)
         self.login_team(self.USERNAME_A, self.EMPLOYEE_A)
         page = self.client.get("/team/").get_data(as_text=True)
-        self.assertIn("Поручена:", page)
+        self.assertNotIn("Поручена:", page)
+        self.assertNotIn("Срок:", page)  # none set -> nothing shown
+        task_id = self.assignment(self.EMPLOYEE_A)["id"]
+        self.edit_dates(task_id, "2026-10-12")
+        self.login_team(self.USERNAME_A, self.EMPLOYEE_A)
+        self.assertIn("Срок: 12/10/2026", self.client.get("/team/").get_data(as_text=True))
+        self.edit_dates(task_id, "2026-10-12", due_to="2026-10-15")
+        self.login_team(self.USERNAME_A, self.EMPLOYEE_A)
+        self.assertIn("Срок: 12/10/2026 – 15/10/2026", self.client.get("/team/").get_data(as_text=True))
+
+
+class TuningTaskDueDateTests(_TuningTaskFixture, unittest.TestCase):
+    """The planned execution (one date or a period) chosen when a task is
+    created, replacing the shown creation date."""
+
+    def assign_with_due(self, due_from="", due_to="", rows=None):
+        self.login_admin()
+        data = MultiDict()
+        for name, rate, hours in rows or [(self.EMPLOYEE_A, 100, 2)]:
+            data.add("employee_name[]", name)
+            data.add("rate[]", str(rate))
+            data.add("norm_hours[]", str(hours))
+        data["comment"] = ""
+        data["due_from"] = due_from
+        data["due_to"] = due_to
+        return self.client.post(f"/tuning/{self.order_id}/item/{self.item_id}/assign", data=data)
+
+    def due(self, employee):
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT due_from, due_to FROM tuning_item_assignments "
+                "WHERE item_id = ? AND employee_name = ?", (self.item_id, employee),
+            ).fetchone()
+            return (row["due_from"], row["due_to"])
+
+    def test_a_single_date_is_stored_as_due_from_only(self):
+        self.assign_with_due("2026-10-12")
+        self.assertEqual(self.due(self.EMPLOYEE_A), ("2026-10-12", None))
+
+    def test_a_period_stores_both_ends(self):
+        self.assign_with_due("2026-10-12", "2026-10-15")
+        self.assertEqual(self.due(self.EMPLOYEE_A), ("2026-10-12", "2026-10-15"))
+
+    def test_no_date_is_allowed(self):
+        self.assign_with_due()
+        self.assertEqual(self.due(self.EMPLOYEE_A), (None, None))
+
+    def test_equal_ends_collapse_to_one_date_and_reversed_ends_are_swapped(self):
+        self.assign_with_due("2026-10-12", "2026-10-12")
+        self.assertEqual(self.due(self.EMPLOYEE_A), ("2026-10-12", None))
+        self.assign_with_due("2026-10-20", "2026-10-15", rows=[(self.EMPLOYEE_B, 100, 1)])
+        self.assertEqual(self.due(self.EMPLOYEE_B), ("2026-10-15", "2026-10-20"))
+
+    def test_a_lone_end_date_counts_as_the_single_date_and_garbage_is_ignored(self):
+        self.assign_with_due("", "2026-10-14")
+        self.assertEqual(self.due(self.EMPLOYEE_A), ("2026-10-14", None))
+        self.assign_with_due("not-a-date", "", rows=[(self.EMPLOYEE_B, 100, 1)])
+        self.assertEqual(self.due(self.EMPLOYEE_B), (None, None))
+
+    def test_everyone_assigned_in_one_submission_shares_the_due_date(self):
+        self.assign_with_due("2026-10-12", "2026-10-15",
+                             rows=[(self.EMPLOYEE_A, 100, 1), (self.EMPLOYEE_B, 150, 1)])
+        self.assertEqual(self.due(self.EMPLOYEE_A), ("2026-10-12", "2026-10-15"))
+        self.assertEqual(self.due(self.EMPLOYEE_B), ("2026-10-12", "2026-10-15"))
+
+    def test_the_board_shows_the_due_date_in_the_edit_form(self):
+        self.assign_with_due("2026-10-12", "2026-10-15")
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn('name="due_from" value="2026-10-12"', page)
+        self.assertIn('name="due_to" value="2026-10-15"', page)
+
+    def test_the_assign_modals_offer_the_due_fields(self):
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn('id="assign-due-from"', page)
+        order_page = self.client.get(f"/tuning/edit/{self.order_id}").get_data(as_text=True)
+        self.assertIn('id="assign-due-from"', order_page)
+
+    def schedule_task(self, days):
+        self.login_admin()
+        data = MultiDict([
+            ("employee_name", self.EMPLOYEE_A), ("rate", "100"), ("comment", ""),
+            ("order_id", str(self.order_id)), ("order_item_id", str(self.item_id)),
+            ("return_date", "2026-10-12"),
+        ])
+        for day in days:
+            data.add("work_date[]", day)
+            data.add("start_time[]", "10:00")
+            data.add("planned_hours[]", "2")
+        return self.client.post("/schedule/tuning/tasks", data=data)
+
+    def test_a_task_scheduled_on_one_day_gets_that_day_as_its_due_date(self):
+        self.schedule_task(["2026-10-12"])
+        self.assertEqual(self.due(self.EMPLOYEE_A), ("2026-10-12", None))
+
+    def test_a_task_scheduled_over_several_days_gets_the_period_as_its_due_date(self):
+        self.schedule_task(["2026-10-14", "2026-10-12", "2026-10-13"])
+        self.assertEqual(self.due(self.EMPLOYEE_A), ("2026-10-12", "2026-10-14"))
+
+    def test_the_assignment_message_to_the_employee_includes_the_due_date(self):
+        from unittest import mock
+        with mock.patch.object(application_module, "send_telegram_notification_to_employee") as sender:
+            self.assign_with_due("2026-10-12", "2026-10-15")
+        texts = [call.args[2] for call in sender.call_args_list]
+        self.assertTrue(any("Срок: 12.10.2026 – 15.10.2026" in text for text in texts), texts)
+        with mock.patch.object(application_module, "send_telegram_notification_to_employee") as sender:
+            self.assign_with_due("2026-10-14", rows=[(self.EMPLOYEE_B, 100, 1)])
+        texts = [call.args[2] for call in sender.call_args_list]
+        self.assertTrue(any("Срок: 14.10.2026" in text and "–" not in text.split("Срок:")[1].split("\n")[0]
+                            for text in texts), texts)
 
 
 class TuningTaskCommentEditTests(_TuningTaskFixture, unittest.TestCase):

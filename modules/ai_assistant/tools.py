@@ -480,7 +480,7 @@ def _tuning_order_details(db, arguments, user):
     for item in item_rows:
         assignment_rows = db.execute(
             "SELECT id, employee_name, rate, norm_hours, comment, assignment_status, "
-            "assigned_at, responded_at, entry_id FROM tuning_item_assignments "
+            "due_from, due_to, completed_at, entry_id FROM tuning_item_assignments "
             "WHERE item_id = ? ORDER BY id",
             (item["id"],),
         ).fetchall()
@@ -504,8 +504,9 @@ def _tuning_order_details(db, arguments, user):
                 "norm_hours": _money(assignment["norm_hours"]),
                 "comment": _safe_text(assignment["comment"]),
                 "assignment_status": assignment["assignment_status"],
-                "assigned_at": assignment["assigned_at"],
-                "responded_at": assignment["responded_at"],
+                "due_from": assignment["due_from"],
+                "due_to": assignment["due_to"],
+                "completed_at": assignment["completed_at"],
                 "payroll_entry_id": assignment["entry_id"],
             } for assignment in assignment_rows],
             "photos": [{

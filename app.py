@@ -2137,6 +2137,12 @@ def init_db(db_path=None, include_bootstrap_data=True):
             "ALTER TABLE tuning_item_assignments "
             "ADD COLUMN comment TEXT NOT NULL DEFAULT ''"
         )
+    for due_column in ("due_from", "due_to"):
+        # Planned execution: one date (due_from only) or a period (both),
+        # chosen when the task is created. assigned_at stays as the internal
+        # creation timestamp (reminders, ordering) but is no longer shown.
+        if due_column not in tuning_assignment_cols:
+            conn.execute(f"ALTER TABLE tuning_item_assignments ADD COLUMN {due_column} TEXT")
     if "completed_at" not in tuning_assignment_cols:
         # The task's completion date (assigned_at is its assignment date).
         # Stamped by the triggers below whenever the status becomes "done",
@@ -5801,8 +5807,8 @@ app.register_blueprint(
         # defined later in this file (near assign_tuning_item) — same
         # deferred-name-resolution trick the schedule registration above
         # already relies on for e.g. _sync_weather_forecast.
-        create_order_assignment=lambda db, item, employee_name, rate, hours, comment: (
-            _create_tuning_item_assignment(db, item, employee_name, rate, hours, comment)
+        create_order_assignment=lambda db, item, employee_name, rate, hours, comment, **due: (
+            _create_tuning_item_assignment(db, item, employee_name, rate, hours, comment, **due)
         ),
         update_order_assignment_status=lambda db, assignment_id, status: (
             _set_tuning_item_assignment_status(db, assignment_id, status)
@@ -11552,6 +11558,7 @@ def assign_tuning_item(order_id, item_id):
     raw_rates = request.form.getlist("rate[]")
     raw_hours = request.form.getlist("norm_hours[]")
     comment = request.form.get("comment", "").strip()
+    due_from, due_to = _parse_task_due(request.form.get("due_from"), request.form.get("due_to"))
 
     valid_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
     seen = set()
@@ -11576,7 +11583,9 @@ def assign_tuning_item(order_id, item_id):
     if rows and len(comment) <= TASK_ASSIGNMENT_COMMENT_MAX_LENGTH:
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
         created_ids = [
-            _insert_tuning_item_assignment(db, item_id, employee_name, rate, hours, comment, now)
+            _insert_tuning_item_assignment(
+                db, item_id, employee_name, rate, hours, comment, now, due_from, due_to
+            )
             for employee_name, rate, hours in rows
         ]
         db.commit()
@@ -11588,7 +11597,45 @@ def assign_tuning_item(order_id, item_id):
     return redirect(url_for(return_endpoint, order_id=order_id))
 
 
-def _insert_tuning_item_assignment(db, item_id, employee_name, rate, hours, comment, now):
+def _parse_task_due(from_raw, to_raw):
+    """Planned-execution inputs -> (due_from, due_to) as ISO dates. One date
+    comes back as (date, None); a period as (start, end) with end after
+    start (a reversed pair is swapped); a lone "to" counts as the one date;
+    unparseable/blank input as (None, None)."""
+    def parse(raw):
+        try:
+            return dt.date.fromisoformat((raw or "").strip()).isoformat()
+        except ValueError:
+            return None
+    due_from, due_to = parse(from_raw), parse(to_raw)
+    if due_from is None:
+        due_from, due_to = due_to, None
+    if due_from and due_to:
+        if due_to < due_from:
+            due_from, due_to = due_to, due_from
+        if due_to == due_from:
+            due_to = None
+    return due_from, due_to
+
+
+def format_task_due(due_from, due_to):
+    """'05/10/2026' or '05/10/2026 – 09/10/2026'; empty when no due date."""
+    if not due_from:
+        return ""
+    if due_to:
+        return f"{format_ru_date(due_from)} – {format_ru_date(due_to)}"
+    return format_ru_date(due_from)
+
+
+app.jinja_env.filters["task_due"] = lambda task: format_task_due(
+    task["due_from"] if "due_from" in task.keys() else None,
+    task["due_to"] if "due_to" in task.keys() else None,
+)
+
+
+def _insert_tuning_item_assignment(
+    db, item_id, employee_name, rate, hours, comment, now, due_from=None, due_to=None
+):
     """Bare INSERT behind assign_tuning_item's multi-employee loop — pulled
     out so modules/tuning_schedule can hand a work item to someone on a
     specific day through the exact same tuning_item_assignments row shape,
@@ -11597,21 +11644,23 @@ def _insert_tuning_item_assignment(db, item_id, employee_name, rate, hours, comm
     (_flag_tuning_item_budget_overrun), same as assign_tuning_item does."""
     cur = db.execute(
         "INSERT INTO tuning_item_assignments "
-        "(item_id, employee_name, rate, norm_hours, comment, assignment_status, assigned_at) "
-        "VALUES (?, ?, ?, ?, ?, 'pending', ?)",
-        (item_id, employee_name, rate, hours, comment, now),
+        "(item_id, employee_name, rate, norm_hours, comment, assignment_status, assigned_at, "
+        "due_from, due_to) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
+        (item_id, employee_name, rate, hours, comment, now, due_from, due_to),
     )
     return cur.lastrowid
 
 
-def _create_tuning_item_assignment(db, item, employee_name, rate, hours, comment):
+def _create_tuning_item_assignment(
+    db, item, employee_name, rate, hours, comment, due_from=None, due_to=None
+):
     """Self-contained version of the insert above (commit + notify + budget
     flag included) — the callable injected into modules/tuning_schedule as
     create_order_assignment, for assigning a work item to someone directly
     from the tuning schedule rather than from the order/board."""
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     assignment_id = _insert_tuning_item_assignment(
-        db, item["id"], employee_name, rate, hours, comment, now
+        db, item["id"], employee_name, rate, hours, comment, now, due_from, due_to
     )
     db.commit()
     _notify_task_assignment(db, ASSIGNMENT_TUNING, assignment_id)
@@ -11925,11 +11974,12 @@ def repair_tuning_order_payouts(order_id):
 @app.route("/tuning/assignments/<int:assignment_id>/dates", methods=["POST"])
 @admin_login_required
 def update_tuning_assignment_dates(assignment_id):
-    """Admin correction of a task's assignment and completion dates. The
-    completion date only exists while the task is "Выполнена" (it can be
-    cleared there); the time of day is kept. The payout of a paid task moves
-    with the completion date (its payroll entry's date), which can shift it
-    into another payroll week — the notice flags weeks already marked paid."""
+    """Admin correction of a task's planned execution (one date or a period)
+    and its completion date. The completion date only exists while the task
+    is "Выполнена" (it can be cleared there); the time of day is kept. The
+    payout of a paid task moves with the completion date (its payroll
+    entry's date), which can shift it into another payroll week — the notice
+    flags weeks already marked paid."""
     db = get_db()
     assignment = db.execute(
         "SELECT tia.*, ti.order_id FROM tuning_item_assignments tia "
@@ -11942,41 +11992,38 @@ def update_tuning_assignment_dates(assignment_id):
         f"#board-work-{assignment['item_id']}"
     )
 
-    def parse_day(raw):
+    def valid_day(raw):
         raw = (raw or "").strip()
         if not raw:
-            return None
+            return True
         try:
-            return dt.date.fromisoformat(raw).isoformat()
+            dt.date.fromisoformat(raw)
+            return True
         except ValueError:
-            raise ValueError
+            return False
 
-    try:
-        assigned_day = parse_day(request.form.get("assigned_date"))
-        completed_day = parse_day(request.form.get("completed_date"))
-    except ValueError:
+    due_from_raw = request.form.get("due_from")
+    due_to_raw = request.form.get("due_to")
+    completed_raw = request.form.get("completed_date")
+    if not all(valid_day(raw) for raw in (due_from_raw, due_to_raw, completed_raw)):
         session["tuning_board_error"] = "Укажите корректные даты."
         return redirect(board)
-    if assigned_day is None:
-        assigned_day = assignment["assigned_at"][:10]
+    due_from, due_to = _parse_task_due(due_from_raw, due_to_raw)
+    completed_day = (completed_raw or "").strip() or None
     if assignment["assignment_status"] != "done" and not assignment["entry_id"]:
         completed_day = None  # nothing to record for a task that isn't done and unpaid
-    if completed_day is not None and completed_day < assigned_day:
-        session["tuning_board_error"] = "Дата выполнения не может быть раньше даты поручения."
-        return redirect(board)
 
     def with_time(new_day, old_value, default="09:00"):
         old_time = (old_value or "")[11:16] or default
         return f"{new_day} {old_time}"
 
-    new_assigned = with_time(assigned_day, assignment["assigned_at"])
     new_completed = (
         with_time(completed_day, assignment["completed_at"], "18:00")
         if completed_day is not None else None
     )
     db.execute(
-        "UPDATE tuning_item_assignments SET assigned_at = ?, completed_at = ? WHERE id = ?",
-        (new_assigned, new_completed, assignment_id),
+        "UPDATE tuning_item_assignments SET due_from = ?, due_to = ?, completed_at = ? WHERE id = ?",
+        (due_from, due_to, new_completed, assignment_id),
     )
     notice = "Даты задачи обновлены."
     if (

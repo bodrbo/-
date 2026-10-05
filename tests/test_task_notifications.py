@@ -55,7 +55,9 @@ class TaskNotificationTestCase(unittest.TestCase):
                 norm_hours REAL NOT NULL,
                 comment TEXT NOT NULL DEFAULT '',
                 assignment_status TEXT NOT NULL,
-                assigned_at TEXT NOT NULL
+                assigned_at TEXT NOT NULL,
+                due_from TEXT,
+                due_to TEXT
             );
             """
         )

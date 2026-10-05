@@ -12022,3 +12022,6 @@ button.partner-open-price-save svg {
 .investor-bar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .board-task-employee-form { margin: 6px 0 0; }
 .board-task-employee-form select { width: 100%; min-width: 0; padding: 4px 6px; font-size: 13px; font-weight: 700; }
+.assign-due-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.assign-due-row label { display: grid; gap: 3px; font-size: 12px; color: var(--ink-soft); }
+.assign-due-row input[type=date] { min-width: 0; }

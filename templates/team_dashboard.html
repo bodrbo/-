@@ -429,7 +429,12 @@
           Ставка: {{ task.rate|float|round(2) }} ₽ · Нормочасы: {{ task.norm_hours|float|round(2) }}
         </div>
         <div class="hint" style="margin:0;">
+          {% if task.kind == 'tuning' %}
+          {% set due_label = task|task_due %}
+          {% if due_label %}Срок: {{ due_label }}{% endif %}{% if due_label and task.completed_at %} · {% endif %}{% if task.completed_at %}Выполнена: {{ task.completed_at[:10]|ru_date }}{% endif %}
+          {% else %}
           Поручена: {{ task.assigned_at[:10]|ru_date }}{% if task.completed_at %} · Выполнена: {{ task.completed_at[:10]|ru_date }}{% endif %}
+          {% endif %}
         </div>
         {% if task.comment %}
         <div class="task-card-comment">

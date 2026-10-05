@@ -39,11 +39,19 @@ def _format_number(value):
     return f"{number:,.2f}".replace(",", " ").replace(".", ",")
 
 
+def _ru_date(iso_date):
+    try:
+        return dt.date.fromisoformat(iso_date).strftime("%d.%m.%Y")
+    except (TypeError, ValueError):
+        return str(iso_date or "")
+
+
 def _assignment(db, assignment_type, assignment_id):
     if assignment_type == ASSIGNMENT_DEFECT:
         return db.execute(
             "SELECT a.id, a.employee_name, a.rate, a.norm_hours, a.comment, "
-            "a.assignment_status, a.assigned_at, d.description AS task_name, "
+            "a.assignment_status, a.assigned_at, NULL AS due_from, NULL AS due_to, "
+            "d.description AS task_name, "
             "d.boat AS context_name, NULL AS order_id, 'Судно' AS context_label "
             "FROM defect_assignments a "
             "JOIN boat_defects d ON d.id = a.defect_id "
@@ -53,7 +61,8 @@ def _assignment(db, assignment_type, assignment_id):
     if assignment_type == ASSIGNMENT_TUNING:
         return db.execute(
             "SELECT a.id, a.employee_name, a.rate, a.norm_hours, a.comment, "
-            "a.assignment_status, a.assigned_at, i.work_name AS task_name, "
+            "a.assignment_status, a.assigned_at, a.due_from, a.due_to, "
+            "i.work_name AS task_name, "
             "CASE WHEN o.equipment_type = 'motor' "
             "THEN COALESCE(NULLIF(o.motor_model, ''), 'Мотор') "
             "ELSE COALESCE(NULLIF(o.boat_model, ''), 'Лодка') END AS context_name, "
@@ -81,6 +90,11 @@ def _notification_text(assignment, event):
     )
     comment = (assignment["comment"] or "").strip()
     comment_line = f"\nКомментарий: {html.escape(comment)}" if comment else ""
+    due_line = ""
+    if assignment["due_from"]:
+        due_from = _ru_date(assignment["due_from"])
+        due_to = _ru_date(assignment["due_to"]) if assignment["due_to"] else None
+        due_line = f"\nСрок: {due_from} – {due_to}" if due_to else f"\nСрок: {due_from}"
     if event == EVENT_TASK_ASSIGNED:
         heading = "📋 <b>Вам поручена задача</b>"
         timing = "Откройте раздел «Мои задачи», чтобы принять или отклонить её."
@@ -93,7 +107,7 @@ def _notification_text(assignment, event):
     return (
         f"{heading}\n"
         f"{assignment['context_label']}: {context}\n"
-        f"Задача: {task_name}{comment_line}\n"
+        f"Задача: {task_name}{due_line}{comment_line}\n"
         f"Вознаграждение: {payment}\n\n"
         f"{timing}"
     )
