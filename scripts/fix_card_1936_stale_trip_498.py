@@ -11,16 +11,14 @@ tombstone so the hourly import can't recreate it) and unlinks the card, so
 the next auto-close run creates the correct trip for Ларус / Платон Жмаев.
 
 Dry run by default — nothing is changed without --apply. Aborts if the data
-isn't exactly what was diagnosed (someone may have already touched it), or
-if the payroll week of the entry to delete is already marked paid — unless
---allow-settled-week says the owner has decided to settle that by hand
-(the employee was then paid for work he didn't do and the amount has to be
-taken back / offset in his next payout).
+isn't exactly what was diagnosed (someone may have already touched it).
+A payroll week already marked paid does NOT stop it: the owner confirmed the
+real payout was settled by hand and is correct, only the amounts in the
+program are wrong, so the week's "paid" mark is left as it is.
 
 Usage:
     python3 scripts/fix_card_1936_stale_trip_498.py            # dry run
     python3 scripts/fix_card_1936_stale_trip_498.py --apply
-    python3 scripts/fix_card_1936_stale_trip_498.py --apply --allow-settled-week
     python3 scripts/fix_card_1936_stale_trip_498.py --apply --close-now
 (--close-now runs the same auto-close pass cron does right after the fix —
 for every card ready to close, not only #1936 — instead of waiting for cron.)
@@ -68,7 +66,6 @@ def abort(message):
 
 def main():
     apply = "--apply" in sys.argv[1:]
-    allow_settled_week = "--allow-settled-week" in sys.argv[1:]
     close_now = "--close-now" in sys.argv[1:]
     with application_module.app.app_context():
         db = application_module.get_db()
@@ -113,13 +110,6 @@ def main():
             "SELECT paid_at FROM payments WHERE employee = ? AND period_key = ?",
             (STALE_EMPLOYEE, monday),
         ).fetchone()
-        if settled is not None and not allow_settled_week:
-            return abort(
-                f"неделя {monday} у {STALE_EMPLOYEE} уже отмечена оплаченной "
-                f"({settled['paid_at']}) — запись #{entry['id']} ({entry['amount']} ₽) удалять "
-                "нельзя без ручной сверки. Если вы решили сверить вручную, добавьте "
-                "--allow-settled-week."
-            )
 
         print(f"Будет удалён рейс №{TRIP_ID}: {trip['boat']}, {trip['trip_date']} {trip['trip_time']}, "
               f"выручка {trip['revenue']}")
@@ -139,10 +129,8 @@ def main():
         db.commit()
         if settled is not None:
             print(
-                f"\nВНИМАНИЕ: неделя {monday} у {STALE_EMPLOYEE} была отмечена оплаченной "
-                f"({settled['paid_at']}). Начисление {entry['amount']} ₽ удалено, значит ему "
-                "выплачено на эту сумму больше, чем начислено — зачтите её в следующей выплате "
-                "или договоритесь о возврате."
+                f"\nНеделя {monday} у {STALE_EMPLOYEE} отмечена оплаченной ({settled['paid_at']}) — "
+                f"отметка оставлена как есть, в программе убрано начисление {entry['amount']} ₽."
             )
         print(f"\nГотово. Рейс №{TRIP_ID} удалён, карточка №{CARD_ID} отвязана.")
         if not close_now:
