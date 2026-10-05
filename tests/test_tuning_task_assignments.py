@@ -434,7 +434,7 @@ class TuningLaborBudgetTests(_TuningTaskFixture, unittest.TestCase):
         with self.client.session_transaction() as session:
             self.assertIn("tuning_budget_warning", session)
 
-    def test_update_assignment_terms_is_blocked_once_paid(self):
+    def test_update_assignment_terms_of_a_paid_task_recalculates_its_payout(self):
         self.assign(self.EMPLOYEE_A, 100, 2)
         assignment_id = self.get_assignment_id(self.EMPLOYEE_A)
         with application_module.app.app_context():
@@ -445,25 +445,47 @@ class TuningLaborBudgetTests(_TuningTaskFixture, unittest.TestCase):
                 "'2026-09-01', '2026-09-01 12:00')",
                 (self.EMPLOYEE_A,),
             )
+            entry_id = entry.lastrowid
             db.execute(
                 "UPDATE tuning_item_assignments SET entry_id = ? WHERE id = ?",
-                (entry.lastrowid, assignment_id),
+                (entry_id, assignment_id),
             )
             db.commit()
 
         self.login_admin()
         response = self.client.post(
             f"/tuning/assignments/{assignment_id}/rate",
-            data={"rate": "999", "norm_hours": "9"},
+            data={"rate": "150", "norm_hours": "3"},
         )
         self.assertEqual(response.status_code, 302)
         with application_module.app.app_context():
-            row = application_module.get_db().execute(
+            db = application_module.get_db()
+            row = db.execute(
                 "SELECT rate, norm_hours FROM tuning_item_assignments WHERE id = ?",
                 (assignment_id,),
             ).fetchone()
+            entry = db.execute(
+                "SELECT rate, quantity, amount FROM entries WHERE id = ?", (entry_id,)
+            ).fetchone()
+        self.assertEqual((row["rate"], row["norm_hours"]), (150, 3))
+        self.assertEqual((entry["rate"], entry["quantity"], entry["amount"]), (150, 3, 450))
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("Выплата пересчитана", page)
+
+    def test_invalid_terms_are_rejected_with_a_message(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        assignment_id = self.get_assignment_id(self.EMPLOYEE_A)
+        self.login_admin()
+        self.client.post(
+            f"/tuning/assignments/{assignment_id}/rate", data={"rate": "abc", "norm_hours": "2"}
+        )
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT rate FROM tuning_item_assignments WHERE id = ?", (assignment_id,)
+            ).fetchone()
         self.assertEqual(row["rate"], 100)
-        self.assertEqual(row["norm_hours"], 2)
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("должны быть числами больше нуля", page)
 
     def test_rejected_assignments_do_not_count_toward_budget(self):
         self.assign(self.EMPLOYEE_A, 400, 2)  # would be over budget
@@ -1017,6 +1039,161 @@ class TuningTaskCommentEditTests(_TuningTaskFixture, unittest.TestCase):
                 f"/tuning/assignments/{self.assignment(employee)['id']}/comment", page
             )
         self.assertIn("+ Добавить комментарий", page)
+
+
+class TuningTaskEmployeeChangeTests(_TuningTaskFixture, unittest.TestCase):
+    EMPLOYEE_C = "Мастеров Третий"
+
+    def assignment(self, employee):
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT * FROM tuning_item_assignments WHERE item_id = ? AND employee_name = ?",
+                (self.item_id, employee),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def change(self, assignment_id, new_name):
+        self.login_admin()
+        with mock.patch.object(
+            application_module, "send_telegram_notification_to_employee"
+        ) as notifier:
+            response = self.client.post(
+                f"/tuning/assignments/{assignment_id}/employee",
+                data={"employee_name": new_name},
+            )
+        return response, notifier
+
+    def _drop_settled_week(self, period_key):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "DELETE FROM payments WHERE employee = ? AND period_key = ?",
+                (self.EMPLOYEE_A, period_key),
+            )
+            db.commit()
+
+    def make_paid(self, assignment_id, employee, work_date="2026-09-01"):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            entry_id = db.execute(
+                "INSERT INTO entries (employee, work_type, rate, quantity, amount, "
+                "work_date, created_at) VALUES (?, 'Полировка корпуса', 100, 2, 200, "
+                "?, '2026-09-01 12:00')",
+                (employee, work_date),
+            ).lastrowid
+            db.execute(
+                "UPDATE tuning_item_assignments SET entry_id = ?, assignment_status = 'done' "
+                "WHERE id = ?", (entry_id, assignment_id),
+            )
+            db.commit()
+        return entry_id
+
+    def test_an_unfinished_task_moves_and_goes_back_to_pending(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task = self.assignment(self.EMPLOYEE_A)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "UPDATE tuning_item_assignments SET assignment_status = 'in_progress', "
+                "comment = 'Заметка' WHERE id = ?", (task["id"],)
+            )
+            db.commit()
+        response, notifier = self.change(task["id"], self.EMPLOYEE_B)
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNone(self.assignment(self.EMPLOYEE_A))
+        moved = self.assignment(self.EMPLOYEE_B)
+        self.assertEqual(moved["id"], task["id"])
+        self.assertEqual(moved["assignment_status"], "pending")
+        self.assertEqual((moved["rate"], moved["norm_hours"], moved["comment"]), (100, 2, "Заметка"))
+        recipients = [call.args[1] for call in notifier.call_args_list]
+        self.assertIn(self.EMPLOYEE_A, recipients)  # told it was taken away
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn(f"{self.EMPLOYEE_A} → {self.EMPLOYEE_B}", page)
+
+    def test_the_new_assignee_sees_the_task_and_the_old_one_does_not(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        self.change(self.assignment(self.EMPLOYEE_A)["id"], self.EMPLOYEE_B)
+        self.login_team(self.USERNAME_B, self.EMPLOYEE_B)
+        self.assertIn("Полировка корпуса", self.client.get("/team/").get_data(as_text=True))
+        self.login_team(self.USERNAME_A, self.EMPLOYEE_A)
+        self.assertNotIn("Полировка корпуса", self.client.get("/team/").get_data(as_text=True))
+
+    def test_a_paid_task_keeps_its_status_and_the_payout_moves_with_it(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task = self.assignment(self.EMPLOYEE_A)
+        entry_id = self.make_paid(task["id"], self.EMPLOYEE_A)
+        self.change(task["id"], self.EMPLOYEE_B)
+        moved = self.assignment(self.EMPLOYEE_B)
+        self.assertEqual(moved["assignment_status"], "done")
+        with application_module.app.app_context():
+            entry = application_module.get_db().execute(
+                "SELECT employee, amount FROM entries WHERE id = ?", (entry_id,)
+            ).fetchone()
+        self.assertEqual((entry["employee"], entry["amount"]), (self.EMPLOYEE_B, 200))
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("перенесена на", page)
+
+    def test_moving_a_paid_task_into_a_settled_week_warns(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task = self.assignment(self.EMPLOYEE_A)
+        self.make_paid(task["id"], self.EMPLOYEE_A, work_date="2026-09-02")  # week of 2026-08-31
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            columns = [r["name"] for r in db.execute("PRAGMA table_info(payments)").fetchall()]
+            values = {"employee": self.EMPLOYEE_A, "period_key": "2026-08-31", "amount": 200,
+                      "paid_at": "2026-09-08", "created_at": "2026-09-08 10:00"}
+            used = [c for c in columns if c in values]
+            db.execute(
+                f"INSERT INTO payments ({','.join(used)}) VALUES ({','.join('?' for _ in used)})",
+                [values[c] for c in used],
+            )
+            db.commit()
+        self.addCleanup(self._drop_settled_week, "2026-08-31")
+        self.change(task["id"], self.EMPLOYEE_B)
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("уже отмечена оплаченной", page)
+
+    def test_cannot_hand_a_task_to_someone_already_on_that_work(self):
+        self.assign_many([(self.EMPLOYEE_A, 100, 1), (self.EMPLOYEE_B, 100, 1)])
+        task = self.assignment(self.EMPLOYEE_A)
+        self.change(task["id"], self.EMPLOYEE_B)
+        self.assertIsNotNone(self.assignment(self.EMPLOYEE_A))
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("уже назначен на эту работу", page)
+
+    def test_cannot_hand_a_task_to_someone_who_is_not_a_tuningman(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task = self.assignment(self.EMPLOYEE_A)
+        self.change(task["id"], "Несуществующий Человек")
+        self.assertIsNotNone(self.assignment(self.EMPLOYEE_A))
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("нельзя назначить", page)
+
+    def test_materials_and_schedule_placement_follow_the_new_employee(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        task = self.assignment(self.EMPLOYEE_A)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            cols = [r["name"] for r in db.execute("PRAGMA table_info(supply_writeoffs)").fetchall()]
+            self.assertIn("employee_name", cols)
+            schedule_id = db.execute(
+                "INSERT INTO tuning_schedule_tasks (assignment_id, employee_name, title, rate, "
+                "created_at) VALUES (?, ?, 'Полировка корпуса', 100, '2026-09-01 10:00')",
+                (task["id"], self.EMPLOYEE_A),
+            ).lastrowid
+            db.commit()
+        self.change(task["id"], self.EMPLOYEE_B)
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT employee_name FROM tuning_schedule_tasks WHERE id = ?", (schedule_id,)
+            ).fetchone()
+        self.assertEqual(row["employee_name"], self.EMPLOYEE_B)
+
+    def test_the_board_offers_an_employee_selector_for_every_task(self):
+        self.assign_many([(self.EMPLOYEE_A, 100, 1), (self.EMPLOYEE_B, 100, 1)])
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        for employee in (self.EMPLOYEE_A, self.EMPLOYEE_B):
+            self.assertIn(f"/tuning/assignments/{self.assignment(employee)['id']}/employee", page)
 
 
 if __name__ == "__main__":

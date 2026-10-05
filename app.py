@@ -11411,9 +11411,28 @@ def _flag_tuning_item_budget_overrun(db, item_id, work_name, cost_price, price_p
         )
 
 
+def _payroll_week_settled(db, employee, work_date):
+    """True when the payroll week containing work_date is already marked
+    paid for this employee — a correction landing there needs a manual
+    reconciliation, so the notices flag it."""
+    day = dt.date.fromisoformat(work_date[:10])
+    monday = (day - dt.timedelta(days=day.weekday())).isoformat()
+    return db.execute(
+        "SELECT 1 FROM payments WHERE employee = ? AND period_key = ?", (employee, monday)
+    ).fetchone() is not None
+
+
+_SETTLED_WEEK_WARNING = (
+    " Внимание: неделя этой выплаты уже отмечена оплаченной — сверьте расчёты с сотрудником."
+)
+
+
 @app.route("/tuning/assignments/<int:assignment_id>/rate", methods=["POST"])
 @admin_login_required
 def update_tuning_assignment_terms(assignment_id):
+    """Edits a task's rate and norm-hours. For a task that was already paid
+    out the payroll entry follows (rate/quantity/amount), so the two never
+    disagree — the notice flags a payroll week already marked paid."""
     db = get_db()
     assignment = db.execute(
         "SELECT tia.*, ti.order_id, ti.work_name, ti.cost_price, ti.price_pending "
@@ -11424,26 +11443,129 @@ def update_tuning_assignment_terms(assignment_id):
     ).fetchone()
     if assignment is None:
         return redirect(url_for("tuning_index"))
-    # Once a payroll entry exists for this task, its rate/hours are a
-    # historical record of what was actually paid — editing them here
-    # wouldn't change the entry, so it would just make the two disagree.
-    if not assignment["entry_id"]:
-        try:
-            rate = float(request.form.get("rate", "").strip().replace(",", "."))
-            hours = float(request.form.get("norm_hours", "").strip().replace(",", "."))
-        except ValueError:
-            rate = hours = None
-        if rate is not None and rate > 0 and hours is not None and hours > 0:
+    board = url_for("tuning_order_board", order_id=assignment["order_id"]) + (
+        f"#board-work-{assignment['item_id']}"
+    )
+    try:
+        rate = float(request.form.get("rate", "").strip().replace(",", "."))
+        hours = float(request.form.get("norm_hours", "").strip().replace(",", "."))
+    except ValueError:
+        rate = hours = None
+    if rate is None or hours is None or rate <= 0 or hours <= 0:
+        session["tuning_board_error"] = "Ставка и нормочасы должны быть числами больше нуля."
+        return redirect(board)
+    db.execute(
+        "UPDATE tuning_item_assignments SET rate = ?, norm_hours = ? WHERE id = ?",
+        (rate, hours, assignment_id),
+    )
+    notice = "Нормировка обновлена."
+    entry = None
+    if assignment["entry_id"]:
+        entry = db.execute(
+            "SELECT work_date, employee, amount FROM entries WHERE id = ?", (assignment["entry_id"],)
+        ).fetchone()
+    if entry is not None:
+        db.execute(
+            "UPDATE entries SET rate = ?, quantity = ?, amount = ? WHERE id = ?",
+            (rate, hours, rate * hours, assignment["entry_id"]),
+        )
+        notice += (
+            f" Выплата пересчитана: {format_money(entry['amount'])} ₽ → {format_money(rate * hours)} ₽."
+        )
+        if _payroll_week_settled(db, entry["employee"], entry["work_date"]):
+            notice += _SETTLED_WEEK_WARNING
+    db.commit()
+    _flag_tuning_item_budget_overrun(
+        db, assignment["item_id"], assignment["work_name"],
+        assignment["cost_price"], assignment["price_pending"],
+    )
+    session["tuning_board_notice"] = notice
+    return redirect(board)
+
+
+@app.route("/tuning/assignments/<int:assignment_id>/employee", methods=["POST"])
+@admin_login_required
+def update_tuning_assignment_employee(assignment_id):
+    """Hands a task to another tuningman. Rate, norm-hours, comment and dates
+    stay. The payroll entry of a paid task moves with it; materials written
+    off against the task and its tuning-schedule placement follow too. An
+    unfinished task goes back to "Ожидает ответа" for the new person (they
+    are notified, the previous assignee is told it was taken away); a
+    finished one keeps its status."""
+    db = get_db()
+    assignment = db.execute(
+        "SELECT tia.*, ti.order_id, ti.work_name FROM tuning_item_assignments tia "
+        "JOIN tuning_order_items ti ON ti.id = tia.item_id WHERE tia.id = ?",
+        (assignment_id,),
+    ).fetchone()
+    if assignment is None:
+        return redirect(url_for("tuning_index"))
+    board = url_for("tuning_order_board", order_id=assignment["order_id"]) + (
+        f"#board-work-{assignment['item_id']}"
+    )
+    old_name = assignment["employee_name"]
+    new_name = request.form.get("employee_name", "").strip()
+    if not new_name or new_name == old_name:
+        return redirect(board)
+    if new_name not in _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS):
+        session["tuning_board_error"] = "Этого сотрудника нельзя назначить на задачи тюнинга."
+        return redirect(board)
+    duplicate = db.execute(
+        "SELECT 1 FROM tuning_item_assignments WHERE item_id = ? AND employee_name = ?",
+        (assignment["item_id"], new_name),
+    ).fetchone()
+    if duplicate is not None:
+        session["tuning_board_error"] = f"{new_name} уже назначен на эту работу."
+        return redirect(board)
+
+    finished = assignment["assignment_status"] == "done"
+    if finished:
+        db.execute(
+            "UPDATE tuning_item_assignments SET employee_name = ? WHERE id = ?",
+            (new_name, assignment_id),
+        )
+    else:
+        db.execute(
+            "UPDATE tuning_item_assignments SET employee_name = ?, "
+            "assignment_status = 'pending', responded_at = NULL WHERE id = ?",
+            (new_name, assignment_id),
+        )
+    db.execute(
+        "UPDATE supply_writeoffs SET employee_name = ? WHERE tuning_item_assignment_id = ?",
+        (new_name, assignment_id),
+    )
+    db.execute(
+        "UPDATE tuning_schedule_tasks SET employee_name = ? WHERE assignment_id = ?",
+        (new_name, assignment_id),
+    )
+    notice = f"Задача «{assignment['work_name']}» передана: {old_name} → {new_name}."
+    if assignment["entry_id"]:
+        entry = db.execute(
+            "SELECT work_date, amount FROM entries WHERE id = ?", (assignment["entry_id"],)
+        ).fetchone()
+        if entry is not None:
             db.execute(
-                "UPDATE tuning_item_assignments SET rate = ?, norm_hours = ? WHERE id = ?",
-                (rate, hours, assignment_id),
+                "UPDATE entries SET employee = ? WHERE id = ?", (new_name, assignment["entry_id"])
             )
-            db.commit()
-            _flag_tuning_item_budget_overrun(
-                db, assignment["item_id"], assignment["work_name"],
-                assignment["cost_price"], assignment["price_pending"],
-            )
-    return redirect(url_for("tuning_order_board", order_id=assignment["order_id"]))
+            notice += f" Выплата {format_money(entry['amount'])} ₽ перенесена на {new_name}."
+            if any(
+                _payroll_week_settled(db, person, entry["work_date"])
+                for person in (old_name, new_name)
+            ):
+                notice += _SETTLED_WEEK_WARNING
+    db.commit()
+    try:
+        send_telegram_notification_to_employee(
+            db, old_name,
+            f"Задача передана другому сотруднику: «{assignment['work_name']}» "
+            f"(заказ №{assignment['order_id']}). Выполнять её больше не нужно.",
+        )
+        if not finished:
+            _notify_task_assignment(db, ASSIGNMENT_TUNING, assignment_id)
+    except Exception:
+        pass  # notifications are best-effort; the reassignment is done
+    session["tuning_board_notice"] = notice
+    return redirect(board)
 
 
 @app.route("/tuning/assignments/<int:assignment_id>/comment", methods=["POST"])

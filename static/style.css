@@ -12020,3 +12020,5 @@ button.partner-open-price-save svg {
 .schedule-tripster-dismiss .btn-secondary.danger { color: var(--danger); border-color: rgba(179, 64, 44, .35); }
 .schedule-tripster-dismiss .btn-secondary.danger:hover { background: var(--danger); color: #fff8f4; }
 .investor-bar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.board-task-employee-form { margin: 6px 0 0; }
+.board-task-employee-form select { width: 100%; min-width: 0; padding: 4px 6px; font-size: 13px; font-weight: 700; }

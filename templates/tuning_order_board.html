@@ -132,7 +132,18 @@
                 </button>
               </form>
             </div>
-            <strong>{{ a.employee_name }}</strong>
+            <form action="{{ url_for('update_tuning_assignment_employee', assignment_id=a.id) }}" method="post"
+                  class="board-task-employee-form"
+                  onsubmit="return confirm('Передать задачу сотруднику «' + this.employee_name.value + '»?{% if a.entry_id %} Выплата тоже перейдёт к нему.{% endif %}{% if a.assignment_status != 'done' %} Задача снова станет «Ожидает ответа».{% endif %}');">
+              <select name="employee_name" onchange="this.form.requestSubmit()" aria-label="Сотрудник">
+                {% if a.employee_name not in assignable_employees %}
+                <option value="{{ a.employee_name }}" selected>{{ a.employee_name }}</option>
+                {% endif %}
+                {% for e in assignable_employees %}
+                <option value="{{ e }}" {{ 'selected' if e == a.employee_name }}>{{ e }}</option>
+                {% endfor %}
+              </select>
+            </form>
             {% if a.payout_missing %}<span class="status-badge status-cancelled" title="Задача выполнена, но записи о выплате нет">Нет выплаты</span>{% endif %}
             <form action="{{ url_for('update_tuning_assignment_dates', assignment_id=a.id) }}" method="post"
                   class="board-task-dates">
@@ -148,13 +159,9 @@
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5l4 4 8-9"/></svg>
               </button>
             </form>
-            {% if a.entry_id %}
-            <div class="hint" style="margin:2px 0 0;">
-              {{ a.rate|float|round(2) }} ₽ × {{ a.norm_hours|float|round(2) }} ч = {{ (a.rate * a.norm_hours)|money }} ₽ · выплачено
-            </div>
-            {% else %}
             <form action="{{ url_for('update_tuning_assignment_terms', assignment_id=a.id) }}"
-                  method="post" class="board-task-rate-form">
+                  method="post" class="board-task-rate-form"
+                  {% if a.entry_id %}onsubmit="return confirm('Задача уже оплачена — выплата будет пересчитана. Продолжить?');"{% endif %}>
               <input type="text" name="rate" inputmode="decimal" class="board-task-rate-input"
                      value="{{ a.rate|float|round(2) }}" aria-label="Ставка, ₽">
               <span aria-hidden="true">₽ ×</span>
@@ -163,8 +170,7 @@
               <span aria-hidden="true">ч</span>
               <button type="submit" class="btn-secondary board-task-rate-save">Сохранить</button>
             </form>
-            <div class="hint" style="margin:2px 0 0;">= {{ (a.rate * a.norm_hours)|money }} ₽</div>
-            {% endif %}
+            <div class="hint" style="margin:2px 0 0;">= {{ (a.rate * a.norm_hours)|money }} ₽{% if a.entry_id %} · выплачено{% endif %}</div>
             <details class="board-task-comment">
               <summary>{{ 'Комментарий' if a.comment else '+ Добавить комментарий' }}</summary>
               <form action="{{ url_for('update_tuning_assignment_comment', assignment_id=a.id) }}" method="post">
