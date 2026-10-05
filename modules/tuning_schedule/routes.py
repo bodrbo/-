@@ -66,7 +66,21 @@ def create_tuning_schedule_blueprint(
             employee_id = int(request.form.get("employee_id", ""))
         except (TypeError, ValueError):
             employee_id = 0
-        success, message = services.add_day_crew_member(get_db(), day, employee_id)
+        success, message = services.add_day_crew_member(
+            get_db(), day, employee_id,
+            request.form.get("shift_start"), request.form.get("shift_end"),
+        )
+        set_notice(message, success)
+        return redirect_to_day(day.isoformat())
+
+    @blueprint.route("/schedule/tuning/crew/<int:employee_id>/hours", methods=["POST"])
+    @manage_required
+    def set_shift_hours(employee_id):
+        day = services.parse_day(request.form.get("work_date"))
+        success, message = services.set_shift_hours(
+            get_db(), day, employee_id,
+            request.form.get("shift_start"), request.form.get("shift_end"),
+        )
         set_notice(message, success)
         return redirect_to_day(day.isoformat())
 

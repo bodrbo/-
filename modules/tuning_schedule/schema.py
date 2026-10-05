@@ -16,6 +16,14 @@ def init_schema(conn):
         )
         """
     )
+    day_crew_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(tuning_schedule_day_crew)")
+    }
+    for column in ("shift_start", "shift_end"):
+        # Working hours of the person's shift that day (HH:MM). NULL on rows
+        # from before shifts had hours: read as the default 09:00-18:00.
+        if column not in day_crew_columns:
+            conn.execute(f"ALTER TABLE tuning_schedule_day_crew ADD COLUMN {column} TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tuning_schedule_tasks (

@@ -985,6 +985,9 @@ class TuningTaskDueDateTests(_TuningTaskFixture, unittest.TestCase):
         data["comment"] = ""
         data["due_from"] = due_from
         data["due_to"] = due_to
+        # these tests are about the stored due date, not the tuning schedule
+        # (covered in test_tuning_schedule_assignments.py)
+        data["shift_decision"] = "skip"
         return self.client.post(f"/tuning/{self.order_id}/item/{self.item_id}/assign", data=data)
 
     def due(self, employee):

@@ -406,6 +406,7 @@
   <details class="panel collapsible-panel" open>
     <summary><span>Статусы работ</span><span class="chev" aria-hidden="true"></span></summary>
     <div class="collapsible-body">
+    {% include '_tuning_assign_shift_modal.html' %}
     {% if video_error %}
     <div class="alert" role="alert">{{ video_error }}</div>
     {% endif %}

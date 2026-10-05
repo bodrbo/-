@@ -6,7 +6,10 @@ import math
 from modules.schedule.services import current_timestamp, day_label, parse_day  # noqa: F401 (re-exported)
 
 from . import repository
-from .constants import DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR, MIN_CARD_MINUTES
+from .constants import (
+    DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR, DEFAULT_SHIFT_END, DEFAULT_SHIFT_START,
+    MIN_CARD_MINUTES,
+)
 
 TASK_TITLE_MAX_LENGTH = 200
 EMPLOYEE_NAME_MAX_LENGTH = 120
@@ -68,19 +71,149 @@ def _clean_task_days(day_rows, errors):
     return clean
 
 
-def add_day_crew_member(db, day, employee_id):
+def _minutes(label):
+    parsed = _parse_hhmm(label)
+    return parsed[0] * 60 + parsed[1] if parsed else None
+
+
+def _label(minutes):
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def clean_shift_hours(raw_start, raw_end, errors):
+    """Working hours of a shift as ("HH:MM", "HH:MM"). Both blank means the
+    default workday; otherwise both must be valid and end after start."""
+    start_raw, end_raw = str(raw_start or "").strip(), str(raw_end or "").strip()
+    if not start_raw and not end_raw:
+        return DEFAULT_SHIFT_START, DEFAULT_SHIFT_END
+    start, end = _minutes(start_raw), _minutes(end_raw)
+    if start is None or end is None:
+        errors.append("Укажите рабочие часы смены (начало и конец, формат ЧЧ:ММ).")
+        return None
+    if end <= start:
+        errors.append("Конец смены должен быть позже её начала.")
+        return None
+    return _label(start), _label(end)
+
+
+def shift_bounds(row):
+    """(start, end) labels of a roster row, falling back to the default
+    workday for rows saved before shifts had hours."""
+    return (row["shift_start"] or DEFAULT_SHIFT_START, row["shift_end"] or DEFAULT_SHIFT_END)
+
+
+def add_day_crew_member(db, day, employee_id, raw_start=None, raw_end=None):
     eligible = {
         employee["id"]: employee
         for employee in repository.list_tuning_crew_employees(db)
     }
     if employee_id not in eligible:
         return False, "Сотрудник не найден или не является тюнингмэном."
+    errors = []
+    hours = clean_shift_hours(raw_start, raw_end, errors)
+    if errors:
+        return False, " ".join(errors)
     added = repository.add_day_crew_member(
-        db, day.isoformat(), employee_id, current_timestamp()
+        db, day.isoformat(), employee_id, current_timestamp(), hours[0], hours[1]
     )
     if not added:
         return True, f"{eligible[employee_id]['name']} уже добавлен в расписание."
-    return True, f"{eligible[employee_id]['name']} добавлен в расписание."
+    return True, (
+        f"{eligible[employee_id]['name']} добавлен в расписание: смена {hours[0]}–{hours[1]}."
+    )
+
+
+def set_shift_hours(db, day, employee_id, raw_start, raw_end):
+    errors = []
+    hours = clean_shift_hours(raw_start, raw_end, errors)
+    if errors:
+        return False, " ".join(errors)
+    if not repository.set_shift_hours(db, day.isoformat(), employee_id, hours[0], hours[1]):
+        return False, "Сотрудник не стоит в расписании на эту дату."
+    return True, f"Часы смены обновлены: {hours[0]}–{hours[1]}."
+
+
+def employees_off_shift(db, day_iso, employee_names):
+    """The names among `employee_names` who are not on the roster of day_iso."""
+    return [
+        name for name in employee_names
+        if repository.get_day_crew_shift_by_name(db, day_iso, name) is None
+    ]
+
+
+def _next_free_start(db, day_iso, employee_name, shift_start):
+    """Minute of the day a new task of this employee should start at: the
+    start of their shift, or the end of their last task that day if later."""
+    start_minutes = _minutes(shift_start)
+    for row in repository.list_day_tasks(db, day_iso):
+        if row["employee_name"] != employee_name:
+            continue
+        begins = _minutes(row["start_time"]) or 0
+        start_minutes = max(start_minutes, begins + round(row["planned_hours"] * 60))
+    return start_minutes
+
+
+def place_assignment_task(db, assignment_id, employee_name, title, rate, comment, day_iso, hours):
+    """Puts an order task (a tuning_item_assignments row) on the employee's
+    day as a card: at the start of their shift, or right after the last task
+    they already have that day. Returns None when the employee isn't on that
+    day's roster, otherwise {"placed": bool, ...} — not placed (with a
+    reason) when the hours don't fit a single day."""
+    crew = repository.get_day_crew_shift_by_name(db, day_iso, employee_name)
+    if crew is None:
+        return None
+    if hours <= 0 or hours > MAX_DAY_HOURS:
+        return {"placed": False, "reason": "hours"}
+    shift_start, shift_end = shift_bounds(crew)
+    start_minutes = _next_free_start(db, day_iso, employee_name, shift_start)
+    end_minutes = start_minutes + round(hours * 60)
+    if end_minutes > 24 * 60:
+        return {"placed": False, "reason": "midnight"}
+    task_id = repository.create_task(
+        db, assignment_id, employee_name, title, rate, comment, current_timestamp()
+    )
+    repository.add_task_day(db, task_id, day_iso, _label(start_minutes), hours)
+    return {
+        "placed": True, "task_id": task_id, "start": _label(start_minutes),
+        "end": _label(end_minutes), "past_shift_end": end_minutes > _minutes(shift_end),
+        "shift_end": shift_end,
+    }
+
+
+def move_assignment_task(db, assignment_id, employee_name, day_iso):
+    """Moves the card of a one-day order task to another day (after the
+    employee's other tasks there). Returns None when the assignment has no
+    card; {"moved": False, "reason": ...} when it can't move (a multi-day
+    card, the same day, or the employee isn't on that day's roster)."""
+    task = repository.get_task_by_assignment(db, assignment_id)
+    if task is None:
+        return None
+    days = repository.list_task_days(db, task["id"])
+    if len(days) != 1:
+        return {"moved": False, "reason": "multi_day"}
+    if days[0]["work_date"] == day_iso:
+        return {"moved": False, "reason": "same_day"}
+    crew = repository.get_day_crew_shift_by_name(db, day_iso, employee_name)
+    if crew is None:
+        return {"moved": False, "reason": "off_shift"}
+    shift_start, _shift_end = shift_bounds(crew)
+    start_minutes = _next_free_start(db, day_iso, employee_name, shift_start)
+    hours = days[0]["planned_hours"]
+    if start_minutes + round(hours * 60) > 24 * 60:
+        return {"moved": False, "reason": "midnight"}
+    repository.delete_task_days(db, task["id"])
+    repository.add_task_day(db, task["id"], day_iso, _label(start_minutes), hours)
+    return {"moved": True, "start": _label(start_minutes)}
+
+
+def sync_assignment_hours(db, assignment_id, hours):
+    """Keeps the card's length equal to the task's norm-hours (one-day cards)."""
+    task = repository.get_task_by_assignment(db, assignment_id)
+    if task is None or not (0 < hours <= MAX_DAY_HOURS):
+        return
+    days = repository.list_task_days(db, task["id"])
+    if len(days) == 1:
+        repository.set_task_day_hours(db, days[0]["id"], hours)
 
 
 def remove_day_crew_member(db, day, employee_id):
@@ -105,9 +238,15 @@ def day_view(db, day):
     crew = repository.list_tuning_crew_employees(db)
     day_crew_ids = set(repository.list_day_crew_ids(db, day.isoformat()))
     assigned_today_ids = repository.list_day_task_employee_ids(db, day.isoformat())
+    shifts = repository.list_day_crew_shifts(db, day.isoformat())
     for employee in crew:
         employee["position_label"] = " · ".join(employee["positions"])
         employee["has_day_task"] = employee["id"] in assigned_today_ids
+        if employee["id"] in shifts:
+            start, end = shifts[employee["id"]]
+            employee["shift_start"] = start or DEFAULT_SHIFT_START
+            employee["shift_end"] = end or DEFAULT_SHIFT_END
+            employee["shift_label"] = f"{employee['shift_start']}–{employee['shift_end']}"
     day_crew = [employee for employee in crew if employee["id"] in day_crew_ids]
     available_crew = [employee for employee in crew if employee["id"] not in day_crew_ids]
 

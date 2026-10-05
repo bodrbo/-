@@ -144,6 +144,14 @@
           {% endfor %}
         </select>
       </div>
+      <div class="field field-narrow">
+        <label for="crew-shift-start">Смена с</label>
+        <input type="time" id="crew-shift-start" name="shift_start" value="09:00" required>
+      </div>
+      <div class="field field-narrow">
+        <label for="crew-shift-end">до</label>
+        <input type="time" id="crew-shift-end" name="shift_end" value="18:00" required>
+      </div>
       <div class="field field-submit">
         <button type="submit">Добавить</button>
       </div>
@@ -155,6 +163,17 @@
     <div class="panel" style="margin-bottom:14px;">
       <div class="tuning-orders-heading">
         <h2 style="font-size:15px;">{{ employee.name }} <span class="muted" style="font-weight:400;">— {{ employee.position_label }}</span></h2>
+        <form method="post" action="{{ url_for('tuning_schedule.set_shift_hours', employee_id=employee.id) }}"
+              class="tuning-shift-hours-form">
+          <input type="hidden" name="work_date" value="{{ day.isoformat() }}">
+          <label>Смена
+            <input type="time" name="shift_start" value="{{ employee.shift_start }}" required>
+          </label>
+          <label>—
+            <input type="time" name="shift_end" value="{{ employee.shift_end }}" required>
+          </label>
+          <button type="submit" class="btn-secondary">Сохранить часы</button>
+        </form>
         <form method="post" action="{{ url_for('tuning_schedule.remove_crew_member', employee_id=employee.id) }}"
               class="row-actions"
               onsubmit="return confirm('Убрать {{ employee.name }} из смены на {{ day_label }}?');">

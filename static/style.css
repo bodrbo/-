@@ -12025,3 +12025,7 @@ button.partner-open-price-save svg {
 .assign-due-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .assign-due-row label { display: grid; gap: 3px; font-size: 12px; color: var(--ink-soft); }
 .assign-due-row input[type=date] { min-width: 0; }
+.tuning-shift-hours-form { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--ink-soft); }
+.tuning-shift-hours-form label { display: flex; align-items: center; gap: 4px; }
+.tuning-shift-hours-form input[type=time] { height: 30px; padding: 0 6px; font-size: 13px; }
+.tuning-shift-hours-form .btn-secondary { min-height: 0; padding: 5px 10px; font-size: 12px; }

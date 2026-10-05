@@ -1,0 +1,51 @@
+{# Shown after "Поручить задачу" when someone isn't on the tuning schedule's
+   roster for the task's date: add them to the shift (with working hours),
+   assign without a schedule card, or cancel. Re-posts the original form. #}
+{% if assign_pending %}
+<div id="assign-shift-modal" class="photo-modal" onclick="if (event.target === this) this.classList.add('hidden');">
+  <div class="photo-modal-inner">
+    <button type="button" class="photo-modal-close" onclick="document.getElementById('assign-shift-modal').classList.add('hidden')" aria-label="Закрыть">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 5l10 10M15 5L5 15"/>
+      </svg>
+    </button>
+    <form method="post" class="assign-modal-card"
+          action="{{ url_for('assign_tuning_item', order_id=assign_pending.order_id, item_id=assign_pending.item_id) }}">
+      <input type="hidden" name="next" value="{{ assign_pending.next }}">
+      <input type="hidden" name="comment" value="{{ assign_pending.comment }}">
+      <input type="hidden" name="due_from" value="{{ assign_pending.due_from or '' }}">
+      <input type="hidden" name="due_to" value="{{ assign_pending.due_to or '' }}">
+      {% for name, rate, hours in assign_pending.rows %}
+      <input type="hidden" name="employee_name[]" value="{{ name }}">
+      <input type="hidden" name="rate[]" value="{{ rate }}">
+      <input type="hidden" name="norm_hours[]" value="{{ hours }}">
+      {% endfor %}
+      <h3>Сотрудник не стоит в расписании</h3>
+      <p class="hint">
+        {{ assign_pending.off_shift|join(', ') }} {{ 'не стоит' if assign_pending.off_shift|length == 1 else 'не стоят' }}
+        в расписании тюнинга на {{ assign_pending.day|ru_date }}. Задача «{{ assign_pending.work_name }}» ставится на эту дату.
+        Добавить {{ 'его' if assign_pending.off_shift|length == 1 else 'их' }} в смену? Для этого укажите рабочие часы.
+      </p>
+      {% if assign_pending.error %}<div class="alert" role="alert">{{ assign_pending.error }}</div>{% endif %}
+      <div class="assign-due-row">
+        <label>Смена с
+          <input type="time" name="shift_start" value="09:00" required>
+        </label>
+        <label>до
+          <input type="time" name="shift_end" value="18:00" required>
+        </label>
+      </div>
+      <p class="hint" style="margin:6px 0 0;">Карточка задачи встанет в начало смены или после уже стоящих у сотрудника задач.</p>
+      <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;">
+        <button type="submit" name="shift_decision" value="add" class="btn-primary">Добавить в смену и поручить</button>
+        <button type="submit" name="shift_decision" value="skip" class="btn-secondary" formnovalidate>Поручить без расписания</button>
+        <button type="button" class="btn-secondary"
+                onclick="document.getElementById('assign-shift-modal').classList.add('hidden')">Отмена</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% if assign_notice %}
+<div class="alert success" role="status">{{ assign_notice }}</div>
+{% endif %}

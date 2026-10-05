@@ -140,6 +140,8 @@ from types import SimpleNamespace
 
 from modules.schedule import repository as schedule_repository
 from modules.schedule import services as schedule_services
+from modules.tuning_schedule import repository as tuning_schedule_repository
+from modules.tuning_schedule import services as tuning_schedule_services
 from modules.tuning_schedule import (
     create_tuning_schedule_blueprint,
     init_schema as init_tuning_schedule_schema,
@@ -11051,6 +11053,8 @@ def edit_tuning_order(order_id):
             work_videos_by_item=work_videos_by_item,
             video_error=session.pop("tuning_video_error", None),
             video_notice=session.pop("tuning_video_notice", None),
+            assign_pending=_pop_assign_pending(order_id),
+            assign_notice=session.pop("tuning_assign_notice", None),
             assignable_employees=assignable_employees,
             goods=goods, goods_subtotal=goods_subtotal, work_subtotal=work_subtotal,
             catalog_products=catalog_products,
@@ -11580,21 +11584,106 @@ def assign_tuning_item(order_id, item_id):
         seen.add(name)
         rows.append((name, rate, hours))
 
-    if rows and len(comment) <= TASK_ASSIGNMENT_COMMENT_MAX_LENGTH:
-        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-        created_ids = [
+    if not rows or len(comment) > TASK_ASSIGNMENT_COMMENT_MAX_LENGTH:
+        return redirect(url_for(return_endpoint, order_id=order_id))
+
+    # A task for one date goes onto each employee's day in the tuning
+    # schedule. Someone who isn't on that day's roster holds everything up
+    # until the admin decides: add them to the shift (with its working
+    # hours), assign without a schedule card, or cancel.
+    schedule_day = due_from if due_from and not due_to else None
+    unscheduled = set()
+    if schedule_day:
+        off_shift = tuning_schedule_services.employees_off_shift(
+            db, schedule_day, [name for name, _rate, _hours in rows]
+        )
+        decision = request.form.get("shift_decision", "")
+        pending_error = None
+        shift_hours = None
+        if off_shift and decision == "add":
+            hour_errors = []
+            if not (request.form.get("shift_start") or "").strip() \
+                    and not (request.form.get("shift_end") or "").strip():
+                hour_errors.append("Укажите рабочие часы смены.")  # no silent default here
+            else:
+                shift_hours = tuning_schedule_services.clean_shift_hours(
+                    request.form.get("shift_start"), request.form.get("shift_end"), hour_errors
+                )
+            pending_error = " ".join(hour_errors) or None
+        if off_shift and (decision not in ("add", "skip") or pending_error):
+            session["tuning_assign_pending"] = {
+                "order_id": order_id, "item_id": item_id, "work_name": item["work_name"],
+                "next": "board" if return_endpoint == "tuning_order_board" else "",
+                "rows": [[name, rate, hours] for name, rate, hours in rows],
+                "comment": comment, "due_from": due_from, "due_to": due_to,
+                "day": schedule_day, "off_shift": off_shift, "error": pending_error,
+            }
+            return redirect(url_for(return_endpoint, order_id=order_id))
+        if off_shift and decision == "add":
+            stamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+            for name in off_shift:
+                employee_id = tuning_schedule_repository.get_employee_id_by_name(db, name)
+                if employee_id is not None:
+                    tuning_schedule_repository.add_day_crew_member(
+                        db, schedule_day, employee_id, stamp, shift_hours[0], shift_hours[1]
+                    )
+        elif off_shift:
+            unscheduled = set(off_shift)
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    created = [
+        (
             _insert_tuning_item_assignment(
                 db, item_id, employee_name, rate, hours, comment, now, due_from, due_to
-            )
-            for employee_name, rate, hours in rows
-        ]
-        db.commit()
-        for assignment_id in created_ids:
-            _notify_task_assignment(db, ASSIGNMENT_TUNING, assignment_id)
-        _flag_tuning_item_budget_overrun(
-            db, item["id"], item["work_name"], item["cost_price"], item["price_pending"]
+            ),
+            employee_name, rate, hours,
         )
+        for employee_name, rate, hours in rows
+    ]
+    db.commit()
+    schedule_notes = []
+    for assignment_id, employee_name, rate, hours in created:
+        if schedule_day and employee_name not in unscheduled:
+            schedule_notes.append(_describe_schedule_placement(
+                employee_name, schedule_day,
+                tuning_schedule_services.place_assignment_task(
+                    db, assignment_id, employee_name, item["work_name"], rate, comment,
+                    schedule_day, hours,
+                ),
+            ))
+    if schedule_notes:
+        session["tuning_assign_notice"] = " ".join(schedule_notes)
+    for assignment_id, _name, _rate, _hours in created:
+        _notify_task_assignment(db, ASSIGNMENT_TUNING, assignment_id)
+    _flag_tuning_item_budget_overrun(
+        db, item["id"], item["work_name"], item["cost_price"], item["price_pending"]
+    )
     return redirect(url_for(return_endpoint, order_id=order_id))
+
+
+def _pop_assign_pending(order_id):
+    """The assignment waiting for the admin's shift decision — only shown on
+    the order it belongs to."""
+    pending = session.pop("tuning_assign_pending", None)
+    return pending if pending and pending.get("order_id") == order_id else None
+
+
+def _describe_schedule_placement(employee_name, day_iso, placement):
+    """One sentence for the admin about where a task card landed in the
+    tuning schedule (or why it didn't)."""
+    day = format_ru_date(day_iso)
+    if placement is None:
+        return f"{employee_name} не стоит в расписании на {day} — карточка в расписание не добавлена."
+    if not placement["placed"]:
+        reason = (
+            "норма часов не помещается в один день"
+            if placement["reason"] == "hours" else "задача не помещается в сутки"
+        )
+        return f"{employee_name}: {reason} — карточка в расписание не добавлена."
+    text = f"{employee_name}: задача добавлена в расписание на {day}, {placement['start']}–{placement['end']}."
+    if placement["past_shift_end"]:
+        text += f" Выходит за конец смены ({placement['shift_end']})."
+    return text
 
 
 def _parse_task_due(from_raw, to_raw):
@@ -11734,6 +11823,7 @@ def update_tuning_assignment_terms(assignment_id):
         (rate, hours, assignment_id),
     )
     notice = "Нормировка обновлена."
+    tuning_schedule_services.sync_assignment_hours(db, assignment_id, hours)
     entry = None
     if assignment["entry_id"]:
         entry = db.execute(
@@ -11950,6 +12040,8 @@ def tuning_order_board(order_id):
         budget_warning=session.pop("tuning_budget_warning", None),
         board_notice=session.pop("tuning_board_notice", None),
         board_error=session.pop("tuning_board_error", None),
+        assign_pending=_pop_assign_pending(order_id),
+        assign_notice=session.pop("tuning_assign_notice", None),
     )
 
 
@@ -12026,6 +12118,29 @@ def update_tuning_assignment_dates(assignment_id):
         (due_from, due_to, new_completed, assignment_id),
     )
     notice = "Даты задачи обновлены."
+    if due_from and not due_to and (due_from != assignment["due_from"] or assignment["due_to"]):
+        # A one-date task lives on that day of the tuning schedule: move its
+        # card there, or add one if the task has none yet.
+        employee = assignment["employee_name"]
+        moved = tuning_schedule_services.move_assignment_task(
+            db, assignment_id, employee, due_from
+        )
+        if moved is None:
+            item = db.execute(
+                "SELECT work_name FROM tuning_order_items WHERE id = ?", (assignment["item_id"],)
+            ).fetchone()
+            placement = tuning_schedule_services.place_assignment_task(
+                db, assignment_id, employee, item["work_name"], assignment["rate"],
+                assignment["comment"], due_from, assignment["norm_hours"],
+            )
+            notice += " " + _describe_schedule_placement(employee, due_from, placement)
+        elif moved["moved"]:
+            notice += f" Карточка в расписании перенесена на {format_ru_date(due_from)}, {moved['start']}."
+        elif moved["reason"] == "off_shift":
+            notice += (
+                f" {employee} не стоит в расписании на {format_ru_date(due_from)} — "
+                "карточка в расписании осталась на прежней дате."
+            )
     if (
         assignment["assignment_status"] == "done"
         and not _tuning_assignment_has_payout(db, assignment)

@@ -55,14 +55,72 @@ def list_day_task_employee_ids(db, day):
     }
 
 
-def add_day_crew_member(db, day, employee_id, timestamp):
+def add_day_crew_member(db, day, employee_id, timestamp, shift_start=None, shift_end=None):
     cursor = db.execute(
         "INSERT OR IGNORE INTO tuning_schedule_day_crew "
-        "(work_date, employee_id, created_at) VALUES (?, ?, ?)",
-        (day, employee_id, timestamp),
+        "(work_date, employee_id, created_at, shift_start, shift_end) VALUES (?, ?, ?, ?, ?)",
+        (day, employee_id, timestamp, shift_start, shift_end),
     )
     db.commit()
     return cursor.rowcount > 0
+
+
+def set_shift_hours(db, day, employee_id, shift_start, shift_end):
+    cursor = db.execute(
+        "UPDATE tuning_schedule_day_crew SET shift_start = ?, shift_end = ? "
+        "WHERE work_date = ? AND employee_id = ?",
+        (shift_start, shift_end, day, employee_id),
+    )
+    db.commit()
+    return cursor.rowcount > 0
+
+
+def list_day_crew_shifts(db, day):
+    """{employee_id: (shift_start, shift_end)} for everyone on the roster of
+    `day` (either may be None on rows from before shifts had hours)."""
+    return {
+        row["employee_id"]: (row["shift_start"], row["shift_end"])
+        for row in db.execute(
+            "SELECT employee_id, shift_start, shift_end FROM tuning_schedule_day_crew "
+            "WHERE work_date = ?", (day,),
+        ).fetchall()
+    }
+
+
+def get_day_crew_shift_by_name(db, day, employee_name):
+    """The roster row (with shift hours) of an employee on `day`, looked up
+    by name, or None when they are not on that day's roster."""
+    return db.execute(
+        "SELECT c.employee_id, c.shift_start, c.shift_end FROM tuning_schedule_day_crew c "
+        "JOIN employees e ON e.id = c.employee_id "
+        "WHERE c.work_date = ? AND e.name = ? AND e.deleted_at IS NULL",
+        (day, employee_name),
+    ).fetchone()
+
+
+def get_employee_id_by_name(db, employee_name):
+    row = db.execute(
+        "SELECT id FROM employees WHERE name = ? AND deleted_at IS NULL", (employee_name,)
+    ).fetchone()
+    return row["id"] if row else None
+
+
+def get_task_by_assignment(db, assignment_id):
+    return db.execute(
+        "SELECT * FROM tuning_schedule_tasks WHERE assignment_id = ?", (assignment_id,)
+    ).fetchone()
+
+
+def set_task_day_hours(db, day_id, planned_hours):
+    db.execute(
+        "UPDATE tuning_schedule_task_days SET planned_hours = ? WHERE id = ?",
+        (planned_hours, day_id),
+    )
+    db.commit()
+
+
+def delete_task_days(db, task_id):
+    db.execute("DELETE FROM tuning_schedule_task_days WHERE task_id = ?", (task_id,))
 
 
 def remove_day_crew_member(db, day, employee_id):
