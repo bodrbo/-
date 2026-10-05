@@ -2,7 +2,7 @@
 
 import datetime as dt
 
-from flask import Blueprint, abort, current_app, jsonify, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, current_app, g, jsonify, redirect, render_template, request, session, url_for
 
 from modules.clients.constants import CLIENT_CONTACT_METHODS
 from modules.excursion_services import repository as service_repository
@@ -40,6 +40,7 @@ def create_schedule_blueprint(
     apply_minimum_shift=None,
     delete_linked_trip=None,
     update_linked_trip_time=None,
+    sync_closed_item_accounting=None,
     receipts=None,
     is_investor_view=lambda: False,
 ):
@@ -66,6 +67,42 @@ def create_schedule_blueprint(
         return schedule_notifications.notify_item_changes(
             get_db(), before, after, employee_notifier
         )
+
+    @blueprint.before_request
+    def capture_accounting_state():
+        """Remember how a card looked before any POST that targets one, so
+        after_request can carry the change over to its trip/payroll."""
+        if sync_closed_item_accounting is None or request.method != "POST":
+            return
+        item_id = (request.view_args or {}).get("item_id")
+        if item_id is not None:
+            g.accounting_item_id = item_id
+            g.accounting_before = repository.accounting_snapshot(get_db(), item_id)
+
+    @blueprint.after_request
+    def sync_accounting_after_change(response):
+        item_id = getattr(g, "accounting_item_id", None)
+        if item_id is None or response.status_code >= 400:
+            return response
+        try:
+            db = get_db()
+            messages = sync_closed_item_accounting(
+                db, item_id, g.accounting_before,
+                repository.accounting_snapshot(db, item_id),
+            )
+        except Exception:
+            current_app.logger.exception("Не удалось пересчитать учёт карточки №%s", item_id)
+            messages = ["Не удалось пересчитать связанный рейс и зарплату — проверьте их вручную."]
+            success = False
+        else:
+            success = True
+        if messages:
+            notice = session.get("schedule_notice") or {"message": "", "type": "success"}
+            notice["message"] = " ".join(filter(None, [notice["message"], *messages]))
+            if not success:
+                notice["type"] = "error"
+            session["schedule_notice"] = notice
+        return response
 
     @blueprint.route("/schedule")
     @access_required

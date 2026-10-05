@@ -252,6 +252,25 @@ def move_item_payroll(db, item_id, work_date):
     )
 
 
+def accounting_snapshot(db, item_id):
+    """The slice of a card that financial accounting (the linked trip and its
+    payroll entries) depends on — compared before/after every card change by
+    the blueprint's after_request hook to decide what to carry over."""
+    item = get_item(db, item_id)
+    if item is None or item["deleted_at"] is not None:
+        return None
+    return {
+        "service_name": item["service_name"],
+        "boat": item["boat"] or "",
+        "starts_at": item["starts_at"],
+        "ends_at": item["ends_at"],
+        "revenue": round(float(item["revenue"] or 0), 2),
+        "crew": tuple(sorted(
+            (row["employee_name"], row["role"]) for row in list_assignments(db, item_id)
+        )),
+    }
+
+
 def set_accounting_trip_id(db, item_id, trip_id, timestamp):
     db.execute(
         "UPDATE schedule_items SET accounting_trip_id = ?, updated_at = ? WHERE id = ?",

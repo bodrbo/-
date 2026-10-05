@@ -4977,6 +4977,25 @@ def trips_index():
     )
 
 
+def _write_trip_fields(db, trip_id, data, entry_id, *, commission_is_manual, needs_review):
+    """UPDATE of every derived column of a trips row from validated form data
+    (as returned by _process_trip_form) — shared by the trip editor and by
+    _sync_closed_schedule_item. Labor entries and expenses are the caller's."""
+    db.execute(
+        "UPDATE trips SET boat=?, trip_date=?, trip_time=?, work_type=?, entry_id=?, revenue=?, "
+        "sale_channel=?, commission_pct=?, commission_is_manual=?, commission_amount=?, "
+        "labor_cost=?, fuel_cost=?, "
+        "mooring_cost=?, extra_total=?, remainder=?, investor_payout=?, my_share=?, "
+        "needs_review=? WHERE id=?",
+        (data["boat"], data["trip_date"], data["trip_time"], data["work_type"],
+         entry_id, data["revenue"],
+         data["sale_channel"], data["commission_pct"], commission_is_manual,
+         data["commission_amount"],
+         data["labor_cost"], data["fuel_cost"], data["mooring_cost"], data["extra_total"],
+         data["remainder"], data["investor_payout"], data["my_share"], needs_review, trip_id),
+    )
+
+
 @app.route("/trips/edit/<int:trip_id>", methods=["GET", "POST"])
 @admin_login_required
 def edit_trip(trip_id):
@@ -5075,18 +5094,9 @@ def edit_trip(trip_id):
         trip["commission_is_manual"]
         or abs(float(trip["commission_pct"]) - data["commission_pct"]) > 0.0001
     ))
-    db.execute(
-        "UPDATE trips SET boat=?, trip_date=?, trip_time=?, work_type=?, entry_id=?, revenue=?, "
-        "sale_channel=?, commission_pct=?, commission_is_manual=?, commission_amount=?, "
-        "labor_cost=?, fuel_cost=?, "
-        "mooring_cost=?, extra_total=?, remainder=?, investor_payout=?, my_share=?, "
-        "needs_review=0 WHERE id=?",
-        (data["boat"], data["trip_date"], data["trip_time"], data["work_type"],
-         entry_ids[0] if entry_ids else None, data["revenue"],
-         data["sale_channel"], data["commission_pct"], commission_is_manual,
-         data["commission_amount"],
-         data["labor_cost"], data["fuel_cost"], data["mooring_cost"], data["extra_total"],
-         data["remainder"], data["investor_payout"], data["my_share"], trip_id),
+    _write_trip_fields(
+        db, trip_id, data, entry_ids[0] if entry_ids else None,
+        commission_is_manual=commission_is_manual, needs_review=0,
     )
     db.execute("DELETE FROM trip_expenses WHERE trip_id = ?", (trip_id,))
     for desc, amt in data["expenses"]:
@@ -5161,6 +5171,221 @@ def _update_trip_datetime_from_schedule(db, trip_id, trip_date, trip_time):
         (trip_date, trip_time, trip_id),
     )
     db.commit()
+
+
+def _schedule_snapshot_hours(snapshot):
+    starts = dt.datetime.strptime(snapshot["starts_at"], "%Y-%m-%d %H:%M")
+    ends = dt.datetime.strptime(snapshot["ends_at"], "%Y-%m-%d %H:%M")
+    return round(max((ends - starts).total_seconds() / 3600, 0), 2)
+
+
+def _sync_closed_schedule_item(db, item_id, before, after):
+    """Injected into modules.schedule as sync_closed_item_accounting — after
+    any change to a card that was already closed into accounting (a trips
+    row, or boat-less payroll entries), carries *what changed* over to the
+    trip and the crew's payroll entries. Only the delta between the card's
+    state before and after the change is applied, so values edited by hand
+    on the trip afterwards (rates, hours, fuel, commission, expenses) survive:
+      - boat / date / time / revenue / service name -> the trip (and the
+        entries' date and work type);
+      - crew members removed -> their entries are deleted; added -> an entry
+        at the role's current excursion rate (flagged needs_review when no
+        rate is set); role changed -> that entry's rate;
+      - duration changed -> hours of every entry that still carried the old
+        duration.
+    A boat appearing/disappearing flips the card between "trip" and
+    "payroll only", so it is reopened instead: the old accounting is deleted
+    and the next auto-close run (a few minutes) builds it again.
+    Returns notice messages (empty when nothing had to change)."""
+    if before is None or after is None or before == after:
+        return []
+    item = db.execute(
+        "SELECT * FROM schedule_items WHERE id = ? AND deleted_at IS NULL", (item_id,)
+    ).fetchone()
+    if item is None:
+        return []
+    trip_id = item["accounting_trip_id"]
+    payroll_only = trip_id is None and bool(item["payroll_closed_at"])
+    if trip_id is None and not payroll_only:
+        return []  # not closed yet — auto-close will pick the card up as it is
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    reopen_note = (
+        " Учёт этого рейса пересоздаётся автоматически в течение нескольких минут."
+    )
+    if trip_id is not None and not after["boat"]:
+        _delete_trip_data(db, trip_id)
+        db.execute(
+            "UPDATE schedule_items SET accounting_trip_id = NULL, updated_at = ? WHERE id = ?",
+            (now, item_id),
+        )
+        db.commit()
+        return ["Катер убран из карточки — рейс в учёте удалён." + reopen_note]
+    if payroll_only and after["boat"]:
+        db.execute("DELETE FROM entries WHERE schedule_item_id = ?", (item_id,))
+        db.execute(
+            "UPDATE schedule_items SET payroll_closed_at = NULL, updated_at = ? WHERE id = ?",
+            (now, item_id),
+        )
+        db.commit()
+        return ["Карточке назначен катер — начисленная ранее зарплата удалена." + reopen_note]
+
+    trip = None
+    if trip_id is not None:
+        trip = db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
+        if trip is None:
+            return []  # dangling link — nothing to carry the change to
+        rows = db.execute(
+            "SELECT e.* FROM trip_labor tl JOIN entries e ON e.id = tl.entry_id "
+            "WHERE tl.trip_id = ? ORDER BY e.id", (trip_id,),
+        ).fetchall()
+        if not rows and trip["entry_id"]:
+            rows = db.execute(
+                "SELECT * FROM entries WHERE id = ?", (trip["entry_id"],)
+            ).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT * FROM entries WHERE schedule_item_id = ? ORDER BY id", (item_id,)
+        ).fetchall()
+    labor = [dict(row, state="keep") for row in rows]
+
+    hours_before = _schedule_snapshot_hours(before)
+    hours_after = _schedule_snapshot_hours(after)
+    new_day = after["starts_at"][:10]
+    before_crew, after_crew = dict(before["crew"]), dict(after["crew"])
+    messages = []
+    touched = []  # (employee, work_date) pairs whose payroll week the change reaches
+
+    for entry in labor:
+        employee = entry["employee"]
+        if employee in before_crew and employee not in after_crew:
+            entry["state"] = "delete"
+            messages.append(f"{employee} убран из экипажа — начисление удалено.")
+        elif employee in before_crew and employee in after_crew and before_crew[employee] != after_crew[employee]:
+            new_rate = payroll_rates_repository.get_excursion_role_rate(db, after_crew[employee])
+            if new_rate:
+                entry["rate"] = new_rate
+                entry["state"] = "update"
+                messages.append(f"У {employee} изменилась роль — ставка {format_money(new_rate)} ₽/ч.")
+        if entry["state"] != "delete" and hours_before != hours_after \
+                and round(float(entry["quantity"] or 0), 2) == hours_before:
+            entry["quantity"] = hours_after
+            entry["state"] = "update"
+        if entry["state"] != "delete" and before["service_name"] != after["service_name"] \
+                and entry["work_type"] == before["service_name"]:
+            entry["work_type"] = after["service_name"]
+            entry["state"] = "update"
+        if entry["state"] != "delete" and entry["work_date"][:10] != new_day:
+            entry["work_date"] = new_day
+            entry["state"] = "update"
+
+    needs_review = False
+    existing_names = {entry["employee"] for entry in labor if entry["state"] != "delete"}
+    for employee, role in after["crew"]:
+        if employee in before_crew or employee in existing_names:
+            continue
+        rate = payroll_rates_repository.get_excursion_role_rate(db, role)
+        if not rate:
+            needs_review = True
+        labor.append({
+            "id": None, "employee": employee, "work_type": after["service_name"],
+            "rate": rate or 0, "quantity": hours_after, "work_date": new_day, "state": "insert",
+        })
+        messages.append(
+            f"{employee} добавлен в экипаж — начислено {format_money((rate or 0) * hours_after)} ₽."
+            + ("" if rate else " Ставка роли не задана — проверьте начисление.")
+        )
+    if hours_before != hours_after and any(e["state"] == "update" and e["id"] for e in labor):
+        messages.append(f"Часы пересчитаны: {hours_before:g} → {hours_after:g}.")
+
+    live = [entry for entry in labor if entry["state"] != "delete"]
+
+    if trip is not None:
+        form = MultiDict()
+        form["boat"] = after["boat"]
+        form["trip_date"] = new_day
+        form["trip_time"] = after["starts_at"][11:16]
+        form["sale_channel"] = trip["sale_channel"]
+        form["commission_pct"] = str(trip["commission_pct"])
+        form["revenue"] = str(after["revenue"] if before["revenue"] != after["revenue"] else trip["revenue"])
+        form["fuel_cost"] = str(trip["fuel_cost"])
+        form["mooring_cost"] = str(trip["mooring_cost"])
+        for entry in live:
+            form.add("employee[]", entry["employee"])
+            form.add("work_type[]", entry["work_type"])
+            form.add("quantity[]", str(entry["quantity"]))
+            form.add("rate[]", str(entry["rate"]))
+        for expense in db.execute(
+            "SELECT description, amount FROM trip_expenses WHERE trip_id = ?", (trip_id,)
+        ).fetchall():
+            form.add("expense_desc[]", expense["description"])
+            form.add("expense_amount[]", str(expense["amount"]))
+        errors, data = _process_trip_form(db, form, exclude_trip_id=trip_id)
+        crew_emptied = not live and all("хотя бы одного сотрудника" in e for e in errors)
+        if errors and not crew_emptied:
+            return [
+                "Не удалось пересчитать связанный рейс (" + "; ".join(errors)
+                + ") — проверьте его в разделе «Рейсы и инвесторы»."
+            ]
+        if crew_emptied:  # keep the trip (and its costs), just without pay
+            data = dict(
+                boat=after["boat"], trip_date=new_day, trip_time=after["starts_at"][11:16],
+                work_type="", labor_cost=0.0, revenue=float(form["revenue"]),
+                sale_channel=trip["sale_channel"], commission_pct=trip["commission_pct"],
+                fuel_cost=trip["fuel_cost"], mooring_cost=trip["mooring_cost"],
+                extra_total=trip["extra_total"],
+            )
+            data["commission_amount"] = data["revenue"] * data["commission_pct"] / 100
+            data["remainder"] = (
+                data["revenue"] - data["commission_amount"]
+                - data["fuel_cost"] - data["mooring_cost"] - data["extra_total"]
+            )
+            data["investor_payout"] = data["remainder"] / 2
+            data["my_share"] = data["commission_amount"] + data["remainder"] / 2
+            messages.append("В карточке не осталось экипажа — зарплата по рейсу не начисляется.")
+        if before["revenue"] != after["revenue"]:
+            messages.append(f"Доход рейса: {format_money(trip['revenue'])} → {format_money(after['revenue'])} ₽.")
+        if before["boat"] != after["boat"]:
+            messages.append(f"Катер рейса: «{trip['boat']}» → «{after['boat']}».")
+
+    for entry in labor:
+        if entry["state"] == "delete":
+            db.execute("DELETE FROM trip_labor WHERE entry_id = ?", (entry["id"],))
+            db.execute("DELETE FROM entries WHERE id = ?", (entry["id"],))
+            touched.append((entry["employee"], entry["work_date"]))
+        elif entry["state"] == "update":
+            db.execute(
+                "UPDATE entries SET work_type = ?, rate = ?, quantity = ?, amount = ?, work_date = ? "
+                "WHERE id = ?",
+                (entry["work_type"], entry["rate"], entry["quantity"],
+                 round(float(entry["rate"]) * float(entry["quantity"]), 2), entry["work_date"], entry["id"]),
+            )
+            touched.append((entry["employee"], entry["work_date"]))
+        elif entry["state"] == "insert":
+            cur = db.execute(
+                "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, "
+                "created_at, schedule_item_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (entry["employee"], entry["work_type"], entry["rate"], entry["quantity"],
+                 round(float(entry["rate"]) * float(entry["quantity"]), 2), entry["work_date"], now,
+                 item_id if trip is None else None),
+            )
+            entry["id"] = cur.lastrowid
+            if trip is not None:
+                db.execute("INSERT INTO trip_labor (trip_id, entry_id) VALUES (?, ?)", (trip_id, entry["id"]))
+            touched.append((entry["employee"], entry["work_date"]))
+    if trip is not None:
+        _write_trip_fields(
+            db, trip_id, data, live[0]["id"] if live else None,
+            commission_is_manual=trip["commission_is_manual"],
+            needs_review=1 if (needs_review or trip["needs_review"]) else 0,
+        )
+    db.commit()
+
+    if any(_payroll_week_settled(db, employee, work_date) for employee, work_date in touched):
+        messages.append(_SETTLED_WEEK_WARNING.strip())
+    if messages:
+        messages.insert(0, "Учёт рейса обновлён:" if trip is not None else "Зарплата за рейс обновлена:")
+    return messages
 
 
 @app.route("/trips/expense/add", methods=["POST"])
@@ -5545,6 +5770,7 @@ app.register_blueprint(
         update_linked_trip_time=lambda db, trip_id, trip_date, trip_time: (
             _update_trip_datetime_from_schedule(db, trip_id, trip_date, trip_time)
         ),
+        sync_closed_item_accounting=_sync_closed_schedule_item,
         receipts=SimpleNamespace(
             configured=lambda: _modulkassa_configured(),
             fiscalize=lambda db, payment_id: _schedule_receipt_fiscalize(db, payment_id),
