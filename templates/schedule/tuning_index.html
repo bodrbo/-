@@ -110,7 +110,8 @@
           </div>
           <div class="tuning-calendar-columns" style="height: {{ grid_height }}px;">
             {% for employee in day_crew %}
-            <div class="tuning-calendar-column" data-employee-id="{{ employee.id }}">
+            <div class="tuning-calendar-column" data-employee-id="{{ employee.id }}" data-employee-name="{{ employee.name }}"
+                 title="Нажмите на свободное место, чтобы добавить задачу">
               {% for mark in hour_marks %}
               <span class="tuning-calendar-hour-line" style="top: {{ mark.top_px }}px;"></span>
               {% endfor %}
@@ -132,7 +133,7 @@
                   </select>
                 </div>
                 <strong>{{ card.title }}</strong>
-                {% if card.is_linked %}
+                {% if card.order_id %}
                 <span class="tuning-calendar-card-meta">№{{ card.order_id }} · {{ card.equipment_label }}</span>
                 {% endif %}
               </div>
@@ -390,6 +391,73 @@
     </div>
   </section>
 </div>
+
+<div class="schedule-modal" id="quickTaskModal" hidden>
+  <div class="schedule-modal-backdrop" data-quick-close></div>
+  <section class="schedule-modal-card quick-task-card" role="dialog" aria-modal="true" aria-labelledby="quickTaskTitle">
+    <header class="schedule-modal-header">
+      <div>
+        <span>Новая задача · {{ day_label }}</span>
+        <h2 id="quickTaskTitle">Добавить задачу</h2>
+      </div>
+      <button type="button" class="schedule-modal-close" data-quick-close aria-label="Закрыть">×</button>
+    </header>
+    <form method="post" action="{{ url_for('tuning_schedule.create_task') }}" class="quick-task-body" id="quickTaskForm">
+      <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
+      <input type="hidden" name="work_date[]" value="{{ day.isoformat() }}">
+
+      <label class="quick-task-field"><span>Сотрудник</span>
+        <select name="employee_name" id="quickTaskEmployee" required onchange="updateQuickTaskRate()">
+          <option value="" disabled>Выберите сотрудника</option>
+          {% for employee in day_crew %}
+          <option value="{{ employee.name }}" data-admin="{{ 1 if employee.is_admin else 0 }}">{{ employee.name }}{{ ' · администратор' if employee.is_admin }}</option>
+          {% endfor %}
+          {% for employee in available_admins %}
+          <option value="{{ employee.name }}" data-admin="1">{{ employee.name }} · администратор (не в смене)</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <div class="quick-task-row">
+        <label class="quick-task-field"><span>Начало</span>
+          <input type="time" name="start_time[]" id="quickTaskStart" value="09:00" required>
+        </label>
+        <label class="quick-task-field"><span>Часы</span>
+          <input type="text" inputmode="decimal" name="planned_hours[]" id="quickTaskHours" value="1" required>
+        </label>
+        <label class="quick-task-field" id="quickTaskRateField"><span>Ставка, ₽/ч</span>
+          <input type="text" inputmode="decimal" name="rate" id="quickTaskRate" required>
+        </label>
+      </div>
+      <p class="hint" id="quickTaskAdminNote" hidden>Администратор на окладе — ставка не нужна.</p>
+
+      <label class="quick-task-field"><span>Проект <small>необязательно</small></span>
+        <select name="order_id" id="quickTaskOrder" onchange="loadQuickTaskWorks(this.value)">
+          <option value="">Без проекта</option>
+          {% for order in linkable_orders %}
+          <option value="{{ order.id }}">№{{ order.id }} — {{ order.client_name }} ({{ order.motor_model if order.equipment_type == 'motor' else order.boat_model }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="quick-task-field" id="quickTaskWorkField" hidden><span>Работа внутри проекта <small>необязательно</small></span>
+        <select name="order_item_id" id="quickTaskWork" onchange="updateQuickTaskTitle()">
+          <option value="">Задача по проекту целиком</option>
+        </select>
+      </label>
+      <label class="quick-task-field" id="quickTaskTitleField"><span>Название задачи</span>
+        <input type="text" name="title" id="quickTaskName" placeholder="Например: уборка цеха" maxlength="200" required>
+      </label>
+      <label class="quick-task-field"><span>Комментарий</span>
+        <textarea name="comment" rows="2" maxlength="2000"></textarea>
+      </label>
+
+      <div class="quick-task-actions">
+        <button type="submit" class="employee-primary-btn">Добавить задачу</button>
+        <button type="button" class="employee-secondary-btn" data-quick-close>Отмена</button>
+      </div>
+    </form>
+  </section>
+</div>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 <script>
 function openTuningRosterModal() {
@@ -603,6 +671,93 @@ function startTuningDrag(event, card) {
   card.addEventListener('pointerup', finishTuningDrag);
   card.addEventListener('pointercancel', cancelTuningDrag);
 }
+
+var QUICK_TASK_STEP = 15;
+
+function quickTaskTimeLabel(minutes) {
+  var snapped = Math.floor(minutes / QUICK_TASK_STEP) * QUICK_TASK_STEP;
+  snapped = Math.max(0, Math.min(24 * 60 - QUICK_TASK_STEP, snapped));
+  return (Math.floor(snapped / 60) < 10 ? '0' : '') + Math.floor(snapped / 60) + ':'
+    + (snapped % 60 < 10 ? '0' : '') + (snapped % 60);
+}
+
+function openQuickTask(employeeName, startMinutes) {
+  var modal = document.getElementById('quickTaskModal');
+  var employee = document.getElementById('quickTaskEmployee');
+  employee.value = employeeName;
+  document.getElementById('quickTaskStart').value = quickTaskTimeLabel(startMinutes);
+  document.getElementById('quickTaskHours').value = '1';
+  document.getElementById('quickTaskRate').value = '';
+  document.getElementById('quickTaskOrder').value = '';
+  document.getElementById('quickTaskName').value = '';
+  loadQuickTaskWorks('');
+  updateQuickTaskRate();
+  modal.hidden = false;
+  document.body.classList.add('schedule-modal-open');
+  setTimeout(function () { document.getElementById('quickTaskName').focus(); }, 20);
+}
+
+function closeQuickTask() {
+  document.getElementById('quickTaskModal').hidden = true;
+  document.body.classList.remove('schedule-modal-open');
+}
+
+function updateQuickTaskRate() {
+  var select = document.getElementById('quickTaskEmployee');
+  var option = select.options[select.selectedIndex];
+  var isAdmin = !!option && option.dataset.admin === '1';
+  var field = document.getElementById('quickTaskRateField');
+  var input = document.getElementById('quickTaskRate');
+  field.hidden = isAdmin;
+  input.required = !isAdmin;
+  if (isAdmin) input.value = '';
+  document.getElementById('quickTaskAdminNote').hidden = !isAdmin;
+}
+
+function updateQuickTaskTitle() {
+  // a work of the project names the task itself; otherwise the title is typed
+  var hasWork = !!document.getElementById('quickTaskWork').value;
+  var titleField = document.getElementById('quickTaskTitleField');
+  var input = document.getElementById('quickTaskName');
+  titleField.hidden = hasWork;
+  input.required = !hasWork;
+}
+
+function loadQuickTaskWorks(orderId) {
+  var field = document.getElementById('quickTaskWorkField');
+  var select = document.getElementById('quickTaskWork');
+  select.innerHTML = '<option value="">Задача по проекту целиком</option>';
+  field.hidden = !orderId;
+  updateQuickTaskTitle();
+  if (!orderId) return;
+  fetch('/schedule/tuning/orders/' + orderId + '/items', {credentials: 'same-origin'})
+    .then(function (response) { return response.json(); })
+    .then(function (data) {
+      ((data && data.items) || []).forEach(function (item) {
+        var option = document.createElement('option');
+        option.value = item.id;
+        option.textContent = item.work_name;
+        select.appendChild(option);
+      });
+    })
+    .catch(function () {});
+}
+
+document.querySelectorAll('[data-quick-close]').forEach(function (element) {
+  element.addEventListener('click', closeQuickTask);
+});
+document.addEventListener('keydown', function (event) {
+  var modal = document.getElementById('quickTaskModal');
+  if (event.key === 'Escape' && modal && !modal.hidden) closeQuickTask();
+});
+document.querySelectorAll('.tuning-calendar-column').forEach(function (column) {
+  column.addEventListener('click', function (event) {
+    if (event.target.closest('.tuning-calendar-card') || tuningDrag || tuningDragSaving) return;
+    var rect = column.getBoundingClientRect();
+    var minutes = TUNING_GRID_START + (event.clientY - rect.top) / TUNING_PX;
+    openQuickTask(column.dataset.employeeName, minutes);
+  });
+});
 
 function updateTuningScheduleRate() {
   var select = document.getElementById('task-employee');

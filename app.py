@@ -11579,11 +11579,13 @@ def _pay_free_tuning_schedule_task(db, task, total_hours):
     if amount <= 0:
         return None  # a salaried task (administrator) — nothing to pay out
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    # a task attached to a project (order) is paid against that project
+    project_id = _project_id_for_tuning_order(db, task["order_id"]) if task["order_id"] else None
     cur = db.execute(
         "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at, project_id) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (task["employee_name"], task["title"], task["rate"], total_hours,
-         amount, dt.date.today().isoformat(), now),
+         amount, dt.date.today().isoformat(), now, project_id),
     )
     db.commit()
     return cur.lastrowid

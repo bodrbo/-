@@ -173,7 +173,7 @@ _DAY_TASK_SELECT = (
     "JOIN tuning_schedule_tasks t ON t.id = d.task_id "
     "LEFT JOIN tuning_item_assignments tia ON tia.id = t.assignment_id "
     "LEFT JOIN tuning_order_items ti ON ti.id = tia.item_id "
-    "LEFT JOIN tuning_orders o ON o.id = ti.order_id "
+    "LEFT JOIN tuning_orders o ON o.id = COALESCE(ti.order_id, t.order_id) "
 )
 
 
@@ -228,12 +228,12 @@ def get_task(db, task_id):
     ).fetchone()
 
 
-def create_task(db, assignment_id, employee_name, title, rate, comment, created_at):
+def create_task(db, assignment_id, employee_name, title, rate, comment, created_at, order_id=None):
     cur = db.execute(
         "INSERT INTO tuning_schedule_tasks "
-        "(assignment_id, employee_name, title, rate, comment, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (assignment_id, employee_name, title, rate, comment, created_at),
+        "(assignment_id, employee_name, title, rate, comment, created_at, order_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (assignment_id, employee_name, title, rate, comment, created_at, order_id),
     )
     db.commit()
     return cur.lastrowid
@@ -293,6 +293,13 @@ def list_linkable_orders(db):
         "WHERE status NOT IN ('cancelled', 'handed_over') "
         "ORDER BY id DESC"
     ).fetchall()
+
+
+def get_linkable_order(db, order_id):
+    return db.execute(
+        "SELECT id FROM tuning_orders WHERE id = ? AND status NOT IN ('cancelled', 'handed_over')",
+        (order_id,),
+    ).fetchone()
 
 
 def get_order_item(db, order_id, item_id):

@@ -144,8 +144,15 @@ def create_tuning_schedule_blueprint(
             )
         else:
             title = request.form.get("title", "")
+            try:
+                project_id = int(order_id) if order_id else None
+            except ValueError:
+                project_id = None
+            if order_id and project_id is None:
+                set_notice("Проект не найден.", False)
+                return redirect_to_day(day)
             success, message, _task_id = services.create_free_task(
-                db, employee_name, title, rate, comment, day_rows,
+                db, employee_name, title, rate, comment, day_rows, project_id,
             )
         set_notice(message, success)
         return redirect_to_day(day)

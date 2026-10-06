@@ -268,7 +268,7 @@ def day_view(db, day):
     for row in repository.list_day_tasks(db, day.isoformat()):
         task = dict(row)
         task["is_linked"] = task["assignment_id"] is not None
-        if task["is_linked"]:
+        if task["order_id"] is not None:
             task["equipment_label"] = (
                 (task["motor_model"] or "Мотор") if task["equipment_type"] == "motor"
                 else (task["boat_model"] or "Лодка")
@@ -324,7 +324,7 @@ def calendar_view(db, day, day_crew):
         if task["employee_name"] not in cards_by_employee:
             continue
         task["is_linked"] = task["assignment_id"] is not None
-        if task["is_linked"]:
+        if task["order_id"] is not None:
             task["equipment_label"] = (
                 (task["motor_model"] or "Мотор") if task["equipment_type"] == "motor"
                 else (task["boat_model"] or "Лодка")
@@ -404,7 +404,9 @@ def _roster_note(employee_name, added_days):
     return f" {employee_name} добавлен в смену на {days}."
 
 
-def create_free_task(db, employee_name, title, rate, comment, day_rows):
+def create_free_task(db, employee_name, title, rate, comment, day_rows, order_id=None):
+    """A task that is not tied to a work item. With `order_id` it still
+    belongs to that project (tuning order) and is shown with it."""
     errors = []
     employee_name = _normalise_text(employee_name, EMPLOYEE_NAME_MAX_LENGTH)
     title = _normalise_text(title, TASK_TITLE_MAX_LENGTH)
@@ -415,12 +417,14 @@ def create_free_task(db, employee_name, title, rate, comment, day_rows):
     if not title:
         errors.append("Укажите название задачи.")
     rate = _clean_rate(db, employee_name, rate, errors)
+    if order_id is not None and repository.get_linkable_order(db, order_id) is None:
+        errors.append("Проект не найден или уже закрыт.")
     clean_days = _clean_task_days(day_rows, errors)
     if errors:
         return False, " ".join(errors), None
     added_days = _ensure_on_roster(db, employee_name, clean_days)
     task_id = repository.create_task(
-        db, None, employee_name, title, rate, comment, current_timestamp()
+        db, None, employee_name, title, rate, comment, current_timestamp(), order_id
     )
     for work_date, start_time, hours in clean_days:
         repository.add_task_day(db, task_id, work_date, start_time, hours)

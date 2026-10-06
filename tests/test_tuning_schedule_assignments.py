@@ -903,5 +903,167 @@ class TuningScheduleAdministratorTaskTests(_TuningScheduleFixture, unittest.Test
                 db.commit()
 
 
+class TuningScheduleQuickTaskTests(_TuningScheduleFixture, unittest.TestCase):
+    """Click on an empty place of the calendar -> a window to add a task for
+    anyone, optionally tied to a project or to a work inside it."""
+
+    def quick(self, employee=None, start="10:00", hours="1.5", rate="200", title="Проверка",
+              order_id=None, item_id=None, comment=""):
+        self.login_admin()
+        data = MultiDict([
+            ("employee_name", employee or self.EMPLOYEE_A), ("rate", rate), ("comment", comment),
+            ("title", title), ("return_date", self.DAY), ("work_date[]", self.DAY),
+            ("start_time[]", start), ("planned_hours[]", hours),
+            ("order_id", "" if order_id is None else str(order_id)),
+            ("order_item_id", "" if item_id is None else str(item_id)),
+        ])
+        return self.client.post("/schedule/tuning/tasks", data=data)
+
+    def page(self):
+        return self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+
+    def task(self, employee=None):
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT * FROM tuning_schedule_tasks WHERE employee_name = ? ORDER BY id DESC LIMIT 1",
+                (employee or self.EMPLOYEE_A,)).fetchone()
+            return dict(row) if row else None
+
+    def test_the_page_has_the_window_and_the_columns_know_their_employee(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        page = self.page()
+        self.assertIn('id="quickTaskModal"', page)
+        self.assertIn(f'data-employee-name="{self.EMPLOYEE_A}"', page)
+        self.assertIn("Нажмите на свободное место, чтобы добавить задачу", page)
+        self.assertIn("openQuickTask(column.dataset.employeeName, minutes)", page)
+        self.assertIn("if (event.target.closest('.tuning-calendar-card')", page)  # a click on a card is not an empty place
+        modal = page.split('id="quickTaskModal"')[1]
+        self.assertIn('name="order_id"', modal)
+        self.assertIn('name="order_item_id"', modal)
+        self.assertIn(self.EMPLOYEE_A, modal.split('id="quickTaskEmployee"')[1].split("</select>")[0])
+
+    def test_a_free_task_is_added_at_the_chosen_time(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.quick(start="13:15", hours="1.5", title="Уборка")
+        card = self.cards(self.EMPLOYEE_A)[0]
+        self.assertEqual((card["start_time"], card["planned_hours"]), ("13:15", 1.5))
+        task = self.task()
+        self.assertEqual((task["title"], task["rate"], task["assignment_id"], task["order_id"]),
+                         ("Уборка", 200, None, None))
+
+    def test_a_task_can_be_tied_to_a_project_without_a_work(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        response = self.quick(title="Подготовка корпуса", order_id=self.order_id)
+        self.assertEqual(response.status_code, 302)
+        task = self.task()
+        self.assertEqual((task["assignment_id"], task["order_id"]), (None, self.order_id))
+        page = self.page()
+        self.assertIn(f"№{self.order_id} · Salute 585 HT", page)
+        self.assertIn("Подготовка корпуса", page)
+
+    def test_a_task_can_be_tied_to_a_work_inside_a_project(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.quick(order_id=self.order_id, item_id=self.item_id, title="не используется")
+        task = self.task()
+        self.assertIsNotNone(task["assignment_id"])
+        self.assertEqual(task["title"], "Полировка корпуса")  # the work names the task
+        assignments = [a for a in self.assignments() if a["employee_name"] == self.EMPLOYEE_A]
+        self.assertEqual(len(assignments), 1)
+        self.assertIn(f"№{self.order_id} · Salute 585 HT", self.page())
+
+    def test_a_project_level_task_is_paid_against_the_project(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO projects (name, tuning_order_id, created_at) VALUES (?, ?, 'x')",
+                (f"Заказ №{self.order_id}", self.order_id))
+            db.commit()
+        self.addCleanup(self._drop_project)
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.quick(title="Подготовка", order_id=self.order_id, hours="2")
+        task_id = self.task()["id"]
+        self.login_admin()
+        self.client.post(f"/schedule/tuning/tasks/{task_id}/status", json={"status": "done"})
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            entry = db.execute(
+                "SELECT amount, project_id FROM entries WHERE employee = ?", (self.EMPLOYEE_A,)).fetchone()
+            project_id = db.execute(
+                "SELECT id FROM projects WHERE tuning_order_id = ?", (self.order_id,)).fetchone()
+        self.assertEqual(entry["amount"], 400)
+        self.assertIsNotNone(project_id)
+        self.assertEqual(entry["project_id"], project_id["id"])
+
+    def test_an_unknown_or_closed_project_is_refused(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.quick(order_id=999999)
+        self.assertIsNone(self.task())
+        self.assertIn("Проект не найден", self.page())
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("UPDATE tuning_orders SET status = 'cancelled' WHERE id = ?", (self.order_id,))
+            db.commit()
+        try:
+            self.quick(order_id=self.order_id)
+            self.assertIsNone(self.task())
+        finally:
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                db.execute("UPDATE tuning_orders SET status = 'in_progress' WHERE id = ?", (self.order_id,))
+                db.commit()
+
+    def _drop_project(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM projects WHERE tuning_order_id = ?", (self.order_id,))
+            db.commit()
+
+    def test_the_task_can_go_to_any_employee_on_the_shift_not_only_the_clicked_column(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.put_on_shift(self.EMPLOYEE_B)
+        self.quick(employee=self.EMPLOYEE_B, start="11:00")
+        self.assertEqual(self.cards(self.EMPLOYEE_A), [])
+        self.assertEqual([c["start_time"] for c in self.cards(self.EMPLOYEE_B)], ["11:00"])
+
+    def test_hours_that_do_not_fit_the_day_are_refused(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.quick(hours="20")
+        self.assertIsNone(self.task())
+        self.assertIn("Слишком много часов", self.page())
+
+    def test_an_administrator_needs_no_rate_in_the_window_either(self):
+        self.login_admin()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            employee_id = db.execute(
+                "INSERT INTO employees (name, created_at) VALUES ('Окно Админ', 'x')").lastrowid
+            db.execute(
+                "INSERT INTO employee_positions (employee_id, position, created_at) "
+                "VALUES (?, 'Администратор', 'x')", (employee_id,))
+            db.commit()
+        try:
+            self.quick(employee="Окно Админ", rate="", title="Совещание")
+            self.assertEqual(self.task("Окно Админ")["rate"], 0)
+            self.assertIn("quickTaskAdminNote", self.page())
+        finally:
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                db.execute("DELETE FROM tuning_schedule_task_days")
+                db.execute("DELETE FROM tuning_schedule_tasks")
+                db.execute("DELETE FROM tuning_schedule_day_crew WHERE employee_id = "
+                           "(SELECT id FROM employees WHERE name = 'Окно Админ')")
+                db.execute("DELETE FROM employee_positions WHERE employee_id = "
+                           "(SELECT id FROM employees WHERE name = 'Окно Админ')")
+                db.execute("DELETE FROM employees WHERE name = 'Окно Админ'")
+                db.commit()
+
+    def test_the_existing_bottom_form_still_creates_free_and_work_tasks(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.quick(title="Просто задача")
+        self.assertIsNone(self.task()["assignment_id"])
+        self.quick(order_id=self.order_id, item_id=self.item_id)
+        self.assertIsNotNone(self.task()["assignment_id"])
+
+
 if __name__ == "__main__":
     unittest.main()

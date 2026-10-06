@@ -52,6 +52,11 @@ def init_schema(conn):
         )
         """
     )
+    task_columns = {row[1] for row in conn.execute("PRAGMA table_info(tuning_schedule_tasks)")}
+    if "order_id" not in task_columns:
+        # A task not tied to a work item may still belong to a project
+        # (a tuning order) — it is then shown with that order on its card.
+        conn.execute("ALTER TABLE tuning_schedule_tasks ADD COLUMN order_id INTEGER")
     task_day_columns = {
         row[1] for row in conn.execute("PRAGMA table_info(tuning_schedule_task_days)")
     }
