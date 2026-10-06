@@ -297,6 +297,59 @@ class TuningScheduleAssignmentTests(_TuningTaskFixture, unittest.TestCase):
         )
         self.assertEqual(self.cards(self.EMPLOYEE_A)[0]["planned_hours"], 3.5)
 
+    # --- the production SQLite has no upsert -------------------------------
+
+    def test_no_upsert_syntax_in_the_tuning_schedule_module(self):
+        # this hosting's SQLite fails on upserts ("near ON: syntax error"),
+        # see modules/settings/repository.py
+        import pathlib
+        folder = pathlib.Path(application_module.__file__).parent / "modules" / "tuning_schedule"
+        for path in folder.glob("*.py"):
+            self.assertNotIn("ON CONFLICT", path.read_text(encoding="utf-8"), f"{path.name} uses an upsert")
+
+    def test_placing_a_task_on_the_same_day_twice_replaces_the_placement(self):
+        from modules.tuning_schedule import repository as tuning_repo
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            task_id = tuning_repo.create_task(db, None, self.EMPLOYEE_A, "Своя", 100, "", "2026-10-01 09:00")
+            tuning_repo.add_task_day(db, task_id, self.DAY, "09:00", 2)
+            tuning_repo.add_task_day(db, task_id, self.DAY, "13:00", 3)
+            rows = [dict(r) for r in tuning_repo.list_task_days(db, task_id)]
+        self.assertEqual([(r["start_time"], r["planned_hours"]) for r in rows], [("13:00", 3)])
+
+    def test_a_failure_while_placing_leaves_no_card_less_task_behind(self):
+        from unittest import mock
+        from modules.tuning_schedule import repository as tuning_repo
+        self.put_on_shift(self.EMPLOYEE_A)
+        with mock.patch.object(tuning_repo, "add_task_day", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                self.assign([(self.EMPLOYEE_A, 100, 2)])
+        with application_module.app.app_context():
+            count = application_module.get_db().execute(
+                "SELECT COUNT(*) FROM tuning_schedule_tasks"
+            ).fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_setting_the_date_again_repairs_a_task_left_without_a_card(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.assign([(self.EMPLOYEE_A, 100, 2)], due_from="")
+        assignment_id = self.assignments()[0]["id"]
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO tuning_schedule_tasks (assignment_id, employee_name, title, rate, "
+                "created_at) VALUES (?, ?, 'Работа', 100, '2026-10-05 10:00')",
+                (assignment_id, self.EMPLOYEE_A),
+            )
+            db.commit()
+        self.edit_due(assignment_id, self.DAY)
+        self.assertEqual([c["start_time"] for c in self.cards(self.EMPLOYEE_A)], ["09:00"])
+        with application_module.app.app_context():
+            count = application_module.get_db().execute(
+                "SELECT COUNT(*) FROM tuning_schedule_tasks WHERE assignment_id = ?", (assignment_id,)
+            ).fetchone()[0]
+        self.assertEqual(count, 1)  # the empty one was reused, not duplicated
+
     # --- shift hours on the schedule page ---------------------------------
 
     def test_adding_to_the_shift_from_the_schedule_page_stores_the_hours(self):

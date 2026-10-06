@@ -169,10 +169,16 @@ def place_assignment_task(db, assignment_id, employee_name, title, rate, comment
     end_minutes = start_minutes + round(hours * 60)
     if end_minutes > 24 * 60:
         return {"placed": False, "reason": "midnight"}
-    task_id = repository.create_task(
+    existing = repository.get_task_by_assignment(db, assignment_id)  # e.g. left empty by a failed run
+    task_id = existing["id"] if existing else repository.create_task(
         db, assignment_id, employee_name, title, rate, comment, current_timestamp()
     )
-    repository.add_task_day(db, task_id, day_iso, _label(start_minutes), hours)
+    try:
+        repository.add_task_day(db, task_id, day_iso, _label(start_minutes), hours)
+    except Exception:
+        if existing is None:
+            repository.delete_task(db, task_id)  # never leave a card-less task behind
+        raise
     return {
         "placed": True, "task_id": task_id, "start": _label(start_minutes),
         "end": _label(end_minutes), "past_shift_end": end_minutes > _minutes(shift_end),
@@ -189,6 +195,8 @@ def move_assignment_task(db, assignment_id, employee_name, day_iso):
     if task is None:
         return None
     days = repository.list_task_days(db, task["id"])
+    if not days:
+        return None  # a task with no day is no card — the caller places it afresh
     if len(days) != 1:
         return {"moved": False, "reason": "multi_day"}
     if days[0]["work_date"] == day_iso:

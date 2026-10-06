@@ -119,6 +119,12 @@ def set_task_day_hours(db, day_id, planned_hours):
     db.commit()
 
 
+def delete_task(db, task_id):
+    db.execute("DELETE FROM tuning_schedule_task_days WHERE task_id = ?", (task_id,))
+    db.execute("DELETE FROM tuning_schedule_tasks WHERE id = ?", (task_id,))
+    db.commit()
+
+
 def delete_task_days(db, task_id):
     db.execute("DELETE FROM tuning_schedule_task_days WHERE task_id = ?", (task_id,))
 
@@ -186,13 +192,21 @@ def create_task(db, assignment_id, employee_name, title, rate, comment, created_
 
 
 def add_task_day(db, task_id, work_date, start_time, planned_hours):
-    db.execute(
-        "INSERT INTO tuning_schedule_task_days (task_id, work_date, start_time, planned_hours) "
-        "VALUES (?, ?, ?, ?) "
-        "ON CONFLICT(task_id, work_date) DO UPDATE SET "
-        "start_time = excluded.start_time, planned_hours = excluded.planned_hours",
-        (task_id, work_date, start_time, planned_hours),
+    """Places a task on a day, replacing that day's placement if the task
+    already has one. Update-then-insert rather than an upsert clause: the
+    production SQLite is too old for upserts (it fails with a syntax error
+    "near ON")."""
+    cursor = db.execute(
+        "UPDATE tuning_schedule_task_days SET start_time = ?, planned_hours = ? "
+        "WHERE task_id = ? AND work_date = ?",
+        (start_time, planned_hours, task_id, work_date),
     )
+    if cursor.rowcount == 0:
+        db.execute(
+            "INSERT INTO tuning_schedule_task_days (task_id, work_date, start_time, planned_hours) "
+            "VALUES (?, ?, ?, ?)",
+            (task_id, work_date, start_time, planned_hours),
+        )
     db.commit()
 
 
