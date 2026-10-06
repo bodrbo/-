@@ -12076,3 +12076,7 @@ button.partner-open-price-save svg {
 .tuning-card-status:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
 .tuning-card-status option { color: #12202a; background: #fff; }
 .field-narrow[hidden] { display: none; }
+/* The tuning schedule uses the whole work area: no 1080px column, and the
+   calendar grows to the height of the screen instead of 70vh. */
+.tuning-schedule-wide { max-width: none; padding-right: 16px; padding-left: 16px; }
+.tuning-schedule-wide .tuning-calendar-board-scroll { max-height: max(480px, calc(100vh - 150px)); }

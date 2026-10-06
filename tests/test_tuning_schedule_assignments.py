@@ -370,6 +370,14 @@ class TuningScheduleAssignmentTests(_TuningScheduleFixture, unittest.TestCase):
         page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
         self.assertIn('name="shift_start" value="08:30"', page)  # editable in the roster window
 
+    def test_the_schedule_page_uses_the_full_width_of_the_work_area(self):
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        self.assertIn('<main class="wrap tuning-schedule-wide">', page)
+        import pathlib
+        css = (pathlib.Path(application_module.__file__).parent / "static" / "style.css").read_text(encoding="utf-8")
+        self.assertIn(".tuning-schedule-wide { max-width: none;", css)
+        self.assertIn(".tuning-schedule-wide .tuning-calendar-board-scroll { max-height: max(480px, calc(100vh - 150px)); }", css)
+
     def test_the_who_is_on_shift_panel_is_gone_and_the_roster_button_replaces_it(self):
         self.put_on_shift(self.EMPLOYEE_A, "10:00", "19:00")
         page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
