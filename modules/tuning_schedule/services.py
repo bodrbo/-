@@ -11,6 +11,7 @@ from .constants import (
     MIN_CARD_MINUTES,
 )
 
+ADMIN_POSITION = "Администратор"
 TASK_TITLE_MAX_LENGTH = 200
 EMPLOYEE_NAME_MAX_LENGTH = 120
 COMMENT_MAX_LENGTH = 2000
@@ -255,8 +256,13 @@ def day_view(db, day):
             employee["shift_start"] = start or DEFAULT_SHIFT_START
             employee["shift_end"] = end or DEFAULT_SHIFT_END
             employee["shift_label"] = f"{employee['shift_start']}–{employee['shift_end']}"
+    for employee in crew:
+        employee["is_admin"] = ADMIN_POSITION in employee["positions"]
     day_crew = [employee for employee in crew if employee["id"] in day_crew_ids]
     available_crew = [employee for employee in crew if employee["id"] not in day_crew_ids]
+    # administrators can be given a task even when they are not on the day's
+    # shift — they are put on it automatically (see _ensure_on_roster)
+    available_admins = [employee for employee in available_crew if employee["is_admin"]]
 
     tasks_by_employee_name = {}
     for row in repository.list_day_tasks(db, day.isoformat()):
@@ -283,6 +289,7 @@ def day_view(db, day):
         "crew": crew,
         "day_crew": day_crew,
         "available_crew": available_crew,
+        "available_admins": available_admins,
         "leftover_tasks": leftover_tasks,
     }
 
@@ -350,6 +357,53 @@ def calendar_view(db, day, day_crew):
     }
 
 
+def _clean_rate(db, employee_name, raw_rate, errors):
+    """The hourly rate of a task. Administrators are salaried: no rate is
+    asked for (whatever was submitted is ignored) and their tasks carry 0."""
+    if repository.is_administrator(db, employee_name):
+        return 0.0
+    try:
+        rate = float(str(raw_rate or "").strip().replace(",", "."))
+    except ValueError:
+        rate = 0
+    if rate <= 0:
+        errors.append("Ставка должна быть больше нуля.")
+    return rate
+
+
+def _ensure_on_roster(db, employee_name, clean_days):
+    """An administrator isn't required to be on the shift schedule; when a
+    task is put on a day they are not on, they are added to that day's
+    roster (default hours, widened to cover the task). Anyone else is left
+    alone. Returns the dates the person was added for."""
+    if not repository.is_administrator(db, employee_name):
+        return []
+    employee_id = repository.get_employee_id_by_name(db, employee_name)
+    if employee_id is None:
+        return []
+    added = []
+    for work_date, start_time, hours in clean_days:
+        if employee_id in repository.list_day_crew_ids(db, work_date):
+            continue
+        start = _minutes(start_time)
+        shift_start = min(_minutes(DEFAULT_SHIFT_START), start)
+        shift_end = max(_minutes(DEFAULT_SHIFT_END), min(start + round(hours * 60), 24 * 60 - 1))
+        repository.add_day_crew_member(
+            db, work_date, employee_id, current_timestamp(), _label(shift_start), _label(shift_end)
+        )
+        added.append(work_date)
+    return added
+
+
+def _roster_note(employee_name, added_days):
+    if not added_days:
+        return ""
+    days = ", ".join(
+        dt.date.fromisoformat(day).strftime("%d.%m") for day in added_days
+    )
+    return f" {employee_name} добавлен в смену на {days}."
+
+
 def create_free_task(db, employee_name, title, rate, comment, day_rows):
     errors = []
     employee_name = _normalise_text(employee_name, EMPLOYEE_NAME_MAX_LENGTH)
@@ -360,21 +414,17 @@ def create_free_task(db, employee_name, title, rate, comment, day_rows):
         errors.append("Выберите сотрудника из списка тюнингмэнов.")
     if not title:
         errors.append("Укажите название задачи.")
-    try:
-        rate = float(str(rate or "").strip().replace(",", "."))
-    except ValueError:
-        rate = 0
-    if rate <= 0:
-        errors.append("Ставка должна быть больше нуля.")
+    rate = _clean_rate(db, employee_name, rate, errors)
     clean_days = _clean_task_days(day_rows, errors)
     if errors:
         return False, " ".join(errors), None
+    added_days = _ensure_on_roster(db, employee_name, clean_days)
     task_id = repository.create_task(
         db, None, employee_name, title, rate, comment, current_timestamp()
     )
     for work_date, start_time, hours in clean_days:
         repository.add_task_day(db, task_id, work_date, start_time, hours)
-    return True, "Задача добавлена в расписание.", task_id
+    return True, "Задача добавлена в расписание." + _roster_note(employee_name, added_days), task_id
 
 
 def create_linked_task(db, item, employee_name, rate, comment, day_rows, create_order_assignment):
@@ -389,15 +439,11 @@ def create_linked_task(db, item, employee_name, rate, comment, day_rows, create_
     eligible = {employee["name"] for employee in repository.list_tuning_crew_employees(db)}
     if not employee_name or employee_name not in eligible:
         errors.append("Выберите сотрудника из списка тюнингмэнов.")
-    try:
-        rate = float(str(rate or "").strip().replace(",", "."))
-    except ValueError:
-        rate = 0
-    if rate <= 0:
-        errors.append("Ставка должна быть больше нуля.")
+    rate = _clean_rate(db, employee_name, rate, errors)
     clean_days = _clean_task_days(day_rows, errors)
     if errors:
         return False, " ".join(errors), None
+    added_days = _ensure_on_roster(db, employee_name, clean_days)
     total_hours = sum(hours for _, _, hours in clean_days)
     work_dates = sorted(work_date for work_date, _, _ in clean_days)
     due = {"due_from": work_dates[0], "due_to": work_dates[-1] if work_dates[-1] != work_dates[0] else None} \
@@ -410,7 +456,7 @@ def create_linked_task(db, item, employee_name, rate, comment, day_rows, create_
     )
     for work_date, start_time, hours in clean_days:
         repository.add_task_day(db, task_id, work_date, start_time, hours)
-    return True, "Задача добавлена в расписание.", task_id
+    return True, "Задача добавлена в расписание." + _roster_note(employee_name, added_days), task_id
 
 
 def add_task_day(db, task_id, raw_date, raw_start_time, raw_hours):

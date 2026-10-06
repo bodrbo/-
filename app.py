@@ -11517,6 +11517,8 @@ def _pay_tuning_assignment(db, assignment, work_date=None):
     if item is None:
         return
     amount = assignment["rate"] * assignment["norm_hours"]
+    if amount <= 0:
+        return  # a salaried task (administrator) — nothing to pay out
     project_id = _project_id_for_tuning_order(db, item["order_id"])
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     cur = db.execute(
@@ -11550,6 +11552,8 @@ def _repair_tuning_assignment_payouts(db, order_id=None):
     for assignment in db.execute(query + " ORDER BY tia.id", params).fetchall():
         if _tuning_assignment_has_payout(db, assignment):
             continue
+        if assignment["rate"] * assignment["norm_hours"] <= 0:
+            continue  # salaried task, no payout expected
         work_date = (assignment["completed_at"] or "")[:10] or None
         _pay_tuning_assignment(db, assignment, work_date=work_date)
         created.append((
@@ -11572,6 +11576,8 @@ def _pay_free_tuning_schedule_task(db, task, total_hours):
     if task["entry_id"]:
         return None
     amount = task["rate"] * total_hours
+    if amount <= 0:
+        return None  # a salaried task (administrator) — nothing to pay out
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     cur = db.execute(
         "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at, project_id) "
@@ -11839,6 +11845,15 @@ def _flag_tuning_item_budget_overrun(db, item_id, work_name, cost_price, price_p
         )
 
 
+def _employee_is_administrator(db, employee_name):
+    """Administrators are salaried, so their tasks carry no rate or payout."""
+    return db.execute(
+        "SELECT 1 FROM employee_positions JOIN employees ON employees.id = employee_positions.employee_id "
+        "WHERE employees.name = ? AND employees.deleted_at IS NULL AND employee_positions.position = ?",
+        (employee_name, ADMIN_POSITION),
+    ).fetchone() is not None
+
+
 def _payroll_week_settled(db, employee, work_date):
     """True when the payroll week containing work_date is already marked
     paid for this employee — a correction landing there needs a manual
@@ -11879,7 +11894,11 @@ def update_tuning_assignment_terms(assignment_id):
         hours = float(request.form.get("norm_hours", "").strip().replace(",", "."))
     except ValueError:
         rate = hours = None
-    if rate is None or hours is None or rate <= 0 or hours <= 0:
+    # an administrator's task has no rate (salaried) — only the hours are set
+    rate_floor_ok = rate is not None and (
+        rate > 0 or (rate == 0 and _employee_is_administrator(db, assignment["employee_name"]))
+    )
+    if not rate_floor_ok or hours is None or hours <= 0:
         session["tuning_board_error"] = "Ставка и нормочасы должны быть числами больше нуля."
         return redirect(board)
     db.execute(
@@ -12102,6 +12121,7 @@ def tuning_order_board(order_id):
                 assignment["entry_id"] = None
             assignment["payout_missing"] = (
                 assignment["assignment_status"] == "done" and not assignment["entry_id"]
+                and assignment["rate"] * assignment["norm_hours"] > 0
             )
             payouts_missing += 1 if assignment["payout_missing"] else 0
     assignable_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
@@ -12220,6 +12240,7 @@ def update_tuning_assignment_dates(assignment_id):
     if (
         assignment["assignment_status"] == "done"
         and not _tuning_assignment_has_payout(db, assignment)
+        and assignment["rate"] * assignment["norm_hours"] > 0
     ):
         # A finished task with no payout: create it, dated with the
         # completion date that was just set.

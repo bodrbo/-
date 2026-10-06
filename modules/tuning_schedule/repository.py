@@ -117,6 +117,16 @@ def get_assignment_order_id(db, assignment_id):
     return row["order_id"] if row else None
 
 
+def is_administrator(db, employee_name):
+    """Administrators are salaried: their tasks carry no rate."""
+    return db.execute(
+        "SELECT 1 FROM employee_positions JOIN employees ON employees.id = employee_positions.employee_id "
+        "WHERE employees.name = ? AND employees.deleted_at IS NULL "
+        "AND employee_positions.position = 'Администратор'",
+        (employee_name,),
+    ).fetchone() is not None
+
+
 def get_task_by_assignment(db, assignment_id):
     return db.execute(
         "SELECT * FROM tuning_schedule_tasks WHERE assignment_id = ?", (assignment_id,)

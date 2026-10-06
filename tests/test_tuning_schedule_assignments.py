@@ -700,5 +700,200 @@ class TuningScheduleStatusTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertEqual(self.assignments()[0]["assignment_status"], "pending")
 
 
+class TuningScheduleAdministratorTaskTests(_TuningScheduleFixture, unittest.TestCase):
+    """«Добавить задачу» for administrators: they are listed even when they
+    are not on the day's shift, need no rate (they are salaried), and are put
+    on the shift automatically."""
+
+    ADMIN = "Тестовый Администратор"
+    HYBRID = "Тестовый Админ-Мастер"
+
+    def setUp(self):
+        super().setUp()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self._drop_people(db)
+            for name, positions in ((self.ADMIN, ["Администратор"]), (self.HYBRID, ["Администратор", "Тюнингмэн"])):
+                employee_id = db.execute(
+                    "INSERT INTO employees (name, created_at) VALUES (?, '2026-01-01 09:00')", (name,)
+                ).lastrowid
+                for position in positions:
+                    db.execute(
+                        "INSERT INTO employee_positions (employee_id, position, created_at) "
+                        "VALUES (?, ?, '2026-01-01 09:00')", (employee_id, position))
+            db.commit()
+        self.addCleanup(self._cleanup_people)
+
+    def _drop_people(self, db):
+        for name in (self.ADMIN, self.HYBRID):
+            row = db.execute("SELECT id FROM employees WHERE name = ?", (name,)).fetchone()
+            if row:
+                for table in ("tuning_schedule_day_crew", "employee_positions"):
+                    db.execute(f"DELETE FROM {table} WHERE employee_id = ?", (row["id"],))
+                db.execute("DELETE FROM employees WHERE id = ?", (row["id"],))
+            db.execute("DELETE FROM entries WHERE employee = ?", (name,))
+            db.execute("DELETE FROM tuning_item_assignments WHERE employee_name = ?", (name,))
+        db.execute("DELETE FROM tuning_schedule_task_days")
+        db.execute("DELETE FROM tuning_schedule_tasks")
+        db.commit()
+
+    def _cleanup_people(self):
+        with application_module.app.app_context():
+            self._drop_people(application_module.get_db())
+
+    def add_free_task(self, employee, rate="", start="09:00", hours="2", day=None, title="Планёрка"):
+        self.login_admin()
+        data = MultiDict([
+            ("employee_name", employee), ("rate", rate), ("comment", ""), ("title", title),
+            ("return_date", self.DAY), ("work_date[]", day or self.DAY),
+            ("start_time[]", start), ("planned_hours[]", hours)])
+        return self.client.post("/schedule/tuning/tasks", data=data)
+
+    def add_order_task(self, employee, rate=""):
+        self.login_admin()
+        data = MultiDict([
+            ("employee_name", employee), ("rate", rate), ("comment", ""),
+            ("order_id", str(self.order_id)), ("order_item_id", str(self.item_id)),
+            ("return_date", self.DAY), ("work_date[]", self.DAY),
+            ("start_time[]", "10:00"), ("planned_hours[]", "2")])
+        return self.client.post("/schedule/tuning/tasks", data=data)
+
+    def crew_row(self, name, day=None):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            row = db.execute(
+                "SELECT shift_start, shift_end FROM tuning_schedule_day_crew c JOIN employees e "
+                "ON e.id = c.employee_id WHERE e.name = ? AND c.work_date = ?", (name, day or self.DAY)
+            ).fetchone()
+            return (row["shift_start"], row["shift_end"]) if row else None
+
+    def task_rows(self, name):
+        with application_module.app.app_context():
+            return [dict(r) for r in application_module.get_db().execute(
+                "SELECT id, rate, status, entry_id, assignment_id FROM tuning_schedule_tasks WHERE employee_name = ?",
+                (name,)).fetchall()]
+
+    def entries_of(self, name):
+        with application_module.app.app_context():
+            return application_module.get_db().execute(
+                "SELECT COUNT(*) FROM entries WHERE employee = ?", (name,)).fetchone()[0]
+
+    def notice(self):
+        return self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+
+    def test_every_administrator_is_in_the_employee_list_even_off_the_shift(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        page = self.notice()
+        form = page.split('id="task-employee"')[1].split("</select>")[0]
+        self.assertIn(f'<option value="{self.ADMIN}" data-admin="1">{self.ADMIN} · администратор (не в смене)</option>', form)
+        self.assertIn(f'<option value="{self.HYBRID}" data-admin="1">', form)
+        self.assertIn(f'<option value="{self.EMPLOYEE_A}" data-admin="0">{self.EMPLOYEE_A}</option>', form)
+        self.assertNotIn(self.EMPLOYEE_B, form)  # an ordinary person off the shift is still not offered
+
+    def test_an_administrator_on_the_shift_is_listed_once_and_marked(self):
+        self.put_on_shift(self.ADMIN)
+        form = self.notice().split('id="task-employee"')[1].split("</select>")[0]
+        self.assertEqual(form.count(f'value="{self.ADMIN}"'), 1)
+        self.assertIn(f'data-admin="1">{self.ADMIN} · администратор</option>', form)
+
+    def test_the_page_hides_the_rate_field_for_an_administrator(self):
+        page = self.notice()
+        self.assertIn('id="tuningScheduleRateField"', page)
+        self.assertIn('onchange="updateTuningScheduleRate()"', page)
+        self.assertIn("function updateTuningScheduleRate()", page)
+        self.assertIn("Администратор на окладе — ставка не нужна.", page)
+
+    def test_a_task_for_an_administrator_needs_no_rate_and_puts_them_on_the_shift(self):
+        response = self.add_free_task(self.ADMIN)
+        self.assertEqual(response.status_code, 302)
+        tasks = self.task_rows(self.ADMIN)
+        self.assertEqual([t["rate"] for t in tasks], [0])
+        self.assertEqual(self.crew_row(self.ADMIN), ("09:00", "18:00"))
+        self.assertEqual([c["start_time"] for c in self.cards(self.ADMIN)], ["09:00"])
+        page = self.notice()
+        self.assertIn(f"{self.ADMIN} добавлен в смену на 12.10", page)
+
+    def test_a_submitted_rate_is_ignored_for_an_administrator(self):
+        self.add_free_task(self.ADMIN, rate="5000")
+        self.add_free_task(self.HYBRID, rate="5000", day="2026-10-13")
+        self.assertEqual([t["rate"] for t in self.task_rows(self.ADMIN)], [0])
+        self.assertEqual([t["rate"] for t in self.task_rows(self.HYBRID)], [0])  # admin + tuningman: still salaried
+
+    def test_an_ordinary_employee_still_needs_a_rate(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.add_free_task(self.EMPLOYEE_A, rate="")
+        self.assertEqual(self.task_rows(self.EMPLOYEE_A), [])
+        self.assertIn("Ставка должна быть больше нуля", self.notice())
+        self.add_free_task(self.EMPLOYEE_A, rate="150")
+        self.assertEqual([t["rate"] for t in self.task_rows(self.EMPLOYEE_A)], [150])
+
+    def test_an_administrator_already_on_the_shift_is_not_added_twice_or_announced(self):
+        self.put_on_shift(self.ADMIN, "10:00", "19:00")
+        self.add_free_task(self.ADMIN, start="10:00")
+        self.assertEqual(self.crew_row(self.ADMIN), ("10:00", "19:00"))
+        self.assertNotIn("добавлен в смену", self.notice())
+
+    def test_the_automatic_shift_is_widened_to_cover_an_early_or_late_task(self):
+        self.add_free_task(self.ADMIN, start="07:00", hours="1")
+        self.add_free_task(self.ADMIN, start="20:00", hours="2", day="2026-10-13")
+        self.assertEqual(self.crew_row(self.ADMIN), ("07:00", "18:00"))
+        self.assertEqual(self.crew_row(self.ADMIN, "2026-10-13"), ("09:00", "22:00"))
+
+    def test_an_order_task_for_an_administrator_is_created_with_no_rate(self):
+        response = self.add_order_task(self.ADMIN)
+        self.assertEqual(response.status_code, 302)
+        assignments = [a for a in self.assignments() if a["employee_name"] == self.ADMIN]
+        self.assertEqual([(a["rate"], a["norm_hours"]) for a in assignments], [(0, 2)])
+        self.assertEqual(self.crew_row(self.ADMIN), ("09:00", "18:00"))
+        self.assertEqual(len(self.cards(self.ADMIN)), 1)
+
+    def test_finishing_an_administrators_task_pays_nothing(self):
+        self.add_free_task(self.ADMIN)
+        task_id = self.task_rows(self.ADMIN)[0]["id"]
+        self.login_admin()
+        response = self.client.post(f"/schedule/tuning/tasks/{task_id}/status", json={"status": "done"})
+        self.assertEqual(response.status_code, 200)
+        row = self.task_rows(self.ADMIN)[0]
+        self.assertEqual((row["status"], row["entry_id"]), ("done", None))
+        self.assertEqual(self.entries_of(self.ADMIN), 0)
+
+    def test_a_finished_order_task_of_an_administrator_has_no_missing_payout_flag(self):
+        self.add_order_task(self.ADMIN)
+        task_id = self.task_rows(self.ADMIN)[0]["id"]
+        self.login_admin()
+        self.client.post(f"/schedule/tuning/tasks/{task_id}/status", json={"status": "done"})
+        self.assertEqual(self.entries_of(self.ADMIN), 0)
+        board = self.board()
+        self.assertNotIn("Нет выплаты", board)
+        self.assertNotIn("repair-payouts", board)
+
+    def test_the_board_can_edit_hours_of_a_rate_free_task_but_not_give_an_ordinary_one_zero_pay(self):
+        self.add_order_task(self.ADMIN)
+        admin_assignment = [a for a in self.assignments() if a["employee_name"] == self.ADMIN][0]
+        self.login_admin()
+        self.client.post(f"/tuning/assignments/{admin_assignment['id']}/rate", data={"rate": "0", "norm_hours": "3"})
+        updated = [a for a in self.assignments() if a["employee_name"] == self.ADMIN][0]
+        self.assertEqual((updated["rate"], updated["norm_hours"]), (0, 3))
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.assign([(self.EMPLOYEE_A, 100, 1)])
+        ordinary = [a for a in self.assignments() if a["employee_name"] == self.EMPLOYEE_A][0]
+        self.client.post(f"/tuning/assignments/{ordinary['id']}/rate", data={"rate": "0", "norm_hours": "1"})
+        self.assertEqual([a["rate"] for a in self.assignments() if a["employee_name"] == self.EMPLOYEE_A], [100])
+
+    def test_someone_who_is_neither_staff_nor_an_administrator_is_still_refused(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("INSERT INTO employees (name, created_at) VALUES ('Тестовый Менеджер', 'x')")
+            db.commit()
+        try:
+            self.add_free_task("Тестовый Менеджер", rate="100")
+            self.assertEqual(self.task_rows("Тестовый Менеджер"), [])
+        finally:
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                db.execute("DELETE FROM employees WHERE name = 'Тестовый Менеджер'")
+                db.commit()
+
+
 if __name__ == "__main__":
     unittest.main()

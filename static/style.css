@@ -12075,3 +12075,4 @@ button.partner-open-price-save svg {
 .tuning-card-status { max-width: 62%; min-width: 0; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: rgba(255,255,255,.22); color: #fff; font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; text-overflow: ellipsis; }
 .tuning-card-status:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
 .tuning-card-status option { color: #12202a; background: #fff; }
+.field-narrow[hidden] { display: none; }

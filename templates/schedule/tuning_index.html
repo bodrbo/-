@@ -196,13 +196,16 @@
 
         <div class="field">
           <label for="task-employee">Сотрудник</label>
-          <select id="task-employee" name="employee_name" required>
+          <select id="task-employee" name="employee_name" required onchange="updateTuningScheduleRate()">
             <option value="" disabled selected>Выберите тюнингмэна</option>
             {% for employee in day_crew %}
-            <option value="{{ employee.name }}">{{ employee.name }}</option>
+            <option value="{{ employee.name }}" data-admin="{{ 1 if employee.is_admin else 0 }}">{{ employee.name }}{{ ' · администратор' if employee.is_admin }}</option>
+            {% endfor %}
+            {% for employee in available_admins %}
+            <option value="{{ employee.name }}" data-admin="1">{{ employee.name }} · администратор (не в смене)</option>
             {% endfor %}
           </select>
-          <span class="field-context">Только сотрудники, поставленные в смену на этот день</span>
+          <span class="field-context">Сотрудники в смене на этот день и все администраторы (администратор попадёт в смену автоматически)</span>
         </div>
       </div>
 
@@ -231,10 +234,11 @@
           </select>
         </div>
 
-        <div class="field field-narrow">
+        <div class="field field-narrow" id="tuningScheduleRateField">
           <label for="task-rate">Ставка, ₽/ч</label>
           <input type="text" inputmode="decimal" id="task-rate" name="rate" required>
         </div>
+        <p class="hint" id="tuningScheduleAdminNote" hidden>Администратор на окладе — ставка не нужна.</p>
       </div>
 
       <div class="field-row-inner" style="margin-top:16px;">
@@ -598,6 +602,18 @@ function startTuningDrag(event, card) {
   card.addEventListener('pointermove', updateTuningDrag);
   card.addEventListener('pointerup', finishTuningDrag);
   card.addEventListener('pointercancel', cancelTuningDrag);
+}
+
+function updateTuningScheduleRate() {
+  var select = document.getElementById('task-employee');
+  var option = select.options[select.selectedIndex];
+  var isAdmin = !!option && option.dataset.admin === '1';
+  var field = document.getElementById('tuningScheduleRateField');
+  var input = document.getElementById('task-rate');
+  field.hidden = isAdmin;
+  input.required = !isAdmin;
+  if (isAdmin) input.value = '';
+  document.getElementById('tuningScheduleAdminNote').hidden = !isAdmin;
 }
 
 function updateTuningScheduleTaskKind() {
