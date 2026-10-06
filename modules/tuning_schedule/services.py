@@ -442,6 +442,9 @@ def set_task_status(db, task_id, status, pay_free_task, update_order_assignment_
         return False, "Задача не найдена."
     if task["assignment_id"] is not None:
         update_order_assignment_status(db, task["assignment_id"], status)
+        order_id = repository.get_assignment_order_id(db, task["assignment_id"])
+        if order_id is not None:
+            return True, f"Статус обновлён — так же и на доске задач заказа №{order_id}."
         return True, "Статус обновлён."
     repository.set_task_status(db, task_id, status, current_timestamp())
     if status == "done" and not task["entry_id"]:

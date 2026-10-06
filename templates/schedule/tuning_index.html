@@ -121,7 +121,16 @@
                    data-move-url="{{ url_for('tuning_schedule.move_task_card', task_id=card.task_id, day_id=card.day_id) }}"
                    data-start-minutes="{{ card._start_minutes }}" data-duration-minutes="{{ card._end_minutes - card._start_minutes }}"
                    onpointerdown="startTuningDrag(event, this)">
-                <span class="tuning-calendar-card-time">{{ card.start_label }}–{{ card.end_label }}</span>
+                <div class="tuning-calendar-card-head">
+                  <span class="tuning-calendar-card-time">{{ card.start_label }}–{{ card.end_label }}</span>
+                  <select class="tuning-card-status" aria-label="Статус задачи «{{ card.title }}»"
+                          data-status-url="{{ url_for('tuning_schedule.set_task_status', task_id=card.task_id) }}"
+                          data-current="{{ card.status }}" onchange="changeTuningCardStatus(this)">
+                    {% for s in assignment_statuses %}
+                    <option value="{{ s.value }}"{{ ' selected' if card.status == s.value }}>{{ s.label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
                 <strong>{{ card.title }}</strong>
                 {% if card.is_linked %}
                 <span class="tuning-calendar-card-meta">№{{ card.order_id }} · {{ card.equipment_label }}</span>
@@ -540,7 +549,34 @@ function cancelTuningDrag(event) {
   clearTuningDrag(state);
 }
 
+async function changeTuningCardStatus(select) {
+  var card = select.closest('.tuning-calendar-card');
+  var previous = select.dataset.current;
+  var status = select.value;
+  select.disabled = true;
+  try {
+    var response = await fetch(select.dataset.statusUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+      body: JSON.stringify({status: status}),
+    });
+    var payload = await response.json().catch(function () { return {}; });
+    if (!response.ok || !payload.ok) throw new Error(payload.message || 'Не удалось изменить статус.');
+    card.classList.remove('status-' + previous);
+    card.classList.add('status-' + status);
+    select.dataset.current = status;
+    showTuningNotice(payload.message || 'Статус обновлён.', true);
+  } catch (error) {
+    select.value = previous;
+    showTuningNotice(error.message || 'Не удалось изменить статус.', false);
+  } finally {
+    select.disabled = false;
+  }
+}
+
 function startTuningDrag(event, card) {
+  if (event.target.closest && event.target.closest('select, option, button, a')) return;
   if (event.button !== 0 || event.pointerType !== 'mouse') return;
   var sourceColumn = card.closest('.tuning-calendar-column');
   if (!sourceColumn || tuningDrag || tuningDragSaving) return;

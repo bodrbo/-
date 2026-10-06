@@ -12071,3 +12071,7 @@ button.partner-open-price-save svg {
 .tuning-drag-preview { position: fixed; z-index: 1200; right: auto; margin: 0; pointer-events: none; opacity: .92; transform: scale(1.015); box-shadow: 0 18px 32px -16px rgba(9,30,40,.8); cursor: grabbing; }
 .tuning-calendar-column.is-drop-target { background-color: rgba(52,152,219,.08); box-shadow: inset 0 0 0 2px rgba(52,152,219,.55); }
 .tuning-is-dragging, .tuning-is-dragging * { cursor: grabbing !important; user-select: none !important; }
+.tuning-calendar-card-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.tuning-card-status { max-width: 62%; min-width: 0; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: rgba(255,255,255,.22); color: #fff; font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; text-overflow: ellipsis; }
+.tuning-card-status:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.tuning-card-status option { color: #12202a; background: #fff; }

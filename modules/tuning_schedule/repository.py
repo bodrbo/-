@@ -107,6 +107,16 @@ def get_employee_id_by_name(db, employee_name):
     return row["id"] if row else None
 
 
+def get_assignment_order_id(db, assignment_id):
+    """The order a linked task belongs to (for "also changed on the board")."""
+    row = db.execute(
+        "SELECT ti.order_id FROM tuning_item_assignments tia "
+        "JOIN tuning_order_items ti ON ti.id = tia.item_id WHERE tia.id = ?",
+        (assignment_id,),
+    ).fetchone()
+    return row["order_id"] if row else None
+
+
 def get_task_by_assignment(db, assignment_id):
     return db.execute(
         "SELECT * FROM tuning_schedule_tasks WHERE assignment_id = ?", (assignment_id,)

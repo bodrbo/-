@@ -192,8 +192,27 @@ def create_tuning_schedule_blueprint(
     @blueprint.route("/schedule/tuning/tasks/<int:task_id>/status", methods=["POST"])
     @manage_required
     def set_task_status(task_id):
+        # The calendar card's status picker posts JSON; the old form posts
+        # a regular form and gets a redirect.
+        payload = request.get_json(silent=True) if request.is_json else None
+        status = str(
+            (payload or {}).get("status", "") if payload is not None
+            else request.form.get("status", "")
+        ).strip()
+        if payload is not None:
+            if status not in assignment_status_values:
+                return jsonify({"ok": False, "message": "Некорректный статус."}), 400
+            success, message = services.set_task_status(
+                get_db(), task_id, status, pay_free_task, update_order_assignment_status,
+            )
+            if not success:
+                return jsonify({"ok": False, "message": message}), 400
+            label = next(
+                (choice["label"] for choice in assignment_status_choices if choice["value"] == status),
+                status,
+            )
+            return jsonify({"ok": True, "message": message, "status": status, "label": label})
         day = services.parse_day(request.form.get("return_date")).isoformat()
-        status = request.form.get("status", "").strip()
         if status not in assignment_status_values:
             set_notice("Некорректный статус.", False)
             return redirect_to_day(day)

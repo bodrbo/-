@@ -20,6 +20,11 @@ class _TuningScheduleFixture(_TuningTaskFixture):
             db = application_module.get_db()
             for table in ("tuning_schedule_task_days", "tuning_schedule_tasks", "tuning_schedule_day_crew"):
                 db.execute(f"DELETE FROM {table}")
+            # payouts of "free" tasks belong to no assignment, so the base
+            # fixture's cleanup doesn't remove them
+            db.execute(
+                "DELETE FROM entries WHERE employee IN (?, ?)", (self.EMPLOYEE_A, self.EMPLOYEE_B)
+            )
             db.commit()
 
     def employee_id(self, name):
@@ -578,6 +583,121 @@ class TuningScheduleDragTests(_TuningScheduleFixture, unittest.TestCase):
             f"/schedule/tuning/tasks/{task_id}/days/{day_id}/move", json={"start_time": "14:00"})
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.cards(self.EMPLOYEE_A)[0]["start_time"], "09:00")
+
+
+class TuningScheduleStatusTests(_TuningScheduleFixture, unittest.TestCase):
+    """The status picker on a calendar card: it is the task's real status, so
+    an order task changes on the order board too (and the other way round)."""
+
+    def place_linked(self, employee=None, hours=2):
+        employee = employee or self.EMPLOYEE_A
+        self.put_on_shift(employee)
+        self.assign([(employee, 100, hours)])
+        return self.cards(employee)[0]["task_id"]
+
+    def place_free(self, employee=None):
+        employee = employee or self.EMPLOYEE_A
+        self.put_on_shift(employee)
+        self.login_admin()
+        self.client.post("/schedule/tuning/tasks", data=MultiDict([
+            ("employee_name", employee), ("rate", "100"), ("comment", ""), ("title", "Уборка"),
+            ("return_date", self.DAY), ("work_date[]", self.DAY), ("start_time[]", "09:00"),
+            ("planned_hours[]", "1")]))
+        return self.cards(employee)[0]["task_id"]
+
+    def set_status(self, task_id, status):
+        self.login_admin()
+        return self.client.post(f"/schedule/tuning/tasks/{task_id}/status", json={"status": status})
+
+    def page(self):
+        return self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+
+    def test_every_card_carries_a_status_picker_with_the_current_status_selected(self):
+        task_id = self.place_linked()
+        page = self.page()
+        select = page.split('class="tuning-card-status"')[1].split("</select>")[0]
+        self.assertIn(f"/schedule/tuning/tasks/{task_id}/status", select)
+        for label in ("Ожидает ответа", "Принята", "В работе", "Выполнена", "Отклонена"):
+            self.assertIn(label, select)
+        self.assertIn('<option value="pending" selected>', select)
+        self.assertIn("tuning-calendar-card status-pending", page)
+        self.assertIn("changeTuningCardStatus(this)", page)
+
+    def test_dragging_does_not_start_from_the_status_picker(self):
+        self.place_linked()
+        self.assertIn("event.target.closest('select, option, button, a')", self.page())
+
+    def test_changing_an_order_task_status_changes_the_board_too(self):
+        task_id = self.place_linked()
+        response = self.set_status(task_id, "in_progress")
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual((body["ok"], body["status"], body["label"]), (True, "in_progress", "В работе"))
+        self.assertIn(f"заказа №{self.order_id}", body["message"])
+        self.assertEqual(self.assignments()[0]["assignment_status"], "in_progress")
+        board = self.board()
+        self.assertIn('<option value="in_progress" selected>', board)
+        self.assertIn("tuning-calendar-card status-in_progress", self.page())
+
+    def test_a_status_changed_on_the_board_shows_on_the_card(self):
+        self.place_linked()
+        self.login_admin()
+        self.client.post(
+            f"/tuning/assignments/{self.assignments()[0]['id']}/status", data={"status": "accepted"})
+        page = self.page()
+        self.assertIn("tuning-calendar-card status-accepted", page)
+        self.assertIn('<option value="accepted" selected>', page)
+
+    def test_finishing_a_task_from_the_card_pays_it_out_once(self):
+        task_id = self.place_linked()
+        self.set_status(task_id, "done")
+        self.assertIsNotNone(self.assignments()[0]["entry_id"])
+        self.assertIsNotNone(self.assignments()[0]["completed_at"])
+        self.set_status(task_id, "done")
+        self.set_status(task_id, "in_progress")
+        self.set_status(task_id, "done")
+        with application_module.app.app_context():
+            count = application_module.get_db().execute(
+                "SELECT COUNT(*) FROM entries WHERE employee = ?", (self.EMPLOYEE_A,)
+            ).fetchone()[0]
+        self.assertEqual(count, 1)
+
+    def test_a_free_task_status_changes_and_pays_on_done(self):
+        task_id = self.place_free()
+        self.assertEqual(self.set_status(task_id, "accepted").status_code, 200)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.assertEqual(db.execute("SELECT status FROM tuning_schedule_tasks WHERE id = ?", (task_id,)).fetchone()[0], "accepted")
+        response = self.set_status(task_id, "done")
+        self.assertNotIn("доске задач", response.get_json()["message"])  # no order board for a free task
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT status, entry_id FROM tuning_schedule_tasks WHERE id = ?", (task_id,)).fetchone()
+        self.assertEqual(row["status"], "done")
+        self.assertIsNotNone(row["entry_id"])
+        self.assertIn("tuning-calendar-card status-done", self.page())
+
+    def test_bad_requests_are_refused_and_change_nothing(self):
+        task_id = self.place_linked()
+        self.assertEqual(self.set_status(task_id, "bogus").status_code, 400)
+        self.assertEqual(self.set_status(task_id, "").status_code, 400)
+        self.assertEqual(self.set_status(999999, "done").status_code, 400)
+        self.assertEqual(self.assignments()[0]["assignment_status"], "pending")
+
+    def test_the_old_form_still_works(self):
+        task_id = self.place_linked()
+        self.login_admin()
+        response = self.client.post(
+            f"/schedule/tuning/tasks/{task_id}/status", data={"status": "accepted", "return_date": self.DAY})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.assignments()[0]["assignment_status"], "accepted")
+
+    def test_the_status_route_needs_an_administrator(self):
+        task_id = self.place_linked()
+        anonymous = application_module.app.test_client()
+        response = anonymous.post(f"/schedule/tuning/tasks/{task_id}/status", json={"status": "done"})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.assignments()[0]["assignment_status"], "pending")
 
 
 if __name__ == "__main__":
