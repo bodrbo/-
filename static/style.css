@@ -12091,3 +12091,30 @@ button.partner-open-price-save svg {
 .quick-task-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .quick-task-row input { min-width: 0; width: 100%; }
 .quick-task-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Личные кабинеты клиента и партнёра: на всю ширину экрана и без блоков
+   внутри блоков. Заказы — это сами карточки (без общей рамки вокруг них),
+   «Доходность» — полоса показателей без вложенных карточек, а внутри
+   карточки заказа разбивка суммы, расчёт партнёра, чеки и служебные блоки —
+   строки с тонкими линиями, а не рамки в рамке. */
+.client-cabinet { max-width: none; padding-right: clamp(12px, 2.4vw, 40px); padding-left: clamp(12px, 2.4vw, 40px); }
+.client-cabinet .client-orders { margin-bottom: 22px; }
+.client-cabinet .client-orders > .partner-request-tabs { margin-bottom: 14px; }
+
+.client-cabinet .partner-income .totals-grid { gap: 0; margin-bottom: 14px; }
+.client-cabinet .partner-income .total-card { padding: 12px 20px 12px 0; border-right: 1px solid var(--hairline-soft); }
+.client-cabinet .partner-income .total-card + .total-card { padding-left: 20px; }
+.client-cabinet .partner-income .total-card:last-child { border-right: 0; }
+.client-cabinet .partner-income .total-card-grand { background: transparent; border-color: var(--hairline-soft); }
+.client-cabinet .partner-income .total-card-grand .k { color: var(--brass-strong); }
+.client-cabinet .partner-income .total-card-grand .v { color: var(--ink); }
+
+.client-cabinet .order-card-amount-breakdown { gap: 0; border: 0; border-bottom: 1px solid var(--hairline-soft); border-radius: 0; background: transparent; }
+.client-cabinet .order-card-amount-breakdown > div { padding: 2px 14px 14px 0; background: transparent; }
+.client-cabinet .order-card-amount-breakdown > div + div { padding-left: 14px; border-left: 1px solid var(--hairline-soft); }
+
+.client-cabinet .partner-quote-panel { border: 0; border-top: 1px solid var(--hairline-soft); border-radius: 0; background: transparent; }
+.client-cabinet .partner-quote-totals .partner-quote-grand { background: transparent; }
+.client-cabinet .client-receipts { border: 0; border-top: 1px solid var(--hairline-soft); border-radius: 0; background: transparent; }
+.client-cabinet .client-receipts-heading { padding-right: 0; padding-left: 0; }
+.client-cabinet .client-admin-private-block { border: 0; border-top: 1px solid var(--hairline-soft); border-radius: 0; background: transparent; }

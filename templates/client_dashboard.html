@@ -51,7 +51,7 @@
   </div>
 </header>
 
-<main class="wrap">
+<main class="wrap client-cabinet">
 
   {% if is_staff_view %}
   <section class="client-admin-toolbar" aria-labelledby="client-admin-mode-title">
@@ -269,15 +269,15 @@
     <summary><span>Доходность</span><span class="chev" aria-hidden="true"></span></summary>
     <div class="collapsible-body">
       <div class="totals-grid partner-totals-grid">
-        <div class="panel total-card">
+        <div class="total-card">
           <span class="k">Схема работы</span>
           <span class="v" style="font-size:18px;">{{ partner_income.scheme_summary or 'Не задана' }}</span>
         </div>
-        <div class="panel total-card">
+        <div class="total-card">
           <span class="k">Комиссия за этот месяц</span>
           <span class="v">{{ partner_income.month_total|money }} ₽</span>
         </div>
-        <div class="panel total-card total-card-grand">
+        <div class="total-card total-card-grand">
           <span class="k">Комиссия за всё время</span>
           <span class="v">{{ partner_income.total|money }} ₽</span>
         </div>
@@ -308,7 +308,7 @@
   </details>
   {% endif %}
 
-  <section class="panel" id="orders">
+  <section class="client-orders" id="orders">
     <div class="partner-orders-heading">
       <h2>{{ ('Входящие заявки' if partner_request_view == 'incoming' else 'Исходящие заявки') if is_tuning_partner else 'Ваши заказы' }}</h2>
       {% if is_tuning_partner and not is_admin_view %}
