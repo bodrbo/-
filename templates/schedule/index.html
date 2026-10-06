@@ -638,7 +638,7 @@
           {% endif %}
           <div>
             <strong>{{ employee.name }}</strong>
-            <small>{{ employee.position_label }}{% if employee.has_day_assignment %}<em> · назначен рейс</em>{% endif %}</small>
+            <small>{{ employee.position_label }}{% if employee.shift_label %} · смена {{ employee.shift_label }}{% endif %}{% if employee.has_day_assignment %}<em> · назначен рейс</em>{% endif %}</small>
           </div>
           <form method="post" action="{{ url_for('schedule.remove_crew_member', employee_id=employee.id) }}">
             <input type="hidden" name="work_date" value="{{ day.isoformat() }}">

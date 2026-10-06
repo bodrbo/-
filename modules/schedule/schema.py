@@ -286,6 +286,11 @@ def init_schema(conn):
         )
         """
     )
+    day_crew_columns = {row[1] for row in conn.execute("PRAGMA table_info(schedule_day_crew)")}
+    for column in ("shift_start", "shift_end"):
+        # working hours of the person's shift that day (HH:MM); NULL = not set
+        if column not in day_crew_columns:
+            conn.execute(f"ALTER TABLE schedule_day_crew ADD COLUMN {column} TEXT")
     conn.execute(
         "INSERT OR IGNORE INTO schedule_day_crew "
         "(work_date, employee_id, created_at) "

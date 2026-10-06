@@ -11,6 +11,10 @@ from werkzeug.security import generate_password_hash
 from . import repository
 from .constants import (
     ADMIN_NAME_MAX_LENGTH,
+    EXCURSION_SCHEDULE_POSITIONS,
+    MAX_WORKDAYS_PER_REQUEST,
+    TUNING_SCHEDULE_POSITIONS,
+    WORKDAY_SCHEDULES,
     EMPLOYEE_LOGIN_MIN_LENGTH,
     PASSWORD_MAX_LENGTH,
     PASSWORD_MIN_LENGTH,
@@ -136,6 +140,9 @@ def employee_directory(db):
         employee["initials"] = _initials(employee["name"])
         employee["positions"] = positions_by_employee.get(employee["id"], [])
         employee["telegram"] = links_by_employee.get(employee["id"])
+        held = {item["position"] for item in employee["positions"]}
+        employee["can_work_tuning"] = bool(held & set(TUNING_SCHEDULE_POSITIONS))
+        employee["can_work_excursion"] = bool(held & set(EXCURSION_SCHEDULE_POSITIONS))
         employees.append(employee)
     return employees
 
@@ -538,3 +545,79 @@ def update_legacy_admin(db, admin_id, raw_name, raw_login, raw_password):
         return True, "Изменений нет.", name
     repository.update_legacy_admin(db, admin_id, name, username, password_hash)
     return True, f"Данные администратора обновлены: {', '.join(changes)}.", name
+
+
+def _parse_workdays(raw_dates):
+    """'2026-10-12,2026-10-13' (or a list) -> sorted unique dates; (None,
+    error) when empty, malformed or too many."""
+    if isinstance(raw_dates, str):
+        raw_dates = raw_dates.replace(";", ",").replace("\n", ",").split(",")
+    days = set()
+    for raw in raw_dates or []:
+        raw = (raw or "").strip()
+        if not raw:
+            continue
+        try:
+            days.add(dt.date.fromisoformat(raw))
+        except ValueError:
+            return None, f"Некорректная дата: «{raw}»."
+    if not days:
+        return None, "Выберите хотя бы один рабочий день."
+    if len(days) > MAX_WORKDAYS_PER_REQUEST:
+        return None, f"За один раз можно добавить не больше {MAX_WORKDAYS_PER_REQUEST} дней."
+    return sorted(days), None
+
+
+def _clean_hours(raw_start, raw_end):
+    """("HH:MM", "HH:MM") or (None, error); both are required here."""
+    start_raw, end_raw = (raw_start or "").strip(), (raw_end or "").strip()
+    try:
+        start = dt.datetime.strptime(start_raw, "%H:%M")
+        end = dt.datetime.strptime(end_raw, "%H:%M")
+    except ValueError:
+        return None, "Укажите рабочие часы: начало и конец смены."
+    if end <= start:
+        return None, "Конец смены должен быть позже её начала."
+    return (start.strftime("%H:%M"), end.strftime("%H:%M")), None
+
+
+def add_workdays(db, employee_id, schedule, raw_dates, raw_start, raw_end, adders):
+    """Put an employee on the roster of one schedule for many days at once,
+    with the given working hours. `adders[schedule](db, employee_id, day,
+    start, end)` (injected from app.py, so each schedule keeps its own
+    rules) returns ("added" | "updated" | "error", text). A day the employee
+    is already on gets its hours updated. Returns (success, message)."""
+    employee = repository.get_employee(db, employee_id)
+    if employee is None:
+        return False, "Сотрудник не найден."
+    if schedule not in WORKDAY_SCHEDULES or schedule not in adders:
+        return False, "Выберите расписание: тюнинг или экскурсии."
+    days, error = _parse_workdays(raw_dates)
+    if error:
+        return False, error
+    hours, error = _clean_hours(raw_start, raw_end)
+    if error:
+        return False, error
+
+    added = updated = 0
+    for day in days:
+        status, text = adders[schedule](db, employee_id, day, hours[0], hours[1])
+        if status == "error":
+            if added or updated:
+                return False, (
+                    f"{text} Уже обработано дней: {added + updated} — остальные не добавлены."
+                )
+            return False, text
+        if status == "added":
+            added += 1
+        else:
+            updated += 1
+    parts = []
+    if added:
+        parts.append(f"добавлено дней: {added}")
+    if updated:
+        parts.append(f"обновлены часы в уже стоявших днях: {updated}")
+    return True, (
+        f"{employee['name']} — расписание «{WORKDAY_SCHEDULES[schedule]}», "
+        f"смена {hours[0]}–{hours[1]}: {', '.join(parts)}."
+    )

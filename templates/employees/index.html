@@ -218,6 +218,11 @@
           {% else %}
           <span class="connection-badge"><i></i> Нет связи</span>
           {% endif %}
+          <button type="button" class="employee-secondary-btn employee-workdays-open"
+                  data-action="{{ url_for('employees.add_workdays', employee_id=employee.id) }}"
+                  data-name="{{ employee.name }}"
+                  data-tuning="{{ 1 if employee.can_work_tuning else 0 }}"
+                  data-excursion="{{ 1 if employee.can_work_excursion else 0 }}">Рабочие дни</button>
           <form action="{{ url_for('employees.reset_password', employee_id=employee.id) }}" method="post"
                 onsubmit='return confirm({{ (("Выпустить новый пароль для " ~ employee.name ~ "? Старый пароль сразу перестанет работать.") if employee.account_id else ("Создать личный кабинет для " ~ employee.name ~ "?") )|tojson }});'>
             <button type="submit" class="employee-secondary-btn" title="{{ 'Выпустить новый пароль' if employee.account_id else 'Создать личный кабинет' }}">
@@ -319,7 +324,164 @@
   </section>
 </main>
 
+
+<div class="schedule-modal" id="workdaysModal" hidden>
+  <div class="schedule-modal-backdrop" data-workdays-close></div>
+  <section class="schedule-modal-card workdays-card" role="dialog" aria-modal="true" aria-labelledby="workdaysTitle">
+    <header class="schedule-modal-header">
+      <div>
+        <span>Рабочие дни</span>
+        <h2 id="workdaysTitle">Сотрудник</h2>
+      </div>
+      <button type="button" class="schedule-modal-close" data-workdays-close aria-label="Закрыть">×</button>
+    </header>
+    <form method="post" id="workdaysForm" class="workdays-body">
+      <input type="hidden" name="dates" id="workdaysDates">
+
+      <fieldset class="workdays-schedules">
+        <legend>Расписание</legend>
+        <label id="workdaysTuningOption"><input type="radio" name="schedule" value="tuning" required><span>Тюнинг</span></label>
+        <label id="workdaysExcursionOption"><input type="radio" name="schedule" value="excursion" required><span>Экскурсии</span></label>
+        <p class="hint" id="workdaysScheduleHint" style="margin:0;" hidden></p>
+      </fieldset>
+
+      <div class="workdays-hours">
+        <label><span>Смена с</span><input type="time" name="shift_start" value="09:00" required></label>
+        <label><span>до</span><input type="time" name="shift_end" value="18:00" required></label>
+      </div>
+
+      <div class="workdays-calendar">
+        <div class="workdays-calendar-nav">
+          <button type="button" id="workdaysPrev" aria-label="Предыдущий месяц">‹</button>
+          <strong id="workdaysMonthTitle"></strong>
+          <button type="button" id="workdaysNext" aria-label="Следующий месяц">›</button>
+        </div>
+        <div class="workdays-weekdays" aria-hidden="true"><span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span></div>
+        <div class="workdays-grid" id="workdaysGrid"></div>
+        <div class="workdays-quick">
+          <button type="button" id="workdaysWeekdays">Будни месяца</button>
+          <button type="button" id="workdaysAll">Все дни месяца</button>
+          <button type="button" id="workdaysClearMonth">Снять месяц</button>
+        </div>
+      </div>
+
+      <p class="workdays-summary" id="workdaysSummary">Выберите дни в календаре</p>
+      <div class="workdays-actions">
+        <button type="submit" class="employee-primary-btn" id="workdaysSubmit" disabled>Добавить в расписание</button>
+        <button type="button" class="employee-secondary-btn" data-workdays-close>Отмена</button>
+      </div>
+      <p class="hint" style="margin:0;">Дни добавляются сразу. Если сотрудник уже стоит в смене в выбранный день, у него обновятся часы.</p>
+    </form>
+  </section>
+</div>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+(function () {
+  var modal = document.getElementById('workdaysModal');
+  var form = document.getElementById('workdaysForm');
+  var grid = document.getElementById('workdaysGrid');
+  var selected = new Set();
+  var view = new Date();
+  view = new Date(view.getFullYear(), view.getMonth(), 1);
+  var MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+
+  function iso(date) {
+    var m = date.getMonth() + 1, d = date.getDate();
+    return date.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
+  }
+  function ruDate(isoDate) { var p = isoDate.split('-'); return p[2] + '.' + p[1]; }
+  function daysOfView() {
+    var out = [], last = new Date(view.getFullYear(), view.getMonth() + 1, 0).getDate();
+    for (var day = 1; day <= last; day++) out.push(new Date(view.getFullYear(), view.getMonth(), day));
+    return out;
+  }
+  function render() {
+    document.getElementById('workdaysMonthTitle').textContent = MONTHS[view.getMonth()] + ' ' + view.getFullYear();
+    grid.innerHTML = '';
+    var offset = (new Date(view.getFullYear(), view.getMonth(), 1).getDay() + 6) % 7;
+    for (var blank = 0; blank < offset; blank++) grid.appendChild(document.createElement('span'));
+    var today = iso(new Date());
+    daysOfView().forEach(function (date) {
+      var key = iso(date), button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = date.getDate();
+      button.dataset.date = key;
+      if (selected.has(key)) button.classList.add('is-selected');
+      if (key === today) button.classList.add('is-today');
+      if (date.getDay() === 0 || date.getDay() === 6) button.classList.add('is-weekend');
+      grid.appendChild(button);
+    });
+    var list = Array.from(selected).sort();
+    document.getElementById('workdaysDates').value = list.join(',');
+    document.getElementById('workdaysSubmit').disabled = !list.length || !form.dataset.canSubmit;
+    var summary = document.getElementById('workdaysSummary');
+    if (!list.length) { summary.textContent = 'Выберите дни в календаре'; return; }
+    var shown = list.slice(0, 14).map(ruDate).join(', ');
+    summary.textContent = 'Выбрано дней: ' + list.length + ' — ' + shown + (list.length > 14 ? ', …' : '');
+  }
+  function openFor(button) {
+    form.action = button.dataset.action;
+    document.getElementById('workdaysTitle').textContent = button.dataset.name;
+    var tuning = button.dataset.tuning === '1', excursion = button.dataset.excursion === '1';
+    var radios = form.querySelectorAll('input[name="schedule"]');
+    radios.forEach(function (radio) {
+      var allowed = radio.value === 'tuning' ? tuning : excursion;
+      radio.disabled = !allowed;
+      radio.checked = allowed && (radio.value === 'tuning' ? !excursion : !tuning);
+      radio.closest('label').classList.toggle('is-disabled', !allowed);
+    });
+    var hint = document.getElementById('workdaysScheduleHint');
+    hint.hidden = tuning && excursion;
+    hint.textContent = !tuning && !excursion
+      ? 'У сотрудника нет должностей для расписаний: добавьте «Тюнингмэн» или «Капитан»/«Гид».'
+      : (tuning ? 'Для расписания экскурсий нужна должность «Капитан», «Гид» или «Гид-капитан».'
+                : 'Для расписания тюнинга нужна должность «Тюнингмэн».');
+    form.dataset.canSubmit = (tuning || excursion) ? '1' : '';
+    selected.clear();
+    view = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    render();
+    modal.hidden = false;
+    document.body.classList.add('schedule-modal-open');
+  }
+  function close() {
+    modal.hidden = true;
+    document.body.classList.remove('schedule-modal-open');
+  }
+  document.querySelectorAll('.employee-workdays-open').forEach(function (button) {
+    button.addEventListener('click', function () { openFor(button); });
+  });
+  modal.querySelectorAll('[data-workdays-close]').forEach(function (element) {
+    element.addEventListener('click', close);
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && !modal.hidden) close();
+  });
+  grid.addEventListener('click', function (event) {
+    var key = event.target.dataset && event.target.dataset.date;
+    if (!key) return;
+    if (selected.has(key)) selected.delete(key); else selected.add(key);
+    render();
+  });
+  document.getElementById('workdaysPrev').addEventListener('click', function () {
+    view = new Date(view.getFullYear(), view.getMonth() - 1, 1); render();
+  });
+  document.getElementById('workdaysNext').addEventListener('click', function () {
+    view = new Date(view.getFullYear(), view.getMonth() + 1, 1); render();
+  });
+  document.getElementById('workdaysWeekdays').addEventListener('click', function () {
+    daysOfView().forEach(function (date) {
+      if (date.getDay() !== 0 && date.getDay() !== 6) selected.add(iso(date));
+    });
+    render();
+  });
+  document.getElementById('workdaysAll').addEventListener('click', function () {
+    daysOfView().forEach(function (date) { selected.add(iso(date)); }); render();
+  });
+  document.getElementById('workdaysClearMonth').addEventListener('click', function () {
+    daysOfView().forEach(function (date) { selected.delete(iso(date)); }); render();
+  });
+})();
+</script>
 <script>
 document.querySelector('.employee-copy-credentials')?.addEventListener('click', async function () {
   const text = `Логин: ${this.dataset.login}\nПароль: ${this.dataset.password}`;

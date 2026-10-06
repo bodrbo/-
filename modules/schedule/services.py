@@ -1817,6 +1817,10 @@ def day_view(
         db, day.isoformat()
     )
     day_crew = [employee for employee in crew if employee["id"] in day_crew_ids]
+    shifts = repository.list_day_crew_shifts(db, day.isoformat())
+    for employee in day_crew:
+        start, end = shifts.get(employee["id"], (None, None))
+        employee["shift_label"] = f"{start}–{end}" if start and end else ""
     available_crew = [employee for employee in crew if employee["id"] not in day_crew_ids]
     selected_id = None
     selected_unassigned = selected_employee == "unassigned" and has_unassigned

@@ -96,6 +96,27 @@ def add_day_crew_member(db, day, employee_id, timestamp):
     return cursor.rowcount > 0
 
 
+def set_day_crew_hours(db, day, employee_id, shift_start, shift_end):
+    cursor = db.execute(
+        "UPDATE schedule_day_crew SET shift_start = ?, shift_end = ? "
+        "WHERE work_date = ? AND employee_id = ?",
+        (shift_start, shift_end, day, employee_id),
+    )
+    db.commit()
+    return cursor.rowcount > 0
+
+
+def list_day_crew_shifts(db, day):
+    """{employee_id: (shift_start, shift_end)} of the day's roster."""
+    return {
+        row["employee_id"]: (row["shift_start"], row["shift_end"])
+        for row in db.execute(
+            "SELECT employee_id, shift_start, shift_end FROM schedule_day_crew WHERE work_date = ?",
+            (day,),
+        ).fetchall()
+    }
+
+
 def remove_day_crew_member(db, day, employee_id):
     cursor = db.execute(
         "DELETE FROM schedule_day_crew WHERE work_date = ? AND employee_id = ?",

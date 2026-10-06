@@ -14,6 +14,7 @@ def create_employees_blueprint(
     telegram_sender,
     telegram_configured,
     telegram_bot_username,
+    workday_adders=None,
 ):
     blueprint = Blueprint("employees", __name__)
 
@@ -96,6 +97,19 @@ def create_employees_blueprint(
         if success and name and session.get("admin_id") == admin_id:
             session["admin_name"] = name
         return redirect_with_notice(message, success, f"admin-{admin_id}")
+
+    @blueprint.route("/employees/<int:employee_id>/workdays", methods=["POST"])
+    @admin_login_required
+    def add_workdays(employee_id):
+        success, message = services.add_workdays(
+            get_db(), employee_id,
+            request.form.get("schedule", ""),
+            request.form.get("dates", ""),
+            request.form.get("shift_start", ""),
+            request.form.get("shift_end", ""),
+            workday_adders or {},
+        )
+        return redirect_with_notice(message, success, f"employee-{employee_id}")
 
     @blueprint.route("/employees/<int:employee_id>/delete", methods=["POST"])
     @admin_login_required

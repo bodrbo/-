@@ -5732,8 +5732,51 @@ app.register_blueprint(
         telegram_sender=lambda chat_id, text: send_telegram_notification(text, chat_id=chat_id),
         telegram_configured=lambda: bool(TELEGRAM_BOT_TOKEN),
         telegram_bot_username=lambda: TELEGRAM_BOT_USERNAME,
+        workday_adders={
+            "tuning": lambda db, employee_id, day, start, end: (
+                _add_tuning_workday(db, employee_id, day, start, end)
+            ),
+            "excursion": lambda db, employee_id, day, start, end: (
+                _add_excursion_workday(db, employee_id, day, start, end)
+            ),
+        },
     )
 )
+
+
+def _add_tuning_workday(db, employee_id, day, start, end):
+    """One day of «Рабочие дни» for the tuning schedule: the employee goes on
+    that day's roster with these hours (hours are updated if they're already
+    on it)."""
+    names = {e["id"]: e["name"] for e in tuning_schedule_repository.list_tuning_crew_employees(db)}
+    if employee_id not in names:
+        return "error", "В расписание тюнинга можно ставить только сотрудников с должностью «Тюнингмэн»."
+    day_iso = day.isoformat()
+    if employee_id in tuning_schedule_repository.list_day_crew_ids(db, day_iso):
+        tuning_schedule_repository.set_shift_hours(db, day_iso, employee_id, start, end)
+        return "updated", ""
+    tuning_schedule_repository.add_day_crew_member(
+        db, day_iso, employee_id, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), start, end
+    )
+    return "added", ""
+
+
+def _add_excursion_workday(db, employee_id, day, start, end):
+    """Same for the excursion schedule, through its own service so the
+    retroactive minimum-shift top-up still applies to a day that is over."""
+    day_iso = day.isoformat()
+    already = employee_id in schedule_repository.list_day_crew_ids(db, day_iso)
+    if not already:
+        success, message = schedule_services.add_day_crew_member(
+            db, day, employee_id, apply_minimum_shift=_apply_schedule_minimum_shift
+        )
+        if not success:
+            return "error", (
+                "В расписание экскурсий можно ставить только капитанов и гидов "
+                "(должности «Капитан», «Гид», «Гид-капитан»)."
+            )
+    schedule_repository.set_day_crew_hours(db, day_iso, employee_id, start, end)
+    return ("updated" if already else "added"), ""
 
 
 # =======================================================================
