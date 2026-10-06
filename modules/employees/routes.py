@@ -35,6 +35,8 @@ def create_employees_blueprint(
         return render_template(
             "employees/index.html",
             employees=services.employee_directory(db),
+            legacy_admins=services.legacy_admins(db),
+            current_admin_id=session.get("admin_id"),
             known_positions=services.known_positions(db),
             telegram_contacts=contacts,
             unlinked_telegram_contacts=[
@@ -70,6 +72,30 @@ def create_employees_blueprint(
             "chat_id": request.form.get("chat_id", ""),
         }
         return redirect_with_notice(message, False, "new-employee")
+
+    @blueprint.route("/employees/<int:employee_id>/update", methods=["POST"])
+    @admin_login_required
+    def update_employee(employee_id):
+        success, message = services.update_employee(
+            get_db(), employee_id,
+            request.form.get("name", ""),
+            request.form.get("username", ""),
+            request.form.get("password", ""),
+        )
+        return redirect_with_notice(message, success, f"employee-{employee_id}")
+
+    @blueprint.route("/employees/admins/<int:admin_id>/update", methods=["POST"])
+    @admin_login_required
+    def update_admin(admin_id):
+        success, message, name = services.update_legacy_admin(
+            get_db(), admin_id,
+            request.form.get("name", ""),
+            request.form.get("username", ""),
+            request.form.get("password", ""),
+        )
+        if success and name and session.get("admin_id") == admin_id:
+            session["admin_name"] = name
+        return redirect_with_notice(message, success, f"admin-{admin_id}")
 
     @blueprint.route("/employees/<int:employee_id>/delete", methods=["POST"])
     @admin_login_required

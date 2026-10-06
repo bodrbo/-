@@ -1887,7 +1887,11 @@ def init_db(db_path=None, include_bootstrap_data=True):
     # Backfill a row for every employee already known to the system — the
     # configured EMPLOYEES list plus any name used in entries but not in it
     # (mirrors the "known" merge in _payroll_context so nobody is missed).
-    known_employee_names = list(EMPLOYEES) if include_bootstrap_data else []
+    # The configured EMPLOYEES only seed an EMPTY directory: names are now
+    # editable in «Сотрудники», and re-adding the original name on every
+    # start would resurrect a renamed employee as a duplicate.
+    employees_were_empty = conn.execute("SELECT COUNT(*) FROM employees").fetchone()[0] == 0
+    known_employee_names = list(EMPLOYEES) if (include_bootstrap_data and employees_were_empty) else []
     for row in conn.execute("SELECT DISTINCT employee FROM entries").fetchall():
         if row[0] not in known_employee_names:
             known_employee_names.append(row[0])
@@ -3614,7 +3618,13 @@ def init_db(db_path=None, include_bootstrap_data=True):
     # support in hashlib, which makes scrypt-hashed logins fail at runtime.
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     if include_bootstrap_data:
-        for admin_name, username, password_hash in ADMIN_ACCOUNTS:
+        # Only into a database without a main administrator: its login and
+        # password are editable in «Сотрудники», and re-inserting the original
+        # "admin" account after a rename would bring back the old credentials.
+        has_main_admin = conn.execute(
+            "SELECT 1 FROM admin_accounts WHERE employee_id IS NULL"
+        ).fetchone() is not None
+        for admin_name, username, password_hash in ([] if has_main_admin else ADMIN_ACCOUNTS):
             conn.execute(
                 "INSERT OR IGNORE INTO admin_accounts "
                 "(admin_name, username, password_hash, created_at) "
@@ -3642,6 +3652,11 @@ def init_db(db_path=None, include_bootstrap_data=True):
             existing = conn.execute(
                 "SELECT id FROM team_accounts WHERE username = ?", (username,)
             ).fetchone()
+            has_other_login = existing is None and conn.execute(
+                "SELECT 1 FROM team_accounts WHERE employee_id = ?", (employee_id,)
+            ).fetchone() is not None
+            if has_other_login:
+                continue  # the login was changed in «Сотрудники» — don't add the old one back
             if existing is None:
                 conn.execute(
                     "INSERT INTO team_accounts "
@@ -16704,7 +16719,8 @@ def team_login_required(view):
         account = None
         if team_id:
             account = get_db().execute(
-                "SELECT team_accounts.id FROM team_accounts "
+                "SELECT team_accounts.id, team_accounts.username, employees.name AS employee_name "
+                "FROM team_accounts "
                 "JOIN employees ON employees.id = team_accounts.employee_id "
                 "WHERE team_accounts.id = ? AND employees.deleted_at IS NULL",
                 (team_id,),
@@ -16714,6 +16730,17 @@ def team_login_required(view):
             session.pop("team_employee_name", None)
             session.pop("team_username", None)
             return redirect(url_for("team_login"))
+        # The name may have been edited in «Сотрудники» since login — all the
+        # team pages look the employee up by this session name, so a stale
+        # one would show an empty cabinet. Refresh it only when nobody has the
+        # stored name any more (i.e. it was renamed away).
+        stored_name = session.get("team_employee_name")
+        if stored_name != account["employee_name"] and not (
+            stored_name and get_db().execute(
+                "SELECT 1 FROM employees WHERE name = ?", (stored_name,)
+            ).fetchone()
+        ):
+            session["team_employee_name"] = account["employee_name"]
         return view(*args, **kwargs)
     return wrapped
 

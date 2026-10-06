@@ -2,6 +2,7 @@
 
 import datetime as dt
 import html
+import re
 import secrets
 import unicodedata
 
@@ -9,6 +10,10 @@ from werkzeug.security import generate_password_hash
 
 from . import repository
 from .constants import (
+    ADMIN_NAME_MAX_LENGTH,
+    EMPLOYEE_LOGIN_MIN_LENGTH,
+    PASSWORD_MAX_LENGTH,
+    PASSWORD_MIN_LENGTH,
     CANDIDATE_NAME_MAX_LENGTH,
     CANDIDATE_NOTE_MAX_LENGTH,
     CANDIDATE_PHONE_MAX_LENGTH,
@@ -409,3 +414,127 @@ def convert_candidate(db, candidate_id, raw_positions, raw_custom_position):
         f"{candidate['name']} переведён(а) в сотрудники. Личный кабинет создан.",
         credentials,
     )
+
+
+_LOGIN_PATTERN = re.compile(r"^[A-Za-z0-9._@-]+$")
+
+
+def _validate_login(raw_login):
+    login = (raw_login or "").strip()
+    if len(login) < EMPLOYEE_LOGIN_MIN_LENGTH or len(login) > EMPLOYEE_LOGIN_MAX_LENGTH:
+        return None, (
+            f"Логин должен быть от {EMPLOYEE_LOGIN_MIN_LENGTH} до "
+            f"{EMPLOYEE_LOGIN_MAX_LENGTH} символов."
+        )
+    if not _LOGIN_PATTERN.match(login):
+        return None, "Логин может содержать только латинские буквы, цифры и символы . _ - @"
+    return login, None
+
+
+def _validate_password(raw_password):
+    password = raw_password or ""
+    if len(password) < PASSWORD_MIN_LENGTH:
+        return None, f"Пароль должен быть не короче {PASSWORD_MIN_LENGTH} символов."
+    if len(password) > PASSWORD_MAX_LENGTH:
+        return None, f"Пароль должен быть не длиннее {PASSWORD_MAX_LENGTH} символов."
+    return password, None
+
+
+def update_employee(db, employee_id, raw_name, raw_login, raw_password):
+    """Edit an employee's ФИО, login and password. A blank login/password
+    keeps the current one; a ФИО change is carried through all name-keyed
+    history (see repository.rename_employee_everywhere)."""
+    employee = repository.get_employee(db, employee_id)
+    if employee is None:
+        return False, "Сотрудник не найден."
+    name, error = _normalise_employee_name(raw_name)
+    if error:
+        return False, error
+    other = repository.get_employee_by_name(db, name, include_deleted=True)
+    if other is not None and other["id"] != employee_id:
+        return False, "Сотрудник с таким ФИО уже есть (в том числе среди удалённых)."
+
+    account = repository.get_team_account(db, employee_id)
+    login_raw = (raw_login or "").strip()
+    password_raw = raw_password or ""
+    username = None
+    if login_raw:
+        username, error = _validate_login(login_raw)
+        if error:
+            return False, error
+        if username != (account["username"] if account else None) and repository.login_in_use(
+            db, username, exclude_team_account_id=account["id"] if account else None
+        ):
+            return False, f"Логин «{username}» уже занят."
+    password_hash = None
+    if password_raw:
+        password, error = _validate_password(password_raw)
+        if error:
+            return False, error
+        password_hash = generate_password_hash(password, method="pbkdf2:sha256")
+    if account is None and (username or password_hash) and not (username and password_hash):
+        return False, "Чтобы создать личный кабинет, укажите и логин, и пароль."
+
+    changes = []
+    if name != employee["name"]:
+        changes.append("ФИО")
+    if account is not None and username and username != account["username"]:
+        changes.append("логин")
+    if password_hash:
+        changes.append("пароль")
+    if account is None and username and password_hash:
+        changes.append("личный кабинет создан")
+    if not changes:
+        return True, "Изменений нет."
+
+    repository.apply_employee_update(
+        db, employee, name, account, username, password_hash, current_timestamp()
+    )
+    return True, f"Данные сотрудника {name} обновлены: {', '.join(changes)}."
+
+
+def legacy_admins(db):
+    return [
+        dict(row, initials=_initials(row["admin_name"]))
+        for row in repository.list_legacy_admins(db)
+    ]
+
+
+def update_legacy_admin(db, admin_id, raw_name, raw_login, raw_password):
+    """Edit the main administrator account: displayed name, login, password."""
+    admin = repository.get_legacy_admin(db, admin_id)
+    if admin is None:
+        return False, "Учётная запись администратора не найдена.", None
+    name = " ".join((raw_name or "").strip().split())
+    if not name:
+        return False, "Введите имя администратора.", None
+    if len(name) > ADMIN_NAME_MAX_LENGTH:
+        return False, f"Имя должно быть не длиннее {ADMIN_NAME_MAX_LENGTH} символов.", None
+    if any(ord(character) < 32 for character in name):
+        return False, "Имя содержит недопустимые символы.", None
+    login_raw = (raw_login or "").strip()
+    username = admin["username"]
+    if login_raw and login_raw != admin["username"]:
+        username, error = _validate_login(login_raw)
+        if error:
+            return False, error, None
+        if repository.login_in_use(db, username, exclude_admin_id=admin_id):
+            return False, f"Логин «{username}» уже занят.", None
+    password_hash = None
+    if raw_password:
+        password, error = _validate_password(raw_password)
+        if error:
+            return False, error, None
+        password_hash = generate_password_hash(password, method="pbkdf2:sha256")
+
+    changes = []
+    if name != admin["admin_name"]:
+        changes.append("имя")
+    if username != admin["username"]:
+        changes.append("логин")
+    if password_hash:
+        changes.append("пароль")
+    if not changes:
+        return True, "Изменений нет.", name
+    repository.update_legacy_admin(db, admin_id, name, username, password_hash)
+    return True, f"Данные администратора обновлены: {', '.join(changes)}.", name

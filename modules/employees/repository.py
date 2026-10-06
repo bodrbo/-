@@ -405,3 +405,142 @@ def delete_candidate(db, candidate_id):
     cursor = db.execute("DELETE FROM candidates WHERE id = ?", (candidate_id,))
     db.commit()
     return cursor.rowcount > 0
+
+
+# Every place that keeps an employee's name as plain text (history is joined by
+# name, not by id). Renaming an employee must rewrite all of them or the
+# person's payroll, tasks, shifts and paid-week marks would silently detach.
+NAME_COLUMNS = (
+    ("entries", "employee"),
+    ("payments", "employee"),
+    ("tbank_payout_registries", "employee"),
+    ("boat_checklists", "employee_name"),
+    ("boat_defects", "employee_name"),
+    ("defect_assignments", "employee_name"),
+    ("offline_operations", "employee_name"),
+    ("schedule_assignments", "employee_name"),
+    ("supply_locker_drops", "employee_name"),
+    ("supply_requests", "employee_name"),
+    ("supply_writeoffs", "employee_name"),
+    ("tuning_item_assignments", "employee_name"),
+    ("tuning_schedule_tasks", "employee_name"),
+    ("boat_fuel_transactions", "created_by_name"),
+    ("boat_fuel_state", "activated_by_name"),
+    ("field_diagnostic_sheets", "created_by_name"),
+)
+
+
+def _table_has_column(db, table, column):
+    return any(row[1] == column for row in db.execute(f"PRAGMA table_info({table})").fetchall())
+
+
+def rename_employee_everywhere(db, employee_id, old_name, new_name):
+    """Rename an employee and rewrite their name in all name-keyed history.
+    Does not commit — the caller wraps it with the rest of the update."""
+    db.execute("UPDATE employees SET name = ? WHERE id = ?", (new_name, employee_id))
+    db.execute(
+        "UPDATE team_accounts SET employee_name = ? WHERE employee_id = ?",
+        (new_name, employee_id),
+    )
+    db.execute(
+        "UPDATE admin_accounts SET admin_name = ? WHERE employee_id = ?",
+        (new_name, employee_id),
+    )
+    if _table_has_column(db, "software_requests", "author_name"):
+        db.execute(
+            "UPDATE software_requests SET author_name = ? WHERE author_employee_id = ?",
+            (new_name, employee_id),
+        )
+    for table, column in NAME_COLUMNS:
+        if _table_has_column(db, table, column):
+            db.execute(f"UPDATE {table} SET {column} = ? WHERE {column} = ?", (new_name, old_name))
+
+
+def login_in_use(db, username, exclude_team_account_id=None, exclude_admin_id=None):
+    """Logins are looked up across several account tables (the administrator
+    login page tries admin_accounts first, then team_accounts), so a login
+    must be unique across all of them, ignoring case."""
+    row = db.execute(
+        "SELECT id FROM team_accounts WHERE lower(username) = lower(?) AND id != ?",
+        (username, exclude_team_account_id or 0),
+    ).fetchone()
+    if row is not None:
+        return True
+    row = db.execute(
+        "SELECT id FROM admin_accounts WHERE lower(username) = lower(?) "
+        "AND employee_id IS NULL AND id != ?",
+        (username, exclude_admin_id or 0),
+    ).fetchone()
+    if row is not None:
+        return True
+    return db.execute(
+        "SELECT 1 FROM investors WHERE lower(username) = lower(?)", (username,)
+    ).fetchone() is not None
+
+
+def apply_employee_update(db, employee, new_name, account, username, password_hash, timestamp):
+    """One transaction for name / login / password of an employee. `account`
+    is the existing team_accounts row or None (then a cabinet is created from
+    username + password_hash)."""
+    try:
+        if new_name != employee["name"]:
+            rename_employee_everywhere(db, employee["id"], employee["name"], new_name)
+        if account is not None:
+            if username and username != account["username"]:
+                db.execute(
+                    "UPDATE team_accounts SET username = ? WHERE id = ?", (username, account["id"])
+                )
+            if password_hash:
+                db.execute(
+                    "UPDATE team_accounts SET password_hash = ? WHERE id = ?",
+                    (password_hash, account["id"]),
+                )
+                db.execute(
+                    "UPDATE admin_accounts SET password_hash = ? WHERE employee_id = ?",
+                    (password_hash, employee["id"]),
+                )
+        elif username and password_hash:
+            db.execute(
+                "INSERT INTO team_accounts "
+                "(employee_id, employee_name, username, password_hash, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (employee["id"], new_name, username, password_hash, timestamp),
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
+def list_legacy_admins(db):
+    """The main administrator login(s): admin_accounts rows that are not
+    bridged from an employee."""
+    return db.execute(
+        "SELECT id, admin_name, username FROM admin_accounts "
+        "WHERE employee_id IS NULL ORDER BY id"
+    ).fetchall()
+
+
+def get_legacy_admin(db, admin_id):
+    return db.execute(
+        "SELECT id, admin_name, username FROM admin_accounts "
+        "WHERE id = ? AND employee_id IS NULL",
+        (admin_id,),
+    ).fetchone()
+
+
+def update_legacy_admin(db, admin_id, name, username, password_hash):
+    try:
+        db.execute(
+            "UPDATE admin_accounts SET admin_name = ?, username = ? WHERE id = ?",
+            (name, username, admin_id),
+        )
+        if password_hash:
+            db.execute(
+                "UPDATE admin_accounts SET password_hash = ? WHERE id = ?",
+                (password_hash, admin_id),
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise

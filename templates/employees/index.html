@@ -170,6 +170,39 @@
     {% for position in known_positions %}<option value="{{ position }}">{% endfor %}
   </datalist>
 
+  <section class="employee-roster employee-roster-admins" aria-label="Основной администратор">
+    {% for admin in legacy_admins %}
+    <article class="employee-card employee-card-admin" id="admin-{{ admin.id }}">
+      <header class="employee-card-header">
+        <span class="employee-roster-avatar" aria-hidden="true">{{ admin.initials }}</span>
+        <div class="employee-identity">
+          <h3>{{ admin.admin_name }}</h3>
+          <span>Вход в систему: <code>{{ admin.username }}</code></span>
+        </div>
+        <div class="employee-card-actions">
+          <span class="connection-badge connected"><i></i> Основной администратор</span>
+          {% if admin.id == current_admin_id %}<span class="connection-badge"><i></i> Это вы</span>{% endif %}
+        </div>
+      </header>
+      <details class="employee-edit">
+        <summary>Изменить имя, логин и пароль</summary>
+        <form action="{{ url_for('employees.update_admin', admin_id=admin.id) }}" method="post" class="employee-edit-form">
+          <label><span>Имя</span>
+            <input type="text" name="name" value="{{ admin.admin_name }}" maxlength="120" required autocomplete="off">
+          </label>
+          <label><span>Логин</span>
+            <input type="text" name="username" value="{{ admin.username }}" maxlength="50" required autocomplete="off" autocapitalize="off">
+          </label>
+          <label><span>Новый пароль</span>
+            <input name="password" type="password" minlength="8" maxlength="128" autocomplete="new-password" placeholder="Оставьте пустым, чтобы не менять">
+          </label>
+          <button type="submit" class="employee-primary-btn">Сохранить</button>
+        </form>
+      </details>
+    </article>
+    {% endfor %}
+  </section>
+
   <section class="employee-roster" aria-label="Список сотрудников">
     {% for employee in employees %}
     <article class="employee-card" id="employee-{{ employee.id }}">
@@ -263,6 +296,22 @@
           {% endif %}
         </section>
       </div>
+      <details class="employee-edit">
+        <summary>Изменить ФИО, логин и пароль</summary>
+        <form action="{{ url_for('employees.update_employee', employee_id=employee.id) }}" method="post" class="employee-edit-form">
+          <label><span>ФИО</span>
+            <input type="text" name="name" value="{{ employee.name }}" maxlength="120" required autocomplete="off">
+          </label>
+          <label><span>Логин</span>
+            <input type="text" name="username" value="{{ employee.login or '' }}" maxlength="50" autocomplete="off" autocapitalize="off"
+                   placeholder="{{ '' if employee.login else 'Кабинета нет — укажите логин и пароль' }}">
+          </label>
+          <label><span>Новый пароль</span>
+            <input name="password" type="password" minlength="8" maxlength="128" autocomplete="new-password" placeholder="Оставьте пустым, чтобы не менять">
+          </label>
+          <button type="submit" class="employee-primary-btn">Сохранить</button>
+        </form>
+      </details>
     </article>
     {% else %}
     <div class="employee-roster-empty">Сотрудники ещё не добавлены в систему.</div>
