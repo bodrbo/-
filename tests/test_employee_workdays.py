@@ -7,7 +7,7 @@ class EmployeeWorkdaysTests(unittest.TestCase):
     """«Рабочие дни»: many days at once, with shift hours, straight into the
     tuning or the excursion schedule."""
 
-    NAMES = ("Рабочий Тюнинг", "Рабочий Капитан", "Рабочий Гибрид", "Рабочий Менеджер")
+    NAMES = ("Рабочий Тюнинг", "Рабочий Капитан", "Рабочий Гибрид", "Рабочий Менеджер", "Рабочий Админ")
     DAYS = "2031-03-03,2031-03-04,2031-03-05"
 
     def setUp(self):
@@ -23,6 +23,7 @@ class EmployeeWorkdaysTests(unittest.TestCase):
                 ("Рабочий Капитан", ["Капитан"]),
                 ("Рабочий Гибрид", ["Тюнингмэн", "Гид-капитан"]),
                 ("Рабочий Менеджер", ["Менеджер по работе с клиентами"]),
+                ("Рабочий Админ", ["Администратор"]),
             ):
                 employee_id = db.execute(
                     "INSERT INTO employees (name, created_at) VALUES (?, '2026-01-01 09:00')", (name,)
@@ -105,11 +106,30 @@ class EmployeeWorkdaysTests(unittest.TestCase):
         self.assertIn("добавлено дней: 1", page)
         self.assertIn("обновлены часы в уже стоявших днях: 1", page)
 
+    def test_an_administrator_can_work_in_both_schedules(self):
+        self.post("Рабочий Админ", schedule="tuning", dates="2031-03-03")
+        self.post("Рабочий Админ", schedule="excursion", dates="2031-03-04", start="11:00", end="20:00")
+        self.assertEqual([(r["work_date"], r["shift_start"]) for r in self.rows("tuning_schedule_day_crew", "Рабочий Админ")],
+                         [("2031-03-03", "10:00")])
+        self.assertEqual([(r["work_date"], r["shift_start"]) for r in self.rows("schedule_day_crew", "Рабочий Админ")],
+                         [("2031-03-04", "11:00")])
+        # ...and they show up on those days' rosters
+        tuning = self.client.get("/schedule/tuning?date=2031-03-03").get_data(as_text=True)
+        self.assertIn("Рабочий Админ", tuning.split('id="tuningRosterModal"')[1])
+        excursion = self.client.get("/schedule?date=2031-03-04").get_data(as_text=True)
+        self.assertIn("Рабочий Админ", excursion.split('id="scheduleRosterModal"')[1])
+
+    def test_an_administrator_is_offered_in_the_roster_pickers_of_both_schedules(self):
+        tuning = self.client.get("/schedule/tuning?date=2031-03-10").get_data(as_text=True)
+        self.assertIn("Рабочий Админ · Администратор", tuning)
+        excursion = self.client.get("/schedule?date=2031-03-10").get_data(as_text=True)
+        self.assertIn("Рабочий Админ · Администратор", excursion)
+
     def test_an_employee_without_the_right_position_is_refused(self):
         self.post("Рабочий Менеджер", schedule="tuning")
-        self.assertIn("Тюнингмэн", self.notice())
+        self.assertIn("«Тюнингмэн» или «Администратор»", self.notice())
         self.post("Рабочий Тюнинг", schedule="excursion")
-        self.assertIn("капитанов и гидов", self.notice())
+        self.assertIn("капитанов, гидов и администраторов", self.notice())
         self.assertEqual(self.rows("tuning_schedule_day_crew", "Рабочий Менеджер"), [])
         self.assertEqual(self.rows("schedule_day_crew", "Рабочий Тюнинг"), [])
 
@@ -138,6 +158,7 @@ class EmployeeWorkdaysTests(unittest.TestCase):
         for name, tuning, excursion in (
             ("Рабочий Тюнинг", 1, 0), ("Рабочий Капитан", 0, 1),
             ("Рабочий Гибрид", 1, 1), ("Рабочий Менеджер", 0, 0),
+            ("Рабочий Админ", 1, 1),
         ):
             button = page.split(f'data-name="{name}"')[1].split(">")[0]
             self.assertIn(f'data-tuning="{tuning}"', button, name)

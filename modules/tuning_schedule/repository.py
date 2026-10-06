@@ -2,18 +2,20 @@
 
 
 def list_tuning_crew_employees(db):
-    """Tuningmen eligible for the day roster — mirrors
+    """Staff eligible for the day roster — mirrors
     modules.schedule.repository.list_crew_employees, filtered to the
-    tuning-center position instead of captain/guide. Position name kept in
-    sync with app.py's TUNING_ASSIGNABLE_POSITIONS ("Тюнингмэн") by
-    convention, the same way the excursion roster hardcodes its own
-    position list rather than taking it as a parameter."""
+    tuning-center position instead of captain/guide, plus administrators
+    (who may work in either schedule). Position names kept in sync with
+    app.py's TUNING_ASSIGNABLE_POSITIONS ("Тюнингмэн") and
+    modules/employees/constants.py by convention, the same way the
+    excursion roster hardcodes its own position list rather than taking it
+    as a parameter."""
     rows = db.execute(
         "SELECT employees.id, employees.name, employee_positions.position "
         "FROM employees JOIN employee_positions "
         "ON employee_positions.employee_id = employees.id "
         "WHERE employees.deleted_at IS NULL "
-        "AND employee_positions.position = 'Тюнингмэн' "
+        "AND employee_positions.position IN ('Тюнингмэн', 'Администратор') "
         "ORDER BY employees.name"
     ).fetchall()
     employees = {}

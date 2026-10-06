@@ -66,7 +66,7 @@ CUSTOMER_MANAGER_POSITION = "Менеджер по работе с клиент�
 
 # Positions that let an employee work in each schedule (mirrors
 # modules/tuning_schedule and modules/schedule, which enforce it themselves).
-TUNING_SCHEDULE_POSITIONS = ("Тюнингмэн",)
-EXCURSION_SCHEDULE_POSITIONS = ("Капитан", "Гид", "Гид-капитан")
+TUNING_SCHEDULE_POSITIONS = ("Тюнингмэн", "Администратор")
+EXCURSION_SCHEDULE_POSITIONS = ("Капитан", "Гид", "Гид-капитан", "Администратор")
 WORKDAY_SCHEDULES = {"tuning": "Тюнинг", "excursion": "Экскурсии"}
 MAX_WORKDAYS_PER_REQUEST = 120

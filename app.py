@@ -5750,7 +5750,10 @@ def _add_tuning_workday(db, employee_id, day, start, end):
     on it)."""
     names = {e["id"]: e["name"] for e in tuning_schedule_repository.list_tuning_crew_employees(db)}
     if employee_id not in names:
-        return "error", "В расписание тюнинга можно ставить только сотрудников с должностью «Тюнингмэн»."
+        return "error", (
+            "В расписание тюнинга можно ставить только сотрудников с должностью "
+            "«Тюнингмэн» или «Администратор»."
+        )
     day_iso = day.isoformat()
     if employee_id in tuning_schedule_repository.list_day_crew_ids(db, day_iso):
         tuning_schedule_repository.set_shift_hours(db, day_iso, employee_id, start, end)
@@ -5772,8 +5775,8 @@ def _add_excursion_workday(db, employee_id, day, start, end):
         )
         if not success:
             return "error", (
-                "В расписание экскурсий можно ставить только капитанов и гидов "
-                "(должности «Капитан», «Гид», «Гид-капитан»)."
+                "В расписание экскурсий можно ставить только капитанов, гидов и "
+                "администраторов (должности «Капитан», «Гид», «Гид-капитан», «Администратор»)."
             )
     schedule_repository.set_day_crew_hours(db, day_iso, employee_id, start, end)
     return ("updated" if already else "added"), ""

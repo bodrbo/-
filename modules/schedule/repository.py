@@ -34,7 +34,7 @@ def list_crew_employees(db):
         "FROM employees JOIN employee_positions "
         "ON employee_positions.employee_id = employees.id "
         "WHERE employees.deleted_at IS NULL "
-        "AND employee_positions.position IN ('Капитан', 'Гид', 'Гид-капитан') "
+        "AND employee_positions.position IN ('Капитан', 'Гид', 'Гид-капитан', 'Администратор') "
         "ORDER BY employees.name, employee_positions.position"
     ).fetchall()
     employees = {}
