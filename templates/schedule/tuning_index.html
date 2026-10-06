@@ -77,7 +77,14 @@
   </section>
 
   <section class="panel">
-    <h2 style="margin:0 0 14px;">Календарь на {{ day_label }}</h2>
+    <div class="tuning-calendar-heading">
+      <h2 style="margin:0;">Календарь на {{ day_label }}</h2>
+      <button type="button" class="schedule-roster-button" onclick="openTuningRosterModal()">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="3"/><circle cx="14.5" cy="8" r="2.2"/><path d="M2.5 16c.4-3 2.1-4.6 4.7-4.6s4.4 1.6 4.8 4.6M12 12.2c2.8-.6 4.8.7 5.5 3.8"/></svg>
+        <span>Состав</span>
+        <b>{{ day_crew|length }}</b>
+      </button>
+    </div>
     {% if day_crew %}
     <div class="tuning-calendar-board">
       <div class="tuning-calendar-board-scroll">
@@ -125,116 +132,9 @@
       </div>
     </div>
     {% else %}
-    <p class="hint">Добавьте тюнингмэнов в смену ниже, чтобы увидеть календарь на {{ day_label }}.</p>
+    <p class="hint">На {{ day_label }} никто из тюнингмэнов не поставлен в смену. Добавьте сотрудников кнопкой «Состав», чтобы увидеть календарь.</p>
     {% endif %}
   </section>
-
-  <details class="panel collapsible-panel" open>
-    <summary><span>Кто сегодня на смене</span><span class="chev" aria-hidden="true"></span></summary>
-    <div class="collapsible-body">
-    {% if available_crew %}
-    <form method="post" action="{{ url_for('tuning_schedule.add_crew_member') }}" class="entry-form" style="margin-bottom:16px;">
-      <input type="hidden" name="work_date" value="{{ day.isoformat() }}">
-      <div class="field">
-        <label for="crew-employee">Добавить в смену</label>
-        <select id="crew-employee" name="employee_id" required>
-          <option value="" disabled selected>Выберите тюнингмэна</option>
-          {% for employee in available_crew %}
-          <option value="{{ employee.id }}">{{ employee.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="field field-narrow">
-        <label for="crew-shift-start">Смена с</label>
-        <input type="time" id="crew-shift-start" name="shift_start" value="09:00" required>
-      </div>
-      <div class="field field-narrow">
-        <label for="crew-shift-end">до</label>
-        <input type="time" id="crew-shift-end" name="shift_end" value="18:00" required>
-      </div>
-      <div class="field field-submit">
-        <button type="submit">Добавить</button>
-      </div>
-    </form>
-    {% endif %}
-
-    {% if day_crew %}
-    {% for employee in day_crew %}
-    <div class="panel" style="margin-bottom:14px;">
-      <div class="tuning-orders-heading">
-        <h2 style="font-size:15px;">{{ employee.name }} <span class="muted" style="font-weight:400;">— {{ employee.position_label }}</span></h2>
-        <form method="post" action="{{ url_for('tuning_schedule.set_shift_hours', employee_id=employee.id) }}"
-              class="tuning-shift-hours-form">
-          <input type="hidden" name="work_date" value="{{ day.isoformat() }}">
-          <label>Смена
-            <input type="time" name="shift_start" value="{{ employee.shift_start }}" required>
-          </label>
-          <label>—
-            <input type="time" name="shift_end" value="{{ employee.shift_end }}" required>
-          </label>
-          <button type="submit" class="btn-secondary">Сохранить часы</button>
-        </form>
-        <form method="post" action="{{ url_for('tuning_schedule.remove_crew_member', employee_id=employee.id) }}"
-              class="row-actions"
-              onsubmit="return confirm('Убрать {{ employee.name }} из смены на {{ day_label }}?');">
-          <input type="hidden" name="work_date" value="{{ day.isoformat() }}">
-          <button type="submit" class="icon-btn danger" title="Убрать из смены"{{ ' disabled' if employee.has_day_task }}>
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
-          </button>
-        </form>
-      </div>
-      {% if employee.tasks %}
-      <div class="table-scroll">
-        <table class="records">
-          <thead><tr><th>Задача</th><th>Время</th><th>Часы</th><th>Ставка</th><th>Статус</th><th></th></tr></thead>
-          <tbody>
-            {% for task in employee.tasks %}
-            <tr>
-              <td>
-                {{ task.title }}
-                {% if task.is_linked %}
-                <div class="hint" style="margin:2px 0 0;">
-                  Заказ <a href="{{ url_for('edit_tuning_order', order_id=task.order_id) }}">№{{ task.order_id }}</a> — {{ task.equipment_label }}
-                </div>
-                {% endif %}
-              </td>
-              <td class="amount">{{ task.start_time }}</td>
-              <td class="amount">{{ task.planned_hours|float|round(1) }} ч</td>
-              <td class="amount">{{ task.rate|money }} ₽</td>
-              <td>
-                <form method="post" action="{{ url_for('tuning_schedule.set_task_status', task_id=task.task_id) }}" class="status-select-form">
-                  <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
-                  <select name="status" onchange="this.form.submit()">
-                    {% for s in assignment_statuses %}
-                    <option value="{{ s.value }}"{{ ' selected' if task.status == s.value }}>{{ s.label }}</option>
-                    {% endfor %}
-                  </select>
-                </form>
-              </td>
-              <td class="row-actions">
-                <form method="post" action="{{ url_for('tuning_schedule.remove_task_day', task_id=task.task_id, day_id=task.day_id) }}"
-                      onsubmit="return confirm('Убрать эту задачу с {{ day_label }}?');">
-                  <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
-                  <button type="submit" class="icon-btn danger" title="Убрать с этого дня">
-                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
-                  </button>
-                </form>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      <p class="hint" style="margin:0;">На этот день задач не назначено.</p>
-      {% endif %}
-    </div>
-    {% endfor %}
-    {% else %}
-    <p class="hint">На {{ day_label }} никто из тюнингмэнов не поставлен в смену.</p>
-    {% endif %}
-    </div>
-  </details>
 
   {% if leftover_tasks %}
   <details class="panel collapsible-panel" open>
@@ -393,8 +293,110 @@
 
 </main>
 
+
+<div class="schedule-modal" id="tuningRosterModal" hidden>
+  <div class="schedule-modal-backdrop" onclick="closeTuningRosterModal()"></div>
+  <section class="schedule-modal-card schedule-roster-card" role="dialog" aria-modal="true" aria-labelledby="tuningRosterTitle">
+    <header class="schedule-modal-header">
+      <div>
+        <span>Рабочая смена · {{ day_label }}</span>
+        <h2 id="tuningRosterTitle">Состав расписания</h2>
+      </div>
+      <button type="button" class="schedule-modal-close" onclick="closeTuningRosterModal()" aria-label="Закрыть состав">×</button>
+    </header>
+    <div class="schedule-roster-body">
+      {% if day_crew %}
+      <div class="schedule-roster-list" aria-label="Сотрудники в расписании">
+        {% for employee in day_crew %}
+        <article class="schedule-roster-row">
+          {% if employee.avatar_url %}
+          <img src="{{ employee.avatar_url }}" alt="">
+          {% else %}
+          <span class="schedule-roster-avatar">{{ employee.name.split()[0][0] }}{{ employee.name.split()[-1][0] }}</span>
+          {% endif %}
+          <div>
+            <strong>{{ employee.name }}</strong>
+            <small>{{ employee.position_label }}{% if employee.has_day_task %}<em> · есть задача</em>{% endif %}</small>
+            <form method="post" action="{{ url_for('tuning_schedule.set_shift_hours', employee_id=employee.id) }}"
+                  class="tuning-roster-hours">
+              <input type="hidden" name="work_date" value="{{ day.isoformat() }}">
+              <input type="time" name="shift_start" value="{{ employee.shift_start }}" required aria-label="Начало смены">
+              <span aria-hidden="true">–</span>
+              <input type="time" name="shift_end" value="{{ employee.shift_end }}" required aria-label="Конец смены">
+              <button type="submit" class="btn-secondary">Сохранить</button>
+            </form>
+          </div>
+          <form method="post" action="{{ url_for('tuning_schedule.remove_crew_member', employee_id=employee.id) }}"
+                onsubmit="return confirm('Убрать {{ employee.name }} из смены на {{ day_label }}?');">
+            <input type="hidden" name="work_date" value="{{ day.isoformat() }}">
+            <button type="{{ 'button' if employee.has_day_task else 'submit' }}"
+                    class="schedule-roster-remove"
+                    {{ 'disabled' if employee.has_day_task }}
+                    title="{{ 'Сначала перенесите или удалите задачу' if employee.has_day_task else 'Убрать из смены' }}"
+                    aria-label="Убрать {{ employee.name }} из смены">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h12M8 3h4l1 3H7l1-3zM6 6l.7 11h6.6L14 6M8.5 9v5M11.5 9v5"/></svg>
+            </button>
+          </form>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="schedule-roster-empty">На эту дату пока никто не добавлен.</div>
+      {% endif %}
+
+      {% if available_crew %}
+      <form method="post" action="{{ url_for('tuning_schedule.add_crew_member') }}" class="schedule-roster-add tuning-roster-add">
+        <input type="hidden" name="work_date" value="{{ day.isoformat() }}">
+        <label class="field">
+          <span>Добавить сотрудника</span>
+          <select name="employee_id" id="tuningRosterEmployee" required>
+            <option value="" disabled selected>Выберите тюнингмэна</option>
+            {% for employee in available_crew %}
+            <option value="{{ employee.id }}">{{ employee.name }} · {{ employee.position_label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Смена с</span>
+          <input type="time" name="shift_start" value="09:00" required>
+        </label>
+        <label class="field">
+          <span>до</span>
+          <input type="time" name="shift_end" value="18:00" required>
+        </label>
+        <button type="submit">Добавить</button>
+      </form>
+      {% elif crew %}
+      <div class="schedule-roster-complete">Все тюнингмэны уже добавлены.</div>
+      {% else %}
+      <a href="{{ url_for('employees.index') }}" class="btn-secondary">Открыть раздел «Сотрудники»</a>
+      {% endif %}
+    </div>
+  </section>
+</div>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 <script>
+function openTuningRosterModal() {
+  var modal = document.getElementById('tuningRosterModal');
+  modal.hidden = false;
+  document.body.classList.add('schedule-modal-open');
+  setTimeout(function () {
+    var target = document.getElementById('tuningRosterEmployee') || modal.querySelector('.schedule-modal-close');
+    target.focus();
+  }, 20);
+}
+
+function closeTuningRosterModal() {
+  document.getElementById('tuningRosterModal').hidden = true;
+  document.body.classList.remove('schedule-modal-open');
+}
+
+document.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape' && !document.getElementById('tuningRosterModal').hidden) {
+    closeTuningRosterModal();
+  }
+});
+
 function updateTuningScheduleTaskKind() {
   var isOrder = document.querySelector('input[name="task_kind"]:checked').value === 'order';
   document.getElementById('tuningScheduleFreeTitleField').hidden = isOrder;

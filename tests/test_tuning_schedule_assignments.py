@@ -361,7 +361,47 @@ class TuningScheduleAssignmentTests(_TuningTaskFixture, unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.crew_hours(self.EMPLOYEE_A), ("08:30", "17:00"))
         page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
-        self.assertIn('name="shift_start" value="08:30"', page)
+        self.assertIn('name="shift_start" value="08:30"', page)  # editable in the roster window
+
+    def test_the_who_is_on_shift_panel_is_gone_and_the_roster_button_replaces_it(self):
+        self.put_on_shift(self.EMPLOYEE_A, "10:00", "19:00")
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        self.assertNotIn("Кто сегодня на смене", page)
+        self.assertNotIn("tuning-shift-hours-form", page)
+        self.assertIn('onclick="openTuningRosterModal()"', page)
+        self.assertIn('id="tuningRosterModal"', page)
+        self.assertIn("<span>Состав</span>", page)
+        self.assertIn("<b>1</b>", page)  # shift size on the button
+        self.assertIn(self.EMPLOYEE_A, page.split('id="tuningRosterModal"')[1])
+        self.assertIn('name="shift_start" value="10:00"', page)
+
+    def test_the_roster_window_lists_those_not_yet_on_the_shift_with_hour_fields(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        add_form = page.split('class="schedule-roster-add tuning-roster-add"')[1].split("</form>")[0]
+        self.assertIn(self.EMPLOYEE_B, add_form)
+        self.assertNotIn(self.EMPLOYEE_A, add_form)
+        self.assertIn('name="shift_start"', add_form)
+        self.assertIn('name="shift_end"', add_form)
+
+    def test_removing_from_the_roster_is_blocked_while_the_day_has_a_task(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.assign([(self.EMPLOYEE_A, 100, 2)])
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        self.assertIn("Сначала перенесите или удалите задачу", page)
+        self.login_admin()
+        self.client.post(
+            f"/schedule/tuning/crew/{self.employee_id(self.EMPLOYEE_A)}/remove",
+            data={"work_date": self.DAY},
+        )
+        self.assertIsNotNone(self.crew_hours(self.EMPLOYEE_A))
+        # without a task the same person can be removed
+        self.put_on_shift(self.EMPLOYEE_B)
+        self.client.post(
+            f"/schedule/tuning/crew/{self.employee_id(self.EMPLOYEE_B)}/remove",
+            data={"work_date": self.DAY},
+        )
+        self.assertIsNone(self.crew_hours(self.EMPLOYEE_B))
 
     def test_blank_hours_fall_back_to_the_default_workday(self):
         self.login_admin()
