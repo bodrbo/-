@@ -6036,7 +6036,7 @@ def _process_tuning_form(
     items = []
     subtotal = 0.0
     for i in range(len(names)):
-        name = names[i].strip()
+        name = " ".join(names[i].split())  # one line: pasted line breaks become spaces
         direct_price_raw = (
             _get(direct_prices, i).strip().replace("\u00a0", "")
             .replace(" ", "").replace(",", ".")

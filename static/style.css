@@ -4487,6 +4487,8 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
   align-items: center;
 }
 .work-row .work-name { flex: 2 1 200px; min-width: 0; }
+/* a wrapping, auto-growing field (see autoGrowWorkName) instead of a one-line input */
+.work-row textarea.work-name { resize: none; overflow: hidden; line-height: 1.4; min-height: 0; }
 .work-row .work-cost,
 .work-row .work-multiplier { flex: 1 1 130px; min-width: 0; }
 .work-row .work-direct-price { width: 100%; min-width: 0; }

@@ -38,8 +38,9 @@
 {% macro work_row(item=None) %}
 <div class="work-row{{ ' subcontract-work-row' if edit_order and edit_order.source == 'subcontract_request' }}">
   <input type="hidden" name="item_id[]" value="{{ item.id if item else '' }}">
-  <input type="text" name="work_name[]" placeholder="Название работы" class="work-name"
-         value="{{ item.work_name if item else '' }}" oninput="autoGrowWorkName(this)">
+  <textarea name="work_name[]" placeholder="Название работы" class="work-name" rows="1"
+            oninput="autoGrowWorkName(this)"
+            onkeydown="if (event.key === 'Enter') event.preventDefault();">{{ item.work_name if item else '' }}</textarea>
   {% if edit_order and edit_order.source == 'subcontract_request' %}
   <span class="subcontract-price-field subcontract-closed-price">
     <small>Закрытая цена</small>
@@ -1714,21 +1715,17 @@ function addWorkRow() {
   container.appendChild(template.content.cloneNode(true));
 }
 
-// Названия работ часто длинные, а поле в узком ряду обрезает текст —
-// расширяем поле по мере ввода (через flex-basis, т.к. у .work-name flex:2 1
-// 200px), измеряя реальную ширину текста на canvas, чтобы учитывать
-// конкретный шрифт и кириллицу. flex-shrink остаётся включённым, так что
-// поле всё равно не растянет строку шире контейнера — соседние поля просто
-// переносятся на новую строку (flex-wrap уже включён у .work-row).
-function autoGrowWorkName(input) {
-  var canvas = autoGrowWorkName._canvas || (autoGrowWorkName._canvas = document.createElement('canvas'));
-  var ctx = canvas.getContext('2d');
-  var style = getComputedStyle(input);
-  ctx.font = style.fontStyle + ' ' + style.fontWeight + ' ' + style.fontSize + ' ' + style.fontFamily;
-  var textWidth = ctx.measureText(input.value || input.placeholder || '').width;
-  var extra = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0)
-    + (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.borderRightWidth) || 0) + 16;
-  input.style.flexBasis = Math.max(200, Math.ceil(textWidth + extra)) + 'px';
+// Названия работ часто длинные: поле переносит текст по словам и растёт
+// вниз по мере ввода, а не вытягивается в одну длинную строку. Enter не
+// вставляет перенос строки (это одно название), вставленные переносы
+// схлопываются сервером.
+function autoGrowWorkName(field) {
+  field.style.height = 'auto';
+  field.style.height = field.scrollHeight + 'px';
+}
+
+function autoGrowAllWorkNames() {
+  document.querySelectorAll('#work-container .work-name').forEach(autoGrowWorkName);
 }
 
 function removeWorkRow(btn) {
@@ -1849,9 +1846,9 @@ function updateEquipmentFields() {
 
 document.addEventListener('DOMContentLoaded', updateOrderTotal);
 document.addEventListener('DOMContentLoaded', updateEquipmentFields);
-document.addEventListener('DOMContentLoaded', function () {
-  document.querySelectorAll('#work-container .work-name').forEach(autoGrowWorkName);
-});
+document.addEventListener('DOMContentLoaded', autoGrowAllWorkNames);
+window.addEventListener('load', autoGrowAllWorkNames);   // after web fonts settle
+window.addEventListener('resize', autoGrowAllWorkNames); // the field's width changes
 
 // "Выставить счёт" (ЮKassa) stays disabled until the amount field holds a
 // real positive number — clicking it with an empty/zero amount used to just
