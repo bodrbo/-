@@ -6,7 +6,7 @@ from support import application_module
 from test_tuning_task_assignments import _TuningTaskFixture
 
 
-class TuningScheduleAssignmentTests(_TuningTaskFixture, unittest.TestCase):
+class _TuningScheduleFixture(_TuningTaskFixture):
     """A task assigned for one date becomes a card on that employee's day in
     the tuning schedule — at the start of their shift, or after the tasks
     they already have — and someone who isn't on that day's roster has to be
@@ -80,6 +80,8 @@ class TuningScheduleAssignmentTests(_TuningTaskFixture, unittest.TestCase):
     def board(self):
         return self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
 
+
+class TuningScheduleAssignmentTests(_TuningScheduleFixture, unittest.TestCase):
     def test_a_task_for_one_date_lands_at_the_start_of_the_shift(self):
         self.put_on_shift(self.EMPLOYEE_A, "10:00", "19:00")
         response = self.assign([(self.EMPLOYEE_A, 100, 2)])
@@ -432,6 +434,150 @@ class TuningScheduleAssignmentTests(_TuningTaskFixture, unittest.TestCase):
             data={"work_date": self.DAY, "shift_start": "20:00", "shift_end": "12:00"},
         )
         self.assertEqual(self.crew_hours(self.EMPLOYEE_A), ("12:00", "20:00"))
+
+
+class TuningScheduleDragTests(_TuningScheduleFixture, unittest.TestCase):
+    """Moving cards of the tuning calendar by drag-and-drop (the JSON
+    endpoint the page script calls)."""
+
+    def place(self, employee, hours=2, due_from=None):
+        """A card on DAY for `employee`, returns (task_id, day_id)."""
+        self.put_on_shift(employee)
+        self.assign([(employee, 100, hours)], due_from=due_from)
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT t.id AS task_id, d.id AS day_id FROM tuning_schedule_tasks t "
+                "JOIN tuning_schedule_task_days d ON d.task_id = t.id "
+                "JOIN tuning_item_assignments a ON a.id = t.assignment_id "
+                "WHERE a.employee_name = ? ORDER BY t.id DESC LIMIT 1", (employee,)
+            ).fetchone()
+            return row["task_id"], row["day_id"]
+
+    def move(self, task_id, day_id, start_time, target_employee=None):
+        self.login_admin()
+        payload = {"start_time": start_time}
+        if target_employee is not None:
+            payload["target_employee_id"] = self.employee_id(target_employee)
+        return self.client.post(f"/schedule/tuning/tasks/{task_id}/days/{day_id}/move", json=payload)
+
+    def test_a_card_moves_to_a_new_time_in_its_column(self):
+        task_id, day_id = self.place(self.EMPLOYEE_A)
+        response = self.move(task_id, day_id, "13:15")
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["card"], {"start": "13:15", "end": "15:15", "employee_name": self.EMPLOYEE_A})
+        self.assertEqual([c["start_time"] for c in self.cards(self.EMPLOYEE_A)], ["13:15"])
+
+    def test_the_cards_data_for_the_script_is_on_the_page(self):
+        task_id, day_id = self.place(self.EMPLOYEE_A)
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        self.assertIn(f"/schedule/tuning/tasks/{task_id}/days/{day_id}/move", page)
+        self.assertIn('data-start-minutes="540"', page)
+        self.assertIn('data-duration-minutes="120"', page)
+        self.assertIn('onpointerdown="startTuningDrag(event, this)"', page)
+        self.assertIn(f'data-employee-id="{self.employee_id(self.EMPLOYEE_A)}"', page)
+        self.assertIn("var TUNING_GRID_START = ", page)
+
+    def test_a_card_cannot_overlap_another_card_of_the_same_person(self):
+        task_id, day_id = self.place(self.EMPLOYEE_A, hours=2)       # 09:00-11:00
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            second_item = db.execute(
+                "INSERT INTO tuning_order_items (order_id, work_name, cost_price, multiplier, price, "
+                "price_pending, status) VALUES (?, 'Вторая', 1, 1, 1, 0, 'in_progress')", (self.order_id,)
+            ).lastrowid
+            db.commit()
+        self.login_admin()
+        self.client.post(f"/tuning/{self.order_id}/item/{second_item}/assign", data=MultiDict([
+            ("employee_name[]", self.EMPLOYEE_A), ("rate[]", "100"), ("norm_hours[]", "1"),
+            ("comment", ""), ("due_from", self.DAY), ("due_to", "")]))              # 11:00-12:00
+        response = self.move(task_id, day_id, "10:30")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("это время занято", response.get_json()["message"])
+        self.assertEqual(self.cards(self.EMPLOYEE_A)[0]["start_time"], "09:00")
+        self.assertEqual(self.move(task_id, day_id, "12:00").status_code, 200)       # right after is fine
+
+    def test_bad_times_are_rejected(self):
+        task_id, day_id = self.place(self.EMPLOYEE_A, hours=2)
+        for bad in ("", "25:99", "abc", None):
+            self.assertEqual(self.move(task_id, day_id, bad).status_code, 400, bad)
+        self.assertEqual(self.move(task_id, day_id, "23:00").status_code, 400)       # 2 h don't fit before midnight
+        self.assertEqual(self.cards(self.EMPLOYEE_A)[0]["start_time"], "09:00")
+
+    def test_dragging_to_another_column_hands_an_order_task_over(self):
+        task_id, day_id = self.place(self.EMPLOYEE_A)
+        self.put_on_shift(self.EMPLOYEE_B)
+        response = self.move(task_id, day_id, "10:00", target_employee=self.EMPLOYEE_B)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()["card"]["employee_name"], self.EMPLOYEE_B)
+        self.assertEqual(self.cards(self.EMPLOYEE_A), [])
+        self.assertEqual([c["start_time"] for c in self.cards(self.EMPLOYEE_B)], ["10:00"])
+        assignment = self.assignments()[0]
+        self.assertEqual((assignment["employee_name"], assignment["assignment_status"]), (self.EMPLOYEE_B, "pending"))
+
+    def test_the_target_must_be_on_the_shift_that_day(self):
+        task_id, day_id = self.place(self.EMPLOYEE_A)
+        response = self.move(task_id, day_id, "10:00", target_employee=self.EMPLOYEE_B)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("не стоит в смене", response.get_json()["message"])
+        self.assertEqual(self.assignments()[0]["employee_name"], self.EMPLOYEE_A)
+
+    def test_a_finished_task_cannot_be_handed_over_by_dragging(self):
+        task_id, day_id = self.place(self.EMPLOYEE_A)
+        self.put_on_shift(self.EMPLOYEE_B)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("UPDATE tuning_item_assignments SET assignment_status = 'done'")
+            db.commit()
+        response = self.move(task_id, day_id, "10:00", target_employee=self.EMPLOYEE_B)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Выполненную", response.get_json()["message"])
+        self.assertEqual(self.move(task_id, day_id, "10:00").status_code, 200)       # its time can still change
+
+    def test_a_multi_day_task_changes_time_but_not_employee(self):
+        task_id, day_id = self.place(self.EMPLOYEE_A)
+        self.put_on_shift(self.EMPLOYEE_B)
+        from modules.tuning_schedule import repository as tuning_repo
+        with application_module.app.app_context():
+            tuning_repo.add_task_day(application_module.get_db(), task_id, "2026-10-13", "09:00", 2)
+        response = self.move(task_id, day_id, "10:00", target_employee=self.EMPLOYEE_B)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("несколько дней", response.get_json()["message"])
+        self.assertEqual(self.move(task_id, day_id, "10:00").status_code, 200)
+
+    def test_a_free_task_moves_between_columns(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.put_on_shift(self.EMPLOYEE_B)
+        self.login_admin()
+        self.client.post("/schedule/tuning/tasks", data=MultiDict([
+            ("employee_name", self.EMPLOYEE_A), ("rate", "100"), ("comment", ""), ("title", "Уборка"),
+            ("return_date", self.DAY), ("work_date[]", self.DAY), ("start_time[]", "09:00"),
+            ("planned_hours[]", "1")]))
+        cards = self.cards(self.EMPLOYEE_A)
+        with application_module.app.app_context():
+            day_id = application_module.get_db().execute(
+                "SELECT id FROM tuning_schedule_task_days WHERE task_id = ?", (cards[0]["task_id"],)
+            ).fetchone()["id"]
+        response = self.move(cards[0]["task_id"], day_id, "15:00", target_employee=self.EMPLOYEE_B)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual([c["start_time"] for c in self.cards(self.EMPLOYEE_B)], ["15:00"])
+        self.assertEqual(self.cards(self.EMPLOYEE_A), [])
+
+    def test_unknown_cards_and_bad_requests_are_reported(self):
+        self.login_admin()
+        self.assertEqual(
+            self.client.post("/schedule/tuning/tasks/999/days/999/move", json={"start_time": "10:00"}).status_code, 400)
+        self.assertEqual(
+            self.client.post("/schedule/tuning/tasks/1/days/1/move", data="not json").status_code, 400)
+
+    def test_the_route_needs_an_administrator(self):
+        task_id, day_id = self.place(self.EMPLOYEE_A)
+        anonymous = application_module.app.test_client()
+        response = anonymous.post(
+            f"/schedule/tuning/tasks/{task_id}/days/{day_id}/move", json={"start_time": "14:00"})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.cards(self.EMPLOYEE_A)[0]["start_time"], "09:00")
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ def create_tuning_schedule_blueprint(
     update_order_assignment_status,
     pay_free_task,
     assignment_status_choices,
+    reassign_order_assignment=None,
 ):
     blueprint = Blueprint("tuning_schedule", __name__)
     assignment_status_values = {choice["value"] for choice in assignment_status_choices}
@@ -160,6 +161,23 @@ def create_tuning_schedule_blueprint(
         )
         set_notice(message, success)
         return redirect_to_day(day)
+
+    @blueprint.route(
+        "/schedule/tuning/tasks/<int:task_id>/days/<int:day_id>/move", methods=["POST"]
+    )
+    @manage_required
+    def move_task_card(task_id, day_id):
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"ok": False, "message": "Некорректный запрос."}), 400
+        success, message, card = services.move_task_card(
+            get_db(), task_id, day_id,
+            payload.get("start_time"), payload.get("target_employee_id"),
+            reassign_order_assignment or (lambda *_args: (False, "Передача недоступна.")),
+        )
+        if not success:
+            return jsonify({"ok": False, "message": message}), 400
+        return jsonify({"ok": True, "message": message, "card": card})
 
     @blueprint.route(
         "/schedule/tuning/tasks/<int:task_id>/days/<int:day_id>/remove", methods=["POST"]

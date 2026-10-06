@@ -110,14 +110,17 @@
           </div>
           <div class="tuning-calendar-columns" style="height: {{ grid_height }}px;">
             {% for employee in day_crew %}
-            <div class="tuning-calendar-column">
+            <div class="tuning-calendar-column" data-employee-id="{{ employee.id }}">
               {% for mark in hour_marks %}
               <span class="tuning-calendar-hour-line" style="top: {{ mark.top_px }}px;"></span>
               {% endfor %}
               {% for card in cards_by_employee.get(employee.name, []) %}
               <div class="tuning-calendar-card status-{{ card.status }}"
                    style="top: {{ card.top_px }}px; height: {{ card.height_px }}px;"
-                   title="{{ card.start_label }}–{{ card.end_label }} · {{ card.title }}">
+                   title="{{ card.start_label }}–{{ card.end_label }} · {{ card.title }}"
+                   data-move-url="{{ url_for('tuning_schedule.move_task_card', task_id=card.task_id, day_id=card.day_id) }}"
+                   data-start-minutes="{{ card._start_minutes }}" data-duration-minutes="{{ card._end_minutes - card._start_minutes }}"
+                   onpointerdown="startTuningDrag(event, this)">
                 <span class="tuning-calendar-card-time">{{ card.start_label }}–{{ card.end_label }}</span>
                 <strong>{{ card.title }}</strong>
                 {% if card.is_linked %}
@@ -396,6 +399,170 @@ document.addEventListener('keydown', function (event) {
     closeTuningRosterModal();
   }
 });
+
+var tuningDrag = null;
+var tuningDragSaving = false;
+var TUNING_PX = {{ px_per_minute }};
+var TUNING_GRID_START = {{ grid_start_minutes }};
+var TUNING_GRID_MINUTES = {{ grid_minutes }};
+var TUNING_STEP = 15;
+
+function tuningTime(minutes) {
+  var snapped = Math.round(minutes / TUNING_STEP) * TUNING_STEP;
+  return (Math.floor(snapped / 60) < 10 ? '0' : '') + Math.floor(snapped / 60) + ':'
+    + (snapped % 60 < 10 ? '0' : '') + (snapped % 60);
+}
+
+function tuningColumnAt(x, y) {
+  var target = document.elementFromPoint(x, y);
+  return target ? target.closest('.tuning-calendar-column') : null;
+}
+
+function clearTuningDrag(state) {
+  state.card.classList.remove('is-drag-source');
+  if (state.preview) state.preview.remove();
+  document.querySelectorAll('.tuning-calendar-column.is-drop-target').forEach(function (column) {
+    column.classList.remove('is-drop-target');
+  });
+  document.body.classList.remove('tuning-is-dragging');
+}
+
+function showTuningNotice(message, success) {
+  var current = document.getElementById('tuningDragNotice');
+  if (current) current.remove();
+  var notice = document.createElement('p');
+  notice.id = 'tuningDragNotice';
+  notice.className = 'alert' + (success ? ' success' : '');
+  notice.setAttribute('role', 'status');
+  notice.textContent = message;
+  var main = document.querySelector('main.wrap');
+  var nav = main.querySelector('.sub-tabs');
+  main.insertBefore(notice, nav ? nav.nextSibling : main.firstChild);
+  notice.scrollIntoView({block: 'nearest'});
+}
+
+function updateTuningDrag(event) {
+  var state = tuningDrag;
+  if (!state || event.pointerId !== state.pointerId) return;
+  var distance = Math.hypot(event.clientX - state.originX, event.clientY - state.originY);
+  if (!state.moved && distance < 6) return;
+  if (!state.moved) {
+    state.moved = true;
+    state.card.classList.add('is-drag-source');
+    state.preview = state.card.cloneNode(true);
+    state.preview.removeAttribute('onpointerdown');
+    state.preview.removeAttribute('data-move-url');
+    state.preview.classList.add('tuning-drag-preview');
+    state.preview.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(state.preview);
+    document.body.classList.add('tuning-is-dragging');
+  }
+  event.preventDefault();
+  var deltaSteps = Math.round((event.clientY - state.originY) / TUNING_PX / TUNING_STEP);
+  var latestStart = Math.floor(Math.min(
+    24 * 60 - state.durationMinutes,
+    TUNING_GRID_START + TUNING_GRID_MINUTES - state.durationMinutes
+  ) / TUNING_STEP) * TUNING_STEP;
+  state.startMinutes = Math.max(TUNING_GRID_START, Math.min(
+    latestStart, state.originalStartMinutes + deltaSteps * TUNING_STEP
+  ));
+  var targetColumn = tuningColumnAt(event.clientX, event.clientY);
+  document.querySelectorAll('.tuning-calendar-column').forEach(function (column) {
+    column.classList.toggle('is-drop-target', column === targetColumn);
+  });
+  state.targetColumn = targetColumn || state.sourceColumn;
+  var rect = state.targetColumn.getBoundingClientRect();
+  state.preview.style.left = (rect.left + 6) + 'px';
+  state.preview.style.width = Math.max(40, rect.width - 12) + 'px';
+  state.preview.style.top = (rect.top + (state.startMinutes - TUNING_GRID_START) * TUNING_PX) + 'px';
+  var time = state.preview.querySelector('.tuning-calendar-card-time');
+  if (time) time.textContent = tuningTime(state.startMinutes) + '–' + tuningTime(state.startMinutes + state.durationMinutes);
+}
+
+function detachTuningDrag(state, event) {
+  state.card.removeEventListener('pointermove', updateTuningDrag);
+  state.card.removeEventListener('pointerup', finishTuningDrag);
+  state.card.removeEventListener('pointercancel', cancelTuningDrag);
+  if (event && state.card.hasPointerCapture(event.pointerId)) {
+    state.card.releasePointerCapture(event.pointerId);
+  }
+}
+
+async function finishTuningDrag(event) {
+  var state = tuningDrag;
+  if (!state || event.pointerId !== state.pointerId) return;
+  tuningDrag = null;
+  detachTuningDrag(state, event);
+  if (!state.moved) return;
+  var startTime = tuningTime(state.startMinutes);
+  var sameColumn = state.targetColumn === state.sourceColumn;
+  if (sameColumn && state.startMinutes === state.originalStartMinutes) {
+    clearTuningDrag(state);
+    return;
+  }
+  tuningDragSaving = true;
+  try {
+    var response = await fetch(state.card.dataset.moveUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+      body: JSON.stringify({
+        start_time: startTime,
+        target_employee_id: sameColumn ? null : Number(state.targetColumn.dataset.employeeId),
+      }),
+    });
+    var payload = await response.json().catch(function () { return {}; });
+    if (!response.ok || !payload.ok) throw new Error(payload.message || 'Не удалось перенести задачу.');
+    var card = state.card;
+    card.style.top = ((state.startMinutes - TUNING_GRID_START) * TUNING_PX) + 'px';
+    card.dataset.startMinutes = String(state.startMinutes);
+    var label = payload.card.start + '–' + payload.card.end;
+    var time = card.querySelector('.tuning-calendar-card-time');
+    if (time) time.textContent = label;
+    var title = card.querySelector('strong');
+    card.title = label + (title ? ' · ' + title.textContent : '');
+    if (!sameColumn) state.targetColumn.appendChild(card);
+    clearTuningDrag(state);
+    showTuningNotice(payload.message || 'Задача перенесена.', true);
+  } catch (error) {
+    clearTuningDrag(state);
+    showTuningNotice(error.message || 'Не удалось перенести задачу.', false);
+  } finally {
+    tuningDragSaving = false;
+  }
+}
+
+function cancelTuningDrag(event) {
+  var state = tuningDrag;
+  if (!state || event.pointerId !== state.pointerId) return;
+  tuningDrag = null;
+  detachTuningDrag(state, event);
+  clearTuningDrag(state);
+}
+
+function startTuningDrag(event, card) {
+  if (event.button !== 0 || event.pointerType !== 'mouse') return;
+  var sourceColumn = card.closest('.tuning-calendar-column');
+  if (!sourceColumn || tuningDrag || tuningDragSaving) return;
+  var startMinutes = Number(card.dataset.startMinutes);
+  tuningDrag = {
+    pointerId: event.pointerId,
+    card: card,
+    sourceColumn: sourceColumn,
+    targetColumn: sourceColumn,
+    originX: event.clientX,
+    originY: event.clientY,
+    originalStartMinutes: startMinutes,
+    startMinutes: startMinutes,
+    durationMinutes: Number(card.dataset.durationMinutes),
+    moved: false,
+    preview: null,
+  };
+  card.setPointerCapture(event.pointerId);
+  card.addEventListener('pointermove', updateTuningDrag);
+  card.addEventListener('pointerup', finishTuningDrag);
+  card.addEventListener('pointercancel', cancelTuningDrag);
+}
 
 function updateTuningScheduleTaskKind() {
   var isOrder = document.querySelector('input[name="task_kind"]:checked').value === 'order';

@@ -343,6 +343,10 @@ def calendar_view(db, day, day_crew):
         "cards_by_employee": cards_by_employee,
         "hour_marks": hour_marks,
         "grid_height": round(total_minutes * PX_PER_MINUTE, 2),
+        # for the drag-and-drop script: where the grid starts and how big a minute is
+        "grid_start_minutes": earliest,
+        "grid_minutes": total_minutes,
+        "px_per_minute": PX_PER_MINUTE,
     }
 
 
@@ -448,3 +452,70 @@ def set_task_status(db, task_id, status, pay_free_task, update_order_assignment_
         if entry_id:
             repository.set_task_entry(db, task_id, entry_id)
     return True, "Статус обновлён."
+
+
+def move_task_card(db, task_id, day_id, raw_start, raw_target_employee_id, reassign_order_assignment):
+    """Drag-and-drop of a calendar card: a new start time on the same day,
+    optionally in another employee's column. Returns (ok, message, card)
+    where card = {start, end, employee_name} on success.
+
+    The card must fit before midnight and not overlap another card of the
+    target employee that day; the target must be on that day's roster.
+    Changing the employee moves the whole task, so it is refused for a
+    multi-day task and for a finished one; for an order task it goes through
+    `reassign_order_assignment(db, assignment_id, employee_name)` (the same
+    hand-over the order board uses: payout/materials follow, the new person
+    is notified), for a free task the card's own employee is changed."""
+    row = repository.get_day_task(db, task_id, day_id)
+    if row is None:
+        return False, "Задача не найдена. Обновите страницу.", None
+    start_minutes = _minutes(str(raw_start or "").strip())
+    if start_minutes is None:
+        return False, "Некорректное время начала.", None
+    end_minutes = start_minutes + round(row["planned_hours"] * 60)
+    if end_minutes > 24 * 60:
+        return False, "Задача не помещается до конца суток.", None
+
+    day_iso = row["work_date"]
+    current_name = row["employee_name"]
+    target_name = current_name
+    if raw_target_employee_id not in (None, ""):
+        try:
+            target_id = int(raw_target_employee_id)
+        except (TypeError, ValueError):
+            return False, "Некорректный сотрудник.", None
+        if target_id not in repository.list_day_crew_ids(db, day_iso):
+            return False, "Этот сотрудник не стоит в смене на эту дату.", None
+        names = {e["id"]: e["name"] for e in repository.list_tuning_crew_employees(db)}
+        if target_id not in names:
+            return False, "Сотрудник не найден или не подходит для расписания тюнинга.", None
+        target_name = names[target_id]
+
+    for other in repository.list_day_tasks(db, day_iso):
+        if other["employee_name"] != target_name or other["day_id"] == day_id:
+            continue
+        other_start = _minutes(other["start_time"]) or 0
+        other_end = other_start + round(other["planned_hours"] * 60)
+        if start_minutes < other_end and other_start < end_minutes:
+            return False, f"{target_name}: это время занято задачей «{other['title']}».", None
+
+    message = "Задача перенесена."
+    if target_name != current_name:
+        if len(repository.list_task_days(db, task_id)) > 1:
+            return False, (
+                "Задача идёт несколько дней — сменить сотрудника можно на доске задач заказа."
+            ), None
+        if row["assignment_id"] is not None:
+            if row["status"] == "done":
+                return False, "Выполненную задачу нельзя передать другому сотруднику.", None
+            ok, text = reassign_order_assignment(db, row["assignment_id"], target_name)
+            if not ok:
+                return False, text, None
+            message = text or message
+        else:
+            repository.set_free_task_employee(db, task_id, target_name)
+            message = f"Задача передана: {current_name} → {target_name}."
+    repository.set_task_day_start(db, day_id, _label(start_minutes))
+    return True, message, {
+        "start": _label(start_minutes), "end": _label(end_minutes), "employee_name": target_name,
+    }

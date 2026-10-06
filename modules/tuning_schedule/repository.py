@@ -140,6 +140,23 @@ def remove_day_crew_member(db, day, employee_id):
     return cursor.rowcount > 0
 
 
+_DAY_TASK_SELECT = (
+    "SELECT t.id AS task_id, t.assignment_id, d.id AS day_id, "
+    "d.work_date, d.start_time, d.planned_hours, "
+    "COALESCE(tia.employee_name, t.employee_name) AS employee_name, "
+    "COALESCE(ti.work_name, t.title) AS title, "
+    "COALESCE(tia.rate, t.rate) AS rate, "
+    "COALESCE(tia.assignment_status, t.status) AS status, "
+    "COALESCE(tia.comment, t.comment) AS comment, "
+    "o.id AS order_id, o.equipment_type, o.boat_model, o.motor_model "
+    "FROM tuning_schedule_task_days d "
+    "JOIN tuning_schedule_tasks t ON t.id = d.task_id "
+    "LEFT JOIN tuning_item_assignments tia ON tia.id = t.assignment_id "
+    "LEFT JOIN tuning_order_items ti ON ti.id = tia.item_id "
+    "LEFT JOIN tuning_orders o ON o.id = ti.order_id "
+)
+
+
 def list_day_tasks(db, day):
     """One row per task that has a placement on `day`, with that day's own
     planned_hours, plus (for a task linked to an order — assignment_id NOT
@@ -149,23 +166,32 @@ def list_day_tasks(db, day):
     of sync with the order board. A free task (assignment_id IS NULL) uses
     its own employee_name/title/rate/status columns instead."""
     return db.execute(
-        "SELECT t.id AS task_id, t.assignment_id, d.id AS day_id, "
-        "d.work_date, d.start_time, d.planned_hours, "
-        "COALESCE(tia.employee_name, t.employee_name) AS employee_name, "
-        "COALESCE(ti.work_name, t.title) AS title, "
-        "COALESCE(tia.rate, t.rate) AS rate, "
-        "COALESCE(tia.assignment_status, t.status) AS status, "
-        "COALESCE(tia.comment, t.comment) AS comment, "
-        "o.id AS order_id, o.equipment_type, o.boat_model, o.motor_model "
-        "FROM tuning_schedule_task_days d "
-        "JOIN tuning_schedule_tasks t ON t.id = d.task_id "
-        "LEFT JOIN tuning_item_assignments tia ON tia.id = t.assignment_id "
-        "LEFT JOIN tuning_order_items ti ON ti.id = tia.item_id "
-        "LEFT JOIN tuning_orders o ON o.id = ti.order_id "
-        "WHERE d.work_date = ? "
-        "ORDER BY employee_name, t.id",
+        _DAY_TASK_SELECT + "WHERE d.work_date = ? ORDER BY employee_name, t.id",
         (day,),
     ).fetchall()
+
+
+def get_day_task(db, task_id, day_id):
+    """The list_day_tasks row of one placement (task_id + its day row id)."""
+    return db.execute(
+        _DAY_TASK_SELECT + "WHERE d.id = ? AND t.id = ?", (day_id, task_id)
+    ).fetchone()
+
+
+def set_task_day_start(db, day_id, start_time):
+    db.execute(
+        "UPDATE tuning_schedule_task_days SET start_time = ? WHERE id = ?",
+        (start_time, day_id),
+    )
+    db.commit()
+
+
+def set_free_task_employee(db, task_id, employee_name):
+    db.execute(
+        "UPDATE tuning_schedule_tasks SET employee_name = ? WHERE id = ? AND assignment_id IS NULL",
+        (employee_name, task_id),
+    )
+    db.commit()
 
 
 def list_task_days(db, task_id):

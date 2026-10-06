@@ -5880,6 +5880,9 @@ app.register_blueprint(
             _pay_free_tuning_schedule_task(db, task, total_hours)
         ),
         assignment_status_choices=ASSIGNMENT_STATUSES,
+        reassign_order_assignment=lambda db, assignment_id, employee_name: (
+            _reassign_tuning_assignment(db, assignment_id, employee_name)[:2]
+        ),
     )
 )
 
@@ -11909,40 +11912,38 @@ def update_tuning_assignment_terms(assignment_id):
     return redirect(board)
 
 
-@app.route("/tuning/assignments/<int:assignment_id>/employee", methods=["POST"])
-@admin_login_required
-def update_tuning_assignment_employee(assignment_id):
+def _reassign_tuning_assignment(db, assignment_id, new_name):
     """Hands a task to another tuningman. Rate, norm-hours, comment and dates
     stay. The payroll entry of a paid task moves with it; materials written
     off against the task and its tuning-schedule placement follow too. An
     unfinished task goes back to "Ожидает ответа" for the new person (they
     are notified, the previous assignee is told it was taken away); a
-    finished one keeps its status."""
-    db = get_db()
+    finished one keeps its status. Shared by the order board and by dragging
+    a card to another employee's column in the tuning schedule.
+
+    Returns (ok, message, order_id, item_id); ok is False with an error
+    message when nothing was changed (unknown task/employee, a duplicate on
+    the same work), and message is "" when the employee is the same."""
     assignment = db.execute(
         "SELECT tia.*, ti.order_id, ti.work_name FROM tuning_item_assignments tia "
         "JOIN tuning_order_items ti ON ti.id = tia.item_id WHERE tia.id = ?",
         (assignment_id,),
     ).fetchone()
     if assignment is None:
-        return redirect(url_for("tuning_index"))
-    board = url_for("tuning_order_board", order_id=assignment["order_id"]) + (
-        f"#board-work-{assignment['item_id']}"
-    )
+        return False, "Задача не найдена.", None, None
+    order_id, item_id = assignment["order_id"], assignment["item_id"]
     old_name = assignment["employee_name"]
-    new_name = request.form.get("employee_name", "").strip()
+    new_name = (new_name or "").strip()
     if not new_name or new_name == old_name:
-        return redirect(board)
+        return True, "", order_id, item_id
     if new_name not in _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS):
-        session["tuning_board_error"] = "Этого сотрудника нельзя назначить на задачи тюнинга."
-        return redirect(board)
+        return False, "Этого сотрудника нельзя назначить на задачи тюнинга.", order_id, item_id
     duplicate = db.execute(
         "SELECT 1 FROM tuning_item_assignments WHERE item_id = ? AND employee_name = ?",
         (assignment["item_id"], new_name),
     ).fetchone()
     if duplicate is not None:
-        session["tuning_board_error"] = f"{new_name} уже назначен на эту работу."
-        return redirect(board)
+        return False, f"{new_name} уже назначен на эту работу.", order_id, item_id
 
     finished = assignment["assignment_status"] == "done"
     if finished:
@@ -11990,7 +11991,21 @@ def update_tuning_assignment_employee(assignment_id):
             _notify_task_assignment(db, ASSIGNMENT_TUNING, assignment_id)
     except Exception:
         pass  # notifications are best-effort; the reassignment is done
-    session["tuning_board_notice"] = notice
+    return True, notice, order_id, item_id
+
+
+@app.route("/tuning/assignments/<int:assignment_id>/employee", methods=["POST"])
+@admin_login_required
+def update_tuning_assignment_employee(assignment_id):
+    db = get_db()
+    ok, message, order_id, item_id = _reassign_tuning_assignment(
+        db, assignment_id, request.form.get("employee_name", "")
+    )
+    if order_id is None:
+        return redirect(url_for("tuning_index"))
+    board = url_for("tuning_order_board", order_id=order_id) + f"#board-work-{item_id}"
+    if message:
+        session["tuning_board_notice" if ok else "tuning_board_error"] = message
     return redirect(board)
 
 
