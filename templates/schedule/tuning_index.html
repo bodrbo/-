@@ -406,6 +406,7 @@
       <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
       <input type="hidden" name="work_date[]" value="{{ day.isoformat() }}">
 
+      <div class="quick-task-column">
       <label class="quick-task-field"><span>Сотрудник</span>
         <select name="employee_name" id="quickTaskEmployee" required onchange="updateQuickTaskRate()">
           <option value="" disabled>Выберите сотрудника</option>
@@ -430,7 +431,9 @@
         </label>
       </div>
       <p class="hint" id="quickTaskAdminNote" hidden>Администратор на окладе — ставка не нужна.</p>
+      </div>
 
+      <div class="quick-task-column">
       <label class="quick-task-field"><span>Проект <small>необязательно</small></span>
         <select name="order_id" id="quickTaskOrder" onchange="loadQuickTaskWorks(this.value)">
           <option value="">Без проекта</option>
@@ -447,11 +450,13 @@
       <label class="quick-task-field" id="quickTaskTitleField"><span>Название задачи</span>
         <input type="text" name="title" id="quickTaskName" placeholder="Например: уборка цеха" maxlength="200" required>
       </label>
-      <label class="quick-task-field"><span>Комментарий</span>
+      </div>
+
+      <label class="quick-task-field quick-task-wide"><span>Комментарий</span>
         <textarea name="comment" rows="2" maxlength="2000"></textarea>
       </label>
 
-      <div class="quick-task-actions">
+      <div class="quick-task-actions quick-task-wide">
         <button type="submit" class="employee-primary-btn">Добавить задачу</button>
         <button type="button" class="employee-secondary-btn" data-quick-close>Отмена</button>
       </div>

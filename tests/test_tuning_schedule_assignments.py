@@ -942,6 +942,24 @@ class TuningScheduleQuickTaskTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertIn('name="order_item_id"', modal)
         self.assertIn(self.EMPLOYEE_A, modal.split('id="quickTaskEmployee"')[1].split("</select>")[0])
 
+    def test_the_window_is_wide_two_columns_and_has_no_scroll_area_of_its_own(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        page = self.page()
+        form = page.split('id="quickTaskForm"')[1].split("</form>")[0]
+        self.assertEqual(form.count('class="quick-task-column"'), 2)
+        self.assertIn('class="quick-task-field quick-task-wide"', form)   # the comment spans both columns
+        self.assertIn('class="quick-task-actions quick-task-wide"', form)
+        import pathlib
+        css = (pathlib.Path(application_module.__file__).parent / "static" / "style.css").read_text(encoding="utf-8")
+        card = css.split(".quick-task-card {")[1].split("}")[0]
+        self.assertIn("width: min(940px, 100%)", card)
+        self.assertIn("max-height: none", card)
+        body = css.split(".quick-task-body {")[1].split("}")[0]
+        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr))", body)
+        self.assertIn("overflow: visible", body)
+        self.assertNotIn("overflow-y: auto", body)  # the form itself must not scroll
+        self.assertIn("#quickTaskModal { align-items: start; overflow-y: auto; }", css)  # a short screen scrolls the page behind
+
     def test_a_free_task_is_added_at_the_chosen_time(self):
         self.put_on_shift(self.EMPLOYEE_A)
         self.quick(start="13:15", hours="1.5", title="Уборка")
