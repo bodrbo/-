@@ -1627,5 +1627,151 @@ class TuningTaskContractorCostTests(_ContractorFixture, unittest.TestCase):
         self.assertIn("syncAssignRowKind", page)
 
 
+class TuningTaskContractorLocationTests(_ContractorFixture, unittest.TestCase):
+    """"На территории подрядчика": the boat is off the shop map for the
+    task's period and back on the date the period ends."""
+
+    def setUp(self):
+        super().setUp()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO shop_map_boats (order_id, x_m, y_m, created_at, updated_at) "
+                "VALUES (?, 1, 1, 'x', 'x')", (self.order_id,),
+            )
+            db.commit()
+
+    def tearDown(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM shop_map_boats WHERE order_id = ?", (self.order_id,))
+            db.commit()
+        super().tearDown()
+
+    def in_shop(self, day):
+        with application_module.app.app_context():
+            boats = application_module._shop_map_boats(application_module.get_db(), on_date=day)
+        return self.order_id in [b["order_id"] for b in boats]
+
+    def give(self, location, due_from="2030-05-10", due_to="2030-05-14", comment=""):
+        self.login_admin()
+        data = {"employee_name[]": self.partner_key, "rate[]": "5000", "comment": comment,
+                "partner_location[]": location, "due_from": due_from or "", "due_to": due_to or ""}
+        return self.client.post(f"/tuning/{self.order_id}/item/{self.item_id}/assign", data=data)
+
+    def test_the_boat_leaves_the_map_for_the_period_and_is_back_on_its_last_day(self):
+        self.give("partner")
+        (row,) = self.rows()
+        self.assertEqual(row["at_partner"], 1)
+        self.assertTrue(self.in_shop("2030-05-09"))
+        for day in ("2030-05-10", "2030-05-11", "2030-05-13"):
+            self.assertFalse(self.in_shop(day), day)
+        self.assertTrue(self.in_shop("2030-05-14"))
+        self.assertTrue(self.in_shop("2030-05-20"))
+
+    def test_on_our_territory_the_boat_stays_on_the_map(self):
+        self.give("own")
+        (row,) = self.rows()
+        self.assertEqual(row["at_partner"], 0)
+        self.assertTrue(self.in_shop("2030-05-11"))
+
+    def test_a_one_day_task_takes_the_boat_away_for_that_day_only(self):
+        self.give("partner", due_from="2030-05-10", due_to="")
+        self.assertTrue(self.in_shop("2030-05-09"))
+        self.assertFalse(self.in_shop("2030-05-10"))
+        self.assertTrue(self.in_shop("2030-05-11"))
+
+    def test_the_boat_returns_on_the_real_completion_date_when_the_task_is_done(self):
+        self.give("partner")
+        (row,) = self.rows()
+        self.login_admin()
+        self.client.post(f"/tuning/assignments/{row['id']}/status", data={"status": "done"})
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("UPDATE tuning_item_assignments SET completed_at = '2030-05-12 15:00' WHERE id = ?",
+                       (row["id"],))
+            db.commit()
+        self.assertFalse(self.in_shop("2030-05-11"))
+        self.assertTrue(self.in_shop("2030-05-12"))
+
+    def test_a_rejected_task_does_not_take_the_boat_away(self):
+        self.give("partner")
+        (row,) = self.rows()
+        self.login_admin()
+        self.client.post(f"/tuning/assignments/{row['id']}/status", data={"status": "rejected"})
+        self.assertTrue(self.in_shop("2030-05-11"))
+
+    def test_revoking_the_task_brings_the_boat_back(self):
+        self.give("partner")
+        (row,) = self.rows()
+        self.login_admin()
+        self.client.post(f"/tuning/assignments/{row['id']}/revoke")
+        self.assertTrue(self.in_shop("2030-05-11"))
+
+    def test_the_contractor_premises_need_a_due_date(self):
+        response = self.give("partner", due_from="", due_to="")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.rows(), [])
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("укажите срок исполнения", page)
+
+    def test_the_location_of_an_existing_task_can_be_switched_on_the_board(self):
+        self.give("own")
+        (row,) = self.rows()
+        self.client.post(f"/tuning/assignments/{row['id']}/location", data={"location": "partner"})
+        self.assertFalse(self.in_shop("2030-05-11"))
+        self.client.post(f"/tuning/assignments/{row['id']}/location", data={"location": "own"})
+        self.assertTrue(self.in_shop("2030-05-11"))
+
+    def test_switching_to_the_contractor_premises_without_a_due_date_is_refused(self):
+        self.give("own", due_from="", due_to="")
+        (row,) = self.rows()
+        self.client.post(f"/tuning/assignments/{row['id']}/location", data={"location": "partner"})
+        (row,) = self.rows()
+        self.assertEqual(row["at_partner"], 0)
+
+    def test_an_employee_task_ignores_the_location(self):
+        self.login_admin()
+        with mock.patch.object(application_module, "send_telegram_notification_to_employee"):
+            self.client.post(
+                f"/tuning/{self.order_id}/item/{self.item_id}/assign",
+                data={"employee_name[]": self.EMPLOYEE_A, "rate[]": "100", "norm_hours[]": "1",
+                      "partner_location[]": "partner", "due_from": "2030-05-10", "due_to": "2030-05-14"},
+            )
+        (row,) = self.rows()
+        self.assertEqual(row["at_partner"], 0)
+        self.assertTrue(self.in_shop("2030-05-11"))
+
+    def test_giving_the_task_to_an_employee_clears_the_location(self):
+        self.give("partner")
+        (row,) = self.rows()
+        self.login_admin()
+        with mock.patch.object(application_module, "send_telegram_notification_to_employee"):
+            self.client.post(f"/tuning/assignments/{row['id']}/employee", data={"employee_name": self.EMPLOYEE_A})
+        (row,) = self.rows()
+        self.assertEqual((row["partner_id"], row["at_partner"]), (None, 0))
+        self.assertTrue(self.in_shop("2030-05-11"))
+
+    def test_the_map_page_lists_the_boat_at_the_contractor_and_events(self):
+        self.give("partner")
+        self.login_admin()
+        away = self.client.get("/tuning/shop-map?date=2030-05-11").get_data(as_text=True)
+        self.assertIn("На территории подрядчика «Мастерская Подряд»", away)
+        self.assertIn("вернётся", away)
+        leaves = self.client.get("/tuning/shop-map?date=2030-05-10").get_data(as_text=True)
+        self.assertIn("Уезжает к подрядчику", leaves)
+        back = self.client.get("/tuning/shop-map?date=2030-05-14").get_data(as_text=True)
+        self.assertIn("Возвращается от подрядчика", back)
+        self.assertNotIn("На территории подрядчика «", back)
+
+    def test_the_board_offers_the_location_choice_for_a_contractor_task(self):
+        self.give("partner")
+        self.login_admin()
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("На территории подрядчика", page)
+        self.assertIn(f"/tuning/assignments/{self.rows()[0]['id']}/location", page)
+        self.assertIn("syncAssignDueRequired", page)
+
+
 if __name__ == "__main__":
     unittest.main()

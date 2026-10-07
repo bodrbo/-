@@ -783,6 +783,7 @@ def _tuning_partner_choices(db):
 
 
 PARTNER_EXECUTOR_PREFIX = "partner:"
+PARTNER_LOCATION_AT_PARTNER = "partner"  # the other value of the location select is "own"
 
 
 def _partner_executor(db, raw):
@@ -2179,6 +2180,12 @@ def init_db(db_path=None, include_bootstrap_data=True):
         # carries the partner's name for display, and nothing is paid out
         # through payroll for it.
         conn.execute("ALTER TABLE tuning_item_assignments ADD COLUMN partner_id INTEGER")
+    if "at_partner" not in tuning_assignment_cols:
+        # 1 = the contractor does this work on their own premises: the boat
+        # is off the shop map for the task's period (see _shop_map_away_periods).
+        conn.execute(
+            "ALTER TABLE tuning_item_assignments ADD COLUMN at_partner INTEGER NOT NULL DEFAULT 0"
+        )
     if "completed_at" not in tuning_assignment_cols:
         # The task's completion date (assigned_at is its assignment date).
         # Stamped by the triggers below whenever the status becomes "done",
@@ -9610,6 +9617,54 @@ def _shop_map_intervals_overlap(a_start, a_end, b_start, b_end):
     return (a_end is None or b_start <= a_end) and (b_end is None or a_start <= b_end)
 
 
+def _shop_map_away_periods(db):
+    """order_id -> [{"start", "back", "partner", "assignment_id"}]: the periods a
+    boat is at a contractor's premises (tasks handed to a tuning partner as
+    "На территории подрядчика"). The boat is off the map from the task's start
+    date and back in the shop on the date the period ends — the planned end
+    (due_to), or the real completion date once the task is done. A one-day
+    task (start only) takes the boat away for that day."""
+    periods = {}
+    for row in db.execute(
+        "SELECT ti.order_id, tia.id, tia.employee_name, tia.due_from, tia.due_to, "
+        "tia.assignment_status, tia.completed_at "
+        "FROM tuning_item_assignments tia JOIN tuning_order_items ti ON ti.id = tia.item_id "
+        "WHERE tia.at_partner = 1 AND tia.partner_id IS NOT NULL "
+        "AND tia.assignment_status != 'rejected' AND tia.due_from IS NOT NULL "
+        "ORDER BY tia.due_from, tia.id"
+    ).fetchall():
+        back = row["due_to"] or row["due_from"]
+        if row["assignment_status"] == "done" and (row["completed_at"] or "").strip():
+            back = row["completed_at"].strip()[:10]
+        try:  # at least that one day away, back the next
+            first_back = (dt.date.fromisoformat(row["due_from"]) + dt.timedelta(days=1)).isoformat()
+        except ValueError:
+            continue
+        back = max(back, first_back)
+        periods.setdefault(row["order_id"], []).append({
+            "start": row["due_from"], "back": back,
+            "partner": row["employee_name"], "assignment_id": row["id"],
+        })
+    return periods
+
+
+def _shop_map_boat_away_on(boat, iso):
+    """The contractor period the boat is away in on that day, or None."""
+    for period in boat.get("away", ()):
+        if period["start"] <= iso < period["back"]:
+            return period
+    return None
+
+
+def _shop_map_boat_in_shop_on(boat, iso):
+    """Standing in the shop on that day: within its stay and not at a contractor."""
+    return (
+        boat["present_start"] <= iso
+        and (boat["present_end"] is None or iso <= boat["present_end"])
+        and _shop_map_boat_away_on(boat, iso) is None
+    )
+
+
 def _shop_map_boats(db, on_date=None):
     """Boats placed on Карта цеха, one row per order. Position (x_m/y_m)
     is the only thing stored in shop_map_boats — length/width are read live
@@ -9624,15 +9679,14 @@ def _shop_map_boats(db, on_date=None):
         "ORDER BY b.id"
     ).fetchall()
     boats = []
+    away_periods = _shop_map_away_periods(db)
     for row in rows:
         boat = dict(row)
         boat["present_start"], boat["present_end"] = _shop_map_presence(row)
         if boat["present_start"] is None:
             continue
-        if on_date is not None and not (
-            boat["present_start"] <= on_date
-            and (boat["present_end"] is None or on_date <= boat["present_end"])
-        ):
+        boat["away"] = away_periods.get(boat["order_id"], [])
+        if on_date is not None and not _shop_map_boat_in_shop_on(boat, on_date):
             continue
         profile = _boat_dimensions(db, boat["boat_model"])
         boat["length_m"] = profile["length_m"] if profile else None
@@ -9722,10 +9776,7 @@ def _shop_map_boat_placement_errors(db, room, x_m, y_m, length_m, width_m, rotat
         # in the shop on the day being viewed; a boat that isn't there that
         # day doesn't block it (a clash on a later day shows up on the map
         # for that day, highlighted).
-        if on_date is not None and not (
-            boat["present_start"] <= on_date
-            and (boat["present_end"] is None or on_date <= boat["present_end"])
-        ):
+        if on_date is not None and not _shop_map_boat_in_shop_on(boat, on_date):
             continue
         # Auto-placement: a boat only blocks the spot while both are in the
         # shop at once — one that leaves before this one arrives frees it.
@@ -9862,7 +9913,7 @@ def _shop_map_timeline(db, selected, span_before=10, span_after=20):
         iso = day.isoformat()
         present = arrivals = departures = 0
         for boat in boats:
-            if boat["present_start"] <= iso and (boat["present_end"] is None or iso <= boat["present_end"]):
+            if _shop_map_boat_in_shop_on(boat, iso):
                 present += 1
             if boat["present_start"] == iso:
                 arrivals += 1
@@ -9882,6 +9933,14 @@ def _shop_map_timeline(db, selected, span_before=10, span_after=20):
     ] + [
         {"kind": "departure", "boat": boat} for boat in boats if boat["present_end"] == selected
     ]
+    for boat in boats:
+        for period in boat["away"]:
+            if not (boat["present_start"] <= selected and (boat["present_end"] is None or selected <= boat["present_end"])):
+                continue
+            if period["start"] == selected:
+                events.append({"kind": "to_partner", "boat": boat, "partner": period["partner"]})
+            elif period["back"] == selected:
+                events.append({"kind": "from_partner", "boat": boat, "partner": period["partner"]})
     return days, events
 
 
@@ -9961,6 +10020,14 @@ def tuning_shop_map():
         else:
             boats_missing_dimensions.append(boat)
 
+    boats_away = []
+    for boat in _shop_map_boats(db):
+        period = _shop_map_boat_away_on(boat, selected_date)
+        if period is not None and boat["present_start"] <= selected_date and (
+            boat["present_end"] is None or selected_date <= boat["present_end"]
+        ):
+            boats_away.append(dict(boat, away_period=period))
+
     # Rules are advisory: every boat standing on this day is checked against
     # the room, the zones and the other boats present that day; the results
     # are shown as warnings (a red dashed outline and a list under the map).
@@ -9979,7 +10046,7 @@ def tuning_shop_map():
         room=room, scale=SHOP_MAP_SCALE, padding=SHOP_MAP_PADDING,
         elements=elements,
         boats_on_map=boats_on_map, boats_missing_dimensions=boats_missing_dimensions,
-        selected_date=selected_date, today_iso=today_iso,
+        boats_away=boats_away, selected_date=selected_date, today_iso=today_iso,
         prev_day=(selected_day - dt.timedelta(days=1)).isoformat(),
         next_day=(selected_day + dt.timedelta(days=1)).isoformat(),
         prev_week=(selected_day - dt.timedelta(days=7)).isoformat(),
@@ -11155,6 +11222,7 @@ def edit_tuning_order(order_id):
             video_notice=session.pop("tuning_video_notice", None),
             assign_pending=_pop_assign_pending(order_id),
             assign_notice=session.pop("tuning_assign_notice", None),
+            assign_error=session.pop("tuning_assign_error", None),
             assignable_employees=assignable_employees,
             assignable_partners=assignable_partners,
             goods=goods, goods_subtotal=goods_subtotal, work_subtotal=work_subtotal,
@@ -11670,6 +11738,7 @@ def assign_tuning_item(order_id, item_id):
     raw_names = request.form.getlist("employee_name[]")
     raw_rates = request.form.getlist("rate[]")
     raw_hours = request.form.getlist("norm_hours[]")
+    raw_locations = request.form.getlist("partner_location[]")
     comment = request.form.get("comment", "").strip()
     due_from, due_to = _parse_task_due(request.form.get("due_from"), request.form.get("due_to"))
 
@@ -11677,6 +11746,7 @@ def assign_tuning_item(order_id, item_id):
     seen = set()
     rows = []
     partner_ids = {}  # executor name -> clients.id, for contractor rows
+    at_partner_names = set()  # contractors who do the work on their own premises
     for i in range(len(raw_names)):
         name = raw_names[i].strip()
         partner = _partner_executor(db, name)
@@ -11687,6 +11757,8 @@ def assign_tuning_item(order_id, item_id):
             name = partner[1]
             partner_ids[name] = partner[0]
             seen.add(partner_key)
+            if i < len(raw_locations) and raw_locations[i].strip() == PARTNER_LOCATION_AT_PARTNER:
+                at_partner_names.add(name)
         elif not name or name not in valid_employees or name in seen:
             continue
         try:
@@ -11707,6 +11779,14 @@ def assign_tuning_item(order_id, item_id):
         rows.append((name, rate, hours))
 
     if not rows or len(comment) > TASK_ASSIGNMENT_COMMENT_MAX_LENGTH:
+        return redirect(url_for(return_endpoint, order_id=order_id))
+    if at_partner_names and not due_from:
+        # the boat leaves the shop map for the task's period — without one
+        # there's nothing to take it off the map for
+        session["tuning_assign_error"] = (
+            "Для работы на территории подрядчика укажите срок исполнения: "
+            "на это время лодка уберётся с карты цеха."
+        )
         return redirect(url_for(return_endpoint, order_id=order_id))
 
     # A task for one date goes onto each employee's day in the tuning
@@ -11739,7 +11819,7 @@ def assign_tuning_item(order_id, item_id):
                 "next": "board" if return_endpoint == "tuning_order_board" else "",
                 "rows": [
                     [f"{PARTNER_EXECUTOR_PREFIX}{partner_ids[name]}" if name in partner_ids else name,
-                     rate, hours]
+                     rate, hours, PARTNER_LOCATION_AT_PARTNER if name in at_partner_names else ""]
                     for name, rate, hours in rows
                 ],
                 "comment": comment, "due_from": due_from, "due_to": due_to,
@@ -11763,6 +11843,7 @@ def assign_tuning_item(order_id, item_id):
             _insert_tuning_item_assignment(
                 db, item_id, employee_name, rate, hours, comment, now, due_from, due_to,
                 partner_id=partner_ids.get(employee_name),
+                at_partner=employee_name in at_partner_names,
             ),
             employee_name, rate, hours,
         )
@@ -11853,7 +11934,7 @@ app.jinja_env.filters["task_due"] = lambda task: format_task_due(
 
 def _insert_tuning_item_assignment(
     db, item_id, employee_name, rate, hours, comment, now, due_from=None, due_to=None,
-    partner_id=None,
+    partner_id=None, at_partner=False,
 ):
     """Bare INSERT behind assign_tuning_item's multi-employee loop — pulled
     out so modules/tuning_schedule can hand a work item to someone on a
@@ -11866,9 +11947,10 @@ def _insert_tuning_item_assignment(
     cur = db.execute(
         "INSERT INTO tuning_item_assignments "
         "(item_id, employee_name, rate, norm_hours, comment, assignment_status, assigned_at, "
-        "due_from, due_to, partner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "due_from, due_to, partner_id, at_partner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (item_id, employee_name, rate, hours, comment,
-         "accepted" if partner_id else "pending", now, due_from, due_to, partner_id),
+         "accepted" if partner_id else "pending", now, due_from, due_to, partner_id,
+         1 if partner_id and at_partner else 0),
     )
     return cur.lastrowid
 
@@ -11931,6 +12013,43 @@ def _payroll_week_settled(db, employee, work_date):
 _SETTLED_WEEK_WARNING = (
     " Внимание: неделя этой выплаты уже отмечена оплаченной — сверьте расчёты с сотрудником."
 )
+
+
+@app.route("/tuning/assignments/<int:assignment_id>/location", methods=["POST"])
+@admin_login_required
+def update_tuning_assignment_location(assignment_id):
+    """Where a contractor's task is done: on our premises or on theirs. On
+    the contractor's premises the boat leaves the shop map for the task's
+    period (see _shop_map_away_periods), so the task needs a due date."""
+    db = get_db()
+    assignment = db.execute(
+        "SELECT tia.*, ti.order_id FROM tuning_item_assignments tia "
+        "JOIN tuning_order_items ti ON ti.id = tia.item_id WHERE tia.id = ?",
+        (assignment_id,),
+    ).fetchone()
+    if assignment is None:
+        return redirect(url_for("tuning_index"))
+    board = url_for("tuning_order_board", order_id=assignment["order_id"]) + (
+        f"#board-work-{assignment['item_id']}"
+    )
+    if not assignment["partner_id"]:
+        return redirect(board)
+    at_partner = request.form.get("location", "").strip() == PARTNER_LOCATION_AT_PARTNER
+    if at_partner and not assignment["due_from"]:
+        session["tuning_board_error"] = (
+            "Сначала укажите срок исполнения задачи — на этот период лодка уберётся с карты цеха."
+        )
+        return redirect(board)
+    db.execute(
+        "UPDATE tuning_item_assignments SET at_partner = ? WHERE id = ?",
+        (1 if at_partner else 0, assignment_id),
+    )
+    db.commit()
+    session["tuning_board_notice"] = (
+        "Работа на территории подрядчика: лодка уберётся с карты цеха на период задачи."
+        if at_partner else "Работа на нашей территории: лодка остаётся на карте цеха."
+    )
+    return redirect(board)
 
 
 @app.route("/tuning/assignments/<int:assignment_id>/rate", methods=["POST"])
@@ -12042,12 +12161,12 @@ def _reassign_tuning_assignment(db, assignment_id, new_name):
     finished = assignment["assignment_status"] == "done"
     if finished:
         db.execute(
-            "UPDATE tuning_item_assignments SET employee_name = ?, partner_id = NULL WHERE id = ?",
+            "UPDATE tuning_item_assignments SET employee_name = ?, partner_id = NULL, at_partner = 0 WHERE id = ?",
             (new_name, assignment_id),
         )
     else:
         db.execute(
-            "UPDATE tuning_item_assignments SET employee_name = ?, partner_id = NULL, "
+            "UPDATE tuning_item_assignments SET employee_name = ?, partner_id = NULL, at_partner = 0, "
             "assignment_status = 'pending', responded_at = NULL WHERE id = ?",
             (new_name, assignment_id),
         )
@@ -12271,6 +12390,7 @@ def tuning_order_board(order_id):
         board_error=session.pop("tuning_board_error", None),
         assign_pending=_pop_assign_pending(order_id),
         assign_notice=session.pop("tuning_assign_notice", None),
+        assign_error=session.pop("tuning_assign_error", None),
     )
 
 

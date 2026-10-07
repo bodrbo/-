@@ -7759,6 +7759,9 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 .assign-employee-row .assign-row-rate,
 .assign-employee-row .assign-row-hours { flex: 1 1 90px; min-width: 0; }
 .assign-employee-row .assign-row-hours[hidden] { display: none; }
+.assign-employee-row .assign-row-location { flex: 1 1 100%; min-width: 0; }
+.assign-employee-row .assign-row-location[hidden] { display: none; }
+.board-task-location-form select { width: 100%; }
 
 .photo-modal-close {
   position: absolute;

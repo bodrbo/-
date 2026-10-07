@@ -1326,6 +1326,10 @@
               </select>
               <input type="text" name="rate[]" class="assign-row-rate" inputmode="decimal" placeholder="Ставка, ₽" required>
               <input type="text" name="norm_hours[]" class="assign-row-hours" inputmode="decimal" placeholder="Нормочасы" required>
+              <select name="partner_location[]" class="assign-row-location" hidden aria-label="Где выполняется работа" onchange="syncAssignDueRequired()">
+                <option value="own" selected>На нашей территории</option>
+                <option value="partner">На территории подрядчика</option>
+              </select>
               <button type="button" class="btn-delete" onclick="removeAssignEmployeeRow(this)" title="Убрать сотрудника">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
               </button>
@@ -1348,6 +1352,10 @@
               </select>
               <input type="text" name="rate[]" class="assign-row-rate" inputmode="decimal" placeholder="Ставка, ₽" required>
               <input type="text" name="norm_hours[]" class="assign-row-hours" inputmode="decimal" placeholder="Нормочасы" required>
+              <select name="partner_location[]" class="assign-row-location" hidden aria-label="Где выполняется работа" onchange="syncAssignDueRequired()">
+                <option value="own" selected>На нашей территории</option>
+                <option value="partner">На территории подрядчика</option>
+              </select>
               <button type="button" class="btn-delete" onclick="removeAssignEmployeeRow(this)" title="Убрать сотрудника">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/></svg>
               </button>
@@ -1486,6 +1494,16 @@ async function createSalesChannel(event) {
     submit.disabled = false;
   }
 }
+// On the contractor's premises the boat leaves the shop map for the task's
+// period, so that choice needs a due date.
+function syncAssignDueRequired() {
+  var need = Array.prototype.some.call(
+    document.querySelectorAll('#assign-rows .assign-row-location'),
+    function (l) { return !l.hidden && l.value === 'partner'; }
+  );
+  document.getElementById('assign-due-from').required = need;
+}
+
 // A contractor (partner) has one agreed cost instead of rate x norm-hours:
 // the hours field is hidden (it travels as 1) and the rate field becomes the cost.
 function syncAssignRowKind(select) {
@@ -1496,6 +1514,10 @@ function syncAssignRowKind(select) {
   rate.placeholder = contractor ? 'Стоимость, ₽' : 'Ставка, ₽';
   rate.setAttribute('aria-label', rate.placeholder);
   hours.hidden = contractor;
+  var location = row.querySelector('.assign-row-location');
+  location.hidden = !contractor;
+  if (!contractor) location.value = 'own';
+  syncAssignDueRequired();
   hours.required = !contractor;
   if (contractor) {
     if (!hours.value) hours.dataset.auto = '1';
@@ -1525,6 +1547,7 @@ function openAssignModal(actionUrl, description) {
   document.getElementById('assign-due-from').value = '';
   document.getElementById('assign-due-to').value = '';
   document.getElementById('assign-due-to').min = '';
+  syncAssignDueRequired();
   document.getElementById('assign-modal').classList.remove('hidden');
 }
 
@@ -1560,6 +1583,7 @@ function removeAssignEmployeeRow(btn) {
   var rows = document.querySelectorAll('#assign-rows .assign-employee-row');
   if (rows.length <= 1) return;
   btn.closest('.assign-employee-row').remove();
+  syncAssignDueRequired();
 }
 
 var photoModalPhotos = [];

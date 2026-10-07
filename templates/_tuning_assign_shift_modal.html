@@ -15,8 +15,9 @@
       <input type="hidden" name="comment" value="{{ assign_pending.comment }}">
       <input type="hidden" name="due_from" value="{{ assign_pending.due_from or '' }}">
       <input type="hidden" name="due_to" value="{{ assign_pending.due_to or '' }}">
-      {% for name, rate, hours in assign_pending.rows %}
+      {% for name, rate, hours, location in assign_pending.rows %}
       <input type="hidden" name="employee_name[]" value="{{ name }}">
+      <input type="hidden" name="partner_location[]" value="{{ location }}">
       <input type="hidden" name="rate[]" value="{{ rate }}">
       <input type="hidden" name="norm_hours[]" value="{{ hours }}">
       {% endfor %}
@@ -45,6 +46,9 @@
     </form>
   </div>
 </div>
+{% endif %}
+{% if assign_error %}
+<div class="alert" role="alert">{{ assign_error }}</div>
 {% endif %}
 {% if assign_notice %}
 <div class="alert success" role="status">{{ assign_notice }}</div>
