@@ -119,7 +119,11 @@
                     method="post" class="status-select-form">
                 <select name="status" onchange="this.form.submit()">
                   {% for s in assignment_statuses %}
-                  <option value="{{ s.value }}" {{ 'selected' if a.assignment_status == s.value }}>{{ s.label }}</option>
+                  <option value="{{ s.value }}" {{ 'selected' if a.assignment_status == s.value and not (s.value == 'done' and a.returned_at) }}>{{ s.label }}</option>
+                  {% if s.value == 'done' and a.partner_id %}
+                  <option value="handed_over" {{ 'selected' if a.assignment_status == 'done' and a.returned_at }}
+                          title="Работа выполнена, лодка забрана у подрядчика — возвращается на карту цеха">Выполнена, передана</option>
+                  {% endif %}
                   {% endfor %}
                 </select>
               </form>
@@ -182,6 +186,13 @@
                        {{ 'disabled' if a.assignment_status != 'done' and not a.entry_id }}
                        {% if a.assignment_status != 'done' and not a.entry_id %}title="Дата появится, когда задача станет «Выполнена»"{% endif %}>
               </label>
+              {% if a.partner_id and a.at_partner %}
+              <label>Лодка вернулась
+                <input type="date" name="returned_date" value="{{ a.returned_at or '' }}"
+                       {{ 'disabled' if not a.returned_at }}
+                       {% if not a.returned_at %}title="Дата появится, когда задача станет «Выполнена, передана»"{% endif %}>
+              </label>
+              {% endif %}
               <button type="submit" class="icon-btn approve" title="Сохранить даты" aria-label="Сохранить даты">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5l4 4 8-9"/></svg>
               </button>

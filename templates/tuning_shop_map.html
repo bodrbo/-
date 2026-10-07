@@ -107,7 +107,7 @@
     <ul class="shop-timeline-events shop-timeline-away">
       {% for boat in boats_away %}
       <li class="to_partner">
-        На территории подрядчика «{{ boat.away_period.partner }}» — вернётся {{ boat.away_period.back|ru_date }}:
+        На территории подрядчика «{{ boat.away_period.partner }}» — {% if boat.away_period.waiting %}работа выполнена, ждёт, когда её заберут{% else %}вернётся {{ boat.away_period.back|ru_date }}{% endif %}:
         <a href="{{ url_for('edit_tuning_order', order_id=boat.order_id) }}">{{ boat.client_name }} — {{ boat.boat_model }}</a>
       </li>
       {% endfor %}

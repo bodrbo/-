@@ -1,3 +1,4 @@
+import datetime as dt
 import unittest
 from unittest import mock
 
@@ -1681,18 +1682,94 @@ class TuningTaskContractorLocationTests(_ContractorFixture, unittest.TestCase):
         self.assertFalse(self.in_shop("2030-05-10"))
         self.assertTrue(self.in_shop("2030-05-11"))
 
-    def test_the_boat_returns_on_the_real_completion_date_when_the_task_is_done(self):
-        self.give("partner")
+    def set_status(self, status):
         (row,) = self.rows()
         self.login_admin()
-        self.client.post(f"/tuning/assignments/{row['id']}/status", data={"status": "done"})
-        with application_module.app.app_context():
-            db = application_module.get_db()
-            db.execute("UPDATE tuning_item_assignments SET completed_at = '2030-05-12 15:00' WHERE id = ?",
-                       (row["id"],))
-            db.commit()
+        self.client.post(f"/tuning/assignments/{row['id']}/status", data={"status": status})
+        return self.rows()[0]
+
+    def test_a_merely_done_task_keeps_the_boat_at_the_contractor(self):
+        """Work finished, but the boat is not necessarily collected that day."""
+        self.give("partner")
+        row = self.set_status("done")
+        self.assertEqual(row["assignment_status"], "done")
+        self.assertIsNone(row["returned_at"])
+        for day in ("2030-05-11", "2030-05-14", "2030-06-30", "2031-01-01"):
+            self.assertFalse(self.in_shop(day), day)
+
+    def test_handed_over_brings_the_boat_back_on_that_day(self):
+        self.give("partner")
+        row = self.set_status("handed_over")
+        self.assertEqual(row["assignment_status"], "done")  # everything keyed on "done" keeps working
+        self.assertEqual(row["returned_at"], dt.date.today().isoformat())
+        self.assertIsNotNone(row["completed_at"])
+        # the task's own dates are in 2030, so the boat is away until its start... then
+        # the return date (today) is before the start: at least one day away
+        self.assertFalse(self.in_shop("2030-05-10"))
+        self.assertTrue(self.in_shop("2030-05-11"))
+
+    def test_handed_over_on_a_chosen_later_date(self):
+        self.give("partner")
+        self.set_status("handed_over")
+        (row,) = self.rows()
+        self.login_admin()
+        self.client.post(
+            f"/tuning/assignments/{row['id']}/dates",
+            data={"due_from": "2030-05-10", "due_to": "2030-05-14", "completed_date": "2030-05-12",
+                  "returned_date": "2030-05-17"},
+        )
+        self.assertFalse(self.in_shop("2030-05-16"))
+        self.assertTrue(self.in_shop("2030-05-17"))
+
+    def test_changing_the_status_away_from_handed_over_sends_the_boat_back_to_the_contractor(self):
+        self.give("partner")
+        self.set_status("handed_over")
+        self.assertTrue(self.in_shop("2030-05-11"))
+        row = self.set_status("done")
+        self.assertIsNone(row["returned_at"])
         self.assertFalse(self.in_shop("2030-05-11"))
-        self.assertTrue(self.in_shop("2030-05-12"))
+        row = self.set_status("in_progress")
+        self.assertTrue(self.in_shop("2030-05-14"))  # back to the planned end date
+
+    def test_handed_over_is_for_contractor_tasks_only(self):
+        self.login_admin()
+        with mock.patch.object(application_module, "send_telegram_notification_to_employee"):
+            self.client.post(
+                f"/tuning/{self.order_id}/item/{self.item_id}/assign",
+                data={"employee_name[]": self.EMPLOYEE_A, "rate[]": "100", "norm_hours[]": "1"},
+            )
+        (row,) = self.rows()
+        self.client.post(f"/tuning/assignments/{row['id']}/status", data={"status": "handed_over"})
+        (row,) = self.rows()
+        self.assertEqual(row["assignment_status"], "pending")
+        self.assertIsNone(row["returned_at"])
+
+    def test_the_board_status_menu_offers_handed_over_for_a_contractor_only(self):
+        self.give("partner")
+        self.login_admin()
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn('value="handed_over"', page)
+        self.assertIn("Выполнена, передана", page)
+        self.set_status("handed_over")
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertRegex(page, r'value="handed_over"\s+selected')
+        self.assertIn("Лодка вернулась", page)
+
+    def test_the_map_says_the_boat_waits_to_be_collected(self):
+        self.give("partner")
+        self.set_status("done")
+        self.login_admin()
+        page = self.client.get("/tuning/shop-map?date=2030-06-01").get_data(as_text=True)
+        self.assertIn("ждёт, когда её заберут", page)
+
+    def test_editing_a_contractor_tasks_date_says_nothing_about_the_schedule(self):
+        self.give("own", due_from="", due_to="")
+        (row,) = self.rows()
+        self.login_admin()
+        self.client.post(f"/tuning/assignments/{row['id']}/dates", data={"due_from": "2030-05-10", "due_to": ""})
+        with self.client.session_transaction() as session:
+            notice = session.get("tuning_board_notice", "")
+        self.assertEqual(notice, "Даты задачи обновлены.")
 
     def test_a_rejected_task_does_not_take_the_boat_away(self):
         self.give("partner")

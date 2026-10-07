@@ -783,6 +783,7 @@ def _tuning_partner_choices(db):
 
 
 PARTNER_EXECUTOR_PREFIX = "partner:"
+ASSIGNMENT_STATUS_HANDED_OVER = "handed_over"  # contractor tasks only: "Выполнена, передана"
 PARTNER_LOCATION_AT_PARTNER = "partner"  # the other value of the location select is "own"
 
 
@@ -2180,6 +2181,10 @@ def init_db(db_path=None, include_bootstrap_data=True):
         # carries the partner's name for display, and nothing is paid out
         # through payroll for it.
         conn.execute("ALTER TABLE tuning_item_assignments ADD COLUMN partner_id INTEGER")
+    if "returned_at" not in tuning_assignment_cols:
+        # A contractor's task finished with "Выполнена, передана": the date the
+        # boat came back from the contractor (assignment_status stays "done").
+        conn.execute("ALTER TABLE tuning_item_assignments ADD COLUMN returned_at TEXT")
     if "at_partner" not in tuning_assignment_cols:
         # 1 = the contractor does this work on their own premises: the boat
         # is off the shop map for the task's period (see _shop_map_away_periods).
@@ -9622,27 +9627,34 @@ def _shop_map_away_periods(db):
     boat is at a contractor's premises (tasks handed to a tuning partner as
     "На территории подрядчика"). The boat is off the map from the task's start
     date and back in the shop on the date the period ends — the planned end
-    (due_to), or the real completion date once the task is done. A one-day
-    task (start only) takes the boat away for that day."""
+    (due_to) while the work is going, the date the boat was collected once the
+    task is "Выполнена, передана", and not until then once the work is merely
+    "Выполнена" (the boat isn't necessarily collected the same day). A one-day
+    task (start only) takes the boat away for that day, back the next."""
     periods = {}
     for row in db.execute(
         "SELECT ti.order_id, tia.id, tia.employee_name, tia.due_from, tia.due_to, "
-        "tia.assignment_status, tia.completed_at "
+        "tia.assignment_status, tia.completed_at, tia.returned_at "
         "FROM tuning_item_assignments tia JOIN tuning_order_items ti ON ti.id = tia.item_id "
         "WHERE tia.at_partner = 1 AND tia.partner_id IS NOT NULL "
         "AND tia.assignment_status != 'rejected' AND tia.due_from IS NOT NULL "
         "ORDER BY tia.due_from, tia.id"
     ).fetchall():
-        back = row["due_to"] or row["due_from"]
-        if row["assignment_status"] == "done" and (row["completed_at"] or "").strip():
-            back = row["completed_at"].strip()[:10]
         try:  # at least that one day away, back the next
             first_back = (dt.date.fromisoformat(row["due_from"]) + dt.timedelta(days=1)).isoformat()
         except ValueError:
             continue
-        back = max(back, first_back)
+        waiting = False
+        if row["assignment_status"] == "done" and (row["returned_at"] or "").strip():
+            back = max(row["returned_at"].strip()[:10], first_back)  # "Выполнена, передана"
+        elif row["assignment_status"] == "done":
+            # work finished but the boat hasn't been collected yet — it stays
+            # at the contractor until the task is marked "Выполнена, передана"
+            back, waiting = "9999-12-31", True
+        else:
+            back = max(row["due_to"] or row["due_from"], first_back)
         periods.setdefault(row["order_id"], []).append({
-            "start": row["due_from"], "back": back,
+            "start": row["due_from"], "back": back, "waiting": waiting,
             "partner": row["employee_name"], "assignment_id": row["id"],
         })
     return periods
@@ -12161,13 +12173,14 @@ def _reassign_tuning_assignment(db, assignment_id, new_name):
     finished = assignment["assignment_status"] == "done"
     if finished:
         db.execute(
-            "UPDATE tuning_item_assignments SET employee_name = ?, partner_id = NULL, at_partner = 0 WHERE id = ?",
+            "UPDATE tuning_item_assignments SET employee_name = ?, partner_id = NULL, at_partner = 0, "
+            "returned_at = NULL WHERE id = ?",
             (new_name, assignment_id),
         )
     else:
         db.execute(
             "UPDATE tuning_item_assignments SET employee_name = ?, partner_id = NULL, at_partner = 0, "
-            "assignment_status = 'pending', responded_at = NULL WHERE id = ?",
+            "returned_at = NULL, assignment_status = 'pending', responded_at = NULL WHERE id = ?",
             (new_name, assignment_id),
         )
     db.execute(
@@ -12326,7 +12339,9 @@ def set_tuning_assignment_status(assignment_id):
     if assignment is None:
         return redirect(url_for("tuning_index"))
     status = request.form.get("status", "").strip()
-    if status in [s["value"] for s in ASSIGNMENT_STATUSES]:
+    if status == ASSIGNMENT_STATUS_HANDED_OVER and assignment["partner_id"]:
+        _set_tuning_item_assignment_status(db, assignment_id, "done", handed_over=True)
+    elif status in [s["value"] for s in ASSIGNMENT_STATUSES]:
         _set_tuning_item_assignment_status(db, assignment_id, status)
     return redirect(
         url_for("tuning_order_board", order_id=assignment["order_id"])
@@ -12334,7 +12349,7 @@ def set_tuning_assignment_status(assignment_id):
     )
 
 
-def _set_tuning_item_assignment_status(db, assignment_id, status):
+def _set_tuning_item_assignment_status(db, assignment_id, status, handed_over=False):
     """Core of set_tuning_assignment_status, pulled out so
     modules/tuning_schedule can move a linked task through the same
     states (and trigger the same first-time-done payout) as the order
@@ -12342,10 +12357,14 @@ def _set_tuning_item_assignment_status(db, assignment_id, status):
     drift out of sync with tuning_item_assignments.assignment_status —
     that column stays the one source of truth for a linked task's status.
     Caller has already validated `status` is a real ASSIGNMENT_STATUSES
-    value."""
+    value. handed_over marks a contractor's finished task as also collected
+    ("Выполнена, передана": the status stays "done", returned_at records the
+    day the boat came back); any other status change clears that mark."""
     db.execute(
-        "UPDATE tuning_item_assignments SET assignment_status = ?, responded_at = ? WHERE id = ?",
-        (status, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), assignment_id),
+        "UPDATE tuning_item_assignments SET assignment_status = ?, responded_at = ?, "
+        "returned_at = ? WHERE id = ?",
+        (status, dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+         dt.date.today().isoformat() if handed_over else None, assignment_id),
     )
     if status == "done":
         _pay_tuning_assignment(db, db.execute(
@@ -12446,7 +12465,8 @@ def update_tuning_assignment_dates(assignment_id):
     due_from_raw = request.form.get("due_from")
     due_to_raw = request.form.get("due_to")
     completed_raw = request.form.get("completed_date")
-    if not all(valid_day(raw) for raw in (due_from_raw, due_to_raw, completed_raw)):
+    returned_raw = request.form.get("returned_date")
+    if not all(valid_day(raw) for raw in (due_from_raw, due_to_raw, completed_raw, returned_raw)):
         session["tuning_board_error"] = "Укажите корректные даты."
         return redirect(board)
     due_from, due_to = _parse_task_due(due_from_raw, due_to_raw)
@@ -12466,8 +12486,17 @@ def update_tuning_assignment_dates(assignment_id):
         "UPDATE tuning_item_assignments SET due_from = ?, due_to = ?, completed_at = ? WHERE id = ?",
         (due_from, due_to, new_completed, assignment_id),
     )
+    if assignment["partner_id"] and assignment["returned_at"] and (returned_raw or "").strip():
+        # the day the boat came back from the contractor (only once handed over)
+        db.execute(
+            "UPDATE tuning_item_assignments SET returned_at = ? WHERE id = ?",
+            (returned_raw.strip(), assignment_id),
+        )
     notice = "Даты задачи обновлены."
-    if due_from and not due_to and (due_from != assignment["due_from"] or assignment["due_to"]):
+    if (
+        not assignment["partner_id"]  # a contractor's task has no schedule card
+        and due_from and not due_to and (due_from != assignment["due_from"] or assignment["due_to"])
+    ):
         # A one-date task lives on that day of the tuning schedule: move its
         # card there, or add one if the task has none yet.
         employee = assignment["employee_name"]
