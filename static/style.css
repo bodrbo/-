@@ -12100,7 +12100,9 @@ button.partner-open-price-save svg {
 .quick-task-field[hidden] { display: none; }
 .quick-task-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .quick-task-row input { min-width: 0; width: 100%; }
-.quick-task-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.quick-task-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+/* "Отмена" is the site's regular secondary button, sized to sit level with the primary one. */
+.quick-task-actions .btn-secondary { margin-top: 0; padding: 11px 24px; font-size: 14px; }
 
 /* Личные кабинеты клиента и партнёра: на всю ширину экрана и без блоков
    внутри блоков. Заказы — это сами карточки (без общей рамки вокруг них),
