@@ -469,10 +469,15 @@ def _tuning_order_items_with_assignments(db, order_id):
         item = dict(row)
         item["assignments"] = [
             dict(a) for a in db.execute(
-                "SELECT * FROM tuning_item_assignments WHERE item_id = ? ORDER BY id",
+                "SELECT a.*, c.client_name AS partner_name "
+                "FROM tuning_item_assignments a LEFT JOIN clients c ON c.id = a.partner_id "
+                "WHERE a.item_id = ? ORDER BY a.id",
                 (item["id"],),
             ).fetchall()
         ]
+        for assignment in item["assignments"]:
+            if assignment["partner_id"] and assignment["partner_name"]:
+                assignment["employee_name"] = assignment["partner_name"]  # follows a renamed partner
         # One work item can carry several concurrent tasks (e.g. split
         # between tuningmen, or reassigned after someone declines) —
         # assigning another is always allowed, the admin decides when
@@ -775,6 +780,25 @@ def _tuning_partner_choices(db):
         "ORDER BY clients.client_name COLLATE NOCASE, clients.phone, clients.id",
         (TUNING_SEGMENT, CLIENT_RELATIONSHIP_PARTNER),
     ).fetchall()
+
+
+PARTNER_EXECUTOR_PREFIX = "partner:"
+
+
+def _partner_executor(db, raw):
+    """'partner:<client id>' (the value of a contractor option in the assign
+    selects) -> (client_id, name) of an existing tuning partner, else None."""
+    raw = (raw or "").strip()
+    if not raw.startswith(PARTNER_EXECUTOR_PREFIX):
+        return None
+    try:
+        partner_id = int(raw[len(PARTNER_EXECUTOR_PREFIX):])
+    except ValueError:
+        return None
+    for partner in _tuning_partner_choices(db):
+        if partner["id"] == partner_id:
+            return partner_id, partner["client_name"] or partner["phone"] or f"Партнёр №{partner_id}"
+    return None
 
 
 def _sales_channel_choices(db):
@@ -2149,6 +2173,12 @@ def init_db(db_path=None, include_bootstrap_data=True):
         # creation timestamp (reminders, ordering) but is no longer shown.
         if due_column not in tuning_assignment_cols:
             conn.execute(f"ALTER TABLE tuning_item_assignments ADD COLUMN {due_column} TEXT")
+    if "partner_id" not in tuning_assignment_cols:
+        # A task can be handed to a tuning partner (clients.id of a partner
+        # with the tuning segment) instead of an employee; employee_name then
+        # carries the partner's name for display, and nothing is paid out
+        # through payroll for it.
+        conn.execute("ALTER TABLE tuning_item_assignments ADD COLUMN partner_id INTEGER")
     if "completed_at" not in tuning_assignment_cols:
         # The task's completion date (assigned_at is its assignment date).
         # Stamped by the triggers below whenever the status becomes "done",
@@ -11042,6 +11072,7 @@ def edit_tuning_order(order_id):
         boat_motors = _tuning_order_motors(db, order_id)
         items = _tuning_order_items_with_assignments(db, order_id)
         assignable_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
+        assignable_partners = _tuning_partner_choices(db)
         goods = db.execute(
             "SELECT tuning_order_products.*, supply_warehouses.name AS writeoff_warehouse_name, "
             "supply_writeoffs.warehouse_id AS writeoff_warehouse_id, "
@@ -11125,6 +11156,7 @@ def edit_tuning_order(order_id):
             assign_pending=_pop_assign_pending(order_id),
             assign_notice=session.pop("tuning_assign_notice", None),
             assignable_employees=assignable_employees,
+            assignable_partners=assignable_partners,
             goods=goods, goods_subtotal=goods_subtotal, work_subtotal=work_subtotal,
             catalog_products=catalog_products,
             goods_warehouses=supply_warehouses_list,
@@ -11514,8 +11546,8 @@ def _pay_tuning_assignment(db, assignment, work_date=None):
     from both the admin's own status change (set_tuning_assignment_status)
     and the tuningman's own (team_tuning_task_set_status). work_date
     backdates the payout (default: today)."""
-    if _tuning_assignment_has_payout(db, assignment):
-        return
+    if assignment["partner_id"] or _tuning_assignment_has_payout(db, assignment):
+        return  # a contractor's fee is not paid through payroll
     item = db.execute(
         "SELECT * FROM tuning_order_items WHERE id = ?", (assignment["item_id"],)
     ).fetchone()
@@ -11547,7 +11579,7 @@ def _repair_tuning_assignment_payouts(db, order_id=None):
     query = (
         "SELECT tia.* FROM tuning_item_assignments tia "
         "JOIN tuning_order_items ti ON ti.id = tia.item_id "
-        "WHERE tia.assignment_status = 'done'"
+        "WHERE tia.assignment_status = 'done' AND tia.partner_id IS NULL"
     )
     params = []
     if order_id is not None:
@@ -11644,9 +11676,18 @@ def assign_tuning_item(order_id, item_id):
     valid_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
     seen = set()
     rows = []
+    partner_ids = {}  # executor name -> clients.id, for contractor rows
     for i in range(len(raw_names)):
         name = raw_names[i].strip()
-        if not name or name not in valid_employees or name in seen:
+        partner = _partner_executor(db, name)
+        if partner is not None:
+            partner_key = f"{PARTNER_EXECUTOR_PREFIX}{partner[0]}"
+            if partner_key in seen:
+                continue
+            name = partner[1]
+            partner_ids[name] = partner[0]
+            seen.add(partner_key)
+        elif not name or name not in valid_employees or name in seen:
             continue
         try:
             rate = float(raw_rates[i].strip().replace(",", "."))
@@ -11658,7 +11699,8 @@ def assign_tuning_item(order_id, item_id):
             continue
         if rate <= 0 or hours <= 0:
             continue
-        seen.add(name)
+        if partner is None:
+            seen.add(name)
         rows.append((name, rate, hours))
 
     if not rows or len(comment) > TASK_ASSIGNMENT_COMMENT_MAX_LENGTH:
@@ -11672,7 +11714,8 @@ def assign_tuning_item(order_id, item_id):
     unscheduled = set()
     if schedule_day:
         off_shift = tuning_schedule_services.employees_off_shift(
-            db, schedule_day, [name for name, _rate, _hours in rows]
+            db, schedule_day,
+            [name for name, _rate, _hours in rows if name not in partner_ids],
         )
         decision = request.form.get("shift_decision", "")
         pending_error = None
@@ -11691,7 +11734,11 @@ def assign_tuning_item(order_id, item_id):
             session["tuning_assign_pending"] = {
                 "order_id": order_id, "item_id": item_id, "work_name": item["work_name"],
                 "next": "board" if return_endpoint == "tuning_order_board" else "",
-                "rows": [[name, rate, hours] for name, rate, hours in rows],
+                "rows": [
+                    [f"{PARTNER_EXECUTOR_PREFIX}{partner_ids[name]}" if name in partner_ids else name,
+                     rate, hours]
+                    for name, rate, hours in rows
+                ],
                 "comment": comment, "due_from": due_from, "due_to": due_to,
                 "day": schedule_day, "off_shift": off_shift, "error": pending_error,
             }
@@ -11711,7 +11758,8 @@ def assign_tuning_item(order_id, item_id):
     created = [
         (
             _insert_tuning_item_assignment(
-                db, item_id, employee_name, rate, hours, comment, now, due_from, due_to
+                db, item_id, employee_name, rate, hours, comment, now, due_from, due_to,
+                partner_id=partner_ids.get(employee_name),
             ),
             employee_name, rate, hours,
         )
@@ -11720,7 +11768,7 @@ def assign_tuning_item(order_id, item_id):
     db.commit()
     schedule_notes = []
     for assignment_id, employee_name, rate, hours in created:
-        if schedule_day and employee_name not in unscheduled:
+        if schedule_day and employee_name not in unscheduled and employee_name not in partner_ids:
             schedule_notes.append(_describe_schedule_placement(
                 employee_name, schedule_day,
                 tuning_schedule_services.place_assignment_task(
@@ -11730,8 +11778,9 @@ def assign_tuning_item(order_id, item_id):
             ))
     if schedule_notes:
         session["tuning_assign_notice"] = " ".join(schedule_notes)
-    for assignment_id, _name, _rate, _hours in created:
-        _notify_task_assignment(db, ASSIGNMENT_TUNING, assignment_id)
+    for assignment_id, name, _rate, _hours in created:
+        if name not in partner_ids:  # a contractor has no Telegram / task list here
+            _notify_task_assignment(db, ASSIGNMENT_TUNING, assignment_id)
     _flag_tuning_item_budget_overrun(
         db, item["id"], item["work_name"], item["cost_price"], item["price_pending"]
     )
@@ -11800,7 +11849,8 @@ app.jinja_env.filters["task_due"] = lambda task: format_task_due(
 
 
 def _insert_tuning_item_assignment(
-    db, item_id, employee_name, rate, hours, comment, now, due_from=None, due_to=None
+    db, item_id, employee_name, rate, hours, comment, now, due_from=None, due_to=None,
+    partner_id=None,
 ):
     """Bare INSERT behind assign_tuning_item's multi-employee loop — pulled
     out so modules/tuning_schedule can hand a work item to someone on a
@@ -11808,11 +11858,14 @@ def _insert_tuning_item_assignment(
     instead of a second, diverging insert. Caller commits, notifies
     (_notify_task_assignment) and flags budget overrun
     (_flag_tuning_item_budget_overrun), same as assign_tuning_item does."""
+    # A contractor doesn't accept tasks in an app — the task starts as
+    # accepted (and so is never reminded about as unanswered).
     cur = db.execute(
         "INSERT INTO tuning_item_assignments "
         "(item_id, employee_name, rate, norm_hours, comment, assignment_status, assigned_at, "
-        "due_from, due_to) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
-        (item_id, employee_name, rate, hours, comment, now, due_from, due_to),
+        "due_from, due_to, partner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (item_id, employee_name, rate, hours, comment,
+         "accepted" if partner_id else "pending", now, due_from, due_to, partner_id),
     )
     return cur.lastrowid
 
@@ -11959,13 +12012,18 @@ def _reassign_tuning_assignment(db, assignment_id, new_name):
         return False, "Задача не найдена.", None, None
     order_id, item_id = assignment["order_id"], assignment["item_id"]
     old_name = assignment["employee_name"]
+    was_contractor = bool(assignment["partner_id"])
     new_name = (new_name or "").strip()
-    if not new_name or new_name == old_name:
+    partner = _partner_executor(db, new_name)
+    if partner is not None:
+        return _hand_task_to_partner(db, assignment, partner)
+    if not new_name or (new_name == old_name and not was_contractor):
         return True, "", order_id, item_id
     if new_name not in _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS):
         return False, "Этого сотрудника нельзя назначить на задачи тюнинга.", order_id, item_id
     duplicate = db.execute(
-        "SELECT 1 FROM tuning_item_assignments WHERE item_id = ? AND employee_name = ?",
+        "SELECT 1 FROM tuning_item_assignments WHERE item_id = ? AND employee_name = ? "
+        "AND partner_id IS NULL",
         (assignment["item_id"], new_name),
     ).fetchone()
     if duplicate is not None:
@@ -11974,12 +12032,12 @@ def _reassign_tuning_assignment(db, assignment_id, new_name):
     finished = assignment["assignment_status"] == "done"
     if finished:
         db.execute(
-            "UPDATE tuning_item_assignments SET employee_name = ? WHERE id = ?",
+            "UPDATE tuning_item_assignments SET employee_name = ?, partner_id = NULL WHERE id = ?",
             (new_name, assignment_id),
         )
     else:
         db.execute(
-            "UPDATE tuning_item_assignments SET employee_name = ?, "
+            "UPDATE tuning_item_assignments SET employee_name = ?, partner_id = NULL, "
             "assignment_status = 'pending', responded_at = NULL WHERE id = ?",
             (new_name, assignment_id),
         )
@@ -12008,16 +12066,71 @@ def _reassign_tuning_assignment(db, assignment_id, new_name):
                 notice += _SETTLED_WEEK_WARNING
     db.commit()
     try:
-        send_telegram_notification_to_employee(
-            db, old_name,
-            f"Задача передана другому сотруднику: «{assignment['work_name']}» "
-            f"(заказ №{assignment['order_id']}). Выполнять её больше не нужно.",
-        )
+        if not was_contractor:
+            send_telegram_notification_to_employee(
+                db, old_name,
+                f"Задача передана другому сотруднику: «{assignment['work_name']}» "
+                f"(заказ №{assignment['order_id']}). Выполнять её больше не нужно.",
+            )
         if not finished:
             _notify_task_assignment(db, ASSIGNMENT_TUNING, assignment_id)
     except Exception:
         pass  # notifications are best-effort; the reassignment is done
     return True, notice, order_id, item_id
+
+
+def _hand_task_to_partner(db, assignment, partner):
+    """Gives an order task to a tuning partner (contractor) instead of an
+    employee. The agreed amount (rate x norm-hours) stays on the task and
+    counts against the work's budget but is not paid through payroll, so a
+    task already paid out to an employee can't be moved. The employee's
+    schedule card is removed, they're told the task was taken away.
+    Returns the same (ok, message, order_id, item_id) as
+    _reassign_tuning_assignment."""
+    assignment_id = assignment["id"]
+    order_id, item_id = assignment["order_id"], assignment["item_id"]
+    partner_id, partner_name = partner
+    if assignment["partner_id"] == partner_id:
+        return True, "", order_id, item_id
+    if assignment["entry_id"]:
+        return False, (
+            "Задача уже оплачена сотруднику — подрядчику её передать нельзя. "
+            "Сначала отзовите задачу и поручите заново."
+        ), order_id, item_id
+    if db.execute(
+        "SELECT COUNT(*) FROM supply_writeoffs WHERE tuning_item_assignment_id = ?", (assignment_id,)
+    ).fetchone()[0]:
+        return False, "По задаче списаны материалы сотрудника — сначала верните их.", order_id, item_id
+    if db.execute(
+        "SELECT 1 FROM tuning_item_assignments WHERE item_id = ? AND partner_id = ?",
+        (item_id, partner_id),
+    ).fetchone() is not None:
+        return False, f"{partner_name} уже назначен на эту работу.", order_id, item_id
+    old_name, was_contractor = assignment["employee_name"], bool(assignment["partner_id"])
+    for row in db.execute(
+        "SELECT id FROM tuning_schedule_tasks WHERE assignment_id = ?", (assignment_id,)
+    ).fetchall():
+        db.execute("DELETE FROM tuning_schedule_task_days WHERE task_id = ?", (row["id"],))
+        db.execute("DELETE FROM tuning_schedule_tasks WHERE id = ?", (row["id"],))
+    status = "done" if assignment["assignment_status"] == "done" else "accepted"
+    db.execute(
+        "UPDATE tuning_item_assignments SET employee_name = ?, partner_id = ?, "
+        "assignment_status = ?, responded_at = ? WHERE id = ?",
+        (partner_name, partner_id, status, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), assignment_id),
+    )
+    db.commit()
+    if not was_contractor:
+        try:
+            send_telegram_notification_to_employee(
+                db, old_name,
+                f"Задача передана подрядчику: «{assignment['work_name']}» "
+                f"(заказ №{assignment['order_id']}). Выполнять её больше не нужно.",
+            )
+        except Exception:
+            pass  # best-effort
+    return True, (
+        f"Задача «{assignment['work_name']}» передана подрядчику: {old_name} → {partner_name}."
+    ), order_id, item_id
 
 
 @app.route("/tuning/assignments/<int:assignment_id>/employee", methods=["POST"])
@@ -12128,12 +12241,14 @@ def tuning_order_board(order_id):
                 assignment["entry_id"] = None
             assignment["payout_missing"] = (
                 assignment["assignment_status"] == "done" and not assignment["entry_id"]
+                and not assignment["partner_id"]
                 and assignment["rate"] * assignment["norm_hours"] > 0
             )
             payouts_missing += 1 if assignment["payout_missing"] else 0
     assignable_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
     return render_template(
         "tuning_order_board.html",
+        assignable_partners=_tuning_partner_choices(db),
         payouts_missing=payouts_missing,
         order=order, items=items, work_statuses=WORK_STATUSES,
         assignment_statuses=ASSIGNMENT_STATUSES,
@@ -16980,7 +17095,7 @@ def team_dashboard():
             "FROM tuning_item_assignments ta "
             "JOIN tuning_order_items ti ON ti.id = ta.item_id "
             "JOIN tuning_orders tord ON tord.id = ti.order_id "
-            "WHERE ta.employee_name = ?",
+            "WHERE ta.employee_name = ? AND ta.partner_id IS NULL",
             (employee_name,),
         ).fetchall()
         tuning_task_dicts = []

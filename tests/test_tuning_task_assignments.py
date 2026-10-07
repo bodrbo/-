@@ -1313,5 +1313,216 @@ class TuningTaskEmployeeChangeTests(_TuningTaskFixture, unittest.TestCase):
             self.assertIn(f"/tuning/assignments/{self.assignment(employee)['id']}/employee", page)
 
 
+class TuningTaskContractorTests(_TuningTaskFixture, unittest.TestCase):
+    """A work item's task can go to a tuning partner (contractor) instead of
+    an employee: stored with partner_id, no payroll, no employee schedule."""
+
+    PARTNER_TOKEN = "contractor-test-partner"
+    PLAIN_TOKEN = "contractor-test-plain-client"
+
+    def setUp(self):
+        super().setUp()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.partner_id = db.execute(
+                "INSERT INTO clients (client_name, boat_model, phone, token, status, created_at) "
+                "VALUES ('Мастерская Подряд', '', '+79990001122', ?, 'neutral', '2026-09-01 10:00')",
+                (self.PARTNER_TOKEN,),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO client_segments (client_id, segment, relationship_type, created_at) "
+                "VALUES (?, 'tuning', 'partner', '2026-09-01 10:00')", (self.partner_id,),
+            )
+            self.plain_id = db.execute(
+                "INSERT INTO clients (client_name, boat_model, phone, token, status, created_at) "
+                "VALUES ('Обычный Клиент', '', '', ?, 'neutral', '2026-09-01 10:00')",
+                (self.PLAIN_TOKEN,),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO client_segments (client_id, segment, relationship_type, created_at) "
+                "VALUES (?, 'tuning', 'client', '2026-09-01 10:00')", (self.plain_id,),
+            )
+            db.commit()
+
+    def tearDown(self):
+        super().tearDown()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            for token in (self.PARTNER_TOKEN, self.PLAIN_TOKEN):
+                db.execute(
+                    "DELETE FROM client_segments WHERE client_id IN (SELECT id FROM clients WHERE token = ?)",
+                    (token,),
+                )
+                db.execute("DELETE FROM clients WHERE token = ?", (token,))
+            db.commit()
+
+    @property
+    def partner_key(self):
+        return f"partner:{self.partner_id}"
+
+    def rows(self):
+        with application_module.app.app_context():
+            return [dict(r) for r in application_module.get_db().execute(
+                "SELECT * FROM tuning_item_assignments WHERE item_id = ? ORDER BY id", (self.item_id,)
+            ).fetchall()]
+
+    def assign_quietly(self, rows):
+        with mock.patch.object(
+            application_module, "send_telegram_notification_to_employee"
+        ) as notifier:
+            response = self.assign_many(rows)
+        return response, notifier
+
+    def test_a_task_can_be_given_to_a_partner(self):
+        response, notifier = self.assign_quietly([(self.partner_key, 5000, 1)])
+        self.assertEqual(response.status_code, 302)
+        (row,) = self.rows()
+        self.assertEqual(row["partner_id"], self.partner_id)
+        self.assertEqual(row["employee_name"], "Мастерская Подряд")
+        self.assertEqual((row["rate"], row["norm_hours"]), (5000, 1))
+        self.assertEqual(row["assignment_status"], "accepted")
+        notifier.assert_not_called()  # no Telegram for a contractor
+
+    def test_employee_and_partner_can_share_one_work(self):
+        self.assign_quietly([(self.EMPLOYEE_A, 1000, 2), (self.partner_key, 3000, 1)])
+        by_name = {r["employee_name"]: r for r in self.rows()}
+        self.assertIsNone(by_name[self.EMPLOYEE_A]["partner_id"])
+        self.assertEqual(by_name["Мастерская Подряд"]["partner_id"], self.partner_id)
+
+    def test_someone_who_is_not_a_tuning_partner_is_refused(self):
+        self.assign_quietly([(f"partner:{self.plain_id}", 5000, 1), ("partner:999999", 1, 1), ("partner:x", 1, 1)])
+        self.assertEqual(self.rows(), [])
+
+    def test_the_same_partner_twice_gives_one_task(self):
+        self.assign_quietly([(self.partner_key, 100, 1), (self.partner_key, 200, 1)])
+        self.assertEqual(len(self.rows()), 1)
+
+    def test_finishing_a_contractor_task_creates_no_payroll_entry(self):
+        self.assign_quietly([(self.partner_key, 5000, 1)])
+        (row,) = self.rows()
+        self.login_admin()
+        self.client.post(f"/tuning/assignments/{row['id']}/status", data={"status": "done"})
+        (row,) = self.rows()
+        self.assertEqual(row["assignment_status"], "done")
+        self.assertIsNone(row["entry_id"])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.assertIsNone(db.execute(
+                "SELECT 1 FROM entries WHERE employee = 'Мастерская Подряд'"
+            ).fetchone())
+            self.assertEqual(application_module._repair_tuning_assignment_payouts(db), [])
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertNotIn("Нет выплаты", page)
+
+    def test_the_contractor_cost_counts_against_the_work_budget(self):
+        self.assign_quietly([(self.partner_key, 5000, 1)])
+        with application_module.app.app_context():
+            total = application_module._tuning_item_assigned_labor_total(
+                application_module.get_db(), self.item_id
+            )
+        self.assertEqual(total, 5000)
+
+    def test_the_contractor_is_not_in_any_employees_task_list(self):
+        self.assign_quietly([(self.partner_key, 5000, 1)])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(  # an employee who happens to share the partner's name
+                "UPDATE employees SET name = 'Мастерская Подряд' WHERE name = ?", (self.EMPLOYEE_A,)
+            )
+            db.execute(
+                "UPDATE team_accounts SET employee_name = 'Мастерская Подряд' WHERE employee_name = ?",
+                (self.EMPLOYEE_A,),
+            )
+            db.commit()
+        try:
+            self.login_team(self.USERNAME_A, "Мастерская Подряд")
+            response = self.client.get("/team/")
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn("Полировка корпуса", response.get_data(as_text=True))
+        finally:
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                db.execute("UPDATE employees SET name = ? WHERE name = 'Мастерская Подряд'", (self.EMPLOYEE_A,))
+                db.execute(
+                    "UPDATE team_accounts SET employee_name = ? WHERE employee_name = 'Мастерская Подряд'",
+                    (self.EMPLOYEE_A,),
+                )
+                db.commit()
+
+    def test_the_board_offers_partners_and_marks_a_contractor_task(self):
+        self.assign_quietly([(self.partner_key, 5000, 1)])
+        self.login_admin()
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("Подрядчики (партнёры тюнинга)", page)
+        self.assertIn(f'value="partner:{self.partner_id}"', page)
+        self.assertIn(">Подрядчик<", page)
+        self.assertIn("оплата подрядчику вне зарплат", page)
+
+    def test_the_new_task_form_offers_partners_too(self):
+        self.login_admin()
+        page = self.client.get(f"/tuning/edit/{self.order_id}").get_data(as_text=True)
+        self.assertIn(f'value="partner:{self.partner_id}"', page)
+
+    def test_an_employee_task_can_be_moved_to_a_partner_and_back(self):
+        self.assign_quietly([(self.EMPLOYEE_A, 1000, 2)])
+        (row,) = self.rows()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            task_id = db.execute(
+                "INSERT INTO tuning_schedule_tasks (assignment_id, employee_name, title, rate, status, "
+                "created_at) VALUES (?, ?, 'Полировка корпуса', 1000, 'pending', '2026-09-01 10:00')",
+                (row["id"], self.EMPLOYEE_A),
+            ).lastrowid
+            db.commit()
+        self.login_admin()
+        with mock.patch.object(application_module, "send_telegram_notification_to_employee") as notifier:
+            self.client.post(f"/tuning/assignments/{row['id']}/employee", data={"employee_name": self.partner_key})
+        (row,) = self.rows()
+        self.assertEqual((row["partner_id"], row["employee_name"], row["assignment_status"]),
+                         (self.partner_id, "Мастерская Подряд", "accepted"))
+        self.assertEqual(notifier.call_count, 1)  # the employee is told it was taken away
+        with application_module.app.app_context():
+            self.assertIsNone(application_module.get_db().execute(
+                "SELECT 1 FROM tuning_schedule_tasks WHERE id = ?", (task_id,)).fetchone())
+        with mock.patch.object(application_module, "send_telegram_notification_to_employee"):
+            self.client.post(f"/tuning/assignments/{row['id']}/employee", data={"employee_name": self.EMPLOYEE_B})
+        (row,) = self.rows()
+        self.assertEqual((row["partner_id"], row["employee_name"], row["assignment_status"]),
+                         (None, self.EMPLOYEE_B, "pending"))
+
+    def test_a_task_already_paid_to_an_employee_cannot_go_to_a_partner(self):
+        self.assign_quietly([(self.EMPLOYEE_A, 1000, 2)])
+        (row,) = self.rows()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            entry_id = db.execute(
+                "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at) "
+                "VALUES (?, 'Полировка корпуса', 1000, 2, 2000, '2026-09-01', '2026-09-01 12:00')",
+                (self.EMPLOYEE_A,),
+            ).lastrowid
+            db.execute("UPDATE tuning_item_assignments SET entry_id = ?, assignment_status = 'done' WHERE id = ?",
+                       (entry_id, row["id"]))
+            db.commit()
+        self.login_admin()
+        self.client.post(f"/tuning/assignments/{row['id']}/employee", data={"employee_name": self.partner_key})
+        (row,) = self.rows()
+        self.assertIsNone(row["partner_id"])
+        self.assertEqual(row["employee_name"], self.EMPLOYEE_A)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
+            db.commit()
+
+    def test_a_renamed_partner_shows_under_the_new_name(self):
+        self.assign_quietly([(self.partner_key, 5000, 1)])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("UPDATE clients SET client_name = 'Новое Название' WHERE id = ?", (self.partner_id,))
+            db.commit()
+        self.login_admin()
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("Новое Название", page)
+
+
 if __name__ == "__main__":
     unittest.main()

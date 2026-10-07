@@ -1307,8 +1307,8 @@
         <h3>Поручить задачу</h3>
         <p class="hint" id="assign-modal-description"></p>
         <div class="field field-wide">
-          <span>Сотрудники и условия</span>
-          <p class="hint" style="margin:0 0 2px;">У каждого может быть своя ставка и нормочасы — например, опытный мастер и новичок на одной задаче.</p>
+          <span>Исполнители и условия</span>
+          <p class="hint" style="margin:0 0 2px;">У каждого может быть своя ставка и нормочасы — например, опытный мастер и новичок на одной задаче. Задачу можно поручить и подрядчику из списка «Подрядчики» — его оплата идёт вне зарплат: ставка × часы = договорённая сумма.</p>
           <div id="assign-rows">
             <div class="assign-employee-row">
               <select name="employee_name[]" class="assign-row-employee" required>
@@ -1316,6 +1316,13 @@
                 {% for e in assignable_employees %}
                 <option value="{{ e }}">{{ e }}</option>
                 {% endfor %}
+                {% if assignable_partners %}
+                <optgroup label="Подрядчики (партнёры тюнинга)">
+                  {% for p in assignable_partners %}
+                  <option value="partner:{{ p.id }}">{{ p.client_name or p.phone }}</option>
+                  {% endfor %}
+                </optgroup>
+                {% endif %}
               </select>
               <input type="text" name="rate[]" class="assign-row-rate" inputmode="decimal" placeholder="Ставка, ₽" required>
               <input type="text" name="norm_hours[]" class="assign-row-hours" inputmode="decimal" placeholder="Нормочасы" required>
@@ -1331,6 +1338,13 @@
                 {% for e in assignable_employees %}
                 <option value="{{ e }}">{{ e }}</option>
                 {% endfor %}
+                {% if assignable_partners %}
+                <optgroup label="Подрядчики (партнёры тюнинга)">
+                  {% for p in assignable_partners %}
+                  <option value="partner:{{ p.id }}">{{ p.client_name or p.phone }}</option>
+                  {% endfor %}
+                </optgroup>
+                {% endif %}
               </select>
               <input type="text" name="rate[]" class="assign-row-rate" inputmode="decimal" placeholder="Ставка, ₽" required>
               <input type="text" name="norm_hours[]" class="assign-row-hours" inputmode="decimal" placeholder="Нормочасы" required>

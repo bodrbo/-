@@ -135,16 +135,29 @@
             </div>
             <form action="{{ url_for('update_tuning_assignment_employee', assignment_id=a.id) }}" method="post"
                   class="board-task-employee-form"
-                  onsubmit="return confirm('Передать задачу сотруднику «' + this.employee_name.value + '»?{% if a.entry_id %} Выплата тоже перейдёт к нему.{% endif %}{% if a.assignment_status != 'done' %} Задача снова станет «Ожидает ответа».{% endif %}');">
-              <select name="employee_name" onchange="this.form.requestSubmit()" aria-label="Сотрудник">
-                {% if a.employee_name not in assignable_employees %}
+                  onsubmit="return confirm('Передать задачу: «' + this.employee_name.options[this.employee_name.selectedIndex].text + '»?{% if a.entry_id %} Выплата тоже перейдёт к нему.{% endif %}{% if a.assignment_status != 'done' %} Задача снова станет «Ожидает ответа».{% endif %}');">
+              <select name="employee_name" onchange="this.form.requestSubmit()" aria-label="Исполнитель">
+                {% if not a.partner_id and a.employee_name not in assignable_employees %}
                 <option value="{{ a.employee_name }}" selected>{{ a.employee_name }}</option>
                 {% endif %}
                 {% for e in assignable_employees %}
-                <option value="{{ e }}" {{ 'selected' if e == a.employee_name }}>{{ e }}</option>
+                <option value="{{ e }}" {{ 'selected' if e == a.employee_name and not a.partner_id }}>{{ e }}</option>
                 {% endfor %}
+                {% if assignable_partners or a.partner_id %}
+                <optgroup label="Подрядчики (партнёры тюнинга)">
+                  {% set partner_listed = [] %}
+                  {% for p in assignable_partners %}
+                  {% if p.id == a.partner_id %}{% set _ = partner_listed.append(1) %}{% endif %}
+                  <option value="partner:{{ p.id }}" {{ 'selected' if p.id == a.partner_id }}>{{ p.client_name or p.phone }}</option>
+                  {% endfor %}
+                  {% if a.partner_id and not partner_listed %}
+                  <option value="partner:{{ a.partner_id }}" selected>{{ a.employee_name }}</option>
+                  {% endif %}
+                </optgroup>
+                {% endif %}
               </select>
             </form>
+            {% if a.partner_id %}<span class="status-badge status-in_progress" title="Задача поручена подрядчику — оплата вне зарплатной ведомости">Подрядчик</span>{% endif %}
             {% if a.payout_missing %}<span class="status-badge status-cancelled" title="Задача выполнена, но записи о выплате нет">Нет выплаты</span>{% endif %}
             <form action="{{ url_for('update_tuning_assignment_dates', assignment_id=a.id) }}" method="post"
                   class="board-task-dates">
@@ -175,7 +188,7 @@
               <span aria-hidden="true">ч</span>
               <button type="submit" class="btn-secondary board-task-rate-save">Сохранить</button>
             </form>
-            <div class="hint" style="margin:2px 0 0;">= {{ (a.rate * a.norm_hours)|money }} ₽{% if a.entry_id %} · выплачено{% endif %}</div>
+            <div class="hint" style="margin:2px 0 0;">= {{ (a.rate * a.norm_hours)|money }} ₽{% if a.partner_id %} · оплата подрядчику вне зарплат{% elif a.entry_id %} · выплачено{% endif %}</div>
             <details class="board-task-comment">
               <summary>{{ 'Комментарий' if a.comment else '+ Добавить комментарий' }}</summary>
               <form action="{{ url_for('update_tuning_assignment_comment', assignment_id=a.id) }}" method="post">
@@ -222,8 +235,8 @@
         <h3>Поручить задачу</h3>
         <p class="hint" id="assign-modal-description"></p>
         <div class="field field-wide">
-          <span>Сотрудники и условия</span>
-          <p class="hint" style="margin:0 0 2px;">У каждого может быть своя ставка и нормочасы — например, опытный мастер и новичок на одной задаче.</p>
+          <span>Исполнители и условия</span>
+          <p class="hint" style="margin:0 0 2px;">У каждого может быть своя ставка и нормочасы — например, опытный мастер и новичок на одной задаче. Задачу можно поручить и подрядчику из списка «Подрядчики» — его оплата идёт вне зарплат: ставка × часы = договорённая сумма.</p>
           <div id="assign-rows">
             <div class="assign-employee-row">
               <select name="employee_name[]" class="assign-row-employee" required>
@@ -231,6 +244,13 @@
                 {% for e in assignable_employees %}
                 <option value="{{ e }}">{{ e }}</option>
                 {% endfor %}
+                {% if assignable_partners %}
+                <optgroup label="Подрядчики (партнёры тюнинга)">
+                  {% for p in assignable_partners %}
+                  <option value="partner:{{ p.id }}">{{ p.client_name or p.phone }}</option>
+                  {% endfor %}
+                </optgroup>
+                {% endif %}
               </select>
               <input type="text" name="rate[]" class="assign-row-rate" inputmode="decimal" placeholder="Ставка, ₽" required>
               <input type="text" name="norm_hours[]" class="assign-row-hours" inputmode="decimal" placeholder="Нормочасы" required>
@@ -246,6 +266,13 @@
                 {% for e in assignable_employees %}
                 <option value="{{ e }}">{{ e }}</option>
                 {% endfor %}
+                {% if assignable_partners %}
+                <optgroup label="Подрядчики (партнёры тюнинга)">
+                  {% for p in assignable_partners %}
+                  <option value="partner:{{ p.id }}">{{ p.client_name or p.phone }}</option>
+                  {% endfor %}
+                </optgroup>
+                {% endif %}
               </select>
               <input type="text" name="rate[]" class="assign-row-rate" inputmode="decimal" placeholder="Ставка, ₽" required>
               <input type="text" name="norm_hours[]" class="assign-row-hours" inputmode="decimal" placeholder="Нормочасы" required>
