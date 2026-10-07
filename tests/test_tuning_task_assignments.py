@@ -1841,6 +1841,42 @@ class TuningTaskContractorLocationTests(_ContractorFixture, unittest.TestCase):
         self.assertIn("Возвращается от подрядчика", back)
         self.assertNotIn("На территории подрядчика «", back)
 
+    def calendar_flow(self, selected, day):
+        with application_module.app.app_context():
+            days, _events = application_module._shop_map_timeline(application_module.get_db(), selected)
+        (entry,) = [d for d in days if d["iso"] == day]
+        return entry["arrivals"], entry["departures"], entry["present"]
+
+    def test_leaving_for_and_coming_back_from_a_contractor_mark_the_calendar(self):
+        self.give("partner")  # away 10..13 May, back on the 14th
+        self.assertEqual(self.calendar_flow("2030-05-10", "2030-05-09"), (0, 0, 1))
+        self.assertEqual(self.calendar_flow("2030-05-10", "2030-05-10"), (0, 1, 0))  # red ▼ — leaves
+        self.assertEqual(self.calendar_flow("2030-05-10", "2030-05-12"), (0, 0, 0))
+        self.assertEqual(self.calendar_flow("2030-05-10", "2030-05-14"), (1, 0, 1))  # green ▲ — back
+
+    def test_the_calendar_page_shows_the_contractor_triangles_and_legend(self):
+        self.give("partner")
+        self.login_admin()
+        page = self.client.get("/tuning/shop-map?date=2030-05-10").get_data(as_text=True)
+        self.assertIn('<span class="out">▼1</span>', page)
+        self.assertIn("уезжают к подрядчику", page)
+        self.assertIn("возвращаются от подрядчика", page)
+        self.assertIn("▼ Уезжает к подрядчику", page)
+        back = self.client.get("/tuning/shop-map?date=2030-05-14").get_data(as_text=True)
+        self.assertIn('<span class="in">▲1</span>', back)
+        self.assertIn("▲ Возвращается от подрядчика", back)
+
+    def test_a_boat_waiting_to_be_collected_has_no_return_triangle(self):
+        self.give("partner")
+        self.set_status("done")
+        self.assertEqual(self.calendar_flow("2030-05-10", "2030-05-14"), (0, 0, 0))
+        self.set_status("handed_over")
+        (row,) = self.rows()
+        self.login_admin()
+        self.client.post(f"/tuning/assignments/{row['id']}/dates",
+                         data={"due_from": "2030-05-10", "due_to": "2030-05-14", "returned_date": "2030-05-16"})
+        self.assertEqual(self.calendar_flow("2030-05-10", "2030-05-16"), (1, 0, 1))
+
     def test_the_board_offers_the_location_choice_for_a_contractor_task(self):
         self.give("partner")
         self.login_admin()

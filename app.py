@@ -9931,6 +9931,14 @@ def _shop_map_timeline(db, selected, span_before=10, span_after=20):
                 arrivals += 1
             if boat["present_end"] == iso:
                 departures += 1
+            # a boat going to / coming back from a contractor counts like
+            # leaving / arriving, as long as it's within its stay in the shop
+            if boat["present_start"] <= iso and (boat["present_end"] is None or iso <= boat["present_end"]):
+                for period in boat["away"]:
+                    if period["start"] == iso:
+                        departures += 1
+                    if period["back"] == iso:
+                        arrivals += 1
         days.append({
             "iso": iso, "day": day.day, "month": day.month,
             "weekday": ("пн", "вт", "ср", "чт", "пт", "сб", "вс")[day.weekday()],

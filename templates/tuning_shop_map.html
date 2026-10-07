@@ -102,11 +102,11 @@
       </a>
       {% endfor %}
     </div>
-    <p class="hint shop-timeline-legend">Число под датой — лодок в цеху в этот день (лодки у подрядчика не считаются); <span class="in">▲</span> приходят (дата приемки), <span class="out">▼</span> уходят (срок исполнения).</p>
+    <p class="hint shop-timeline-legend">Число под датой — лодок в цеху в этот день (лодки у подрядчика не считаются); <span class="in">▲</span> приходят (дата приемки) или возвращаются от подрядчика, <span class="out">▼</span> уходят (срок исполнения) или уезжают к подрядчику.</p>
     {% if boats_away %}
     <ul class="shop-timeline-events shop-timeline-away">
       {% for boat in boats_away %}
-      <li class="to_partner">
+      <li class="away">
         На территории подрядчика «{{ boat.away_period.partner }}» — {% if boat.away_period.waiting %}работа выполнена, ждёт, когда её заберут{% else %}вернётся {{ boat.away_period.back|ru_date }}{% endif %}:
         <a href="{{ url_for('edit_tuning_order', order_id=boat.order_id) }}">{{ boat.client_name }} — {{ boat.boat_model }}</a>
       </li>
@@ -117,7 +117,7 @@
     <ul class="shop-timeline-events">
       {% for ev in timeline_events %}
       <li class="{{ ev.kind }}">
-        {% if ev.kind == 'arrival' %}▲ Приходит{% elif ev.kind == 'departure' %}▼ Уходит{% elif ev.kind == 'to_partner' %}↗ Уезжает к подрядчику «{{ ev.partner }}»{% else %}↙ Возвращается от подрядчика «{{ ev.partner }}»{% endif %}:
+        {% if ev.kind == 'arrival' %}▲ Приходит{% elif ev.kind == 'departure' %}▼ Уходит{% elif ev.kind == 'to_partner' %}▼ Уезжает к подрядчику «{{ ev.partner }}»{% else %}▲ Возвращается от подрядчика «{{ ev.partner }}»{% endif %}:
         <a href="{{ url_for('edit_tuning_order', order_id=ev.boat.order_id) }}">{{ ev.boat.client_name }} — {{ ev.boat.boat_model }}</a>
       </li>
       {% endfor %}
