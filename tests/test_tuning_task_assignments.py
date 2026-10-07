@@ -1313,7 +1313,7 @@ class TuningTaskEmployeeChangeTests(_TuningTaskFixture, unittest.TestCase):
             self.assertIn(f"/tuning/assignments/{self.assignment(employee)['id']}/employee", page)
 
 
-class TuningTaskContractorTests(_TuningTaskFixture, unittest.TestCase):
+class _ContractorFixture(_TuningTaskFixture):
     """A work item's task can go to a tuning partner (contractor) instead of
     an employee: stored with partner_id, no payroll, no employee schedule."""
 
@@ -1373,6 +1373,7 @@ class TuningTaskContractorTests(_TuningTaskFixture, unittest.TestCase):
             response = self.assign_many(rows)
         return response, notifier
 
+class TuningTaskContractorTests(_ContractorFixture, unittest.TestCase):
     def test_a_task_can_be_given_to_a_partner(self):
         response, notifier = self.assign_quietly([(self.partner_key, 5000, 1)])
         self.assertEqual(response.status_code, 302)
@@ -1522,6 +1523,108 @@ class TuningTaskContractorTests(_TuningTaskFixture, unittest.TestCase):
         self.login_admin()
         page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
         self.assertIn("Новое Название", page)
+
+
+class TuningTaskContractorCostTests(_ContractorFixture, unittest.TestCase):
+    """The contractor's single cost is a project expense in Аналитика."""
+
+    def setUp(self):
+        super().setUp()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.project_id = db.execute(
+                "INSERT INTO projects (name, tuning_order_id, created_at) VALUES ('Подряд', ?, "
+                "'2026-09-01 10:00')", (self.order_id,),
+            ).lastrowid
+            db.commit()
+
+    def tearDown(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM projects WHERE tuning_order_id = ?", (self.order_id,))
+            db.commit()
+        super().tearDown()
+
+    def expense(self):
+        with application_module.app.app_context():
+            return application_module._project_totals(application_module.get_db(), self.project_id)[1]
+
+    def test_the_cost_is_one_amount_whatever_hours_are_posted(self):
+        self.assign_quietly([(self.partner_key, 5000, 7)])
+        (row,) = self.rows()
+        self.assertEqual((row["rate"], row["norm_hours"]), (5000, 1))
+
+    def test_a_contractor_row_needs_no_hours_field_at_all(self):
+        self.login_admin()
+        self.client.post(
+            f"/tuning/{self.order_id}/item/{self.item_id}/assign",
+            data={"employee_name[]": self.partner_key, "rate[]": "4200", "comment": ""},
+        )
+        (row,) = self.rows()
+        self.assertEqual((row["rate"], row["norm_hours"]), (4200, 1))
+
+    def test_the_cost_is_added_to_the_project_expenses(self):
+        before = self.expense()
+        self.assign_quietly([(self.partner_key, 5000, 1), (self.EMPLOYEE_A, 1000, 2)])
+        self.assertEqual(self.expense() - before, 5000)  # an employee's pay waits for "done"
+
+    def test_the_cost_follows_the_task_edit_revoke_and_reject(self):
+        self.assign_quietly([(self.partner_key, 5000, 1)])
+        (row,) = self.rows()
+        self.login_admin()
+        self.client.post(f"/tuning/assignments/{row['id']}/rate", data={"rate": "6500"})
+        self.assertEqual(self.expense(), 6500)
+        self.client.post(f"/tuning/assignments/{row['id']}/rate", data={"rate": "0"})
+        self.assertEqual(self.expense(), 6500)  # a contractor's cost can't be zero
+        self.client.post(f"/tuning/assignments/{row['id']}/status", data={"status": "rejected"})
+        self.assertEqual(self.expense(), 0)
+        self.client.post(f"/tuning/assignments/{row['id']}/status", data={"status": "accepted"})
+        self.assertEqual(self.expense(), 6500)
+        self.client.post(f"/tuning/assignments/{row['id']}/revoke")
+        self.assertEqual(self.expense(), 0)
+
+    def test_moving_an_employee_task_to_a_partner_turns_pay_into_one_cost(self):
+        self.assign_quietly([(self.EMPLOYEE_A, 1000, 3)])
+        (row,) = self.rows()
+        self.login_admin()
+        with mock.patch.object(application_module, "send_telegram_notification_to_employee"):
+            self.client.post(f"/tuning/assignments/{row['id']}/employee", data={"employee_name": self.partner_key})
+        (row,) = self.rows()
+        self.assertEqual((row["rate"], row["norm_hours"]), (3000, 1))
+        self.assertEqual(self.expense(), 3000)
+
+    def test_the_project_page_lists_the_contractor_cost(self):
+        self.assign_quietly([(self.partner_key, 5000, 1)])
+        self.login_admin()
+        page = self.client.get(f"/analytics/projects/{self.project_id}").get_data(as_text=True)
+        self.assertIn("Подрядчики", page)
+        self.assertIn("Мастерская Подряд", page)
+        self.assertIn("5", page)
+
+    def test_the_projects_list_and_month_totals_count_it(self):
+        self.assign_quietly([(self.partner_key, 5000, 1)])
+        self.login_admin()
+        response = self.client.get("/analytics/projects")
+        self.assertEqual(response.status_code, 200)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            costs = application_module._project_contractor_costs(db, self.project_id)
+        self.assertEqual([(c["partner_name"], c["amount"]) for c in costs], [("Мастерская Подряд", 5000)])
+
+    def test_the_item_profitability_subtracts_the_contractor(self):
+        self.assign_quietly([(self.partner_key, 500, 1)])
+        with application_module.app.app_context():
+            (row,) = application_module._item_profitability(application_module.get_db(), self.order_id)
+        self.assertEqual(row["contractor_expense"], 500)
+        self.assertEqual(row["profit"], row["price"] - 500)
+
+    def test_the_board_shows_one_cost_field_for_a_contractor(self):
+        self.assign_quietly([(self.partner_key, 5000, 1)])
+        self.login_admin()
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn('aria-label="Стоимость, ₽"', page)
+        self.assertIn("Расход проекта: 5", page)
+        self.assertIn("syncAssignRowKind", page)
 
 
 if __name__ == "__main__":

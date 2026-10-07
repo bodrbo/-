@@ -11693,10 +11693,13 @@ def assign_tuning_item(order_id, item_id):
             rate = float(raw_rates[i].strip().replace(",", "."))
         except (IndexError, ValueError):
             continue
-        try:
-            hours = float(raw_hours[i].strip().replace(",", "."))
-        except (IndexError, ValueError):
-            continue
+        if partner is not None:
+            hours = 1.0  # a contractor has one agreed cost, not rate x hours
+        else:
+            try:
+                hours = float(raw_hours[i].strip().replace(",", "."))
+            except (IndexError, ValueError):
+                continue
         if rate <= 0 or hours <= 0:
             continue
         if partner is None:
@@ -11949,23 +11952,30 @@ def update_tuning_assignment_terms(assignment_id):
     board = url_for("tuning_order_board", order_id=assignment["order_id"]) + (
         f"#board-work-{assignment['item_id']}"
     )
+    contractor = bool(assignment["partner_id"])
     try:
         rate = float(request.form.get("rate", "").strip().replace(",", "."))
-        hours = float(request.form.get("norm_hours", "").strip().replace(",", "."))
+        hours = 1.0 if contractor else float(request.form.get("norm_hours", "").strip().replace(",", "."))
     except ValueError:
         rate = hours = None
     # an administrator's task has no rate (salaried) — only the hours are set
     rate_floor_ok = rate is not None and (
-        rate > 0 or (rate == 0 and _employee_is_administrator(db, assignment["employee_name"]))
+        rate > 0 or (
+            rate == 0 and not contractor
+            and _employee_is_administrator(db, assignment["employee_name"])
+        )
     )
     if not rate_floor_ok or hours is None or hours <= 0:
-        session["tuning_board_error"] = "Ставка и нормочасы должны быть числами больше нуля."
+        session["tuning_board_error"] = (
+            "Стоимость должна быть числом больше нуля." if contractor
+            else "Ставка и нормочасы должны быть числами больше нуля."
+        )
         return redirect(board)
     db.execute(
         "UPDATE tuning_item_assignments SET rate = ?, norm_hours = ? WHERE id = ?",
         (rate, hours, assignment_id),
     )
-    notice = "Нормировка обновлена."
+    notice = "Стоимость обновлена." if contractor else "Нормировка обновлена."
     tuning_schedule_services.sync_assignment_hours(db, assignment_id, hours)
     entry = None
     if assignment["entry_id"]:
@@ -12115,6 +12125,7 @@ def _hand_task_to_partner(db, assignment, partner):
     status = "done" if assignment["assignment_status"] == "done" else "accepted"
     db.execute(
         "UPDATE tuning_item_assignments SET employee_name = ?, partner_id = ?, "
+        "rate = rate * norm_hours, norm_hours = 1, "  # the contractor's one agreed cost
         "assignment_status = ?, responded_at = ? WHERE id = ?",
         (partner_name, partner_id, status, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), assignment_id),
     )
@@ -18767,6 +18778,28 @@ def analytics_fetch():
     return redirect(url_for("analytics_index"))
 
 
+_CONTRACTOR_COST_FROM = (
+    "FROM tuning_item_assignments tia "
+    "JOIN tuning_order_items ti ON ti.id = tia.item_id "
+    "JOIN projects p ON p.tuning_order_id = ti.order_id "
+    "WHERE tia.partner_id IS NOT NULL AND tia.assignment_status != 'rejected' "
+)
+
+
+def _project_contractor_costs(db, project_id):
+    """Tasks a project's works were handed to tuning partners (contractors):
+    each one's agreed cost is a project expense from the moment it's
+    assigned, and follows the task — editing the cost or revoking the
+    task changes the project's expenses with it."""
+    return db.execute(
+        "SELECT tia.id, tia.employee_name AS partner_name, tia.rate * tia.norm_hours AS amount, "
+        "substr(tia.assigned_at, 1, 10) AS cost_date, tia.assignment_status, "
+        "ti.work_name, ti.id AS item_id "
+        + _CONTRACTOR_COST_FROM + "AND p.id = ? ORDER BY tia.assigned_at DESC, tia.id DESC",
+        (project_id,),
+    ).fetchall()
+
+
 def _project_totals(db, project_id):
     row = db.execute(
         "SELECT "
@@ -18796,8 +18829,12 @@ def _project_totals(db, project_id):
         "SELECT COALESCE(SUM(amount), 0) AS income FROM tuning_payments WHERE project_id = ?",
         (project_id,),
     ).fetchone()["income"]
+    contractors_expense = sum(c["amount"] for c in _project_contractor_costs(db, project_id))
     income = row["income"] + split_row["income"] + payments_income
-    expense = row["expense"] + split_row["expense"] + entries_expense + materials_expense
+    expense = (
+        row["expense"] + split_row["expense"] + entries_expense + materials_expense
+        + contractors_expense
+    )
     return income, expense, income - expense
 
 
@@ -18835,12 +18872,18 @@ def _item_profitability(db, order_id):
             (item["id"],),
         ).fetchone()["expense"]
         tx_expense = tx_expense_direct + tx_expense_split
+        contractor_expense = db.execute(
+            "SELECT COALESCE(SUM(rate * norm_hours), 0) AS expense FROM tuning_item_assignments "
+            "WHERE item_id = ? AND partner_id IS NOT NULL AND assignment_status != 'rejected'",
+            (item["id"],),
+        ).fetchone()["expense"]
         price_pending = bool(item["price_pending"])
         price = item["price"] if item["status"] != "removed" and not price_pending else 0.0
-        profit = price - materials_expense - tx_expense
+        profit = price - materials_expense - tx_expense - contractor_expense
         result.append({
             "item": item, "price": price, "materials_expense": materials_expense,
-            "tx_expense": tx_expense, "profit": profit, "price_pending": price_pending,
+            "tx_expense": tx_expense, "contractor_expense": contractor_expense,
+            "profit": profit, "price_pending": price_pending,
         })
     return result
 
@@ -18907,8 +18950,16 @@ def analytics_projects():
         "WHERE project_id IN (" + qualifying_projects_sql + ") AND substr(paid_at, 1, 7) = ?",
         TUNING_ANALYTICS_ORDER_STATUSES + (month_prefix,),
     ).fetchone()["income"]
+    month_contractors_expense = db.execute(
+        "SELECT COALESCE(SUM(tia.rate * tia.norm_hours), 0) AS expense " + _CONTRACTOR_COST_FROM
+        + "AND p.id IN (" + qualifying_projects_sql + ") AND substr(tia.assigned_at, 1, 7) = ?",
+        TUNING_ANALYTICS_ORDER_STATUSES + (month_prefix,),
+    ).fetchone()["expense"]
     month_income = month_row["income"] + month_payments_income
-    month_expense = month_row["expense"] + month_entries_expense + month_materials_expense
+    month_expense = (
+        month_row["expense"] + month_entries_expense + month_materials_expense
+        + month_contractors_expense
+    )
 
     return render_template(
         "analytics_projects.html", active_page="analytics", sub_page="projects",
@@ -18977,7 +19028,7 @@ def project_detail(project_id):
         "project_detail.html", active_page="analytics", sub_page="projects",
         project=project, order=order, transactions=transactions, unattached=unattached,
         work_entries=work_entries, material_writeoffs=material_writeoffs, payments=payments,
-        income=income, expense=expense, profit=profit, item_profitability=item_profitability,
+        contractor_costs=_project_contractor_costs(db, project_id), income=income, expense=expense, profit=profit, item_profitability=item_profitability,
     )
 
 

@@ -7758,6 +7758,7 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 .assign-employee-row .assign-row-employee { flex: 2 1 150px; min-width: 0; }
 .assign-employee-row .assign-row-rate,
 .assign-employee-row .assign-row-hours { flex: 1 1 90px; min-width: 0; }
+.assign-employee-row .assign-row-hours[hidden] { display: none; }
 
 .photo-modal-close {
   position: absolute;

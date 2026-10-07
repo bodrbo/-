@@ -180,15 +180,21 @@
             <form action="{{ url_for('update_tuning_assignment_terms', assignment_id=a.id) }}"
                   method="post" class="board-task-rate-form"
                   {% if a.entry_id %}onsubmit="return confirm('Задача уже оплачена — выплата будет пересчитана. Продолжить?');"{% endif %}>
+              {% if a.partner_id %}
+              <input type="text" name="rate" inputmode="decimal" class="board-task-rate-input"
+                     value="{{ (a.rate * a.norm_hours)|float|round(2) }}" aria-label="Стоимость, ₽">
+              <span aria-hidden="true">₽ — стоимость</span>
+              {% else %}
               <input type="text" name="rate" inputmode="decimal" class="board-task-rate-input"
                      value="{{ a.rate|float|round(2) }}" aria-label="Ставка, ₽">
               <span aria-hidden="true">₽ ×</span>
               <input type="text" name="norm_hours" inputmode="decimal" class="board-task-rate-input"
                      value="{{ a.norm_hours|float|round(2) }}" aria-label="Нормочасы">
               <span aria-hidden="true">ч</span>
+              {% endif %}
               <button type="submit" class="btn-secondary board-task-rate-save">Сохранить</button>
             </form>
-            <div class="hint" style="margin:2px 0 0;">= {{ (a.rate * a.norm_hours)|money }} ₽{% if a.partner_id %} · оплата подрядчику вне зарплат{% elif a.entry_id %} · выплачено{% endif %}</div>
+            <div class="hint" style="margin:2px 0 0;">{% if a.partner_id %}Расход проекта: {{ (a.rate * a.norm_hours)|money }} ₽ · оплата подрядчику вне зарплат{% else %}= {{ (a.rate * a.norm_hours)|money }} ₽{% if a.entry_id %} · выплачено{% endif %}{% endif %}</div>
             <details class="board-task-comment">
               <summary>{{ 'Комментарий' if a.comment else '+ Добавить комментарий' }}</summary>
               <form action="{{ url_for('update_tuning_assignment_comment', assignment_id=a.id) }}" method="post">
@@ -236,10 +242,10 @@
         <p class="hint" id="assign-modal-description"></p>
         <div class="field field-wide">
           <span>Исполнители и условия</span>
-          <p class="hint" style="margin:0 0 2px;">У каждого может быть своя ставка и нормочасы — например, опытный мастер и новичок на одной задаче. Задачу можно поручить и подрядчику из списка «Подрядчики» — его оплата идёт вне зарплат: ставка × часы = договорённая сумма.</p>
+          <p class="hint" style="margin:0 0 2px;">У каждого может быть своя ставка и нормочасы — например, опытный мастер и новичок на одной задаче. Задачу можно поручить и подрядчику из списка «Подрядчики»: вместо ставки и нормочасов указывается одна стоимость — она попадает в расходы проекта в «Аналитике».</p>
           <div id="assign-rows">
             <div class="assign-employee-row">
-              <select name="employee_name[]" class="assign-row-employee" required>
+              <select name="employee_name[]" class="assign-row-employee" required onchange="syncAssignRowKind(this)">
                 <option value="" selected disabled>Сотрудник…</option>
                 {% for e in assignable_employees %}
                 <option value="{{ e }}">{{ e }}</option>
@@ -261,7 +267,7 @@
           </div>
           <template id="assign-row-template">
             <div class="assign-employee-row">
-              <select name="employee_name[]" class="assign-row-employee" required>
+              <select name="employee_name[]" class="assign-row-employee" required onchange="syncAssignRowKind(this)">
                 <option value="" selected disabled>Сотрудник…</option>
                 {% for e in assignable_employees %}
                 <option value="{{ e }}">{{ e }}</option>
@@ -310,6 +316,26 @@
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 <script>
+// A contractor (partner) has one agreed cost instead of rate x norm-hours:
+// the hours field is hidden (it travels as 1) and the rate field becomes the cost.
+function syncAssignRowKind(select) {
+  var row = select.closest('.assign-employee-row');
+  var contractor = select.value.indexOf('partner:') === 0;
+  var rate = row.querySelector('.assign-row-rate');
+  var hours = row.querySelector('.assign-row-hours');
+  rate.placeholder = contractor ? 'Стоимость, ₽' : 'Ставка, ₽';
+  rate.setAttribute('aria-label', rate.placeholder);
+  hours.hidden = contractor;
+  hours.required = !contractor;
+  if (contractor) {
+    if (!hours.value) hours.dataset.auto = '1';
+    hours.value = '1';
+  } else if (hours.dataset.auto) {
+    hours.value = '';
+    delete hours.dataset.auto;
+  }
+}
+
 function openAssignModal(actionUrl, description) {
   var form = document.getElementById('assign-form');
   form.action = actionUrl;
@@ -320,6 +346,7 @@ function openAssignModal(actionUrl, description) {
       row.querySelector('.assign-row-employee').value = '';
       row.querySelector('.assign-row-rate').value = '';
       row.querySelector('.assign-row-hours').value = '';
+      syncAssignRowKind(row.querySelector('.assign-row-employee'));
     } else {
       row.remove();
     }

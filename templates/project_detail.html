@@ -104,6 +104,7 @@
             <th>Цена</th>
             <th>Материалы</th>
             <th>Транз. расход</th>
+            <th>Подрядчики</th>
             <th>Прибыль</th>
           </tr>
         </thead>
@@ -116,6 +117,7 @@
             </td>
             <td class="amount">{{ row.materials_expense|money }}</td>
             <td class="amount">{{ row.tx_expense|money }}</td>
+            <td class="amount">{{ row.contractor_expense|money }}</td>
             {% if row.price_pending %}
             <td class="amount work-price-pending">Ждёт расчёта</td>
             {% else %}
@@ -258,6 +260,37 @@
     </div>
     {% else %}
     <p class="hint">К проекту пока не привязано ни одной работы. Привязать работу можно при её добавлении в разделе «Зарплаты».</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Подрядчики</h2>
+    {% if contractor_costs %}
+    <div class="table-scroll">
+      <table class="records">
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th>Подрядчик</th>
+            <th>Работа</th>
+            <th>Сумма</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in contractor_costs %}
+          <tr>
+            <td class="muted">{{ c.cost_date|ru_date }}</td>
+            <td>{{ c.partner_name }}</td>
+            <td>{{ c.work_name }}</td>
+            <td class="amount">{{ c.amount|money }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">Стоимость работ, поручённых подрядчикам, попадает в расходы проекта в момент поручения. Изменить сумму можно на доске задач заказа.</p>
+    {% else %}
+    <p class="hint">Работы подрядчикам по этому проекту не поручались.</p>
     {% endif %}
   </section>
 
