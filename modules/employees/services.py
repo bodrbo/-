@@ -11,6 +11,7 @@ from werkzeug.security import generate_password_hash
 from . import repository
 from .constants import (
     ADMIN_NAME_MAX_LENGTH,
+    ADMIN_POSITION,
     EXCURSION_SCHEDULE_POSITIONS,
     MAX_WORKDAYS_PER_REQUEST,
     TUNING_SCHEDULE_POSITIONS,
@@ -507,6 +508,46 @@ def legacy_admins(db):
     ]
 
 
+def ensure_admin_employee(db, admin_id):
+    """The employees record the main administrator is scheduled under,
+    created on first use (name = his displayed name, position «Администратор»,
+    no personal cabinet — he still logs in through admin_accounts). Returns
+    (employee_id, None) or (None, error)."""
+    admin = repository.get_legacy_admin(db, admin_id)
+    if admin is None:
+        return None, "Учётная запись администратора не найдена."
+    if admin["schedule_employee_id"]:
+        employee = repository.get_employee(db, admin["schedule_employee_id"])
+        if employee is not None:
+            return employee["id"], None
+    if repository.get_employee_by_name(db, admin["admin_name"], include_deleted=True) is not None:
+        return None, (
+            f"Сотрудник с именем «{admin['admin_name']}» уже есть. "
+            "Измените имя администратора, чтобы назначать ему рабочие дни."
+        )
+    employee_id = repository.create_admin_schedule_employee(
+        db, admin_id, admin["admin_name"], ADMIN_POSITION, current_timestamp()
+    )
+    return employee_id, None
+
+
+def add_admin_workdays(db, admin_id, schedule, raw_dates, raw_start, raw_end, adders):
+    """«Рабочие дни» of the main administrator — the same as for any employee.
+    The input is checked first, so a bad request never creates his record."""
+    if schedule not in WORKDAY_SCHEDULES or schedule not in adders:
+        return False, "Выберите расписание: тюнинг или экскурсии."
+    _days, error = _parse_workdays(raw_dates)
+    if error:
+        return False, error
+    _hours, error = _clean_hours(raw_start, raw_end)
+    if error:
+        return False, error
+    employee_id, error = ensure_admin_employee(db, admin_id)
+    if error:
+        return False, error
+    return add_workdays(db, employee_id, schedule, raw_dates, raw_start, raw_end, adders)
+
+
 def update_legacy_admin(db, admin_id, raw_name, raw_login, raw_password):
     """Edit the main administrator account: displayed name, login, password."""
     admin = repository.get_legacy_admin(db, admin_id)
@@ -533,6 +574,10 @@ def update_legacy_admin(db, admin_id, raw_name, raw_login, raw_password):
         if error:
             return False, error, None
         password_hash = generate_password_hash(password, method="pbkdf2:sha256")
+    if admin["schedule_employee_id"] and name != admin["admin_name"]:
+        other = repository.get_employee_by_name(db, name, include_deleted=True)
+        if other is not None and other["id"] != admin["schedule_employee_id"]:
+            return False, "Сотрудник с таким именем уже есть — выберите другое имя.", None
 
     changes = []
     if name != admin["admin_name"]:

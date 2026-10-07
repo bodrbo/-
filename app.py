@@ -3571,6 +3571,11 @@ def init_db(db_path=None, include_bootstrap_data=True):
         conn.execute("ALTER TABLE admin_accounts ADD COLUMN telegram_chat_id TEXT")
     if "employee_id" not in admin_account_cols:
         conn.execute("ALTER TABLE admin_accounts ADD COLUMN employee_id INTEGER")
+    if "schedule_employee_id" not in admin_account_cols:
+        # The main administrator logs in through admin_accounts (employee_id
+        # stays NULL on purpose), so for the work schedules — which work with
+        # employees — he gets a separate employees record, linked here.
+        conn.execute("ALTER TABLE admin_accounts ADD COLUMN schedule_employee_id INTEGER")
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_accounts_employee_id "
         "ON admin_accounts (employee_id)"

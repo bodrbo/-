@@ -8,7 +8,11 @@ def list_employees(db):
         " WHERE team_accounts.employee_id = employees.id ORDER BY id LIMIT 1) AS account_id, "
         "(SELECT username FROM team_accounts "
         " WHERE team_accounts.employee_id = employees.id ORDER BY id LIMIT 1) AS login "
-        "FROM employees WHERE employees.deleted_at IS NULL ORDER BY employees.name"
+        "FROM employees WHERE employees.deleted_at IS NULL "
+        # the main administrator's schedule record is shown as his own card
+        "AND employees.id NOT IN (SELECT schedule_employee_id FROM admin_accounts "
+        "                         WHERE schedule_employee_id IS NOT NULL) "
+        "ORDER BY employees.name"
     ).fetchall()
 
 
@@ -516,21 +520,50 @@ def list_legacy_admins(db):
     """The main administrator login(s): admin_accounts rows that are not
     bridged from an employee."""
     return db.execute(
-        "SELECT id, admin_name, username FROM admin_accounts "
+        "SELECT id, admin_name, username, schedule_employee_id FROM admin_accounts "
         "WHERE employee_id IS NULL ORDER BY id"
     ).fetchall()
 
 
 def get_legacy_admin(db, admin_id):
     return db.execute(
-        "SELECT id, admin_name, username FROM admin_accounts "
+        "SELECT id, admin_name, username, schedule_employee_id FROM admin_accounts "
         "WHERE id = ? AND employee_id IS NULL",
         (admin_id,),
     ).fetchone()
 
 
+def create_admin_schedule_employee(db, admin_id, name, position, timestamp):
+    """The employees record the main administrator is scheduled under; it
+    holds the position «Администратор» (so both schedules accept him) and has
+    no personal cabinet — he keeps logging in through admin_accounts."""
+    try:
+        employee_id = db.execute(
+            "INSERT INTO employees (name, created_at, deleted_at) VALUES (?, ?, NULL)",
+            (name, timestamp),
+        ).lastrowid
+        db.execute(
+            "INSERT INTO employee_positions (employee_id, position, created_at) VALUES (?, ?, ?)",
+            (employee_id, position, timestamp),
+        )
+        db.execute(
+            "UPDATE admin_accounts SET schedule_employee_id = ? WHERE id = ?", (employee_id, admin_id)
+        )
+        db.commit()
+        return employee_id
+    except Exception:
+        db.rollback()
+        raise
+
+
 def update_legacy_admin(db, admin_id, name, username, password_hash):
     try:
+        admin = db.execute(
+            "SELECT admin_name, schedule_employee_id FROM admin_accounts WHERE id = ?", (admin_id,)
+        ).fetchone()
+        if admin is not None and admin["schedule_employee_id"] and admin["admin_name"] != name:
+            # keep the schedule record (and all history keyed by its name) in step
+            rename_employee_everywhere(db, admin["schedule_employee_id"], admin["admin_name"], name)
         db.execute(
             "UPDATE admin_accounts SET admin_name = ?, username = ? WHERE id = ?",
             (name, username, admin_id),

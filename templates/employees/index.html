@@ -182,6 +182,9 @@
         <div class="employee-card-actions">
           <span class="connection-badge connected"><i></i> Основной администратор</span>
           {% if admin.id == current_admin_id %}<span class="connection-badge"><i></i> Это вы</span>{% endif %}
+          <button type="button" class="employee-secondary-btn employee-workdays-open"
+                  data-action="{{ url_for('employees.add_admin_workdays', admin_id=admin.id) }}"
+                  data-name="{{ admin.admin_name }}" data-tuning="1" data-excursion="1">Рабочие дни</button>
         </div>
       </header>
       <details class="employee-edit">

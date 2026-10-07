@@ -111,6 +111,19 @@ def create_employees_blueprint(
         )
         return redirect_with_notice(message, success, f"employee-{employee_id}")
 
+    @blueprint.route("/employees/admins/<int:admin_id>/workdays", methods=["POST"])
+    @admin_login_required
+    def add_admin_workdays(admin_id):
+        success, message = services.add_admin_workdays(
+            get_db(), admin_id,
+            request.form.get("schedule", ""),
+            request.form.get("dates", ""),
+            request.form.get("shift_start", ""),
+            request.form.get("shift_end", ""),
+            workday_adders or {},
+        )
+        return redirect_with_notice(message, success, f"admin-{admin_id}")
+
     @blueprint.route("/employees/<int:employee_id>/delete", methods=["POST"])
     @admin_login_required
     def delete_employee(employee_id):
