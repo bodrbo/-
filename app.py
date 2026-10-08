@@ -478,6 +478,10 @@ def _tuning_order_items_with_assignments(db, order_id):
         for assignment in item["assignments"]:
             if assignment["partner_id"] and assignment["partner_name"]:
                 assignment["employee_name"] = assignment["partner_name"]  # follows a renamed partner
+            assignment["can_remind"] = (
+                not assignment["partner_id"]
+                and _employee_is_administrator(db, assignment["employee_name"])
+            )
             assignment["reminders"] = db.execute(
                 "SELECT r.*, COALESCE(e.name, a.admin_name) AS remind_recipient_name "
                 "FROM tuning_task_reminders r "
@@ -2593,13 +2597,22 @@ def init_db(db_path=None, include_bootstrap_data=True):
         "CREATE INDEX IF NOT EXISTS idx_tuning_note_reminders_employee "
         "ON tuning_order_note_reminders (remind_employee_id)"
     )
-    # Telegram reminders on order tasks (tuning_item_assignments) — the same
+    # Telegram reminders on tasks of administrators — an order task
+    # (assignment_id) or a free tuning-schedule task (schedule_task_id); same
     # idea and the same delivery cron as the order-note reminders above.
+    task_reminder_cols = {
+        row[1]: row for row in conn.execute("PRAGMA table_info(tuning_task_reminders)").fetchall()
+    }
+    if task_reminder_cols and ("schedule_task_id" not in task_reminder_cols
+                               or task_reminder_cols["assignment_id"][3]):
+        # first version had assignment_id NOT NULL and no schedule_task_id
+        conn.execute("ALTER TABLE tuning_task_reminders RENAME TO tuning_task_reminders_old")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tuning_task_reminders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            assignment_id INTEGER NOT NULL,
+            assignment_id INTEGER,
+            schedule_task_id INTEGER,
             remind_admin_id INTEGER,
             remind_employee_id INTEGER,
             remind_at TEXT NOT NULL,
@@ -2609,9 +2622,23 @@ def init_db(db_path=None, include_bootstrap_data=True):
         )
         """
     )
+    if conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='tuning_task_reminders_old'"
+    ).fetchone():
+        conn.execute(
+            "INSERT INTO tuning_task_reminders (id, assignment_id, remind_admin_id, remind_employee_id, "
+            "remind_at, message, sent_at, created_at) "
+            "SELECT id, assignment_id, remind_admin_id, remind_employee_id, remind_at, message, sent_at, "
+            "created_at FROM tuning_task_reminders_old"
+        )
+        conn.execute("DROP TABLE tuning_task_reminders_old")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_tuning_task_reminders_assignment "
         "ON tuning_task_reminders (assignment_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tuning_task_reminders_schedule_task "
+        "ON tuning_task_reminders (schedule_task_id)"
     )
     conn.execute(
         """
@@ -5958,6 +5985,7 @@ app.register_blueprint(
         reassign_order_assignment=lambda db, assignment_id, employee_name: (
             _reassign_tuning_assignment(db, assignment_id, employee_name)[:2]
         ),
+        reminder_recipients=lambda db: _note_reminder_recipients(db),
     )
 )
 
@@ -13168,68 +13196,112 @@ def cancel_note_reminder(order_id, note_id, reminder_id):
 TASK_REMINDER_MESSAGE_MAX_LENGTH = 500
 
 
-@app.route("/tuning/assignments/<int:assignment_id>/reminders", methods=["POST"])
-@admin_login_required
-def add_task_reminder(assignment_id):
-    """Telegram reminder on an order task, set by an administrator for any
-    employee or administrator — same recipient picker, time input and
-    delivery cron as the order-note reminders."""
-    db = get_db()
-    assignment = db.execute(
-        "SELECT tia.id, tia.item_id, ti.order_id FROM tuning_item_assignments tia "
-        "JOIN tuning_order_items ti ON ti.id = tia.item_id WHERE tia.id = ?",
-        (assignment_id,),
-    ).fetchone()
-    if assignment is None:
-        return redirect(url_for("tuning_index"))
-    board = url_for("tuning_order_board", order_id=assignment["order_id"]) + (
-        f"#board-work-{assignment['item_id']}"
-    )
-    remind_employee_id, remind_admin_id = _parse_reminder_recipient(db, request.form)
-    remind_at = _parse_reminder_time(request.form.get("remind_at", ""))
-    message = request.form.get("message", "").strip()
-    legacy_admin_id = remind_admin_id or session.get("admin_id")
-    if not (remind_employee_id or remind_admin_id) or not legacy_admin_id:
-        session["tuning_board_error"] = "Выберите, кому напомнить."
-    elif remind_at is None:
-        session["tuning_board_error"] = "Укажите дату и время напоминания."
-    elif len(message) > TASK_REMINDER_MESSAGE_MAX_LENGTH:
-        session["tuning_board_error"] = (
-            f"Текст напоминания слишком длинный (максимум {TASK_REMINDER_MESSAGE_MAX_LENGTH} символов)."
-        )
-    else:
-        db.execute(
-            "INSERT INTO tuning_task_reminders "
-            "(assignment_id, remind_admin_id, remind_employee_id, remind_at, message, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (assignment_id, legacy_admin_id, remind_employee_id, remind_at, message,
-             dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
-        )
-        db.commit()
-        session["tuning_board_notice"] = "Напоминание создано."
-    return redirect(board)
+def _task_reminder_target(db, form):
+    """The task a reminder form is about -> (assignment_id, schedule_task_id,
+    executor_name, is_contractor) — exactly one of the ids is set — or None.
+    A schedule task that is linked to an order task is stored against the
+    order task, so the reminder shows on the board and in the schedule."""
+    assignment_id = form.get("assignment_id", "").strip()
+    schedule_task_id = form.get("schedule_task_id", "").strip()
+    if schedule_task_id.isdigit():
+        task = db.execute(
+            "SELECT id, assignment_id, employee_name FROM tuning_schedule_tasks WHERE id = ?",
+            (int(schedule_task_id),),
+        ).fetchone()
+        if task is None:
+            return None
+        if task["assignment_id"] is None:
+            return None, task["id"], task["employee_name"], False
+        assignment_id = str(task["assignment_id"])
+    if assignment_id.isdigit():
+        row = db.execute(
+            "SELECT id, employee_name, partner_id FROM tuning_item_assignments WHERE id = ?",
+            (int(assignment_id),),
+        ).fetchone()
+        if row is not None:
+            return row["id"], None, row["employee_name"], bool(row["partner_id"])
+    return None
 
 
-@app.route("/tuning/assignments/<int:assignment_id>/reminders/<int:reminder_id>/cancel", methods=["POST"])
-@admin_login_required
-def cancel_task_reminder(assignment_id, reminder_id):
-    db = get_db()
-    assignment = db.execute(
+def _task_reminder_redirect(db, form, fallback_assignment_id=None):
+    """Back to where the reminder form was: the tuning schedule day, or the
+    order's task board at the task's work."""
+    if form.get("return_to") == "schedule":
+        return redirect(url_for("tuning_schedule.index", date=form.get("return_date") or None))
+    assignment_id = form.get("assignment_id", "").strip() or fallback_assignment_id
+    row = db.execute(
         "SELECT tia.item_id, ti.order_id FROM tuning_item_assignments tia "
         "JOIN tuning_order_items ti ON ti.id = tia.item_id WHERE tia.id = ?",
         (assignment_id,),
-    ).fetchone()
-    db.execute(
-        "DELETE FROM tuning_task_reminders WHERE id = ? AND assignment_id = ? AND sent_at IS NULL",
-        (reminder_id, assignment_id),
-    )
-    db.commit()
-    if assignment is None:
+    ).fetchone() if str(assignment_id or "").isdigit() else None
+    if row is None:
         return redirect(url_for("tuning_index"))
     return redirect(
-        url_for("tuning_order_board", order_id=assignment["order_id"])
-        + f"#board-work-{assignment['item_id']}"
+        url_for("tuning_order_board", order_id=row["order_id"]) + f"#board-work-{row['item_id']}"
     )
+
+
+def _flash_task_reminder(form, message, ok):
+    if form.get("return_to") == "schedule":
+        session["schedule_notice"] = {"message": message, "type": "success" if ok else "error"}
+    else:
+        session["tuning_board_notice" if ok else "tuning_board_error"] = message
+
+
+@app.route("/tuning/task-reminders", methods=["POST"])
+@admin_login_required
+def add_task_reminder():
+    """Telegram reminder on a task given to an administrator — an order task
+    (assignment_id) or a tuning-schedule task (schedule_task_id), with or
+    without a project. Set by an administrator for any employee or
+    administrator; same recipient picker, time input and delivery cron as
+    the order-note reminders."""
+    db = get_db()
+    form = request.form
+    target = _task_reminder_target(db, form)
+    if target is None:
+        return redirect(url_for("tuning_index"))
+    assignment_id, schedule_task_id, executor, is_contractor = target
+    redirect_to = _task_reminder_redirect(db, form, assignment_id)
+    remind_employee_id, remind_admin_id = _parse_reminder_recipient(db, form)
+    remind_at = _parse_reminder_time(form.get("remind_at", ""))
+    message = form.get("message", "").strip()
+    legacy_admin_id = remind_admin_id or session.get("admin_id")
+    if is_contractor or not _employee_is_administrator(db, executor):
+        error = "Напоминания создаются только для задач, поручённых администратору."
+    elif not (remind_employee_id or remind_admin_id) or not legacy_admin_id:
+        error = "Выберите, кому напомнить."
+    elif remind_at is None:
+        error = "Укажите дату и время напоминания."
+    elif len(message) > TASK_REMINDER_MESSAGE_MAX_LENGTH:
+        error = f"Текст напоминания слишком длинный (максимум {TASK_REMINDER_MESSAGE_MAX_LENGTH} символов)."
+    else:
+        error = None
+    if error:
+        _flash_task_reminder(form, error, False)
+        return redirect_to
+    db.execute(
+        "INSERT INTO tuning_task_reminders "
+        "(assignment_id, schedule_task_id, remind_admin_id, remind_employee_id, remind_at, message, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (assignment_id, schedule_task_id, legacy_admin_id, remind_employee_id, remind_at, message,
+         dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+    )
+    db.commit()
+    _flash_task_reminder(form, "Напоминание создано.", True)
+    return redirect_to
+
+
+@app.route("/tuning/task-reminders/<int:reminder_id>/cancel", methods=["POST"])
+@admin_login_required
+def cancel_task_reminder(reminder_id):
+    db = get_db()
+    row = db.execute(
+        "SELECT assignment_id FROM tuning_task_reminders WHERE id = ?", (reminder_id,)
+    ).fetchone()
+    db.execute("DELETE FROM tuning_task_reminders WHERE id = ? AND sent_at IS NULL", (reminder_id,))
+    db.commit()
+    return _task_reminder_redirect(db, request.form, row["assignment_id"] if row else None)
 
 
 @app.route("/tuning/<int:order_id>/products/add", methods=["POST"])
@@ -22020,26 +22092,31 @@ def _send_due_task_reminders(db, now):
     """Sends the order-task reminders whose time has come (the same cron
     run as the note reminders) and marks them sent; returns how many."""
     due = db.execute(
-        "SELECT r.*, ti.order_id, ti.work_name, tia.employee_name AS task_executor, "
-        "tia.due_from, tia.due_to, tia.assignment_status, o.client_name, o.equipment_type, "
+        "SELECT r.*, o.id AS order_id, "
+        "COALESCE(ti.work_name, st.title) AS work_name, "
+        "COALESCE(tia.employee_name, st.employee_name) AS task_executor, "
+        "tia.due_from, tia.due_to, o.client_name, o.equipment_type, "
         "o.boat_model, o.boat_registration_number, o.motor_model, o.motor_serial_number, "
         "e.name AS remind_employee_name "
         "FROM tuning_task_reminders r "
-        "JOIN tuning_item_assignments tia ON tia.id = r.assignment_id "
-        "JOIN tuning_order_items ti ON ti.id = tia.item_id "
-        "JOIN tuning_orders o ON o.id = ti.order_id "
+        "LEFT JOIN tuning_item_assignments tia ON tia.id = r.assignment_id "
+        "LEFT JOIN tuning_schedule_tasks st ON st.id = r.schedule_task_id "
+        "LEFT JOIN tuning_order_items ti ON ti.id = tia.item_id "
+        "LEFT JOIN tuning_orders o ON o.id = COALESCE(ti.order_id, st.order_id) "
         "LEFT JOIN employees e ON e.id = r.remind_employee_id "
-        "WHERE r.sent_at IS NULL AND r.remind_at <= ?",
+        "WHERE r.sent_at IS NULL AND r.remind_at <= ? "
+        "AND (tia.id IS NOT NULL OR st.id IS NOT NULL)",
         (now,),
     ).fetchall()
     sent = 0
     for r in due:
-        lines = [
-            f"⏰ <b>Напоминание по задаче: {html.escape(r['work_name'])}</b>",
-            f"Заказ №{r['order_id']} · {html.escape(r['client_name'])} "
-            f"({html.escape(tuning_equipment_label(r))})",
-            f"Исполнитель: {html.escape(r['task_executor'])}",
-        ]
+        lines = [f"⏰ <b>Напоминание по задаче: {html.escape(r['work_name'] or '')}</b>"]
+        if r["order_id"] is not None:  # a task without a project has no order line
+            lines.append(
+                f"Заказ №{r['order_id']} · {html.escape(r['client_name'])} "
+                f"({html.escape(tuning_equipment_label(r))})"
+            )
+        lines.append(f"Исполнитель: {html.escape(r['task_executor'] or '')}")
         due_text = format_task_due(r["due_from"], r["due_to"])
         if due_text:
             lines.append(f"Срок: {due_text}")

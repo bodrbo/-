@@ -127,6 +127,21 @@ def is_administrator(db, employee_name):
     ).fetchone() is not None
 
 
+def list_task_reminders(db, assignment_id, schedule_task_id):
+    """Telegram reminders set on a task: against its order task when it has
+    one (they then show on the order board too), else against the free
+    schedule task itself."""
+    return db.execute(
+        "SELECT r.*, COALESCE(e.name, a.admin_name) AS remind_recipient_name "
+        "FROM tuning_task_reminders r "
+        "LEFT JOIN employees e ON e.id = r.remind_employee_id "
+        "LEFT JOIN admin_accounts a ON a.id = r.remind_admin_id "
+        "WHERE (? IS NOT NULL AND r.assignment_id = ?) OR r.schedule_task_id = ? "
+        "ORDER BY r.remind_at, r.id",
+        (assignment_id, assignment_id, schedule_task_id),
+    ).fetchall()
+
+
 def get_task_by_assignment(db, assignment_id):
     return db.execute(
         "SELECT * FROM tuning_schedule_tasks WHERE assignment_id = ?", (assignment_id,)

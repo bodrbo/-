@@ -21,6 +21,7 @@ def create_tuning_schedule_blueprint(
     pay_free_task,
     assignment_status_choices,
     reassign_order_assignment=None,
+    reminder_recipients=None,
 ):
     blueprint = Blueprint("tuning_schedule", __name__)
     assignment_status_values = {choice["value"] for choice in assignment_status_choices}
@@ -55,6 +56,7 @@ def create_tuning_schedule_blueprint(
             next_day=(day + dt.timedelta(days=1)).isoformat(),
             today=dt.date.today().isoformat(),
             linkable_orders=repository.list_linkable_orders(db),
+            reminder_recipients=reminder_recipients(db) if reminder_recipients else [],
             assignment_statuses=assignment_status_choices,
             notice=session.pop("schedule_notice", None),
         )

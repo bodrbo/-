@@ -324,6 +324,13 @@ def calendar_view(db, day, day_crew):
         if task["employee_name"] not in cards_by_employee:
             continue
         task["is_linked"] = task["assignment_id"] is not None
+        # an administrator's task can carry Telegram reminders, with or
+        # without a project
+        task["can_remind"] = repository.is_administrator(db, task["employee_name"])
+        task["reminders"] = (
+            repository.list_task_reminders(db, task["assignment_id"], task["task_id"])
+            if task["can_remind"] else []
+        )
         if task["order_id"] is not None:
             task["equipment_label"] = (
                 (task["motor_model"] or "Мотор") if task["equipment_type"] == "motor"

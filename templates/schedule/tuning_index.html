@@ -124,6 +124,12 @@
                    onpointerdown="startTuningDrag(event, this)">
                 <div class="tuning-calendar-card-head">
                   <span class="tuning-calendar-card-time">{{ card.start_label }}–{{ card.end_label }}</span>
+                  {% if card.can_remind %}
+                  <button type="button" class="tuning-card-bell{{ ' has-reminders' if card.reminders }}"
+                          onclick="openTaskReminder({{ card.task_id }})"
+                          title="Напоминание в Telegram{{ ' (' ~ card.reminders|length ~ ')' if card.reminders }}"
+                          aria-label="Напоминание в Telegram по задаче «{{ card.title }}»">🔔{% if card.reminders %}<small>{{ card.reminders|length }}</small>{% endif %}</button>
+                  {% endif %}
                   <select class="tuning-card-status" aria-label="Статус задачи «{{ card.title }}»"
                           data-status-url="{{ url_for('tuning_schedule.set_task_status', task_id=card.task_id) }}"
                           data-current="{{ card.status }}" onchange="changeTuningCardStatus(this)">
@@ -463,8 +469,48 @@
     </form>
   </section>
 </div>
+{% for employee in day_crew %}{% for card in cards_by_employee.get(employee.name, []) %}{% if card.can_remind %}
+<div class="schedule-modal" id="taskReminderModal{{ card.task_id }}" hidden data-task-reminder-modal>
+  <div class="schedule-modal-backdrop" onclick="closeTaskReminder({{ card.task_id }})"></div>
+  <section class="schedule-modal-card task-reminder-card" role="dialog" aria-modal="true" aria-labelledby="taskReminderTitle{{ card.task_id }}">
+    <header class="schedule-modal-header">
+      <div>
+        <span>Напоминание в Telegram · {{ card.employee_name }}</span>
+        <h2 id="taskReminderTitle{{ card.task_id }}">{{ card.title }}</h2>
+      </div>
+      <button type="button" class="schedule-modal-close" onclick="closeTaskReminder({{ card.task_id }})" aria-label="Закрыть">×</button>
+    </header>
+    <div class="task-reminder-body">
+      {% with reminders=card.reminders, assignment_id=None, schedule_task_id=card.task_id, return_to='schedule', return_date=day.isoformat() %}
+      {% include '_tuning_task_reminder.html' %}
+      {% endwith %}
+    </div>
+  </section>
+</div>
+{% endif %}{% endfor %}{% endfor %}
+
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 <script>
+function openTaskReminder(taskId) {
+  var modal = document.getElementById('taskReminderModal' + taskId);
+  if (!modal) return;
+  modal.hidden = false;
+  document.body.classList.add('schedule-modal-open');
+}
+
+function closeTaskReminder(taskId) {
+  var modal = document.getElementById('taskReminderModal' + taskId);
+  if (modal) modal.hidden = true;
+  document.body.classList.remove('schedule-modal-open');
+}
+
+document.addEventListener('keydown', function (event) {
+  if (event.key !== 'Escape') return;
+  document.querySelectorAll('[data-task-reminder-modal]').forEach(function (modal) {
+    if (!modal.hidden) { modal.hidden = true; document.body.classList.remove('schedule-modal-open'); }
+  });
+});
+
 function openTuningRosterModal() {
   var modal = document.getElementById('tuningRosterModal');
   modal.hidden = false;

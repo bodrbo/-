@@ -1,0 +1,37 @@
+{# Telegram reminder on a task of an administrator — list + form.
+   Needs: reminders, reminder_recipients, and one of assignment_id / schedule_task_id;
+   optional return_to='schedule' + return_date. #}
+{% if reminders %}
+<ul class="note-reminders">
+  {% for r in reminders %}
+  <li>
+    {% if r.sent_at %}<span class="status-badge status-defect-resolved">Отправлено</span>
+    {% else %}<span class="status-badge status-defect-new">Ожидает</span>{% endif %}
+    <span>{{ r.remind_recipient_name or 'Неизвестный' }} — {{ r.remind_at[:10]|ru_date }} {{ r.remind_at[11:] }}{% if r.message %}<br><small class="muted">{{ r.message }}</small>{% endif %}</span>
+    {% if not r.sent_at %}
+    <form action="{{ url_for('cancel_task_reminder', reminder_id=r.id) }}" method="post">
+      {% if assignment_id %}<input type="hidden" name="assignment_id" value="{{ assignment_id }}">{% endif %}
+      {% if return_to %}<input type="hidden" name="return_to" value="{{ return_to }}"><input type="hidden" name="return_date" value="{{ return_date }}">{% endif %}
+      <button type="submit" class="icon-btn danger" title="Отменить напоминание" aria-label="Отменить напоминание">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l10 10M15 5L5 15"/></svg>
+      </button>
+    </form>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+<form action="{{ url_for('add_task_reminder') }}" method="post" class="board-task-reminder-form">
+  {% if assignment_id %}<input type="hidden" name="assignment_id" value="{{ assignment_id }}">{% endif %}
+  {% if schedule_task_id %}<input type="hidden" name="schedule_task_id" value="{{ schedule_task_id }}">{% endif %}
+  {% if return_to %}<input type="hidden" name="return_to" value="{{ return_to }}"><input type="hidden" name="return_date" value="{{ return_date }}">{% endif %}
+  <select name="remind_recipient" required aria-label="Кому напомнить">
+    <option value="" selected disabled>Кому напомнить…</option>
+    {% for recipient in reminder_recipients %}
+    <option value="{{ recipient.value }}">{{ recipient.name }}{{ ' · ' ~ recipient.subtitle if recipient.subtitle }}{{ '' if recipient.telegram_linked else ' (нет Telegram)' }}</option>
+    {% endfor %}
+  </select>
+  <input type="datetime-local" name="remind_at" required aria-label="Когда напомнить">
+  <textarea name="message" rows="2" maxlength="500" placeholder="Текст напоминания (необязательно)" aria-label="Текст напоминания"></textarea>
+  <button type="submit" class="btn-secondary board-task-rate-save">Напомнить</button>
+</form>

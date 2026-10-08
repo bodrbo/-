@@ -12087,6 +12087,16 @@ button.partner-open-price-save svg {
 .tuning-calendar-card-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .tuning-card-status { max-width: 62%; min-width: 0; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: rgba(255,255,255,.22); color: #fff; font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; text-overflow: ellipsis; }
 .tuning-card-status:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.tuning-card-bell { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: rgba(255,255,255,.22); color: #fff; font-size: 10px; line-height: 1; cursor: pointer; }
+.tuning-card-bell small { font-size: 9px; font-weight: 700; }
+.tuning-card-bell.has-reminders { background: rgba(255,255,255,.42); }
+.tuning-card-bell:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.task-reminder-card { width: min(520px, 100%); max-height: none; margin: auto; }
+.task-reminder-body { padding: 16px 22px 22px; display: grid; gap: 10px; }
+.task-reminder-body .board-task-reminder-form { margin-top: 0; }
+.task-reminder-body .board-task-reminder-form select,
+.task-reminder-body .board-task-reminder-form input,
+.task-reminder-body .board-task-reminder-form textarea { font-size: 14px; }
 .tuning-card-status option { color: #12202a; background: #fff; }
 .field-narrow[hidden] { display: none; }
 /* The tuning schedule uses the whole work area: no 1080px column, and the

@@ -1887,40 +1887,72 @@ class TuningTaskContractorLocationTests(_ContractorFixture, unittest.TestCase):
 
 
 class TuningTaskReminderTests(_TuningTaskFixture, unittest.TestCase):
-    """Telegram reminders on order tasks — the order-note mechanism."""
+    """Telegram reminders on tasks of administrators — the order-note
+    mechanism; only for tasks given to someone with the Администратор
+    position, with or without a project."""
+
+    DAY = "2030-05-10"
 
     def setUp(self):
         super().setUp()
-        self.assign(self.EMPLOYEE_A, 100, 1)
         with application_module.app.app_context():
             db = application_module.get_db()
-            self.assignment_id = db.execute(
-                "SELECT id FROM tuning_item_assignments WHERE item_id = ?", (self.item_id,)
-            ).fetchone()["id"]
+            # EMPLOYEE_A is an administrator, EMPLOYEE_B an ordinary tuningman
+            self.employee_a_id = db.execute(
+                "SELECT id FROM employees WHERE name = ?", (self.EMPLOYEE_A,)).fetchone()["id"]
             self.employee_b_id = db.execute(
                 "SELECT id FROM employees WHERE name = ?", (self.EMPLOYEE_B,)).fetchone()["id"]
+            db.execute("INSERT INTO employee_positions (employee_id, position, created_at) "
+                       "VALUES (?, 'Администратор', 'x')", (self.employee_a_id,))
+            db.commit()
+        self.assign(self.EMPLOYEE_A, 100, 1)
+        self.assignment_id = self.assignment_of(self.EMPLOYEE_A)
 
     def tearDown(self):
         with application_module.app.app_context():
             db = application_module.get_db()
-            db.execute("DELETE FROM tuning_task_reminders WHERE assignment_id IN "
-                       "(SELECT id FROM tuning_item_assignments WHERE item_id = ?)", (self.item_id,))
+            db.execute("DELETE FROM tuning_task_reminders")
+            for task_id in [r["id"] for r in db.execute(
+                    "SELECT id FROM tuning_schedule_tasks WHERE title LIKE 'Тест-напоминание%'").fetchall()]:
+                db.execute("DELETE FROM tuning_schedule_task_days WHERE task_id = ?", (task_id,))
+                db.execute("DELETE FROM tuning_schedule_tasks WHERE id = ?", (task_id,))
+            db.execute("DELETE FROM tuning_schedule_day_crew WHERE work_date = ?", (self.DAY,))
             db.commit()
         super().tearDown()
 
-    def remind(self, recipient=None, when="2030-05-10T09:30", message=""):
+    def assignment_of(self, employee):
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT id FROM tuning_item_assignments WHERE item_id = ? AND employee_name = ?",
+                (self.item_id, employee)).fetchone()
+            return row["id"] if row else None
+
+    def free_task(self, employee, order_id=None, title="Тест-напоминание"):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            task_id = db.execute(
+                "INSERT INTO tuning_schedule_tasks (assignment_id, employee_name, title, rate, status, "
+                "comment, created_at, order_id) VALUES (NULL, ?, ?, 0, 'pending', '', 'x', ?)",
+                (employee, title, order_id)).lastrowid
+            db.execute("INSERT INTO tuning_schedule_task_days (task_id, work_date, start_time, planned_hours) "
+                       "VALUES (?, ?, '10:00', 2)", (task_id, self.DAY))
+            employee_id = db.execute("SELECT id FROM employees WHERE name = ?", (employee,)).fetchone()["id"]
+            db.execute("INSERT OR IGNORE INTO tuning_schedule_day_crew (work_date, employee_id, created_at) "
+                       "VALUES (?, ?, 'x')", (self.DAY, employee_id))
+            db.commit()
+            return task_id
+
+    def remind(self, recipient=None, when="2030-05-10T09:30", message="", **target):
         self.login_admin()
-        return self.client.post(
-            f"/tuning/assignments/{self.assignment_id}/reminders",
-            data={"remind_recipient": recipient or f"employee:{self.employee_b_id}",
-                  "remind_at": when, "message": message},
-        )
+        data = {"remind_recipient": recipient or f"employee:{self.employee_b_id}",
+                "remind_at": when, "message": message}
+        data.update(target or {"assignment_id": self.assignment_id})
+        return self.client.post("/tuning/task-reminders", data=data)
 
     def reminders(self):
         with application_module.app.app_context():
             return [dict(r) for r in application_module.get_db().execute(
-                "SELECT * FROM tuning_task_reminders WHERE assignment_id = ? ORDER BY id",
-                (self.assignment_id,)).fetchall()]
+                "SELECT * FROM tuning_task_reminders ORDER BY id").fetchall()]
 
     def run_cron(self):
         with mock.patch.object(application_module, "CRON_SECRET", "s3cret"), \
@@ -1929,12 +1961,46 @@ class TuningTaskReminderTests(_TuningTaskFixture, unittest.TestCase):
             response = self.client.get("/internal/cron/send-note-reminders?token=s3cret")
         return response, employee, admin
 
-    def test_an_administrator_can_create_a_reminder_for_an_employee(self):
+    # ---- order tasks
+
+    def test_an_administrators_order_task_takes_a_reminder(self):
         response = self.remind(message="Проверить крепёж")
         self.assertEqual(response.status_code, 302)
         (r,) = self.reminders()
-        self.assertEqual((r["remind_employee_id"], r["remind_at"], r["message"], r["sent_at"]),
-                         (self.employee_b_id, "2030-05-10 09:30", "Проверить крепёж", None))
+        self.assertEqual((r["assignment_id"], r["schedule_task_id"], r["remind_employee_id"],
+                          r["remind_at"], r["message"], r["sent_at"]),
+                         (self.assignment_id, None, self.employee_b_id, "2030-05-10 09:30",
+                          "Проверить крепёж", None))
+
+    def test_a_task_of_an_ordinary_employee_takes_none(self):
+        self.assign(self.EMPLOYEE_B, 100, 1)
+        self.remind(assignment_id=self.assignment_of(self.EMPLOYEE_B))
+        self.assertEqual(self.reminders(), [])
+        with self.client.session_transaction() as session:
+            self.assertIn("только для задач, поручённых администратору", session["tuning_board_error"])
+
+    def test_a_contractors_task_takes_none(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("UPDATE tuning_item_assignments SET partner_id = 1 WHERE id = ?", (self.assignment_id,))
+            db.commit()
+        self.remind()
+        self.assertEqual(self.reminders(), [])
+
+    def test_the_board_offers_reminders_for_administrator_tasks_only(self):
+        self.assign(self.EMPLOYEE_B, 100, 1)
+        other = self.assignment_of(self.EMPLOYEE_B)
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn(f'name="assignment_id" value="{self.assignment_id}"', page)
+        self.assertNotIn(f'name="assignment_id" value="{other}"', page)
+        self.assertEqual(page.count("+ Напоминание в Telegram"), 1)
+
+    def test_missing_recipient_or_time_creates_nothing(self):
+        self.remind(recipient="employee:999999")
+        self.remind(when="")
+        self.remind(when="not-a-date")
+        self.remind(message="x" * 501)
+        self.assertEqual(self.reminders(), [])
 
     def test_a_reminder_can_go_to_an_administrator_account(self):
         with application_module.app.app_context():
@@ -1944,12 +2010,22 @@ class TuningTaskReminderTests(_TuningTaskFixture, unittest.TestCase):
         (r,) = self.reminders()
         self.assertEqual((r["remind_admin_id"], r["remind_employee_id"]), (admin_id, None))
 
-    def test_missing_recipient_or_time_creates_nothing(self):
-        self.remind(recipient="employee:999999")
-        self.remind(when="")
-        self.remind(when="not-a-date")
-        self.remind(message="x" * 501)
+    def test_revoking_the_task_removes_its_reminders(self):
+        self.remind()
+        self.login_admin()
+        self.client.post(f"/tuning/assignments/{self.assignment_id}/revoke")
         self.assertEqual(self.reminders(), [])
+
+    def test_the_board_lists_and_cancels_reminders(self):
+        self.remind(message="Позвонить клиенту")
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn("Позвонить клиенту", page)
+        self.assertIn("Ожидает", page)
+        (r,) = self.reminders()
+        self.client.post(f"/tuning/task-reminders/{r['id']}/cancel", data={"assignment_id": self.assignment_id})
+        self.assertEqual(self.reminders(), [])
+
+    # ---- delivery
 
     def test_the_cron_sends_due_reminders_once(self):
         self.remind(when="2020-01-01T08:00", message="Забрать детали")
@@ -1963,8 +2039,7 @@ class TuningTaskReminderTests(_TuningTaskFixture, unittest.TestCase):
         for part in ("Напоминание по задаче: Полировка корпуса", f"№{self.order_id}",
                      self.EMPLOYEE_A, "Забрать детали"):
             self.assertIn(part, text)
-        sent = [r for r in self.reminders() if r["sent_at"]]
-        self.assertEqual(len(sent), 1)
+        self.assertEqual(len([r for r in self.reminders() if r["sent_at"]]), 1)
         _response, employee, _admin = self.run_cron()
         employee.assert_not_called()  # never twice
 
@@ -1987,40 +2062,100 @@ class TuningTaskReminderTests(_TuningTaskFixture, unittest.TestCase):
             db.execute("DELETE FROM tuning_order_notes WHERE id = ?", (note_id,))
             db.commit()
 
-    def test_a_pending_reminder_can_be_cancelled_a_sent_one_cannot(self):
+    def test_a_sent_reminder_cannot_be_cancelled(self):
         self.remind(when="2020-01-01T08:00")
-        self.remind(when="2030-05-10T09:30")
         self.run_cron()
-        sent, pending = self.reminders()
-        self.assertTrue(sent["sent_at"])
-        self.client.post(f"/tuning/assignments/{self.assignment_id}/reminders/{sent['id']}/cancel")
-        self.assertEqual(len(self.reminders()), 2)
-        self.client.post(f"/tuning/assignments/{self.assignment_id}/reminders/{pending['id']}/cancel")
-        self.assertEqual([r["id"] for r in self.reminders()], [sent["id"]])
+        (r,) = self.reminders()
+        self.client.post(f"/tuning/task-reminders/{r['id']}/cancel", data={"assignment_id": self.assignment_id})
+        self.assertEqual(len(self.reminders()), 1)
 
-    def test_revoking_the_task_removes_its_reminders(self):
-        self.remind()
-        self.login_admin()
-        self.client.post(f"/tuning/assignments/{self.assignment_id}/revoke")
+    # ---- schedule tasks, with and without a project
+
+    def test_a_free_task_without_a_project_takes_a_reminder_and_the_message_has_no_order_line(self):
+        task_id = self.free_task(self.EMPLOYEE_A)
+        self.remind(schedule_task_id=task_id, when="2020-01-01T08:00", message="Купить краску")
+        (r,) = self.reminders()
+        self.assertEqual((r["assignment_id"], r["schedule_task_id"]), (None, task_id))
+        _response, employee, _admin = self.run_cron()
+        text = employee.call_args[0][2]
+        self.assertIn("Напоминание по задаче: Тест-напоминание", text)
+        self.assertIn("Купить краску", text)
+        self.assertIn(self.EMPLOYEE_A, text)
+        self.assertNotIn("Заказ №", text)
+
+    def test_a_free_task_attached_to_a_project_names_the_order(self):
+        task_id = self.free_task(self.EMPLOYEE_A, order_id=self.order_id)
+        self.remind(schedule_task_id=task_id, when="2020-01-01T08:00")
+        _response, employee, _admin = self.run_cron()
+        self.assertIn(f"Заказ №{self.order_id}", employee.call_args[0][2])
+
+    def test_a_free_task_of_an_ordinary_employee_takes_none(self):
+        task_id = self.free_task(self.EMPLOYEE_B)
+        self.remind(schedule_task_id=task_id)
         self.assertEqual(self.reminders(), [])
 
-    def test_the_board_shows_the_form_and_the_existing_reminders(self):
-        self.remind(message="Позвонить клиенту")
+    def test_a_schedule_card_of_an_order_task_stores_the_reminder_on_the_order_task(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            task_id = db.execute(
+                "INSERT INTO tuning_schedule_tasks (assignment_id, employee_name, title, rate, status, "
+                "comment, created_at) VALUES (?, ?, 'Тест-напоминание', 0, 'pending', '', 'x')",
+                (self.assignment_id, self.EMPLOYEE_A)).lastrowid
+            db.commit()
+        self.remind(schedule_task_id=task_id)
+        (r,) = self.reminders()
+        self.assertEqual((r["assignment_id"], r["schedule_task_id"]), (self.assignment_id, None))
         page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
-        self.assertIn(f"/tuning/assignments/{self.assignment_id}/reminders", page)
-        self.assertIn(f'value="employee:{self.employee_b_id}"', page)
+        self.assertIn("Напоминания (1)", page)
+
+    def test_the_schedule_shows_a_bell_and_a_form_on_administrator_cards_only(self):
+        admin_task = self.free_task(self.EMPLOYEE_A, title="Тест-напоминание админа")
+        plain_task = self.free_task(self.EMPLOYEE_B, title="Тест-напоминание обычное")
+        self.login_admin()
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        self.assertIn(f"openTaskReminder({admin_task})", page)
+        self.assertNotIn(f"openTaskReminder({plain_task})", page)
+        self.assertIn(f'name="schedule_task_id" value="{admin_task}"', page)
+        self.assertIn('name="return_to" value="schedule"', page)
+
+    def test_creating_a_reminder_from_the_schedule_returns_to_that_day(self):
+        task_id = self.free_task(self.EMPLOYEE_A)
+        response = self.remind(schedule_task_id=task_id, return_to="schedule", return_date=self.DAY)
+        self.assertIn(f"/schedule/tuning?date={self.DAY}", response.headers["Location"])
+        self.login_admin()
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
         self.assertIn("Ожидает", page)
-        self.assertIn("Позвонить клиенту", page)
-        self.assertIn(self.EMPLOYEE_B, page)
+        self.assertIn("🔔", page)
+
+    # ---- access and migration
 
     def test_only_administrators_can_use_it(self):
         with self.client.session_transaction() as session:
             session.clear()
-        response = self.client.post(
-            f"/tuning/assignments/{self.assignment_id}/reminders",
-            data={"remind_recipient": f"employee:{self.employee_b_id}", "remind_at": "2030-05-10T09:30"})
-        self.assertIn(response.status_code, (302, 401, 403))
+        self.client.post("/tuning/task-reminders", data={
+            "assignment_id": self.assignment_id, "remind_recipient": f"employee:{self.employee_b_id}",
+            "remind_at": "2030-05-10T09:30"})
         self.assertEqual(self.reminders(), [])
+
+    def test_the_first_version_of_the_table_is_migrated_without_losing_reminders(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DROP TABLE tuning_task_reminders")
+            db.execute("CREATE TABLE tuning_task_reminders (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                       "assignment_id INTEGER NOT NULL, remind_admin_id INTEGER, remind_employee_id INTEGER, "
+                       "remind_at TEXT NOT NULL, message TEXT NOT NULL DEFAULT '', sent_at TEXT, "
+                       "created_at TEXT NOT NULL)")
+            db.execute("INSERT INTO tuning_task_reminders (assignment_id, remind_employee_id, remind_at, "
+                       "message, created_at) VALUES (?, ?, '2030-05-10 09:30', 'старое', 'x')",
+                       (self.assignment_id, self.employee_b_id))
+            db.commit()
+        application_module.init_db()
+        (r,) = self.reminders()
+        self.assertEqual((r["assignment_id"], r["message"], r["schedule_task_id"]),
+                         (self.assignment_id, "старое", None))
+        task_id = self.free_task(self.EMPLOYEE_A)
+        self.remind(schedule_task_id=task_id)  # the nullable assignment_id now works
+        self.assertEqual(len(self.reminders()), 2)
 
 
 if __name__ == "__main__":
