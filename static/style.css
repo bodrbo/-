@@ -4099,6 +4099,13 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .board-task-comment summary { cursor: pointer; color: var(--ink-soft); font-weight: 600; }
 .board-task-comment form { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; margin-top: 5px; }
 .board-task-comment textarea { width: 100%; min-width: 0; font-size: 12px; resize: vertical; }
+.board-task-reminders { margin-top: 6px; font-size: 11px; }
+.board-task-reminders summary { cursor: pointer; color: var(--ink-soft); font-weight: 600; }
+.board-task-reminders .note-reminders { margin: 6px 0; }
+.board-task-reminders .note-reminders li { align-items: flex-start; font-size: 11.5px; }
+.board-task-reminder-form { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; margin-top: 5px; }
+.board-task-reminder-form select, .board-task-reminder-form input, .board-task-reminder-form textarea { width: 100%; min-width: 0; font-size: 12px; }
+.board-task-reminder-form textarea { resize: vertical; }
 
 /* Labor budget strip — cost_price read as the anticipated labor budget
    for a work item, vs. the sum of rate x norm_hours across its tasks.

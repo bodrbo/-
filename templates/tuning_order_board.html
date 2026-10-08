@@ -224,6 +224,38 @@
               </form>
             </details>
             {% if a.comment %}<p class="assignment-comment-preview">{{ a.comment }}</p>{% endif %}
+            <details class="board-task-reminders"{{ ' open' if a.reminders }}>
+              <summary>{{ 'Напоминания (' ~ a.reminders|length ~ ')' if a.reminders else '+ Напоминание в Telegram' }}</summary>
+              {% if a.reminders %}
+              <ul class="note-reminders">
+                {% for r in a.reminders %}
+                <li>
+                  {% if r.sent_at %}<span class="status-badge status-defect-resolved">Отправлено</span>
+                  {% else %}<span class="status-badge status-defect-new">Ожидает</span>{% endif %}
+                  <span>{{ r.remind_recipient_name or 'Неизвестный' }} — {{ r.remind_at[:10]|ru_date }} {{ r.remind_at[11:] }}{% if r.message %}<br><small class="muted">{{ r.message }}</small>{% endif %}</span>
+                  {% if not r.sent_at %}
+                  <form action="{{ url_for('cancel_task_reminder', assignment_id=a.id, reminder_id=r.id) }}" method="post">
+                    <button type="submit" class="icon-btn danger" title="Отменить напоминание" aria-label="Отменить напоминание">
+                      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l10 10M15 5L5 15"/></svg>
+                    </button>
+                  </form>
+                  {% endif %}
+                </li>
+                {% endfor %}
+              </ul>
+              {% endif %}
+              <form action="{{ url_for('add_task_reminder', assignment_id=a.id) }}" method="post" class="board-task-reminder-form">
+                <select name="remind_recipient" required aria-label="Кому напомнить">
+                  <option value="" selected disabled>Кому напомнить…</option>
+                  {% for recipient in reminder_recipients %}
+                  <option value="{{ recipient.value }}">{{ recipient.name }}{{ ' · ' ~ recipient.subtitle if recipient.subtitle }}{{ '' if recipient.telegram_linked else ' (нет Telegram)' }}</option>
+                  {% endfor %}
+                </select>
+                <input type="datetime-local" name="remind_at" required aria-label="Когда напомнить">
+                <textarea name="message" rows="2" maxlength="500" placeholder="Текст напоминания (необязательно)" aria-label="Текст напоминания"></textarea>
+                <button type="submit" class="btn-secondary board-task-rate-save">Напомнить</button>
+              </form>
+            </details>
           </div>
         </div>
         {% endfor %}

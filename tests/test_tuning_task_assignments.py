@@ -1886,5 +1886,142 @@ class TuningTaskContractorLocationTests(_ContractorFixture, unittest.TestCase):
         self.assertIn("syncAssignDueRequired", page)
 
 
+class TuningTaskReminderTests(_TuningTaskFixture, unittest.TestCase):
+    """Telegram reminders on order tasks — the order-note mechanism."""
+
+    def setUp(self):
+        super().setUp()
+        self.assign(self.EMPLOYEE_A, 100, 1)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.assignment_id = db.execute(
+                "SELECT id FROM tuning_item_assignments WHERE item_id = ?", (self.item_id,)
+            ).fetchone()["id"]
+            self.employee_b_id = db.execute(
+                "SELECT id FROM employees WHERE name = ?", (self.EMPLOYEE_B,)).fetchone()["id"]
+
+    def tearDown(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM tuning_task_reminders WHERE assignment_id IN "
+                       "(SELECT id FROM tuning_item_assignments WHERE item_id = ?)", (self.item_id,))
+            db.commit()
+        super().tearDown()
+
+    def remind(self, recipient=None, when="2030-05-10T09:30", message=""):
+        self.login_admin()
+        return self.client.post(
+            f"/tuning/assignments/{self.assignment_id}/reminders",
+            data={"remind_recipient": recipient or f"employee:{self.employee_b_id}",
+                  "remind_at": when, "message": message},
+        )
+
+    def reminders(self):
+        with application_module.app.app_context():
+            return [dict(r) for r in application_module.get_db().execute(
+                "SELECT * FROM tuning_task_reminders WHERE assignment_id = ? ORDER BY id",
+                (self.assignment_id,)).fetchall()]
+
+    def run_cron(self):
+        with mock.patch.object(application_module, "CRON_SECRET", "s3cret"), \
+                mock.patch.object(application_module, "send_telegram_notification_to_employee") as employee, \
+                mock.patch.object(application_module, "send_telegram_notification_to_admin") as admin:
+            response = self.client.get("/internal/cron/send-note-reminders?token=s3cret")
+        return response, employee, admin
+
+    def test_an_administrator_can_create_a_reminder_for_an_employee(self):
+        response = self.remind(message="Проверить крепёж")
+        self.assertEqual(response.status_code, 302)
+        (r,) = self.reminders()
+        self.assertEqual((r["remind_employee_id"], r["remind_at"], r["message"], r["sent_at"]),
+                         (self.employee_b_id, "2030-05-10 09:30", "Проверить крепёж", None))
+
+    def test_a_reminder_can_go_to_an_administrator_account(self):
+        with application_module.app.app_context():
+            admin_id = application_module.get_db().execute(
+                "SELECT id FROM admin_accounts WHERE employee_id IS NULL LIMIT 1").fetchone()["id"]
+        self.remind(recipient=f"admin:{admin_id}")
+        (r,) = self.reminders()
+        self.assertEqual((r["remind_admin_id"], r["remind_employee_id"]), (admin_id, None))
+
+    def test_missing_recipient_or_time_creates_nothing(self):
+        self.remind(recipient="employee:999999")
+        self.remind(when="")
+        self.remind(when="not-a-date")
+        self.remind(message="x" * 501)
+        self.assertEqual(self.reminders(), [])
+
+    def test_the_cron_sends_due_reminders_once(self):
+        self.remind(when="2020-01-01T08:00", message="Забрать детали")
+        self.remind(when="2030-05-10T09:30")
+        response, employee, _admin = self.run_cron()
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("1 reminder", response.get_data(as_text=True))
+        employee.assert_called_once()
+        text = employee.call_args[0][2]
+        self.assertEqual(employee.call_args[0][1], self.EMPLOYEE_B)
+        for part in ("Напоминание по задаче: Полировка корпуса", f"№{self.order_id}",
+                     self.EMPLOYEE_A, "Забрать детали"):
+            self.assertIn(part, text)
+        sent = [r for r in self.reminders() if r["sent_at"]]
+        self.assertEqual(len(sent), 1)
+        _response, employee, _admin = self.run_cron()
+        employee.assert_not_called()  # never twice
+
+    def test_the_cron_still_sends_note_reminders(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            note_id = db.execute(
+                "INSERT INTO tuning_order_notes (order_id, author_admin_id, text, created_at) "
+                "VALUES (?, 1, 'Заметка', 'x')", (self.order_id,)).lastrowid
+            db.execute(
+                "INSERT INTO tuning_order_note_reminders (note_id, remind_admin_id, remind_employee_id, "
+                "remind_at, created_at) VALUES (?, 1, ?, '2020-01-01 08:00', 'x')",
+                (note_id, self.employee_b_id))
+            db.commit()
+        _response, employee, _admin = self.run_cron()
+        self.assertIn("Заметка", employee.call_args[0][2])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM tuning_order_note_reminders WHERE note_id = ?", (note_id,))
+            db.execute("DELETE FROM tuning_order_notes WHERE id = ?", (note_id,))
+            db.commit()
+
+    def test_a_pending_reminder_can_be_cancelled_a_sent_one_cannot(self):
+        self.remind(when="2020-01-01T08:00")
+        self.remind(when="2030-05-10T09:30")
+        self.run_cron()
+        sent, pending = self.reminders()
+        self.assertTrue(sent["sent_at"])
+        self.client.post(f"/tuning/assignments/{self.assignment_id}/reminders/{sent['id']}/cancel")
+        self.assertEqual(len(self.reminders()), 2)
+        self.client.post(f"/tuning/assignments/{self.assignment_id}/reminders/{pending['id']}/cancel")
+        self.assertEqual([r["id"] for r in self.reminders()], [sent["id"]])
+
+    def test_revoking_the_task_removes_its_reminders(self):
+        self.remind()
+        self.login_admin()
+        self.client.post(f"/tuning/assignments/{self.assignment_id}/revoke")
+        self.assertEqual(self.reminders(), [])
+
+    def test_the_board_shows_the_form_and_the_existing_reminders(self):
+        self.remind(message="Позвонить клиенту")
+        page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
+        self.assertIn(f"/tuning/assignments/{self.assignment_id}/reminders", page)
+        self.assertIn(f'value="employee:{self.employee_b_id}"', page)
+        self.assertIn("Ожидает", page)
+        self.assertIn("Позвонить клиенту", page)
+        self.assertIn(self.EMPLOYEE_B, page)
+
+    def test_only_administrators_can_use_it(self):
+        with self.client.session_transaction() as session:
+            session.clear()
+        response = self.client.post(
+            f"/tuning/assignments/{self.assignment_id}/reminders",
+            data={"remind_recipient": f"employee:{self.employee_b_id}", "remind_at": "2030-05-10T09:30"})
+        self.assertIn(response.status_code, (302, 401, 403))
+        self.assertEqual(self.reminders(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

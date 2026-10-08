@@ -478,6 +478,14 @@ def _tuning_order_items_with_assignments(db, order_id):
         for assignment in item["assignments"]:
             if assignment["partner_id"] and assignment["partner_name"]:
                 assignment["employee_name"] = assignment["partner_name"]  # follows a renamed partner
+            assignment["reminders"] = db.execute(
+                "SELECT r.*, COALESCE(e.name, a.admin_name) AS remind_recipient_name "
+                "FROM tuning_task_reminders r "
+                "LEFT JOIN employees e ON e.id = r.remind_employee_id "
+                "LEFT JOIN admin_accounts a ON a.id = r.remind_admin_id "
+                "WHERE r.assignment_id = ? ORDER BY r.remind_at, r.id",
+                (assignment["id"],),
+            ).fetchall()
         # One work item can carry several concurrent tasks (e.g. split
         # between tuningmen, or reassigned after someone declines) —
         # assigning another is always allowed, the admin decides when
@@ -2584,6 +2592,26 @@ def init_db(db_path=None, include_bootstrap_data=True):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_tuning_note_reminders_employee "
         "ON tuning_order_note_reminders (remind_employee_id)"
+    )
+    # Telegram reminders on order tasks (tuning_item_assignments) — the same
+    # idea and the same delivery cron as the order-note reminders above.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tuning_task_reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            assignment_id INTEGER NOT NULL,
+            remind_admin_id INTEGER,
+            remind_employee_id INTEGER,
+            remind_at TEXT NOT NULL,
+            message TEXT NOT NULL DEFAULT '',
+            sent_at TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tuning_task_reminders_assignment "
+        "ON tuning_task_reminders (assignment_id)"
     )
     conn.execute(
         """
@@ -12406,6 +12434,7 @@ def tuning_order_board(order_id):
     return render_template(
         "tuning_order_board.html",
         assignable_partners=_tuning_partner_choices(db),
+        reminder_recipients=_note_reminder_recipients(db),
         payouts_missing=payouts_missing,
         order=order, items=items, work_statuses=WORK_STATUSES,
         assignment_statuses=ASSIGNMENT_STATUSES,
@@ -12620,6 +12649,7 @@ def revoke_tuning_assignment(assignment_id):
         if entry is not None:
             payout_removed = entry
             db.execute("DELETE FROM entries WHERE id = ?", (assignment["entry_id"],))
+    db.execute("DELETE FROM tuning_task_reminders WHERE assignment_id = ?", (assignment_id,))
     db.execute("DELETE FROM tuning_item_assignments WHERE id = ?", (assignment_id,))
     db.commit()
     settled_week = False
@@ -13053,20 +13083,11 @@ def delete_tuning_order_note(order_id, note_id):
     return redirect(url_for("edit_tuning_order", order_id=order_id) + "#notes")
 
 
-@app.route("/tuning/<int:order_id>/notes/<int:note_id>/remind", methods=["POST"])
-@admin_login_required
-def add_note_reminder(order_id, note_id):
-    db = get_db()
-    note = db.execute(
-        "SELECT id FROM tuning_order_notes WHERE id = ? AND order_id = ?", (note_id, order_id)
-    ).fetchone()
-    if note is None:
-        return redirect(url_for("edit_tuning_order", order_id=order_id) + "#notes")
-
-    recipient_raw = request.form.get("remind_recipient", "").strip()
-    legacy_admin_id_raw = request.form.get("remind_admin_id", "").strip()
-    remind_at_raw = request.form.get("remind_at", "").strip()
-
+def _parse_reminder_recipient(db, form):
+    """The recipient picker of a reminder form -> (employee_id, admin_id),
+    at most one of them set (both None when nothing valid was chosen)."""
+    recipient_raw = form.get("remind_recipient", "").strip()
+    legacy_admin_id_raw = form.get("remind_admin_id", "").strip()
     remind_employee_id = None
     remind_admin_id = None
     recipient_kind, separator, recipient_id_raw = recipient_raw.partition(":")
@@ -13090,21 +13111,35 @@ def add_note_reminder(order_id, note_id):
             (int(legacy_admin_id_raw),),
         ).fetchone()
         remind_admin_id = admin["id"] if admin else None
+    return remind_employee_id, remind_admin_id
 
+
+def _parse_reminder_time(raw):
+    """<input type="datetime-local"> gives "YYYY-MM-DDTHH:MM" — stored in the
+    same "YYYY-MM-DD HH:MM" string form used everywhere else in this file,
+    so it sorts/compares correctly as text. None when unparseable."""
+    try:
+        return dt.datetime.strptime((raw or "").strip(), "%Y-%m-%dT%H:%M").strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return None
+
+
+@app.route("/tuning/<int:order_id>/notes/<int:note_id>/remind", methods=["POST"])
+@admin_login_required
+def add_note_reminder(order_id, note_id):
+    db = get_db()
+    note = db.execute(
+        "SELECT id FROM tuning_order_notes WHERE id = ? AND order_id = ?", (note_id, order_id)
+    ).fetchone()
+    if note is None:
+        return redirect(url_for("edit_tuning_order", order_id=order_id) + "#notes")
+
+    remind_employee_id, remind_admin_id = _parse_reminder_recipient(db, request.form)
     # Older production databases retain NOT NULL on remind_admin_id. The
     # creating administrator is a compatibility value; delivery prefers the
     # employee column whenever it is populated.
     legacy_admin_id = remind_admin_id or session.get("admin_id")
-    remind_at = None
-    if remind_at_raw:
-        try:
-            # <input type="datetime-local"> gives "YYYY-MM-DDTHH:MM" — store
-            # in the same "YYYY-MM-DD HH:MM" string form used everywhere
-            # else in this file, so it sorts/compares correctly as text.
-            parsed = dt.datetime.strptime(remind_at_raw, "%Y-%m-%dT%H:%M")
-            remind_at = parsed.strftime("%Y-%m-%d %H:%M")
-        except ValueError:
-            remind_at = None
+    remind_at = _parse_reminder_time(request.form.get("remind_at", ""))
 
     if (remind_employee_id or remind_admin_id) and legacy_admin_id and remind_at:
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -13128,6 +13163,73 @@ def cancel_note_reminder(order_id, note_id, reminder_id):
     )
     db.commit()
     return redirect(url_for("edit_tuning_order", order_id=order_id) + "#notes")
+
+
+TASK_REMINDER_MESSAGE_MAX_LENGTH = 500
+
+
+@app.route("/tuning/assignments/<int:assignment_id>/reminders", methods=["POST"])
+@admin_login_required
+def add_task_reminder(assignment_id):
+    """Telegram reminder on an order task, set by an administrator for any
+    employee or administrator — same recipient picker, time input and
+    delivery cron as the order-note reminders."""
+    db = get_db()
+    assignment = db.execute(
+        "SELECT tia.id, tia.item_id, ti.order_id FROM tuning_item_assignments tia "
+        "JOIN tuning_order_items ti ON ti.id = tia.item_id WHERE tia.id = ?",
+        (assignment_id,),
+    ).fetchone()
+    if assignment is None:
+        return redirect(url_for("tuning_index"))
+    board = url_for("tuning_order_board", order_id=assignment["order_id"]) + (
+        f"#board-work-{assignment['item_id']}"
+    )
+    remind_employee_id, remind_admin_id = _parse_reminder_recipient(db, request.form)
+    remind_at = _parse_reminder_time(request.form.get("remind_at", ""))
+    message = request.form.get("message", "").strip()
+    legacy_admin_id = remind_admin_id or session.get("admin_id")
+    if not (remind_employee_id or remind_admin_id) or not legacy_admin_id:
+        session["tuning_board_error"] = "Выберите, кому напомнить."
+    elif remind_at is None:
+        session["tuning_board_error"] = "Укажите дату и время напоминания."
+    elif len(message) > TASK_REMINDER_MESSAGE_MAX_LENGTH:
+        session["tuning_board_error"] = (
+            f"Текст напоминания слишком длинный (максимум {TASK_REMINDER_MESSAGE_MAX_LENGTH} символов)."
+        )
+    else:
+        db.execute(
+            "INSERT INTO tuning_task_reminders "
+            "(assignment_id, remind_admin_id, remind_employee_id, remind_at, message, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (assignment_id, legacy_admin_id, remind_employee_id, remind_at, message,
+             dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+        )
+        db.commit()
+        session["tuning_board_notice"] = "Напоминание создано."
+    return redirect(board)
+
+
+@app.route("/tuning/assignments/<int:assignment_id>/reminders/<int:reminder_id>/cancel", methods=["POST"])
+@admin_login_required
+def cancel_task_reminder(assignment_id, reminder_id):
+    db = get_db()
+    assignment = db.execute(
+        "SELECT tia.item_id, ti.order_id FROM tuning_item_assignments tia "
+        "JOIN tuning_order_items ti ON ti.id = tia.item_id WHERE tia.id = ?",
+        (assignment_id,),
+    ).fetchone()
+    db.execute(
+        "DELETE FROM tuning_task_reminders WHERE id = ? AND assignment_id = ? AND sent_at IS NULL",
+        (reminder_id, assignment_id),
+    )
+    db.commit()
+    if assignment is None:
+        return redirect(url_for("tuning_index"))
+    return redirect(
+        url_for("tuning_order_board", order_id=assignment["order_id"])
+        + f"#board-work-{assignment['item_id']}"
+    )
 
 
 @app.route("/tuning/<int:order_id>/products/add", methods=["POST"])
@@ -21909,8 +22011,48 @@ def cron_send_note_reminders():
             (now, r["id"]),
         )
         sent += 1
+    sent += _send_due_task_reminders(db, now)
     db.commit()
     return f"ok: {sent} reminder(s) sent", 200
+
+
+def _send_due_task_reminders(db, now):
+    """Sends the order-task reminders whose time has come (the same cron
+    run as the note reminders) and marks them sent; returns how many."""
+    due = db.execute(
+        "SELECT r.*, ti.order_id, ti.work_name, tia.employee_name AS task_executor, "
+        "tia.due_from, tia.due_to, tia.assignment_status, o.client_name, o.equipment_type, "
+        "o.boat_model, o.boat_registration_number, o.motor_model, o.motor_serial_number, "
+        "e.name AS remind_employee_name "
+        "FROM tuning_task_reminders r "
+        "JOIN tuning_item_assignments tia ON tia.id = r.assignment_id "
+        "JOIN tuning_order_items ti ON ti.id = tia.item_id "
+        "JOIN tuning_orders o ON o.id = ti.order_id "
+        "LEFT JOIN employees e ON e.id = r.remind_employee_id "
+        "WHERE r.sent_at IS NULL AND r.remind_at <= ?",
+        (now,),
+    ).fetchall()
+    sent = 0
+    for r in due:
+        lines = [
+            f"⏰ <b>Напоминание по задаче: {html.escape(r['work_name'])}</b>",
+            f"Заказ №{r['order_id']} · {html.escape(r['client_name'])} "
+            f"({html.escape(tuning_equipment_label(r))})",
+            f"Исполнитель: {html.escape(r['task_executor'])}",
+        ]
+        due_text = format_task_due(r["due_from"], r["due_to"])
+        if due_text:
+            lines.append(f"Срок: {due_text}")
+        if r["message"]:
+            lines.append("\n" + html.escape(r["message"]))
+        text = "\n".join(lines)
+        if r["remind_employee_id"] is not None:
+            send_telegram_notification_to_employee(db, r["remind_employee_name"] or "", text)
+        else:
+            send_telegram_notification_to_admin(db, r["remind_admin_id"], text)
+        db.execute("UPDATE tuning_task_reminders SET sent_at = ? WHERE id = ?", (now, r["id"]))
+        sent += 1
+    return sent
 
 
 @app.route("/internal/telegram-test")
