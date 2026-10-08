@@ -330,8 +330,13 @@
         </label>
         <label class="field">
           <span>Телефон</span>
-          <input type="tel" name="customer_phone" id="schedulePhone" maxlength="40"
-                 placeholder="+7 999 000-00-00" oninput="scheduleBookingPhoneChanged(this)">
+          <span class="schedule-client-picker" data-phone-picker>
+            <input type="tel" name="customer_phone" id="schedulePhone" maxlength="40" autocomplete="off"
+                   data-phone-search role="combobox" aria-autocomplete="list" aria-expanded="false"
+                   placeholder="+7 999 000-00-00" oninput="scheduleBookingPhoneChanged(this); schedulePhoneInput(this)"
+                   onkeydown="scheduleClientKeydown(event, this)">
+            <span class="schedule-client-results" data-phone-results role="listbox" hidden></span>
+          </span>
         </label>
         <label class="field schedule-client-price-field">
           <span>Стоимость, ₽</span>
@@ -505,7 +510,13 @@
           </label>
           <label class="field">
             <span>Телефон</span>
-            <input type="tel" id="scheduleQuickAddPhone" maxlength="40" placeholder="+7 999 000-00-00">
+            <span class="schedule-client-picker" data-phone-picker>
+              <input type="tel" id="scheduleQuickAddPhone" maxlength="40" autocomplete="off"
+                     data-phone-search role="combobox" aria-autocomplete="list" aria-expanded="false"
+                     placeholder="+7 999 000-00-00" oninput="schedulePhoneInput(this)"
+                     onkeydown="scheduleClientKeydown(event, this)">
+              <span class="schedule-client-results" data-phone-results role="listbox" hidden></span>
+            </span>
           </label>
           <label class="field schedule-quickadd-guests">
             <span>Гостей</span>
@@ -720,7 +731,13 @@
     </label>
     <label class="field">
       <span>Телефон</span>
-      <input type="tel" name="participant_phone[]" maxlength="40" placeholder="+7 999 000-00-00" oninput="scheduleParticipantPhoneChanged(this)">
+      <span class="schedule-client-picker" data-phone-picker>
+        <input type="tel" name="participant_phone[]" maxlength="40" autocomplete="off"
+               data-phone-search role="combobox" aria-autocomplete="list" aria-expanded="false"
+               placeholder="+7 999 000-00-00" oninput="scheduleParticipantPhoneChanged(this); schedulePhoneInput(this)"
+               onkeydown="scheduleClientKeydown(event, this)">
+        <span class="schedule-client-results" data-phone-results role="listbox" hidden></span>
+      </span>
     </label>
     <label class="field schedule-participant-guests" title="Количество человек в группе, включая самого клиента">
       <span>Гостей</span>
@@ -2660,19 +2677,60 @@
     }
     syncScheduleParticipantCount();
   }
-  function closeScheduleClientResults(picker) {
-    if (!picker) return;
-    const results = picker.querySelector('.schedule-client-results');
-    const input = picker.querySelector('[role="combobox"]');
+  function closeScheduleResultsList(results, input) {
     results.hidden = true;
     results.replaceChildren();
     input.setAttribute('aria-expanded', 'false');
     input.removeAttribute('aria-activedescendant');
   }
-  function closeAllScheduleClientResults(exceptPicker) {
+  function closeScheduleClientResults(picker) {
+    if (!picker) return;
+    closeScheduleResultsList(
+      picker.querySelector('.schedule-client-results'),
+      picker.querySelector('[role="combobox"]'),
+    );
+  }
+  function closeSchedulePhoneResults(exceptWrap) {
+    document.querySelectorAll('[data-phone-picker]').forEach(wrap => {
+      if (wrap !== exceptWrap) {
+        closeScheduleResultsList(
+          wrap.querySelector('[data-phone-results]'), wrap.querySelector('[data-phone-search]'),
+        );
+      }
+    });
+  }
+  function closeAllScheduleClientResults(exceptPicker, exceptPhoneWrap) {
     document.querySelectorAll('[data-client-picker]').forEach(picker => {
       if (picker !== exceptPicker) closeScheduleClientResults(picker);
     });
+    closeSchedulePhoneResults(exceptPhoneWrap);
+  }
+  // The name picker a phone field belongs to: a phone typed in the same
+  // place fills (and is filled by) the same client choice as the name.
+  function schedulePickerForPhone(input) {
+    const row = input.closest('.schedule-participant-row');
+    if (row) return row.querySelector('[data-client-picker]');
+    if (input.id === 'scheduleQuickAddPhone') return document.querySelector('[data-picker-kind="quickadd"]');
+    return document.querySelector('[data-picker-kind="booking"]');
+  }
+  // The suggestion list under a name or a phone field.
+  function scheduleClientResultsFor(input) {
+    if (input.hasAttribute('data-phone-search')) {
+      return input.closest('[data-phone-picker]').querySelector('[data-phone-results]');
+    }
+    return input.closest('[data-client-picker]').querySelector('.schedule-client-results');
+  }
+  function schedulePhoneInput(input) {
+    const picker = schedulePickerForPhone(input);
+    clearTimeout(scheduleClientTimers.get(input));
+    const previousRequest = scheduleClientRequests.get(input);
+    if (previousRequest) previousRequest.abort();
+    const query = input.value.trim();
+    if (query.replace(/\D/g, '').length < 3) {
+      closeSchedulePhoneResults();
+      return;
+    }
+    scheduleClientTimers.set(input, setTimeout(() => searchScheduleClients(input, query, picker), 180));
   }
   function scheduleClientInput(input) {
     const picker = input.closest('[data-client-picker]');
@@ -2692,8 +2750,8 @@
     }
     scheduleClientTimers.set(input, setTimeout(() => searchScheduleClients(input, query), 180));
   }
-  async function searchScheduleClients(input, query) {
-    const picker = input.closest('[data-client-picker]');
+  async function searchScheduleClients(input, query, phonePicker) {
+    const picker = phonePicker || input.closest('[data-client-picker]');
     const controller = new AbortController();
     scheduleClientRequests.set(input, controller);
     try {
@@ -2704,15 +2762,17 @@
       if (!response.ok) throw new Error('client-search-failed');
       const payload = await response.json();
       if (input.value.trim() !== query) return;
-      renderScheduleClientResults(picker, payload.clients || []);
+      renderScheduleClientResults(picker, payload.clients || [], phonePicker ? input : null);
     } catch (error) {
       if (error.name !== 'AbortError') closeScheduleClientResults(picker);
     }
   }
-  function renderScheduleClientResults(picker, clients) {
-    closeAllScheduleClientResults(picker);
-    const results = picker.querySelector('.schedule-client-results');
-    const input = picker.querySelector('[role="combobox"]');
+  function renderScheduleClientResults(picker, clients, phoneInput) {
+    // phoneInput: the list is for a phone field, not the name field
+    closeAllScheduleClientResults(phoneInput ? null : picker, phoneInput ? phoneInput.closest('[data-phone-picker]') : null);
+    const input = phoneInput || picker.querySelector('[role="combobox"]');
+    const results = scheduleClientResultsFor(input);
+    if (!results.id) results.id = `scheduleResults${++scheduleParticipantSerial}`;  // unique option ids per list
     results.replaceChildren();
     if (!clients.length) {
       const empty = document.createElement('span');
@@ -2761,16 +2821,18 @@
       document.getElementById('scheduleCustomerContactMethod').value =
         client.preferred_contact_method || '';
     }
-    if (closeResults !== false) closeScheduleClientResults(picker);
+    if (closeResults !== false) {
+      closeScheduleClientResults(picker);
+      closeSchedulePhoneResults();
+    }
   }
   function scheduleClientKeydown(event, input) {
-    const picker = input.closest('[data-client-picker]');
-    const results = picker.querySelector('.schedule-client-results');
+    const results = scheduleClientResultsFor(input);
     const options = [...results.querySelectorAll('.schedule-client-result')];
     if (event.key === 'Escape' && !results.hidden) {
       event.preventDefault();
       event.stopPropagation();
-      closeScheduleClientResults(picker);
+      closeScheduleResultsList(results, input);
       return;
     }
     if (!options.length || results.hidden || !['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
@@ -3201,7 +3263,7 @@
     }
   });
   document.addEventListener('click', event => {
-    if (!event.target.closest('[data-client-picker]')) closeAllScheduleClientResults();
+    if (!event.target.closest('[data-client-picker], [data-phone-picker]')) closeAllScheduleClientResults();
   });
   initScheduleBoardNavigation();
 </script>

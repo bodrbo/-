@@ -1,4 +1,5 @@
 import sqlite3
+import re
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -325,6 +326,48 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             self.client.get("/schedule/clients/search?q=а").get_json(),
             {"clients": []},
         )
+
+    def test_client_search_finds_a_client_by_a_fragment_of_the_phone_in_any_format(self):
+        self.login()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            client_id = db.execute(
+                "INSERT INTO clients (client_name, boat_model, phone, token, created_at) "
+                "VALUES ('Телефонов Иван', '', '+7 (999) 123-45-67', 'schedule-search-phone', "
+                "'2026-09-01 10:00')"
+            ).lastrowid
+            db.execute(
+                "INSERT INTO client_segments (client_id, segment, created_at) "
+                "VALUES (?, 'excursion', '2026-09-01 10:00')", (client_id,)
+            )
+            db.commit()
+
+        def found(query):
+            clients = self.client.get("/schedule/clients/search", query_string={"q": query}).get_json()["clients"]
+            return "Телефонов Иван" in [c["client_name"] for c in clients]
+
+        try:
+            for query in ("+7 999", "999 123", "9991234567", "123-45-67", "8 999 123", "89991234567", "(999)"):
+                self.assertTrue(found(query), query)
+            for query in ("+7 111", "555", "8 111"):
+                self.assertFalse(found(query), query)
+        finally:
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                db.execute("DELETE FROM client_segments WHERE client_id = ?", (client_id,))
+                db.execute("DELETE FROM clients WHERE id = ?", (client_id,))
+                db.commit()
+
+    def test_every_phone_field_of_the_schedule_offers_client_suggestions(self):
+        self.login()
+        html = self.client.get("/schedule?date=2026-09-05").get_data(as_text=True)
+        # booking, quick add and the participant template: three phone fields
+        self.assertEqual(len(re.findall(r'<input type="tel"[^>]*data-phone-search', html)), 3)
+        self.assertEqual(len(re.findall(r'<span class="schedule-client-results" data-phone-results', html)), 3)
+        self.assertIn("function schedulePhoneInput", html)
+        self.assertIn('oninput="scheduleBookingPhoneChanged(this); schedulePhoneInput(this)"', html)
+        self.assertIn('oninput="scheduleParticipantPhoneChanged(this); schedulePhoneInput(this)"', html)
+        self.assertIn('oninput="schedulePhoneInput(this)"', html)
 
     def test_admin_creates_individual_booking_with_assignment(self):
         self.login()

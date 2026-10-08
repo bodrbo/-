@@ -126,6 +126,21 @@ def remove_day_crew_member(db, day, employee_id):
     return cursor.rowcount > 0
 
 
+def _phone_digits(phone):
+    return "".join(ch for ch in str(phone or "") if ch.isdigit())
+
+
+def _phone_word_matches(word, phone_digits):
+    """A typed phone fragment ("+7 999", "8 (999) 12", "99912") against the
+    stored number whatever its formatting; a leading 8 stands for +7."""
+    digits = _phone_digits(word)
+    if len(digits) < 3 or not phone_digits:
+        return False
+    if digits in phone_digits:
+        return True
+    return digits.startswith("8") and ("7" + digits[1:]) in phone_digits
+
+
 def search_clients(db, query, limit=20):
     """Return a small ranked slice of excursion clients for autocomplete."""
     words = [word for word in str(query or "").strip().casefold().split() if word]
@@ -142,10 +157,17 @@ def search_clients(db, query, limit=20):
     ).fetchall()
     ranked = []
     exact_query = " ".join(words)
+    # a query made only of digits and phone punctuation ("8 999 123") is one
+    # phone fragment, not several words
+    phone_query = exact_query if all(ch.isdigit() or ch in " +()-" for ch in exact_query) else None
     for row in rows:
         client = dict(row)
         searchable = f"{client['client_name']} {client['phone']}".casefold()
-        if not all(word in searchable for word in words):
+        phone_digits = _phone_digits(client["phone"])
+        if phone_query is not None:
+            if not (_phone_word_matches(phone_query, phone_digits) or exact_query in searchable):
+                continue
+        elif not all(word in searchable or _phone_word_matches(word, phone_digits) for word in words):
             continue
         name = client["client_name"].casefold()
         if name.startswith(exact_query):
@@ -153,7 +175,7 @@ def search_clients(db, query, limit=20):
         elif exact_query in name:
             score = 1
         else:
-            score = 2 + sum(searchable.index(word) for word in words)
+            score = 2 + sum(searchable.find(word) if word in searchable else 0 for word in words)
         ranked.append((score, name, client["id"], client))
     ranked.sort(key=lambda item: item[:3])
     return [item[3] for item in ranked[:limit]]
