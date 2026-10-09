@@ -22,6 +22,8 @@ def create_tuning_schedule_blueprint(
     assignment_status_choices,
     reassign_order_assignment=None,
     reminder_recipients=None,
+    update_order_assignment_terms=None,
+    revoke_order_assignment=None,
 ):
     blueprint = Blueprint("tuning_schedule", __name__)
     assignment_status_values = {choice["value"] for choice in assignment_status_choices}
@@ -57,6 +59,10 @@ def create_tuning_schedule_blueprint(
             today=dt.date.today().isoformat(),
             linkable_orders=repository.list_linkable_orders(db),
             reminder_recipients=reminder_recipients(db) if reminder_recipients else [],
+            editor_employees=[
+                {"name": employee["name"], "is_admin": services.ADMIN_POSITION in employee["positions"]}
+                for employee in context["crew"]
+            ],
             assignment_statuses=assignment_status_choices,
             notice=session.pop("schedule_notice", None),
         )
@@ -195,6 +201,32 @@ def create_tuning_schedule_blueprint(
     def remove_task_day(task_id, day_id):
         day = services.parse_day(request.form.get("return_date")).isoformat()
         success, message = services.remove_task_day(get_db(), task_id, day_id)
+        set_notice(message, success)
+        return redirect_to_day(day)
+
+    @blueprint.route("/schedule/tuning/tasks/<int:task_id>/update", methods=["POST"])
+    @manage_required
+    def update_task(task_id):
+        day = services.parse_day(request.form.get("return_date")).isoformat()
+        hooks = {
+            "reassign": reassign_order_assignment or (lambda *_args: (False, "Передача недоступна.")),
+            "terms": update_order_assignment_terms or (lambda *_args: (False, "Изменение недоступно.")),
+            "update_status": update_order_assignment_status,
+            "pay_free_task": pay_free_task,
+            "statuses": assignment_status_values,
+        }
+        success, message = services.update_task(get_db(), task_id, request.form, hooks)
+        set_notice(message, success)
+        return redirect_to_day(day)
+
+    @blueprint.route("/schedule/tuning/tasks/<int:task_id>/delete", methods=["POST"])
+    @manage_required
+    def delete_task(task_id):
+        day = services.parse_day(request.form.get("return_date")).isoformat()
+        success, message = services.delete_task(
+            get_db(), task_id,
+            revoke_order_assignment or (lambda *_args: (False, "Удаление недоступно.")),
+        )
         set_notice(message, success)
         return redirect_to_day(day)
 

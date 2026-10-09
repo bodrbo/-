@@ -5986,6 +5986,12 @@ app.register_blueprint(
             _reassign_tuning_assignment(db, assignment_id, employee_name)[:2]
         ),
         reminder_recipients=lambda db: _note_reminder_recipients(db),
+        update_order_assignment_terms=lambda db, assignment_id, rate, hours: (
+            _apply_tuning_assignment_terms(db, assignment_id, rate, hours)[:2]
+        ),
+        revoke_order_assignment=lambda db, assignment_id: (
+            _revoke_tuning_assignment(db, assignment_id)[:2]
+        ),
     )
 )
 
@@ -12128,13 +12134,13 @@ def update_tuning_assignment_location(assignment_id):
     return redirect(board)
 
 
-@app.route("/tuning/assignments/<int:assignment_id>/rate", methods=["POST"])
-@admin_login_required
-def update_tuning_assignment_terms(assignment_id):
-    """Edits a task's rate and norm-hours. For a task that was already paid
-    out the payroll entry follows (rate/quantity/amount), so the two never
-    disagree — the notice flags a payroll week already marked paid."""
-    db = get_db()
+def _apply_tuning_assignment_terms(db, assignment_id, raw_rate, raw_hours):
+    """Edits a task's rate and norm-hours (a contractor's task: its one cost).
+    For a task that was already paid out the payroll entry follows
+    (rate/quantity/amount), so the two never disagree — the message flags a
+    payroll week already marked paid. Shared by the order board and the
+    tuning schedule's task editor. Returns (ok, message, order_id, item_id);
+    order_id is None when the task doesn't exist."""
     assignment = db.execute(
         "SELECT tia.*, ti.order_id, ti.work_name, ti.cost_price, ti.price_pending "
         "FROM tuning_item_assignments tia "
@@ -12143,14 +12149,12 @@ def update_tuning_assignment_terms(assignment_id):
         (assignment_id,),
     ).fetchone()
     if assignment is None:
-        return redirect(url_for("tuning_index"))
-    board = url_for("tuning_order_board", order_id=assignment["order_id"]) + (
-        f"#board-work-{assignment['item_id']}"
-    )
+        return False, "Задача не найдена.", None, None
+    order_id, item_id = assignment["order_id"], assignment["item_id"]
     contractor = bool(assignment["partner_id"])
     try:
-        rate = float(request.form.get("rate", "").strip().replace(",", "."))
-        hours = 1.0 if contractor else float(request.form.get("norm_hours", "").strip().replace(",", "."))
+        rate = float(str(raw_rate).strip().replace(",", "."))
+        hours = 1.0 if contractor else float(str(raw_hours).strip().replace(",", "."))
     except ValueError:
         rate = hours = None
     # an administrator's task has no rate (salaried) — only the hours are set
@@ -12161,11 +12165,10 @@ def update_tuning_assignment_terms(assignment_id):
         )
     )
     if not rate_floor_ok or hours is None or hours <= 0:
-        session["tuning_board_error"] = (
+        return False, (
             "Стоимость должна быть числом больше нуля." if contractor
             else "Ставка и нормочасы должны быть числами больше нуля."
-        )
-        return redirect(board)
+        ), order_id, item_id
     db.execute(
         "UPDATE tuning_item_assignments SET rate = ?, norm_hours = ? WHERE id = ?",
         (rate, hours, assignment_id),
@@ -12192,8 +12195,22 @@ def update_tuning_assignment_terms(assignment_id):
         db, assignment["item_id"], assignment["work_name"],
         assignment["cost_price"], assignment["price_pending"],
     )
-    session["tuning_board_notice"] = notice
-    return redirect(board)
+    return True, notice, order_id, item_id
+
+
+@app.route("/tuning/assignments/<int:assignment_id>/rate", methods=["POST"])
+@admin_login_required
+def update_tuning_assignment_terms(assignment_id):
+    db = get_db()
+    ok, message, order_id, item_id = _apply_tuning_assignment_terms(
+        db, assignment_id, request.form.get("rate", ""), request.form.get("norm_hours", "")
+    )
+    if order_id is None:
+        return redirect(url_for("tuning_index"))
+    session["tuning_board_notice" if ok else "tuning_board_error"] = message
+    return redirect(
+        url_for("tuning_order_board", order_id=order_id) + f"#board-work-{item_id}"
+    )
 
 
 def _reassign_tuning_assignment(db, assignment_id, new_name):
@@ -12631,36 +12648,32 @@ def update_tuning_assignment_dates(assignment_id):
     return redirect(board)
 
 
-@app.route("/tuning/assignments/<int:assignment_id>/revoke", methods=["POST"])
-@admin_login_required
-def revoke_tuning_assignment(assignment_id):
+def _revoke_tuning_assignment(db, assignment_id):
     """Takes a task back from one employee (the assignment row is removed,
-    together with its placement on the tuning schedule, and the employee is
-    told). A task that was already paid out can be revoked too: its payroll
-    entry is deleted. Refused only when the employee wrote materials off
-    against it — that stock movement would be orphaned, the admin has to
-    sort it out first."""
-    db = get_db()
+    together with its placement on the tuning schedule and its reminders,
+    and the employee is told). A task that was already paid out can be
+    revoked too: its payroll entry is deleted. Refused only when the
+    employee wrote materials off against it — that stock movement would be
+    orphaned, the admin has to sort it out first. Shared by the order board
+    and the tuning schedule's task editor. Returns (ok, message, order_id,
+    item_id); order_id is None when the task doesn't exist."""
     assignment = db.execute(
         "SELECT tia.*, ti.order_id, ti.work_name FROM tuning_item_assignments tia "
         "JOIN tuning_order_items ti ON ti.id = tia.item_id WHERE tia.id = ?",
         (assignment_id,),
     ).fetchone()
     if assignment is None:
-        return redirect(url_for("tuning_index"))
-    board = url_for("tuning_order_board", order_id=assignment["order_id"]) + (
-        f"#board-work-{assignment['item_id']}"
-    )
+        return False, "Задача не найдена.", None, None
+    order_id, item_id = assignment["order_id"], assignment["item_id"]
     used_materials = db.execute(
         "SELECT COUNT(*) FROM supply_writeoffs WHERE tuning_item_assignment_id = ?",
         (assignment_id,),
     ).fetchone()[0]
     if used_materials:
-        session["tuning_board_error"] = (
+        return False, (
             f"По задаче {assignment['employee_name']} списаны материалы ({used_materials}) — "
             "сначала верните их, затем отзовите задачу."
-        )
-        return redirect(board)
+        ), order_id, item_id
     schedule_task_ids = [
         row["id"] for row in db.execute(
             "SELECT id FROM tuning_schedule_tasks WHERE assignment_id = ?", (assignment_id,)
@@ -12704,8 +12717,20 @@ def revoke_tuning_assignment(assignment_id):
                 " Внимание: неделя этой выплаты уже отмечена оплаченной — "
                 "сверьте расчёты с сотрудником."
             )
-    session["tuning_board_notice"] = notice
-    return redirect(board)
+    return True, notice, order_id, item_id
+
+
+@app.route("/tuning/assignments/<int:assignment_id>/revoke", methods=["POST"])
+@admin_login_required
+def revoke_tuning_assignment(assignment_id):
+    db = get_db()
+    ok, message, order_id, item_id = _revoke_tuning_assignment(db, assignment_id)
+    if order_id is None:
+        return redirect(url_for("tuning_index"))
+    session["tuning_board_notice" if ok else "tuning_board_error"] = message
+    return redirect(
+        url_for("tuning_order_board", order_id=order_id) + f"#board-work-{item_id}"
+    )
 
 
 @app.route("/tuning/<int:order_id>/item/<int:item_id>/photo", methods=["POST"])

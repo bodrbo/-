@@ -221,6 +221,48 @@ def set_task_day_start(db, day_id, start_time):
     db.commit()
 
 
+def update_free_task(db, task_id, title, rate, comment, order_id):
+    """Title, rate, comment and project of a task that isn't tied to a work
+    item (assignment_id IS NULL)."""
+    db.execute(
+        "UPDATE tuning_schedule_tasks SET title = ?, rate = ?, comment = ?, order_id = ? "
+        "WHERE id = ? AND assignment_id IS NULL",
+        (title, rate, comment, order_id, task_id),
+    )
+    db.commit()
+
+
+def set_linked_task_comment(db, task_id, assignment_id, comment):
+    """The comment of an order task lives on tuning_item_assignments (the
+    board edits it there); the schedule row keeps a copy."""
+    db.execute("UPDATE tuning_item_assignments SET comment = ? WHERE id = ?", (comment, assignment_id))
+    db.execute("UPDATE tuning_schedule_tasks SET comment = ? WHERE id = ?", (comment, task_id))
+    db.commit()
+
+
+def set_assignment_due(db, assignment_id, due_from, due_to):
+    db.execute(
+        "UPDATE tuning_item_assignments SET due_from = ?, due_to = ? WHERE id = ?",
+        (due_from, due_to, assignment_id),
+    )
+    db.commit()
+
+
+def get_assignment(db, assignment_id):
+    return db.execute(
+        "SELECT * FROM tuning_item_assignments WHERE id = ?", (assignment_id,)
+    ).fetchone()
+
+
+def delete_task_reminders(db, task_id):
+    db.execute("DELETE FROM tuning_task_reminders WHERE schedule_task_id = ?", (task_id,))
+
+
+def list_other_day_tasks(db, day, task_id):
+    """Placements on `day` that belong to other tasks than task_id."""
+    return [row for row in list_day_tasks(db, day) if row["task_id"] != task_id]
+
+
 def set_free_task_employee(db, task_id, employee_name):
     db.execute(
         "UPDATE tuning_schedule_tasks SET employee_name = ? WHERE id = ? AND assignment_id IS NULL",

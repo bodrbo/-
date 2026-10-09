@@ -12091,6 +12091,11 @@ button.partner-open-price-save svg {
 .tuning-card-bell small { font-size: 9px; font-weight: 700; }
 .tuning-card-bell.has-reminders { background: rgba(255,255,255,.42); }
 .tuning-card-bell:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.task-editor-days { display: grid; gap: 6px; }
+.task-editor-day { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, .8fr) auto; gap: 6px; align-items: center; }
+.task-editor-day input { min-width: 0; width: 100%; }
+.task-editor-actions .task-editor-delete { margin-left: auto; }
+.task-editor-row2 { grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); }
 .task-reminder-card { width: min(520px, 100%); max-height: none; margin: auto; }
 .task-reminder-body { padding: 16px 22px 22px; display: grid; gap: 10px; }
 .task-reminder-body .board-task-reminder-form { margin-top: 0; }

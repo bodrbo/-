@@ -121,9 +121,12 @@
                    title="{{ card.start_label }}–{{ card.end_label }} · {{ card.title }}"
                    data-move-url="{{ url_for('tuning_schedule.move_task_card', task_id=card.task_id, day_id=card.day_id) }}"
                    data-start-minutes="{{ card._start_minutes }}" data-duration-minutes="{{ card._end_minutes - card._start_minutes }}"
-                   onpointerdown="startTuningDrag(event, this)">
+                   data-editor='{{ card.editor|tojson }}'
+                   onpointerdown="startTuningDrag(event, this)" onclick="openTaskEditor(this, event)">
                 <div class="tuning-calendar-card-head">
                   <span class="tuning-calendar-card-time">{{ card.start_label }}–{{ card.end_label }}</span>
+                  <button type="button" class="tuning-card-bell tuning-card-edit" onclick="openTaskEditor(this.closest('.tuning-calendar-card'), event, true)"
+                          title="Открыть задачу" aria-label="Открыть задачу «{{ card.title }}»">✎</button>
                   {% if card.can_remind %}
                   <button type="button" class="tuning-card-bell{{ ' has-reminders' if card.reminders }}"
                           onclick="openTaskReminder({{ card.task_id }})"
@@ -469,6 +472,77 @@
     </form>
   </section>
 </div>
+<div class="schedule-modal" id="taskEditorModal" hidden>
+  <div class="schedule-modal-backdrop" data-editor-close></div>
+  <section class="schedule-modal-card quick-task-card" role="dialog" aria-modal="true" aria-labelledby="taskEditorTitle">
+    <header class="schedule-modal-header">
+      <div>
+        <span id="taskEditorKind">Задача</span>
+        <h2 id="taskEditorTitle">Редактирование задачи</h2>
+      </div>
+      <button type="button" class="schedule-modal-close" data-editor-close aria-label="Закрыть">×</button>
+    </header>
+    <form method="post" class="quick-task-body" id="taskEditorForm">
+      <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
+
+      <div class="quick-task-column">
+        <label class="quick-task-field" id="taskEditorTitleField"><span>Название задачи</span>
+          <input type="text" name="title" id="taskEditorName" maxlength="200">
+        </label>
+        <p class="hint" id="taskEditorLinkedNote" hidden></p>
+        <label class="quick-task-field"><span>Сотрудник</span>
+          <select name="employee_name" id="taskEditorEmployee" required onchange="syncTaskEditorRate()">
+            {% for employee in editor_employees %}
+            <option value="{{ employee.name }}" data-admin="{{ 1 if employee.is_admin else 0 }}">{{ employee.name }}{{ ' · администратор' if employee.is_admin }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="quick-task-field" id="taskEditorOrderField"><span>Проект <small>необязательно</small></span>
+          <select name="order_id" id="taskEditorOrder">
+            <option value="">Без проекта</option>
+            {% for order in linkable_orders %}
+            <option value="{{ order.id }}">№{{ order.id }} — {{ order.client_name }} ({{ order.motor_model if order.equipment_type == 'motor' else order.boat_model }})</option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="quick-task-row task-editor-row2">
+          <label class="quick-task-field" id="taskEditorRateField"><span>Ставка, ₽/ч</span>
+            <input type="text" inputmode="decimal" name="rate" id="taskEditorRate">
+          </label>
+          <label class="quick-task-field"><span>Статус</span>
+            <select name="status" id="taskEditorStatus">
+              {% for s in assignment_statuses %}
+              <option value="{{ s.value }}">{{ s.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
+        <p class="hint" id="taskEditorAdminNote" hidden>Администратор на окладе — ставка не нужна.</p>
+      </div>
+
+      <div class="quick-task-column">
+        <div class="quick-task-field"><span>Дни выполнения</span>
+          <div id="taskEditorDays" class="task-editor-days"></div>
+          <button type="button" class="btn-add" onclick="addTaskEditorDay()">Добавить день</button>
+        </div>
+        <label class="quick-task-field"><span>Комментарий</span>
+          <textarea name="comment" id="taskEditorComment" rows="3" maxlength="2000"></textarea>
+        </label>
+      </div>
+
+      <div class="quick-task-actions quick-task-wide task-editor-actions">
+        <button type="submit">Сохранить</button>
+        <button type="button" class="btn-secondary" data-editor-close>Отмена</button>
+        <button type="submit" class="btn-secondary danger task-editor-delete" form="taskEditorDeleteForm"
+                onclick="return confirmTaskEditorDelete()">Удалить задачу</button>
+      </div>
+    </form>
+    <form method="post" id="taskEditorDeleteForm" hidden>
+      <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
+    </form>
+  </section>
+</div>
+
 {% for employee in day_crew %}{% for card in cards_by_employee.get(employee.name, []) %}{% if card.can_remind %}
 <div class="schedule-modal" id="taskReminderModal{{ card.task_id }}" hidden data-task-reminder-modal>
   <div class="schedule-modal-backdrop" onclick="closeTaskReminder({{ card.task_id }})"></div>
@@ -626,6 +700,8 @@ async function finishTuningDrag(event) {
   tuningDrag = null;
   detachTuningDrag(state, event);
   if (!state.moved) return;
+  tuningSuppressClick = true;  // the click that follows a drag must not open the editor
+  setTimeout(function () { tuningSuppressClick = false; }, 0);
   var startTime = tuningTime(state.startMinutes);
   var sameColumn = state.targetColumn === state.sourceColumn;
   if (sameColumn && state.startMinutes === state.originalStartMinutes) {
@@ -801,6 +877,107 @@ document.addEventListener('keydown', function (event) {
   var modal = document.getElementById('quickTaskModal');
   if (event.key === 'Escape' && modal && !modal.hidden) closeQuickTask();
 });
+var tuningEditorTask = null;
+var tuningSuppressClick = false;
+
+function openTaskEditor(card, event, fromButton) {
+  if (!fromButton && event && event.target.closest && event.target.closest('select, option, button, a')) return;
+  if (tuningSuppressClick || tuningDrag || tuningDragSaving) return;
+  var task;
+  try { task = JSON.parse(card.dataset.editor); } catch (error) { return; }
+  tuningEditorTask = task;
+  var form = document.getElementById('taskEditorForm');
+  form.action = '/schedule/tuning/tasks/' + task.task_id + '/update';
+  document.getElementById('taskEditorDeleteForm').action = '/schedule/tuning/tasks/' + task.task_id + '/delete';
+  document.getElementById('taskEditorTitle').textContent = task.title;
+  document.getElementById('taskEditorKind').textContent = task.is_linked
+    ? 'Задача заказа №' + task.order_id + ' · синхронна с доской задач'
+    : (task.order_id ? 'Задача проекта №' + task.order_id : 'Задача без проекта');
+  var name = document.getElementById('taskEditorName');
+  name.value = task.title;
+  name.readOnly = task.is_linked;
+  name.required = !task.is_linked;
+  var note = document.getElementById('taskEditorLinkedNote');
+  note.hidden = !task.is_linked;
+  note.textContent = 'Название и проект берутся из работы заказа. Ставка, часы и срок меняют начисление и доску задач.';
+  var employee = document.getElementById('taskEditorEmployee');
+  employee.value = task.employee_name;
+  var order = document.getElementById('taskEditorOrder');
+  if (task.order_id && !Array.prototype.some.call(order.options, function (o) { return o.value === String(task.order_id); })) {
+    order.add(new Option('№' + task.order_id, String(task.order_id)));
+  }
+  order.value = task.order_id ? String(task.order_id) : '';
+  order.disabled = task.is_linked;  // a disabled select is not submitted; the server keeps the work's order
+  document.getElementById('taskEditorOrderField').hidden = false;
+  document.getElementById('taskEditorRate').value = task.rate ? String(task.rate) : '';
+  document.getElementById('taskEditorStatus').value = task.status;
+  document.getElementById('taskEditorComment').value = task.comment || '';
+  var days = document.getElementById('taskEditorDays');
+  days.innerHTML = '';
+  task.days.forEach(function (day) { addTaskEditorDay(day.date, day.start, day.hours); });
+  syncTaskEditorRate();
+  var modal = document.getElementById('taskEditorModal');
+  modal.hidden = false;
+  document.body.classList.add('schedule-modal-open');
+  setTimeout(function () { (task.is_linked ? employee : name).focus(); }, 20);
+}
+
+function closeTaskEditor() {
+  document.getElementById('taskEditorModal').hidden = true;
+  document.body.classList.remove('schedule-modal-open');
+  tuningEditorTask = null;
+}
+
+function syncTaskEditorRate() {
+  var select = document.getElementById('taskEditorEmployee');
+  var option = select.options[select.selectedIndex];
+  var isAdmin = !!option && option.dataset.admin === '1';
+  var input = document.getElementById('taskEditorRate');
+  document.getElementById('taskEditorRateField').hidden = isAdmin;
+  input.required = !isAdmin;
+  if (isAdmin) input.value = '';
+  document.getElementById('taskEditorAdminNote').hidden = !isAdmin;
+}
+
+function addTaskEditorDay(date, start, hours) {
+  var row = document.createElement('div');
+  row.className = 'task-editor-day';
+  row.innerHTML =
+    '<input type="date" name="work_date[]" required aria-label="Дата">' +
+    '<input type="time" name="start_time[]" required aria-label="Начало">' +
+    '<input type="text" inputmode="decimal" name="planned_hours[]" required aria-label="Часы" placeholder="Часы">' +
+    '<button type="button" class="icon-btn danger" aria-label="Убрать день" title="Убрать день">' +
+    '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l10 10M15 5L5 15"/></svg></button>';
+  var dateInput = row.querySelector('[name="work_date[]"]');
+  dateInput.value = typeof date === 'string' ? date : document.querySelector('#taskEditorForm [name="return_date"]').value;
+  row.querySelector('[name="start_time[]"]').value = start || '09:00';
+  row.querySelector('[name="planned_hours[]"]').value = hours ? String(hours) : '1';
+  row.querySelector('button').addEventListener('click', function () {
+    var container = document.getElementById('taskEditorDays');
+    if (container.children.length > 1) row.remove();  // a task keeps at least one day
+  });
+  document.getElementById('taskEditorDays').appendChild(row);
+}
+
+function confirmTaskEditorDelete() {
+  var task = tuningEditorTask;
+  if (!task) return false;
+  var text = 'Удалить задачу «' + task.title + '»?';
+  if (task.is_linked) {
+    text += ' Она будет отозвана у сотрудника и исчезнет с доски задач заказа №' + task.order_id + '.';
+    if (task.paid) text += ' Начисленная выплата тоже будет удалена.';
+  }
+  return confirm(text);
+}
+
+document.querySelectorAll('[data-editor-close]').forEach(function (element) {
+  element.addEventListener('click', closeTaskEditor);
+});
+document.addEventListener('keydown', function (event) {
+  var modal = document.getElementById('taskEditorModal');
+  if (event.key === 'Escape' && modal && !modal.hidden) closeTaskEditor();
+});
+
 document.querySelectorAll('.tuning-calendar-column').forEach(function (column) {
   column.addEventListener('click', function (event) {
     if (event.target.closest('.tuning-calendar-card') || tuningDrag || tuningDragSaving) return;

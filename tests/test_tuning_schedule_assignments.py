@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 from werkzeug.datastructures import MultiDict
 
@@ -1081,6 +1082,276 @@ class TuningScheduleQuickTaskTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertIsNone(self.task()["assignment_id"])
         self.quick(order_id=self.order_id, item_id=self.item_id)
         self.assertIsNotNone(self.task()["assignment_id"])
+
+
+class TuningScheduleTaskEditorTests(_TuningScheduleFixture, unittest.TestCase):
+    """Open a card in the tuning schedule, change any of its data in a
+    window, or delete it."""
+
+    def make_free(self, employee=None, title="Уборка цеха", rate="150", start="10:00", hours="2",
+                  order_id=None):
+        employee = employee or self.EMPLOYEE_A
+        self.put_on_shift(employee)
+        self.login_admin()
+        self.client.post("/schedule/tuning/tasks", data=MultiDict([
+            ("employee_name", employee), ("rate", rate), ("comment", "было"), ("title", title),
+            ("return_date", self.DAY), ("work_date[]", self.DAY), ("start_time[]", start),
+            ("planned_hours[]", hours), ("order_id", "" if order_id is None else str(order_id)),
+        ]))
+        return self.task(employee)
+
+    def make_linked(self, employee=None, rate=100, hours=2):
+        employee = employee or self.EMPLOYEE_A
+        self.put_on_shift(employee)
+        self.assign([(employee, rate, hours)])
+        return self.task(employee)
+
+    def task(self, employee=None):
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT * FROM tuning_schedule_tasks WHERE employee_name = ? ORDER BY id DESC LIMIT 1",
+                (employee or self.EMPLOYEE_A,)).fetchone()
+            return dict(row) if row else None
+
+    def days(self, task_id):
+        with application_module.app.app_context():
+            return [(r["work_date"], r["start_time"], r["planned_hours"]) for r in
+                    application_module.get_db().execute(
+                        "SELECT * FROM tuning_schedule_task_days WHERE task_id = ? ORDER BY work_date",
+                        (task_id,)).fetchall()]
+
+    def save(self, task_id, days=None, **fields):
+        self.login_admin()
+        data = MultiDict()
+        base = {"employee_name": self.EMPLOYEE_A, "title": "Уборка цеха", "rate": "150",
+                "comment": "", "status": "pending", "order_id": "", "return_date": self.DAY}
+        base.update(fields)
+        for key, value in base.items():
+            data[key] = value
+        for day in (days if days is not None else [(self.DAY, "10:00", "2")]):
+            data.add("work_date[]", day[0])
+            data.add("start_time[]", day[1])
+            data.add("planned_hours[]", str(day[2]))
+        return self.client.post(f"/schedule/tuning/tasks/{task_id}/update", data=data)
+
+    def notice(self):
+        with self.client.session_transaction() as session:
+            return session.get("schedule_notice") or {}
+
+    # ---- the page
+
+    def test_every_card_carries_its_data_and_the_page_has_the_editor_window(self):
+        task = self.make_free()
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        self.assertIn('id="taskEditorModal"', page)
+        self.assertIn("openTaskEditor(this, event)", page)
+        self.assertIn("data-editor='{", page)
+        self.assertIn(f'"task_id": {task["id"]}', page)
+        self.assertIn('id="taskEditorDeleteForm"', page)
+        for field in ("title", "employee_name", "order_id", "rate", "status", "comment"):
+            self.assertIn(f'name="{field}"', page.split('id="taskEditorForm"')[1].split("</form>")[0], field)
+
+    # ---- a task without a work item
+
+    def test_a_free_task_can_have_everything_changed(self):
+        task = self.make_free()
+        self.put_on_shift(self.EMPLOYEE_B)
+        response = self.save(
+            task["id"], employee_name=self.EMPLOYEE_B, title="Мойка", rate="175", comment="стало",
+            status="in_progress", order_id=str(self.order_id), days=[(self.DAY, "13:30", "3")],
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.notice()["type"], "success")
+        row = self.task(self.EMPLOYEE_B)
+        self.assertEqual((row["title"], row["rate"], row["comment"], row["status"], row["order_id"]),
+                         ("Мойка", 175, "стало", "in_progress", self.order_id))
+        self.assertEqual(self.days(task["id"]), [(self.DAY, "13:30", 3.0)])
+        self.assertIsNone(self.task(self.EMPLOYEE_A))
+
+    def test_days_can_be_added_moved_and_removed(self):
+        task = self.make_free()
+        self.put_on_shift(self.EMPLOYEE_A, day="2026-10-13")
+        self.save(task["id"], days=[(self.DAY, "10:00", "2"), ("2026-10-13", "09:00", "1")])
+        self.assertEqual(self.days(task["id"]), [(self.DAY, "10:00", 2.0), ("2026-10-13", "09:00", 1.0)])
+        self.save(task["id"], days=[("2026-10-13", "14:00", "1")])  # the first day dropped, the other moved
+        self.assertEqual(self.days(task["id"]), [("2026-10-13", "14:00", 1.0)])
+
+    def test_a_day_off_the_roster_is_refused_and_nothing_changes(self):
+        task = self.make_free()
+        before = self.days(task["id"])
+        self.save(task["id"], title="Другое", days=[("2026-10-20", "09:00", "1")])
+        self.assertEqual(self.notice()["type"], "error")
+        self.assertIn("не стоит в смене на 2026-10-20", self.notice()["message"])
+        self.assertEqual(self.days(task["id"]), before)
+        self.assertEqual(self.task()["title"], "Уборка цеха")
+
+    def test_overlap_with_another_task_of_the_employee_is_refused(self):
+        first = self.make_free(title="Первая", start="10:00", hours="2")
+        second = self.make_free(title="Вторая", start="13:00", hours="1")
+        self.save(second["id"], title="Вторая", days=[(self.DAY, "11:00", "1")])
+        self.assertEqual(self.notice()["type"], "error")
+        self.assertIn("занято задачей «Первая»", self.notice()["message"])
+        self.assertEqual(self.days(second["id"]), [(self.DAY, "13:00", 1.0)])
+        self.assertEqual(self.days(first["id"]), [(self.DAY, "10:00", 2.0)])
+
+    def test_the_task_does_not_clash_with_itself(self):
+        task = self.make_free(start="10:00", hours="2")
+        self.save(task["id"], days=[(self.DAY, "11:00", "2")])
+        self.assertEqual(self.notice()["type"], "success")
+        self.assertEqual(self.days(task["id"]), [(self.DAY, "11:00", 2.0)])
+
+    def test_bad_input_is_refused_with_a_message(self):
+        task = self.make_free()
+        for kwargs, text in (
+            ({"title": ""}, "название"),
+            ({"rate": "0"}, "Ставка"),
+            ({"employee_name": "Никто"}, "сотрудника"),
+            ({"status": "bogus"}, "статус"),
+            ({"days": [(self.DAY, "23:30", "2")]}, "до конца суток"),
+            ({"days": [(self.DAY, "09:00", "0")]}, "часы"),
+            ({"days": [(self.DAY, "09:00", "1"), (self.DAY, "12:00", "1")]}, "дважды"),
+            ({"days": []}, "день"),
+            ({"order_id": "99999"}, "Проект"),
+        ):
+            self.save(task["id"], **kwargs)
+            self.assertEqual(self.notice()["type"], "error", kwargs)
+            self.assertIn(text.lower(), self.notice()["message"].lower(), kwargs)
+        self.assertEqual(self.days(task["id"]), [(self.DAY, "10:00", 2.0)])
+
+    def test_finishing_a_free_task_pays_it_once(self):
+        task = self.make_free(rate="150", hours="2")
+        self.save(task["id"], status="done")
+        with application_module.app.app_context():
+            entries = application_module.get_db().execute(
+                "SELECT amount FROM entries WHERE employee = ?", (self.EMPLOYEE_A,)).fetchall()
+        self.assertEqual([e["amount"] for e in entries], [300])
+        self.save(task["id"], status="done")
+        with application_module.app.app_context():
+            self.assertEqual(application_module.get_db().execute(
+                "SELECT COUNT(*) FROM entries WHERE employee = ?", (self.EMPLOYEE_A,)).fetchone()[0], 1)
+
+    def test_an_administrator_task_needs_no_rate_and_is_put_on_the_shift(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("INSERT INTO employee_positions (employee_id, position, created_at) VALUES (?, 'Администратор', 'x')",
+                       (self.employee_id(self.EMPLOYEE_B),))
+            db.commit()
+        task = self.make_free()
+        self.save(task["id"], employee_name=self.EMPLOYEE_B, rate="")
+        self.assertEqual(self.notice()["type"], "success")
+        self.assertEqual(self.task(self.EMPLOYEE_B)["rate"], 0)
+        self.assertIsNotNone(self.crew_hours(self.EMPLOYEE_B))
+
+    # ---- an order task
+
+    def test_an_order_task_keeps_its_work_and_syncs_with_the_board(self):
+        task = self.make_linked()
+        self.save(task["id"], title="Что угодно", rate="250", comment="новый", status="in_progress",
+                  days=[(self.DAY, "12:00", "3")])
+        self.assertEqual(self.notice()["type"], "success")
+        (assignment,) = self.assignments()
+        self.assertEqual((assignment["rate"], assignment["norm_hours"], assignment["comment"],
+                          assignment["assignment_status"], assignment["due_from"], assignment["due_to"]),
+                         (250, 3, "новый", "in_progress", self.DAY, None))
+        self.assertEqual(self.days(task["id"]), [(self.DAY, "12:00", 3.0)])
+        self.assertEqual(self.task()["title"], task["title"])  # the work's name is not editable here
+        page = self.board()
+        self.assertIn("новый", page)
+
+    def test_an_order_task_over_several_days_sets_the_period(self):
+        task = self.make_linked()
+        self.put_on_shift(self.EMPLOYEE_A, day="2026-10-14")
+        self.save(task["id"], rate="100", days=[(self.DAY, "09:00", "2"), ("2026-10-14", "09:00", "1.5")])
+        (assignment,) = self.assignments()
+        self.assertEqual((assignment["due_from"], assignment["due_to"], assignment["norm_hours"]),
+                         (self.DAY, "2026-10-14", 3.5))
+
+    def test_an_order_task_can_be_handed_to_another_employee(self):
+        task = self.make_linked()
+        self.put_on_shift(self.EMPLOYEE_B)
+        with mock.patch.object(application_module, "send_telegram_notification_to_employee"):
+            self.save(task["id"], employee_name=self.EMPLOYEE_B, rate="100")
+        self.assertEqual(self.notice()["type"], "success")
+        (assignment,) = self.assignments()
+        self.assertEqual(assignment["employee_name"], self.EMPLOYEE_B)
+        self.assertEqual(self.task(self.EMPLOYEE_B)["id"], task["id"])
+
+    def test_a_finished_order_task_cannot_be_handed_over(self):
+        task = self.make_linked()
+        self.save(task["id"], status="done", rate="100")
+        self.put_on_shift(self.EMPLOYEE_B)
+        self.save(task["id"], employee_name=self.EMPLOYEE_B, rate="100", status="done")
+        self.assertEqual(self.notice()["type"], "error")
+        self.assertEqual(self.assignments()[0]["employee_name"], self.EMPLOYEE_A)
+
+    def test_changing_the_rate_of_a_paid_order_task_recalculates_the_payout(self):
+        task = self.make_linked(rate=100, hours=2)
+        self.save(task["id"], status="done", rate="100")
+        self.save(task["id"], status="done", rate="300")
+        with application_module.app.app_context():
+            amounts = [r["amount"] for r in application_module.get_db().execute(
+                "SELECT amount FROM entries WHERE employee = ?", (self.EMPLOYEE_A,)).fetchall()]
+        self.assertEqual(amounts, [600])
+
+    # ---- delete
+
+    def test_a_free_task_is_deleted_with_its_days_and_reminders(self):
+        task = self.make_free()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("INSERT INTO tuning_task_reminders (schedule_task_id, remind_at, created_at) "
+                       "VALUES (?, '2030-01-01 10:00', 'x')", (task["id"],))
+            db.commit()
+        self.login_admin()
+        response = self.client.post(f"/schedule/tuning/tasks/{task['id']}/delete", data={"return_date": self.DAY})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.notice()["type"], "success")
+        self.assertIsNone(self.task())
+        self.assertEqual(self.days(task["id"]), [])
+        with application_module.app.app_context():
+            self.assertEqual(application_module.get_db().execute(
+                "SELECT COUNT(*) FROM tuning_task_reminders WHERE schedule_task_id = ?",
+                (task["id"],)).fetchone()[0], 0)
+
+    def test_a_paid_free_task_is_not_deleted(self):
+        task = self.make_free()
+        self.save(task["id"], status="done")
+        self.client.post(f"/schedule/tuning/tasks/{task['id']}/delete", data={"return_date": self.DAY})
+        self.assertEqual(self.notice()["type"], "error")
+        self.assertIn("оплачена", self.notice()["message"])
+        self.assertIsNotNone(self.task())
+
+    def test_deleting_an_order_task_revokes_it_on_the_board_too(self):
+        task = self.make_linked()
+        self.login_admin()
+        with mock.patch.object(application_module, "send_telegram_notification_to_employee") as notify:
+            self.client.post(f"/schedule/tuning/tasks/{task['id']}/delete", data={"return_date": self.DAY})
+        self.assertEqual(self.assignments(), [])
+        self.assertIsNone(self.task())
+        notify.assert_called()  # the employee is told, as on the board
+        self.assertIn("Пока никто не назначен", self.board())
+
+    def test_deleting_a_paid_order_task_removes_its_payout(self):
+        task = self.make_linked(rate=100, hours=2)
+        self.save(task["id"], status="done", rate="100")
+        self.login_admin()
+        with mock.patch.object(application_module, "send_telegram_notification_to_employee"):
+            self.client.post(f"/schedule/tuning/tasks/{task['id']}/delete", data={"return_date": self.DAY})
+        with application_module.app.app_context():
+            self.assertEqual(application_module.get_db().execute(
+                "SELECT COUNT(*) FROM entries WHERE employee = ?", (self.EMPLOYEE_A,)).fetchone()[0], 0)
+
+    def test_unknown_task_and_anonymous_access(self):
+        self.login_admin()
+        self.client.post("/schedule/tuning/tasks/999999/delete", data={"return_date": self.DAY})
+        self.assertEqual(self.notice()["type"], "error")
+        self.save(999999)
+        self.assertEqual(self.notice()["type"], "error")
+        with self.client.session_transaction() as session:
+            session.clear()
+        response = self.client.post("/schedule/tuning/tasks/1/delete", data={})
+        self.assertEqual(response.status_code, 302)
+        self.assertNotIn("/schedule/tuning", response.headers["Location"])
 
 
 if __name__ == "__main__":

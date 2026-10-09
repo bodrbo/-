@@ -344,6 +344,7 @@ def calendar_view(db, day, day_crew):
         task["height_px"] = round(
             max(MIN_CARD_MINUTES, end_minutes - start_minutes) * PX_PER_MINUTE, 2
         )
+        task["editor"] = editor_payload(db, task)
         cards_by_employee[task["employee_name"]].append(task)
 
     hour_marks = []
@@ -579,3 +580,165 @@ def move_task_card(db, task_id, day_id, raw_start, raw_target_employee_id, reass
     return True, message, {
         "start": _label(start_minutes), "end": _label(end_minutes), "employee_name": target_name,
     }
+
+
+def editor_payload(db, card):
+    """Everything the schedule's task editor shows for one calendar card
+    (a list_day_tasks row): the task's own fields and all its days."""
+    task = repository.get_task(db, card["task_id"])
+    linked = task["assignment_id"] is not None
+    assignment = repository.get_assignment(db, task["assignment_id"]) if linked else None
+    paid_entry = (assignment["entry_id"] if linked else task["entry_id"])
+    return {
+        "task_id": task["id"],
+        "is_linked": linked,
+        "title": card["title"],
+        "employee_name": card["employee_name"],
+        "order_id": card["order_id"],
+        "rate": card["rate"],
+        "status": card["status"],
+        "comment": card["comment"] or "",
+        "is_admin": repository.is_administrator(db, card["employee_name"]),
+        "paid": bool(paid_entry),
+        "days": [
+            {"date": day["work_date"], "start": day["start_time"], "hours": day["planned_hours"]}
+            for day in repository.list_task_days(db, task["id"])
+        ],
+    }
+
+
+def update_task(db, task_id, form, hooks):
+    """Saves everything the task editor can change: employee, title and
+    project (a free task; an order task keeps its work), rate, comment,
+    days (date / start / hours — added, changed or removed) and status.
+
+    `hooks` carries app.py's own helpers so an order task goes through the
+    exact code the order board uses: reassign(db, assignment_id, name),
+    terms(db, assignment_id, rate, hours), status(db, task_id, status) and
+    the set of valid status values. All validation happens before the first
+    write. Returns (ok, message)."""
+    task = repository.get_task(db, task_id)
+    if task is None:
+        return False, "Задача не найдена."
+    linked = task["assignment_id"] is not None
+    assignment = repository.get_assignment(db, task["assignment_id"]) if linked else None
+    current_name = assignment["employee_name"] if linked else task["employee_name"]
+    current_status = assignment["assignment_status"] if linked else task["status"]
+    paid = bool(assignment["entry_id"] if linked else task["entry_id"])
+
+    errors = []
+    employee_name = _normalise_text(form.get("employee_name"), EMPLOYEE_NAME_MAX_LENGTH)
+    eligible = {employee["name"] for employee in repository.list_tuning_crew_employees(db)}
+    if employee_name not in eligible:
+        errors.append("Выберите сотрудника из списка тюнингмэнов.")
+    comment = _normalise_text(form.get("comment"), COMMENT_MAX_LENGTH)
+    status = str(form.get("status", "") or current_status).strip()
+    if status not in hooks["statuses"]:
+        errors.append("Некорректный статус.")
+
+    title = task["title"]
+    order_id = task["order_id"]
+    if not linked:
+        title = _normalise_text(form.get("title"), TASK_TITLE_MAX_LENGTH)
+        if not title:
+            errors.append("Укажите название задачи.")
+        raw_order = str(form.get("order_id", "") or "").strip()
+        order_id = None
+        if raw_order:
+            try:
+                order_id = int(raw_order)
+            except ValueError:
+                errors.append("Проект не найден.")
+            else:
+                if order_id != task["order_id"] and repository.get_linkable_order(db, order_id) is None:
+                    errors.append("Проект не найден или уже закрыт.")
+    rate = _clean_rate(db, employee_name, form.get("rate"), errors)
+
+    day_rows = [
+        row for row in zip(
+            form.getlist("work_date[]"), form.getlist("start_time[]"), form.getlist("planned_hours[]")
+        ) if any(str(value or "").strip() for value in row)
+    ]
+    clean_days = _clean_task_days(day_rows, errors)
+    if not errors and len(clean_days) < len(day_rows):
+        errors.append("Одна и та же дата указана дважды.")
+
+    renamed = employee_name != current_name
+    if renamed and not errors:
+        if paid and not linked:
+            errors.append("Задача уже оплачена — сменить сотрудника нельзя.")
+        elif current_status == "done" and linked:
+            errors.append("Выполненную задачу нельзя передать другому сотруднику.")
+    if not errors:
+        is_admin = repository.is_administrator(db, employee_name)
+        for work_date, start_time, hours in clean_days:
+            start = _minutes(start_time)
+            end = start + round(hours * 60)
+            if end > 24 * 60:
+                errors.append(f"{work_date}: задача не помещается до конца суток.")
+                continue
+            if not is_admin and repository.get_day_crew_shift_by_name(db, work_date, employee_name) is None:
+                errors.append(f"{employee_name} не стоит в смене на {work_date}.")
+                continue
+            for other in repository.list_other_day_tasks(db, work_date, task_id):
+                if other["employee_name"] != employee_name:
+                    continue
+                other_start = _minutes(other["start_time"]) or 0
+                if start < other_start + round(other["planned_hours"] * 60) and other_start < end:
+                    errors.append(f"{employee_name}: {work_date} это время занято задачей «{other['title']}».")
+                    break
+    if errors:
+        return False, " ".join(errors)
+
+    notes = []
+    if renamed:
+        if linked:
+            ok, text = hooks["reassign"](db, task["assignment_id"], employee_name)
+            if not ok:
+                return False, text
+            if text:
+                notes.append(text)
+        else:
+            repository.set_free_task_employee(db, task_id, employee_name)
+    added_days = _ensure_on_roster(db, employee_name, clean_days)
+    repository.delete_task_days(db, task_id)
+    for work_date, start_time, hours in clean_days:
+        repository.add_task_day(db, task_id, work_date, start_time, hours)
+    total_hours = sum(hours for _date, _start, hours in clean_days)
+    if linked:
+        dates = sorted(work_date for work_date, _start, _hours in clean_days)
+        repository.set_assignment_due(
+            db, task["assignment_id"], dates[0], dates[-1] if dates[-1] != dates[0] else None
+        )
+        if comment != (assignment["comment"] or ""):
+            repository.set_linked_task_comment(db, task_id, task["assignment_id"], comment)
+        if abs(rate - assignment["rate"]) > 1e-9 or abs(total_hours - assignment["norm_hours"]) > 1e-9:
+            ok, text = hooks["terms"](db, task["assignment_id"], rate, total_hours)
+            if not ok:
+                notes.append(text)
+            elif paid:
+                notes.append(text)
+    else:
+        repository.update_free_task(db, task_id, title, rate, comment, order_id)
+    if status != current_status:
+        set_task_status(db, task_id, status, hooks["pay_free_task"], hooks["update_status"])
+    return True, ("Задача сохранена. " + " ".join(notes)).strip() + _roster_note(employee_name, added_days)
+
+
+def delete_task(db, task_id, revoke_order_assignment):
+    """Removes a task from the schedule. An order task is revoked from its
+    employee exactly as on the order board (its payout is deleted and they
+    are told; refused when materials were written off against it); a free
+    task goes away with its days and reminders, unless it was already paid."""
+    task = repository.get_task(db, task_id)
+    if task is None:
+        return False, "Задача уже удалена."
+    if task["assignment_id"] is not None:
+        return revoke_order_assignment(db, task["assignment_id"])
+    if task["entry_id"]:
+        return False, (
+            "Задача уже оплачена — сначала удалите выплату на странице «Зарплаты», затем саму задачу."
+        )
+    repository.delete_task_reminders(db, task_id)
+    repository.delete_task(db, task_id)
+    return True, f"Задача «{task['title']}» удалена."
