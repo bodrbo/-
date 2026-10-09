@@ -948,7 +948,7 @@ function addTaskEditorDay(date, start, hours) {
     '<input type="date" name="work_date[]" required aria-label="Дата">' +
     '<input type="time" name="start_time[]" required aria-label="Начало">' +
     '<input type="text" inputmode="decimal" name="planned_hours[]" required aria-label="Часы" placeholder="Часы">' +
-    '<button type="button" class="icon-btn danger" aria-label="Убрать день" title="Убрать день">' +
+    '<button type="button" class="icon-btn danger task-editor-day-remove" aria-label="Убрать день" title="Убрать день">' +
     '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l10 10M15 5L5 15"/></svg></button>';
   var dateInput = row.querySelector('[name="work_date[]"]');
   dateInput.value = typeof date === 'string' ? date : document.querySelector('#taskEditorForm [name="return_date"]').value;

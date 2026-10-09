@@ -7161,7 +7161,8 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   border-top: 1px dashed var(--hairline);
 }
 .tuning-schedule-day-row .field { min-width: 0; }
-.tuning-schedule-day-remove {
+.tuning-schedule-day-remove,
+.task-editor-day-remove {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -7175,8 +7176,10 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   color: var(--ink-soft);
   cursor: pointer;
 }
-.tuning-schedule-day-remove:hover { background: var(--danger); color: #fff8f4; border-color: var(--danger); }
-.tuning-schedule-day-remove svg { width: 16px; height: 16px; }
+.tuning-schedule-day-remove:hover,
+.task-editor-day-remove:hover { background: var(--danger); color: #fff8f4; border-color: var(--danger); }
+.tuning-schedule-day-remove svg,
+.task-editor-day-remove svg { width: 16px; height: 16px; }
 @media (max-width: 700px) {
   .tuning-schedule-day-row { grid-template-columns: minmax(0, 1fr) 38px; }
   .tuning-schedule-day-row .field:nth-child(2),
@@ -12094,7 +12097,7 @@ button.partner-open-price-save svg {
 .tuning-card-bell.has-reminders { background: rgba(255,255,255,.42); }
 .tuning-card-bell:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
 .task-editor-days { display: grid; gap: 6px; }
-.task-editor-day { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, .8fr) auto; gap: 6px; align-items: center; }
+.task-editor-day { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, .8fr) 38px; gap: 6px; align-items: center; }
 .task-editor-day input { min-width: 0; width: 100%; }
 .task-editor-actions .task-editor-delete { margin-left: auto; }
 .task-editor-row2 { grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); }
