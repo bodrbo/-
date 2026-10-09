@@ -12085,7 +12085,9 @@ button.partner-open-price-save svg {
 .tuning-calendar-column.is-drop-target { background-color: rgba(52,152,219,.08); box-shadow: inset 0 0 0 2px rgba(52,152,219,.55); }
 .tuning-is-dragging, .tuning-is-dragging * { cursor: grabbing !important; user-select: none !important; }
 .tuning-calendar-card-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.tuning-card-status { max-width: 62%; min-width: 0; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: rgba(255,255,255,.22); color: #fff; font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; text-overflow: ellipsis; }
+.tuning-calendar-card-time { white-space: nowrap; flex: 0 0 auto; }
+.tuning-calendar-card-tools { display: flex; align-items: center; gap: 3px; margin-left: auto; min-width: 0; }
+.tuning-card-status { max-width: 100%; min-width: 0; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: rgba(255,255,255,.22); color: #fff; font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; text-overflow: ellipsis; }
 .tuning-card-status:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
 .tuning-card-bell { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: rgba(255,255,255,.22); color: #fff; font-size: 10px; line-height: 1; cursor: pointer; }
 .tuning-card-bell small { font-size: 9px; font-weight: 700; }

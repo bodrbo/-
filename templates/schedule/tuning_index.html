@@ -125,14 +125,15 @@
                    onpointerdown="startTuningDrag(event, this)" onclick="openTaskEditor(this, event)">
                 <div class="tuning-calendar-card-head">
                   <span class="tuning-calendar-card-time">{{ card.start_label }}–{{ card.end_label }}</span>
-                  <button type="button" class="tuning-card-bell tuning-card-edit" onclick="openTaskEditor(this.closest('.tuning-calendar-card'), event, true)"
-                          title="Открыть задачу" aria-label="Открыть задачу «{{ card.title }}»">✎</button>
+                  <div class="tuning-calendar-card-tools">
                   {% if card.can_remind %}
                   <button type="button" class="tuning-card-bell{{ ' has-reminders' if card.reminders }}"
                           onclick="openTaskReminder({{ card.task_id }})"
                           title="Напоминание в Telegram{{ ' (' ~ card.reminders|length ~ ')' if card.reminders }}"
                           aria-label="Напоминание в Telegram по задаче «{{ card.title }}»">🔔{% if card.reminders %}<small>{{ card.reminders|length }}</small>{% endif %}</button>
                   {% endif %}
+                  <button type="button" class="tuning-card-bell tuning-card-edit" onclick="openTaskEditor(this.closest('.tuning-calendar-card'), event, true)"
+                          title="Открыть задачу" aria-label="Открыть задачу «{{ card.title }}»">✎</button>
                   <select class="tuning-card-status" aria-label="Статус задачи «{{ card.title }}»"
                           data-status-url="{{ url_for('tuning_schedule.set_task_status', task_id=card.task_id) }}"
                           data-current="{{ card.status }}" onchange="changeTuningCardStatus(this)">
@@ -140,6 +141,7 @@
                     <option value="{{ s.value }}"{{ ' selected' if card.status == s.value }}>{{ s.label }}</option>
                     {% endfor %}
                   </select>
+                  </div>
                 </div>
                 <strong>{{ card.title }}</strong>
                 {% if card.order_id %}
