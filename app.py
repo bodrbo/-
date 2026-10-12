@@ -12061,12 +12061,23 @@ def assign_tuning_item(order_id, item_id):
     db.commit()
     schedule_notes = []
     for assignment_id, employee_name, rate, hours in created:
-        if schedule_day and employee_name not in unscheduled and employee_name not in partner_ids:
+        if employee_name in partner_ids:
+            continue  # a contractor has no card in the employees' schedule
+        if schedule_day and employee_name not in unscheduled:
             schedule_notes.append(_describe_schedule_placement(
                 employee_name, schedule_day,
                 tuning_schedule_services.place_assignment_task(
                     db, assignment_id, employee_name, item["work_name"], rate, comment,
                     schedule_day, hours,
+                ),
+            ))
+        elif due_from and due_to:
+            # a period: the norm-hours are spread over the working days of it
+            schedule_notes.append(_describe_period_placement(
+                employee_name, due_from, due_to,
+                tuning_schedule_services.place_assignment_period(
+                    db, assignment_id, employee_name, item["work_name"], rate, comment,
+                    due_from, due_to, hours,
                 ),
             ))
     if schedule_notes:
@@ -12102,6 +12113,38 @@ def _describe_schedule_placement(employee_name, day_iso, placement):
     text = f"{employee_name}: задача добавлена в расписание на {day}, {placement['start']}–{placement['end']}."
     if placement["past_shift_end"]:
         text += f" Выходит за конец смены ({placement['shift_end']})."
+    return text
+
+
+def _describe_period_placement(employee_name, from_iso, to_iso, placement):
+    """One sentence for the admin about how a task given for a period was
+    spread over the tuning schedule (or why it wasn't)."""
+    period = f"{format_ru_date(from_iso)} – {format_ru_date(to_iso)}"
+    if placement is None:
+        return (
+            f"{employee_name} не стоит в расписании ни в один день периода {period} — "
+            "карточки в расписание не добавлены; как только сотрудник встанет в смену, "
+            "задача появится сама."
+        )
+    if not placement["placed"]:
+        reason = {
+            "hours": "норма часов не делится на рабочие дни периода по суткам",
+            "period": "период слишком длинный",
+        }.get(placement["reason"], "задача не помещается в сутки")
+        return f"{employee_name}: {reason} — карточки в расписание не добавлены."
+    days = placement["days"]
+    text = (
+        f"{employee_name}: задача распределена по {len(days)} "
+        f"{_plural_ru(len(days), ('рабочему дню', 'рабочим дням', 'рабочим дням'))} "
+        f"({period}), по {('%g' % placement['per_day']).replace('.', ',')} ч в день."
+    )
+    if placement["skipped"]:
+        text += " Не поместилось до конца суток: " + ", ".join(
+            format_ru_date(day) for day in placement["skipped"]
+        ) + "."
+    late = [d["date"] for d in days if d["past_shift_end"]]
+    if late:
+        text += " Выходит за конец смены: " + ", ".join(format_ru_date(day) for day in late) + "."
     return text
 
 
@@ -12702,6 +12745,19 @@ def update_tuning_assignment_dates(assignment_id):
             (returned_raw.strip(), assignment_id),
         )
     notice = "Даты задачи обновлены."
+    dates_changed = (due_from, due_to) != (assignment["due_from"], assignment["due_to"])
+    if not assignment["partner_id"] and due_from and due_to and dates_changed:
+        # A period: the norm-hours are spread again over its working days.
+        item = db.execute(
+            "SELECT work_name FROM tuning_order_items WHERE id = ?", (assignment["item_id"],)
+        ).fetchone()
+        placement = tuning_schedule_services.place_assignment_period(
+            db, assignment_id, assignment["employee_name"], item["work_name"], assignment["rate"],
+            assignment["comment"], due_from, due_to, assignment["norm_hours"], replace=True,
+        )
+        notice += " " + _describe_period_placement(
+            assignment["employee_name"], due_from, due_to, placement
+        )
     if (
         not assignment["partner_id"]  # a contractor's task has no schedule card
         and due_from and not due_to and (due_from != assignment["due_from"] or assignment["due_to"])

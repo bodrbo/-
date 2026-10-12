@@ -142,12 +142,12 @@ def employees_off_shift(db, day_iso, employee_names):
     ]
 
 
-def _next_free_start(db, day_iso, employee_name, shift_start):
+def _next_free_start(db, day_iso, employee_name, shift_start, exclude_task_id=None):
     """Minute of the day a new task of this employee should start at: the
     start of their shift, or the end of their last task that day if later."""
     start_minutes = _minutes(shift_start)
     for row in repository.list_day_tasks(db, day_iso):
-        if row["employee_name"] != employee_name:
+        if row["employee_name"] != employee_name or row["task_id"] == exclude_task_id:
             continue
         begins = _minutes(row["start_time"]) or 0
         start_minutes = max(start_minutes, begins + round(row["planned_hours"] * 60))
@@ -215,14 +215,122 @@ def move_assignment_task(db, assignment_id, employee_name, day_iso):
     return {"moved": True, "start": _label(start_minutes)}
 
 
+MAX_PERIOD_DAYS = 92
+
+
+def place_assignment_period(
+    db, assignment_id, employee_name, title, rate, comment, from_iso, to_iso, hours, replace=False
+):
+    """Spreads an order task given for a period over the days of that period
+    the employee is on the shift: the norm-hours are divided by the number
+    of those working days and each day's share goes into the free time of
+    that day (after the tasks already there, from the start of the shift).
+
+    Returns None when the employee works none of the days; otherwise
+    {"placed": bool, ...}: not placed (with a reason) when the share doesn't
+    fit a day; placed gives the days ([{date, start, end, hours,
+    past_shift_end}]), the per-day hours and the dates skipped for not
+    fitting before midnight. With `replace` the card's previous days are
+    dropped first (the dates of the task were changed)."""
+    try:
+        first = dt.date.fromisoformat(from_iso)
+        last = dt.date.fromisoformat(to_iso)
+    except (TypeError, ValueError):
+        return None
+    if last < first or (last - first).days >= MAX_PERIOD_DAYS:
+        return {"placed": False, "reason": "period"}
+    days = [first + dt.timedelta(days=offset) for offset in range((last - first).days + 1)]
+    workdays = []
+    for day in days:
+        crew = repository.get_day_crew_shift_by_name(db, day.isoformat(), employee_name)
+        if crew is not None:
+            workdays.append((day.isoformat(), crew))
+    if not workdays:
+        return None
+    if hours <= 0:
+        return {"placed": False, "reason": "hours"}
+    per_day = round(hours / len(workdays), 2)
+    if per_day <= 0 or per_day > MAX_DAY_HOURS:
+        return {"placed": False, "reason": "hours"}
+    existing = repository.get_task_by_assignment(db, assignment_id)
+    task_id = existing["id"] if existing else repository.create_task(
+        db, assignment_id, employee_name, title, rate, comment, current_timestamp()
+    )
+    if replace and existing:
+        repository.delete_task_days(db, task_id)
+    placed, skipped = [], []
+    for index, (day_iso, crew) in enumerate(workdays):
+        day_hours = per_day if index < len(workdays) - 1 else round(hours - per_day * (len(workdays) - 1), 2)
+        if day_hours <= 0:
+            continue
+        shift_start, shift_end = shift_bounds(crew)
+        start = _next_free_start(db, day_iso, employee_name, shift_start, exclude_task_id=task_id)
+        end = start + round(day_hours * 60)
+        if end > 24 * 60:
+            skipped.append(day_iso)
+            continue
+        repository.add_task_day(db, task_id, day_iso, _label(start), day_hours)
+        placed.append({
+            "date": day_iso, "start": _label(start), "end": _label(end), "hours": day_hours,
+            "past_shift_end": end > _minutes(shift_end),
+        })
+    if not placed:
+        if existing is None:
+            repository.delete_task(db, task_id)  # never leave a card-less task behind
+        return {"placed": False, "reason": "midnight"}
+    return {
+        "placed": True, "task_id": task_id, "days": placed, "per_day": per_day,
+        "workdays": len(workdays), "skipped": skipped,
+    }
+
+
+def place_pending_period_tasks(db, day_iso):
+    """Order tasks given for a period that cover `day_iso` and have no card
+    yet (the person wasn't on the shift when it was assigned, or it was
+    assigned before periods were placed automatically) get their days now.
+    Returns how many tasks were placed."""
+    rows = db.execute(
+        "SELECT tia.id, tia.employee_name, tia.rate, tia.norm_hours, tia.comment, "
+        "tia.due_from, tia.due_to, ti.work_name "
+        "FROM tuning_item_assignments tia JOIN tuning_order_items ti ON ti.id = tia.item_id "
+        "WHERE tia.due_to IS NOT NULL AND tia.due_from <= ? AND tia.due_to >= ? "
+        "AND tia.partner_id IS NULL AND tia.assignment_status NOT IN ('done', 'rejected') "
+        "AND ti.status != 'removed' "
+        "AND NOT EXISTS (SELECT 1 FROM tuning_schedule_tasks t "
+        "                JOIN tuning_schedule_task_days d ON d.task_id = t.id "
+        "                WHERE t.assignment_id = tia.id) "
+        "ORDER BY tia.id",
+        (day_iso, day_iso),
+    ).fetchall()
+    count = 0
+    for row in rows:
+        result = place_assignment_period(
+            db, row["id"], row["employee_name"], row["work_name"], row["rate"], row["comment"],
+            row["due_from"], row["due_to"], row["norm_hours"],
+        )
+        if result and result.get("placed"):
+            count += 1
+    return count
+
+
 def sync_assignment_hours(db, assignment_id, hours):
-    """Keeps the card's length equal to the task's norm-hours (one-day cards)."""
+    """Keeps the card's length equal to the task's norm-hours: a one-day card
+    takes them whole, a multi-day one is scaled day by day in proportion."""
     task = repository.get_task_by_assignment(db, assignment_id)
-    if task is None or not (0 < hours <= MAX_DAY_HOURS):
+    if task is None or not (0 < hours <= MAX_DAY_HOURS * MAX_PERIOD_DAYS):
         return
     days = repository.list_task_days(db, task["id"])
-    if len(days) == 1:
+    if len(days) == 1 and hours <= MAX_DAY_HOURS:
         repository.set_task_day_hours(db, days[0]["id"], hours)
+    elif len(days) > 1:
+        total = sum(day["planned_hours"] for day in days)
+        if total <= 0:
+            return
+        shares = [round(day["planned_hours"] * hours / total, 2) for day in days]
+        shares[-1] = round(hours - sum(shares[:-1]), 2)
+        if all(0 < share <= MAX_DAY_HOURS for share in shares):
+            for day, share in zip(days, shares):
+                repository.set_task_day_hours(db, day["id"], share)
 
 
 def remove_day_crew_member(db, day, employee_id):

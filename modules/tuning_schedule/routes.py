@@ -42,6 +42,12 @@ def create_tuning_schedule_blueprint(
     def index():
         db = get_db()
         day = services.parse_day(request.args.get("date"))
+        try:
+            # period tasks of people who are on the shift this day but have
+            # no card yet get their days (idempotent; never blocks the page)
+            services.place_pending_period_tasks(db, day.isoformat())
+        except Exception:
+            db.rollback()
         context = services.day_view(db, day)
         for employee in context["crew"]:
             employee["avatar_url"] = avatar_url(employee["name"])

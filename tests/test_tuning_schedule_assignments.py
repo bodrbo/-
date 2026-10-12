@@ -199,11 +199,10 @@ class TuningScheduleAssignmentTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertEqual(len(self.cards(self.EMPLOYEE_A)), 1)
         self.assertEqual(self.cards(self.EMPLOYEE_B), [])
 
-    def test_a_period_or_no_date_is_not_put_on_the_schedule(self):
-        self.put_on_shift(self.EMPLOYEE_A)
-        self.assign([(self.EMPLOYEE_A, 100, 1)], due_from="2026-10-12", due_to="2026-10-14")
+    def test_a_task_without_a_date_is_not_put_on_the_schedule(self):
+        self.put_on_shift(self.EMPLOYEE_B)
         self.assign([(self.EMPLOYEE_B, 100, 1)], due_from="")
-        self.assertEqual(len(self.assignments()), 2)
+        self.assertEqual(len(self.assignments()), 1)
         self.assertEqual(self.cards(), [])
         self.assertNotIn("Сотрудник не стоит в расписании", self.board())
 
@@ -1658,6 +1657,182 @@ class TuningScheduleSeveralPeopleTests(_TuningScheduleFixture, unittest.TestCase
             ids = application_module.tuning_schedule_repository.list_day_task_employee_ids(
                 application_module.get_db(), self.DAY)
         self.assertIn(self.employee_id(self.EMPLOYEE_B), ids)
+
+
+class TuningSchedulePeriodTests(_TuningScheduleFixture, unittest.TestCase):
+    """A task given for a period is spread over the working days of that
+    period: norm-hours / working days, in the free time of each day."""
+
+    D1, D2, D3 = "2026-10-12", "2026-10-13", "2026-10-14"
+
+    def period_cards(self, name=None):
+        out = []
+        for day in (self.D1, self.D2, self.D3):
+            for card in self.cards(name, day=day):
+                out.append((day, card["start_time"], card["planned_hours"]))
+        return out
+
+    def give(self, hours, name=None, due_from=None, due_to=None, rate=100):
+        return self.assign([(name or self.EMPLOYEE_A, rate, hours)],
+                           due_from=due_from or self.D1, due_to=due_to or self.D3)
+
+    def notice(self):
+        with self.client.session_transaction() as session:
+            return session.get("tuning_assign_notice", "")
+
+    def test_the_hours_are_divided_over_the_working_days(self):
+        for day in (self.D1, self.D2, self.D3):
+            self.put_on_shift(self.EMPLOYEE_A, "09:00", "18:00", day=day)
+        self.give(6)
+        self.assertEqual(self.period_cards(self.EMPLOYEE_A),
+                         [(self.D1, "09:00", 2.0), (self.D2, "09:00", 2.0), (self.D3, "09:00", 2.0)])
+        (assignment,) = self.assignments()
+        self.assertEqual((assignment["norm_hours"], assignment["due_from"], assignment["due_to"]),
+                         (6, self.D1, self.D3))
+        page = self.board()   # the notice is shown once
+        self.assertIn("распределена по 3 рабочим дням", page)
+        self.assertIn("по 2 ч в день", page)
+
+    def test_only_days_the_person_is_on_the_shift_count(self):
+        self.put_on_shift(self.EMPLOYEE_A, day=self.D1)
+        self.put_on_shift(self.EMPLOYEE_A, day=self.D3)  # the 13th is a day off
+        self.give(6)
+        self.assertEqual(self.period_cards(self.EMPLOYEE_A), [(self.D1, "09:00", 3.0), (self.D3, "09:00", 3.0)])
+
+    def test_the_share_goes_into_the_free_time_of_each_day(self):
+        for day in (self.D1, self.D2):
+            self.put_on_shift(self.EMPLOYEE_A, "09:00", "18:00", day=day)
+        self.put_on_shift(self.EMPLOYEE_A, "09:00", "18:00", day=self.D1)
+        # a task of 2 hours is already there on the 12th
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            task_id = db.execute(
+                "INSERT INTO tuning_schedule_tasks (assignment_id, employee_name, title, rate, status, "
+                "comment, created_at) VALUES (NULL, ?, 'Занято', 0, 'pending', '', 'x')", (self.EMPLOYEE_A,)).lastrowid
+            db.execute("INSERT INTO tuning_schedule_task_days (task_id, work_date, start_time, planned_hours) "
+                       "VALUES (?, ?, '09:00', 2)", (task_id, self.D1))
+            db.commit()
+        self.give(4, due_to=self.D2)
+        cards = [c for c in self.period_cards(self.EMPLOYEE_A) if c[2] == 2.0]
+        self.assertIn((self.D1, "11:00", 2.0), cards)   # after the existing task
+        self.assertIn((self.D2, "09:00", 2.0), cards)
+
+    def test_the_shares_add_up_to_the_norm_hours(self):
+        for day in (self.D1, self.D2, self.D3):
+            self.put_on_shift(self.EMPLOYEE_A, day=day)
+        self.give(10)
+        hours = [c[2] for c in self.period_cards(self.EMPLOYEE_A)]
+        self.assertEqual(len(hours), 3)
+        self.assertAlmostEqual(sum(hours), 10.0, places=6)
+
+    def test_nobody_on_the_shift_is_told_and_the_task_appears_once_they_are(self):
+        self.give(6)
+        self.assertEqual(self.period_cards(self.EMPLOYEE_A), [])
+        self.assertIn("не стоит в расписании ни в один день периода", self.board())
+        self.assertEqual(len(self.assignments()), 1)
+        # the person is put on the shift later; opening the schedule places the task
+        for day in (self.D1, self.D2, self.D3):
+            self.put_on_shift(self.EMPLOYEE_A, day=day)
+        self.login_admin()
+        self.client.get(f"/schedule/tuning?date={self.D2}")
+        self.assertEqual(len(self.period_cards(self.EMPLOYEE_A)), 3)
+        self.client.get(f"/schedule/tuning?date={self.D2}")   # idempotent
+        self.assertEqual(len(self.period_cards(self.EMPLOYEE_A)), 3)
+
+    def test_opening_the_schedule_places_older_period_tasks_too(self):
+        for day in (self.D1, self.D2):
+            self.put_on_shift(self.EMPLOYEE_A, day=day)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO tuning_item_assignments (item_id, employee_name, rate, norm_hours, comment, "
+                "assignment_status, assigned_at, due_from, due_to) VALUES (?, ?, 100, 4, '', 'accepted', "
+                "'2026-10-01 10:00', ?, ?)", (self.item_id, self.EMPLOYEE_A, self.D1, self.D2))
+            db.commit()
+        self.login_admin()
+        page = self.client.get(f"/schedule/tuning?date={self.D1}").get_data(as_text=True)
+        self.assertEqual(self.period_cards(self.EMPLOYEE_A), [(self.D1, "09:00", 2.0), (self.D2, "09:00", 2.0)])
+        self.assertIn("Полировка корпуса", page)
+
+    def test_finished_and_declined_tasks_are_not_placed_afterwards(self):
+        self.put_on_shift(self.EMPLOYEE_A, day=self.D1)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            for status in ("done", "rejected"):
+                db.execute(
+                    "INSERT INTO tuning_item_assignments (item_id, employee_name, rate, norm_hours, comment, "
+                    "assignment_status, assigned_at, due_from, due_to) VALUES (?, ?, 100, 4, '', ?, "
+                    "'2026-10-01 10:00', ?, ?)", (self.item_id, self.EMPLOYEE_A, status, self.D1, self.D2))
+            db.commit()
+        self.login_admin()
+        self.client.get(f"/schedule/tuning?date={self.D1}")
+        self.assertEqual(self.period_cards(self.EMPLOYEE_A), [])
+
+    def test_changing_the_dates_spreads_the_hours_again(self):
+        for day in (self.D1, self.D2, self.D3):
+            self.put_on_shift(self.EMPLOYEE_A, day=day)
+        self.give(6)
+        (assignment,) = self.assignments()
+        self.login_admin()
+        self.client.post(f"/tuning/assignments/{assignment['id']}/dates",
+                         data={"due_from": self.D1, "due_to": self.D2})
+        self.assertEqual(self.period_cards(self.EMPLOYEE_A), [(self.D1, "09:00", 3.0), (self.D2, "09:00", 3.0)])
+
+    def test_changing_the_norm_hours_scales_every_day(self):
+        for day in (self.D1, self.D2, self.D3):
+            self.put_on_shift(self.EMPLOYEE_A, day=day)
+        self.give(6)
+        (assignment,) = self.assignments()
+        self.login_admin()
+        self.client.post(f"/tuning/assignments/{assignment['id']}/rate", data={"rate": "100", "norm_hours": "9"})
+        self.assertEqual([c[2] for c in self.period_cards(self.EMPLOYEE_A)], [3.0, 3.0, 3.0])
+
+    def test_a_share_that_does_not_fit_a_day_leaves_the_task_without_cards(self):
+        for day in (self.D1, self.D2):
+            self.put_on_shift(self.EMPLOYEE_A, day=day)
+        self.give(60, due_to=self.D2)   # 30 hours a day
+        self.assertEqual(len(self.assignments()), 1)
+        self.assertEqual(self.period_cards(self.EMPLOYEE_A), [])
+        self.assertIn("не делится на рабочие дни", self.board())
+
+    def test_two_people_are_each_spread_over_their_own_working_days(self):
+        self.put_on_shift(self.EMPLOYEE_A, day=self.D1)
+        self.put_on_shift(self.EMPLOYEE_A, day=self.D2)
+        for day in (self.D1, self.D2, self.D3):
+            self.put_on_shift(self.EMPLOYEE_B, day=day)
+        self.assign([(self.EMPLOYEE_A, 100, 4), (self.EMPLOYEE_B, 100, 6)], due_from=self.D1, due_to=self.D3)
+        self.assertEqual([c[2] for c in self.period_cards(self.EMPLOYEE_A)], [2.0, 2.0])
+        self.assertEqual([c[2] for c in self.period_cards(self.EMPLOYEE_B)], [2.0, 2.0, 2.0])
+
+    def test_the_period_cards_show_in_the_calendar_of_every_day(self):
+        for day in (self.D1, self.D2, self.D3):
+            self.put_on_shift(self.EMPLOYEE_A, day=day)
+        self.give(6)
+        self.login_admin()
+        for day in (self.D1, self.D2, self.D3):
+            page = self.client.get(f"/schedule/tuning?date={day}").get_data(as_text=True)
+            self.assertIn("tuning-calendar-card", page, day)
+            self.assertIn("Полировка корпуса", page, day)
+
+    def test_a_contractors_task_is_not_spread(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            client_id = db.execute(
+                "INSERT INTO clients (client_name, boat_model, phone, token, status, created_at) "
+                "VALUES ('Подрядчик Периода', '', '', 'period-partner-token', 'neutral', 'x')").lastrowid
+            db.execute("INSERT INTO client_segments (client_id, segment, relationship_type, created_at) "
+                       "VALUES (?, 'tuning', 'partner', 'x')", (client_id,))
+            db.commit()
+        try:
+            self.assign([(f"partner:{client_id}", 5000, 1)], due_from=self.D1, due_to=self.D3)
+            self.assertEqual(self.period_cards(), [])
+            self.assertEqual(len(self.assignments()), 1)
+        finally:
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                db.execute("DELETE FROM client_segments WHERE client_id = ?", (client_id,))
+                db.execute("DELETE FROM clients WHERE id = ?", (client_id,))
+                db.commit()
 
 
 if __name__ == "__main__":
