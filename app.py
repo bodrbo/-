@@ -937,6 +937,37 @@ def messenger_phone_digits(phone):
 
 app.jinja_env.filters["ru_date"] = format_ru_date
 app.jinja_env.filters["money"] = format_money
+
+
+def item_list_price(item):
+    """A work's price before its own discount (its price when it has none)."""
+    keys = item.keys()
+    list_price = item["list_price"] if "list_price" in keys else None
+    return item["price"] if list_price is None else list_price
+
+
+def item_discount_amount(item):
+    """How much a work's own discount takes off its price, in rubles."""
+    keys = item.keys()
+    if "price_pending" in keys and item["price_pending"]:
+        return 0.0
+    if "list_price" not in keys or item["list_price"] is None:
+        return 0.0
+    return max(0.0, item["list_price"] - item["price"])
+
+
+def item_discount_label(item):
+    """'10%' or '500 ₽' — how a work's discount was entered; '' without one."""
+    if item_discount_amount(item) <= 0:
+        return ""
+    if (item["discount_type"] if "discount_type" in item.keys() else "percent") == "amount":
+        return f"{format_money(item_discount_amount(item))} ₽"
+    return f"{('%g' % round(item['discount_value'], 2)).replace('.', ',')}%"
+
+
+app.jinja_env.globals["item_list_price"] = item_list_price
+app.jinja_env.globals["item_discount_amount"] = item_discount_amount
+app.jinja_env.globals["item_discount_label"] = item_discount_label
 app.jinja_env.filters["messenger_phone_digits"] = messenger_phone_digits
 
 # ---------------------------------------------------------------------
@@ -3599,6 +3630,18 @@ def init_db(db_path=None, include_bootstrap_data=True):
         conn.execute(
             "ALTER TABLE tuning_order_items ADD COLUMN price_pending INTEGER NOT NULL DEFAULT 0"
         )
+    if "list_price" not in item_cols:
+        # A discount on one work: price stays what the client pays for it
+        # (every sum in the app already adds up price), list_price is the
+        # price before the discount (NULL = no per-work discount), and
+        # discount_type/discount_value remember how it was entered.
+        conn.execute("ALTER TABLE tuning_order_items ADD COLUMN list_price REAL")
+        conn.execute(
+            "ALTER TABLE tuning_order_items ADD COLUMN discount_type TEXT NOT NULL DEFAULT 'percent'"
+        )
+        conn.execute(
+            "ALTER TABLE tuning_order_items ADD COLUMN discount_value REAL NOT NULL DEFAULT 0"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS work_item_photos (
@@ -6202,6 +6245,8 @@ def _process_tuning_form(
     mults = form.getlist("multiplier[]")
     direct_prices = form.getlist("open_price[]")
     item_ids = form.getlist("item_id[]")
+    item_discount_values = form.getlist("item_discount_value[]")
+    item_discount_types = form.getlist("item_discount_type[]")
 
     def _get(lst, i):
         return lst[i] if i < len(lst) else ""
@@ -6280,12 +6325,49 @@ def _process_tuning_form(
         ):
             price = 0.0 if price_pending else cost * mult
 
+        # A discount on this one work, taken off its own price (the
+        # order-wide discount then applies to what is left).
+        list_price = None
+        work_discount_type = "percent"
+        work_discount_value = 0.0
+        if not price_pending and price is not None:
+            raw_work_discount = _get(item_discount_values, i).strip().replace(",", ".")
+            work_discount_type = _get(item_discount_types, i).strip()
+            if work_discount_type not in ("percent", "amount"):
+                work_discount_type = "percent"
+            if raw_work_discount:
+                try:
+                    work_discount_value = float(raw_work_discount)
+                except ValueError:
+                    errors.append(f"Работа №{row_num}: скидка должна быть числом.")
+                    work_discount_value = 0.0
+                if work_discount_value < 0:
+                    errors.append(f"Работа №{row_num}: скидка не может быть отрицательной.")
+                    work_discount_value = 0.0
+                elif work_discount_type == "percent" and work_discount_value > 100:
+                    errors.append(f"Работа №{row_num}: скидка в процентах не может быть больше 100.")
+                    work_discount_value = 0.0
+                elif work_discount_type == "amount" and work_discount_value > price + 1e-9:
+                    errors.append(f"Работа №{row_num}: скидка не может быть больше цены работы.")
+                    work_discount_value = 0.0
+            if work_discount_value > 0:
+                list_price = price
+                price = round(
+                    price - (
+                        price * work_discount_value / 100
+                        if work_discount_type == "percent" else work_discount_value
+                    ),
+                    2,
+                )
+
         if name and cost is not None and mult is not None and price is not None:
             item_id_raw = _get(item_ids, i).strip()
             items.append({
                 "item_id": int(item_id_raw) if item_id_raw.isdigit() else None,
                 "work_name": name, "cost_price": cost, "multiplier": mult, "price": price,
                 "price_pending": price_pending,
+                "list_price": list_price,
+                "discount_type": work_discount_type, "discount_value": work_discount_value,
             })
             subtotal += price
 
@@ -7780,6 +7862,99 @@ def _build_tuning_review_qr(size):
     return drawing
 
 
+def _act_work_table_rows(items, style_cell, mm):
+    """The works table of an act -> (column widths, rows, sum of the works).
+    A work with its own discount shows its price before the discount, the
+    discount (amount and how it was set) and the price after it; the
+    "Скидка" column exists only when some work has one, so an act without
+    per-work discounts keeps its familiar layout."""
+    from reportlab.lib.enums import TA_RIGHT
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import Paragraph
+
+    def money(value):
+        return f"{value:.2f}".replace(".", ",")
+
+    with_discount = any(item_discount_amount(item) > 0 for item in items)
+    if with_discount:
+        widths = [10 * mm, 60 * mm, 22 * mm, 24 * mm, 14 * mm, 14 * mm, 26 * mm]
+        header = ["№", "Наименование работы", "Цена", "Скидка", "Кол-во", "Ед. изм.", "Сумма"]
+        discount_style = ParagraphStyle(
+            "work-discount", parent=style_cell, alignment=TA_RIGHT, fontSize=9, leading=11,
+        )
+    else:
+        widths = [12 * mm, 76 * mm, 24 * mm, 18 * mm, 18 * mm, 22 * mm]
+        header = ["№", "Наименование работы", "Цена", "Кол-во", "Ед. изм.", "Сумма"]
+    rows = [header]
+    total_sum = 0.0
+    for number, item in enumerate(items, start=1):
+        pending = "price_pending" in item.keys() and bool(item["price_pending"])
+        net = "Ждёт расчёта" if pending else money(item["price"])
+        discount = item_discount_amount(item)
+        if with_discount:
+            list_str = "Ждёт расчёта" if pending else money(item_list_price(item))
+            # "(10%)" under the amount only when it was entered as a percent
+            # (an amount in rubles would only repeat the figure above it)
+            percent_note = (
+                f"<br/>({item_discount_label(item)})"
+                if (item["discount_type"] if "discount_type" in item.keys() else "percent") != "amount"
+                else ""
+            )
+            discount_cell = (
+                Paragraph(f"−{money(discount)}{percent_note}", discount_style)
+                if discount > 0 else ""
+            )
+            rows.append([
+                str(number), Paragraph(item["work_name"], style_cell),
+                list_str, discount_cell, "1", "шт", net,
+            ])
+        else:
+            rows.append([str(number), Paragraph(item["work_name"], style_cell), net, "1", "шт", net])
+        if not pending:
+            total_sum += item["price"]
+    count = f"{len(items):.2f}".replace(".", ",")
+    if with_discount:
+        rows.append(["", "", "", "", count, "Итого:", money(total_sum)])
+    else:
+        rows.append(["", "", "", count, "Итого:", money(total_sum)])
+    return widths, rows, total_sum
+
+
+def _act_order_discount_summary(order, total_sum, goods, col_widths, mm):
+    """'Скидка … / К оплате' rows closing an act: the discount on the whole
+    order, taken off the sum of works and goods. None when there is no
+    order-wide discount and no goods (the section tables' own totals say it)."""
+    from reportlab.platypus import Table, TableStyle
+
+    keys = order.keys()
+    discount_type = order["discount_type"] if "discount_type" in keys else "percent"
+    discount_value = (order["discount_value"] if "discount_value" in keys else 0) or 0
+    if discount_type == "amount":
+        discount_amount = discount_value
+    else:
+        discount_amount = total_sum * discount_value / 100
+    if not (discount_amount > 0 or goods):
+        return None, total_sum
+    pad = [""] * (len(col_widths) - 2)
+    rows = []
+    if discount_amount > 0:
+        label = (
+            f"Скидка ({('%g' % discount_value).replace('.', ',')}%):"
+            if discount_type != "amount" else "Скидка:"
+        )
+        rows.append(pad + [label, f"{discount_amount:.2f}".replace(".", ",")])
+    rows.append(pad + ["К оплате:", f"{total_sum - discount_amount:.2f}".replace(".", ",")])
+    table = Table(rows, colWidths=col_widths)
+    table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), "OpenSans-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+        ("ALIGN", (len(col_widths) - 2, 0), (-1, -1), "RIGHT"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    return table, total_sum - discount_amount
+
+
 def _build_act_pdf(order, items, goods=()):
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER
@@ -7855,24 +8030,10 @@ def _build_act_pdf(order, items, goods=()):
     # Two separate sections/tables (Работы / Товары) instead of one mixed
     # list — only headed when both are actually present, so a pure-work
     # order's act still renders exactly as it always has.
-    total_sum = 0.0
     if goods:
         flow.append(Paragraph("Работы", style_section))
-    table_data = [["№", "Наименование работы", "Цена", "Кол-во", "Ед. изм.", "Сумма"]]
-    for i, item in enumerate(items, start=1):
-        price_pending = "price_pending" in item.keys() and bool(item["price_pending"])
-        price_str = "Ждёт расчёта" if price_pending else f"{item['price']:.2f}".replace(".", ",")
-        table_data.append([
-            str(i), Paragraph(item["work_name"], style_cell),
-            price_str, "1", "шт", price_str,
-        ])
-        if not price_pending:
-            total_sum += item["price"]
-    table_data.append([
-        "", "", "", f"{len(items):.2f}".replace(".", ","), "Итого:",
-        f"{total_sum:.2f}".replace(".", ","),
-    ])
-    tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
+    work_widths, table_data, total_sum = _act_work_table_rows(items, style_cell, mm)
+    tbl = Table(table_data, colWidths=work_widths, repeatRows=1)
     tbl.setStyle(table_style)
     flow.append(tbl)
 
@@ -7900,6 +8061,11 @@ def _build_act_pdf(order, items, goods=()):
         goods_tbl.setStyle(table_style)
         flow.append(goods_tbl)
         total_sum += goods_sum
+
+    summary_tbl, payable = _act_order_discount_summary(order, total_sum, goods, work_widths, mm)
+    if summary_tbl is not None:
+        flow.append(summary_tbl)
+        total_sum = payable
 
     flow.append(Spacer(1, 22))
 
@@ -8059,24 +8225,10 @@ def _build_handover_act_pdf(order, items, goods=()):
     # Two separate sections/tables (Работы / Товары) instead of one mixed
     # list — only headed when both are actually present, so a pure-work
     # order's act still renders exactly as it always has.
-    total_sum = 0.0
     if goods:
         flow.append(Paragraph("Работы", style_section))
-    table_data = [["№", "Наименование работы", "Цена", "Кол-во", "Ед. изм.", "Сумма"]]
-    for i, item in enumerate(items, start=1):
-        price_pending = "price_pending" in item.keys() and bool(item["price_pending"])
-        price_str = "Ждёт расчёта" if price_pending else f"{item['price']:.2f}".replace(".", ",")
-        table_data.append([
-            str(i), Paragraph(item["work_name"], style_cell),
-            price_str, "1", "шт", price_str,
-        ])
-        if not price_pending:
-            total_sum += item["price"]
-    table_data.append([
-        "", "", "", f"{len(items):.2f}".replace(".", ","), "Итого:",
-        f"{total_sum:.2f}".replace(".", ","),
-    ])
-    tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
+    work_widths, table_data, total_sum = _act_work_table_rows(items, style_cell, mm)
+    tbl = Table(table_data, colWidths=work_widths, repeatRows=1)
     tbl.setStyle(table_style)
     flow.append(tbl)
 
@@ -8105,38 +8257,8 @@ def _build_handover_act_pdf(order, items, goods=()):
         flow.append(goods_tbl)
         total_sum += goods_sum
 
-    if order["discount_type"] == "amount":
-        discount_amount = order["discount_value"]
-    else:
-        discount_amount = total_sum * order["discount_value"] / 100
-
-    # Only when there's something to clarify beyond the section table(s)'
-    # own "Итого:" rows — a plain no-discount, no-goods order needs no
-    # extra summary line, same as before goods existed at all.
-    if discount_amount > 0 or goods:
-        summary_data = []
-        if discount_amount > 0:
-            discount_label = (
-                f"Скидка ({('%g' % order['discount_value']).replace('.', ',')}%):"
-                if order["discount_type"] != "amount"
-                else "Скидка:"
-            )
-            summary_data.append([
-                "", "", "", "", discount_label,
-                f"{discount_amount:.2f}".replace(".", ","),
-            ])
-        summary_data.append([
-            "", "", "", "", "К оплате:",
-            f"{total_sum - discount_amount:.2f}".replace(".", ","),
-        ])
-        summary_tbl = Table(summary_data, colWidths=col_widths)
-        summary_tbl.setStyle(TableStyle([
-            ("FONTNAME", (0, 0), (-1, -1), "OpenSans-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9.5),
-            ("ALIGN", (4, 0), (-1, -1), "RIGHT"),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ]))
+    summary_tbl, _payable = _act_order_discount_summary(order, total_sum, goods, work_widths, mm)
+    if summary_tbl is not None:
         flow.append(summary_tbl)
 
     flow.append(Spacer(1, 22))
@@ -10783,10 +10905,12 @@ def add_tuning_order():
     for item in data["items"]:
         db.execute(
             "INSERT INTO tuning_order_items "
-            "(order_id, work_name, cost_price, multiplier, price, price_pending, status) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(order_id, work_name, cost_price, multiplier, price, price_pending, status, "
+            "list_price, discount_type, discount_value) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (order_id, item["work_name"], item["cost_price"], item["multiplier"], item["price"],
-             int(item["price_pending"]), DEFAULT_WORK_STATUS),
+             int(item["price_pending"]), DEFAULT_WORK_STATUS, item["list_price"],
+             item["discount_type"], item["discount_value"]),
         )
     db.execute(
         "INSERT INTO projects (name, tuning_order_id, created_at) VALUES (?, ?, ?)",
@@ -10856,9 +10980,9 @@ def copy_tuning_order(order_id):
     db.execute(
         "INSERT INTO tuning_order_items "
         "(order_id, work_name, cost_price, multiplier, price, partner_price, "
-        "price_pending, status) "
+        "price_pending, status, list_price, discount_type, discount_value) "
         "SELECT ?, work_name, cost_price, multiplier, price, partner_price, "
-        "price_pending, ? "
+        "price_pending, ?, list_price, discount_type, discount_value "
         "FROM tuning_order_items WHERE order_id = ? AND status != 'removed' "
         "ORDER BY id",
         (copied_order_id, DEFAULT_WORK_STATUS, order_id),
@@ -11420,17 +11544,20 @@ def edit_tuning_order(order_id):
         if item["item_id"] in existing_ids:
             db.execute(
                 "UPDATE tuning_order_items SET work_name=?, cost_price=?, multiplier=?, price=?, "
-                "price_pending=? WHERE id=?",
+                "price_pending=?, list_price=?, discount_type=?, discount_value=? WHERE id=?",
                 (item["work_name"], item["cost_price"], item["multiplier"], item["price"],
-                 int(item["price_pending"]), item["item_id"]),
+                 int(item["price_pending"]), item["list_price"], item["discount_type"],
+                 item["discount_value"], item["item_id"]),
             )
         else:
             db.execute(
                 "INSERT INTO tuning_order_items "
-                "(order_id, work_name, cost_price, multiplier, price, price_pending, status) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(order_id, work_name, cost_price, multiplier, price, price_pending, status, "
+                "list_price, discount_type, discount_value) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (order_id, item["work_name"], item["cost_price"], item["multiplier"], item["price"],
-                 int(item["price_pending"]), DEFAULT_WORK_STATUS),
+                 int(item["price_pending"]), DEFAULT_WORK_STATUS, item["list_price"],
+                 item["discount_type"], item["discount_value"]),
             )
     _sync_tuning_boat_profiles(db)
     db.commit()
@@ -13746,7 +13873,10 @@ def _render_client_dashboard(
             payments = []
             paid_amount = payment_total["total"]
             remaining = max(0.0, o["total"] - paid_amount)
-        item_columns = "id, work_name, price, price_pending, status"
+        item_columns = (
+            "id, work_name, price, price_pending, status, "
+            "list_price, discount_type, discount_value"
+        )
         if is_tuning_partner:
             item_columns += ", partner_price"
         if is_admin_view:
@@ -13784,6 +13914,10 @@ def _render_client_dashboard(
         order["work_total"] = sum(
             item["price"] for item in items
             if item["status"] != "removed" and not item["price_pending"]
+        )
+        # what the discounts on single works took off (already out of work_total)
+        order["work_discount_total"] = sum(
+            item_discount_amount(item) for item in items if item["status"] != "removed"
         )
         order["goods_total"] = sum(
             item["quantity"] * item["unit_price"] for item in goods_items

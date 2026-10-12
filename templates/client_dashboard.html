@@ -372,6 +372,12 @@
               <span>Товары{% if not incoming_subcontract and o.discount_value %}, до скидки{% endif %}</span>
               <strong>{{ (o.partner_goods_total if incoming_subcontract else o.goods_total)|money }} ₽</strong>
             </div>
+            {% if not incoming_subcontract and not is_tuning_partner and o.work_discount_total > 0 %}
+            <div>
+              <span>Скидки на работы</span>
+              <strong class="work-discount-total">−{{ o.work_discount_total|money }} ₽</strong>
+            </div>
+            {% endif %}
           </div>
           <h3>Работы по заказу</h3>
           {% if o.work_items %}
@@ -387,7 +393,14 @@
                   <td class="client-admin-multiplier">{{ ('× ' ~ (item.multiplier|float|round(2))) if not item.price_pending else '—' }}</td>
                   {% endif %}
                   {% if not incoming_subcontract %}<td class="amount{{ ' work-price-pending' if item.price_pending }}">
-                    {{ (item.price|money ~ ' ₽') if not item.price_pending else 'Ждёт расчёта' }}
+                    {% if item.price_pending %}Ждёт расчёта
+                    {% elif item_discount_amount(item) > 0 and not is_tuning_partner %}
+                    <span class="work-discounted">
+                      <s class="work-price-was">{{ item_list_price(item)|money }} ₽</s>
+                      <strong>{{ item.price|money }} ₽</strong>
+                      <span class="work-discount-badge" title="Скидка на эту работу">Скидка {{ item_discount_label(item) }}</span>
+                    </span>
+                    {% else %}{{ item.price|money }} ₽{% endif %}
                   </td>{% endif %}
                   {% if is_tuning_partner %}
                   <td class="partner-open-price-cell">
@@ -502,7 +515,7 @@
           </p>
           {% else %}
           <p class="hint" style="margin-top:14px;">
-            Скидка {{ (o.discount_value|float|round(1)|string ~ '%') if o.discount_type != 'amount' else (o.discount_value|money ~ ' ₽') }} · Оплачено {{ o.paid_amount|money }} ₽ ·
+            Скидка на весь заказ {{ (o.discount_value|float|round(1)|string ~ '%') if o.discount_type != 'amount' else (o.discount_value|money ~ ' ₽') }} · Оплачено {{ o.paid_amount|money }} ₽ ·
             К доплате {{ o.remaining|money }} ₽
           </p>
           {% endif %}

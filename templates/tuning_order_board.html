@@ -104,7 +104,8 @@
         </span>
         <h3>{{ item.work_name }}</h3>
         <div class="board-work-price{{ ' work-price-pending' if item.price_pending }}">
-          {{ (item.price|money ~ ' ₽') if not item.price_pending else 'Ждёт расчёта' }}
+          {% if not item.price_pending and item_discount_amount(item) > 0 %}<s class="work-price-was">{{ item_list_price(item)|money }} ₽</s> {{ item.price|money }} ₽ <span class="work-discount-badge" title="Скидка на работу">−{{ item_discount_label(item) }}</span>
+          {% else %}{{ (item.price|money ~ ' ₽') if not item.price_pending else 'Ждёт расчёта' }}{% endif %}
         </div>
         {% include '_tuning_labor_budget.html' %}
       </div>

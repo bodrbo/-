@@ -56,9 +56,21 @@
          value="{{ '' if item and item.price_pending else item.cost_price if item else '' }}" oninput="updateWorkRow(this)">
   <input type="text" inputmode="decimal" name="multiplier[]" placeholder="Коэффициент" class="work-multiplier"
          value="{{ '' if item and item.price_pending else item.multiplier if item else '' }}" oninput="updateWorkRow(this)">
+  {% set work_discounted = item and not item.price_pending and item_discount_amount(item) > 0 %}
+  <span class="work-discount-field" title="Скидка на эту работу — вычитается из её цены; скидка на весь заказ считается уже от итога">
+    <input type="text" inputmode="decimal" name="item_discount_value[]" placeholder="Скидка" class="work-discount"
+           aria-label="Скидка на работу" value="{{ '%g'|format(item.discount_value) if work_discounted else '' }}"
+           oninput="updateWorkRow(this)">
+    <select name="item_discount_type[]" class="work-discount-type" aria-label="Вид скидки на работу" onchange="updateWorkRow(this)">
+      <option value="percent" {{ 'selected' if not work_discounted or item.discount_type != 'amount' }}>%</option>
+      <option value="amount" {{ 'selected' if work_discounted and item.discount_type == 'amount' }}>₽</option>
+    </select>
+  </span>
   <span class="work-price{{ ' work-price-pending' if not item or item.price_pending }}"
         data-value="{{ item.price if item and not item.price_pending else 0 }}">
-    {{ (item.price|money ~ ' ₽') if item and not item.price_pending else 'Ждёт расчёта' }}
+    {% if item and not item.price_pending %}
+    {% if work_discounted %}<s class="work-price-was">{{ item_list_price(item)|money }} ₽</s> {% endif %}{{ item.price|money }} ₽
+    {% else %}Ждёт расчёта{% endif %}
   </span>
   {% endif %}
   <button type="button" class="btn-delete" onclick="removeWorkRow(this)" title="Убрать работу">
@@ -1153,7 +1165,7 @@
         <div class="form-group-label"><span class="n">3</span>Скидка и итог</div>
         <div class="field-row-inner">
         <div class="field field-narrow">
-          <label for="discount_value">Скидка</label>
+          <label for="discount_value">Скидка на весь заказ</label>
           <input type="text" inputmode="decimal" id="discount_value" name="discount_value"
                  value="{{ form_values.discount_value if form_values else 0 }}" oninput="updateOrderTotal()">
         </div>
@@ -1761,10 +1773,28 @@ function updateWorkRow(input) {
   }
   var cost = parseFloat(costRaw.replace(',', '.')) || 0;
   var mult = parseFloat(multRaw.replace(',', '.')) || 0;
-  var price = cost * mult;
+  var listPrice = cost * mult;
+  // the discount on this one work comes off its own price
+  var discountInput = row.querySelector('.work-discount');
+  var discountType = row.querySelector('.work-discount-type');
+  var discountValue = discountInput ? (parseFloat((discountInput.value || '0').replace(',', '.')) || 0) : 0;
+  var discount = discountType && discountType.value === 'amount' ? discountValue : listPrice * discountValue / 100;
+  discount = Math.max(0, Math.min(discount, listPrice));
+  var price = listPrice - discount;
+  var fmt = function (value) {
+    return value.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
+  };
   span.setAttribute('data-value', price);
   span.classList.remove('work-price-pending');
-  span.textContent = price.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
+  span.textContent = '';
+  if (discount > 0) {
+    var was = document.createElement('s');
+    was.className = 'work-price-was';
+    was.textContent = fmt(listPrice);
+    span.appendChild(was);
+    span.appendChild(document.createTextNode(' '));
+  }
+  span.appendChild(document.createTextNode(fmt(price)));
   updateOrderTotal();
 }
 

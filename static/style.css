@@ -4499,6 +4499,18 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .work-row .work-cost,
 .work-row .work-multiplier { flex: 1 1 130px; min-width: 0; }
 .work-row .work-direct-price { width: 100%; min-width: 0; }
+.work-row .work-discount-field { display: inline-flex; flex: 0 1 160px; gap: 4px; min-width: 0; }
+.work-row .work-discount { flex: 1 1 86px; min-width: 0; }
+.work-row .work-discount-type { flex: 0 0 auto; width: 58px; }
+.work-row .work-price-was { color: var(--muted); font-weight: 500; margin-right: 4px; }
+/* a work with its own discount: price before, price after, and the discount */
+.work-discounted { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 8px; }
+.work-discounted .work-price-was { color: var(--muted); font-weight: 500; }
+.work-discount-badge {
+  display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 700;
+  letter-spacing: .02em; background: rgba(46, 160, 90, .14); color: var(--success);
+}
+.work-discount-total { color: var(--success); }
 .subcontract-price-field {
   display: grid;
   flex: 1 1 175px;
