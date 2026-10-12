@@ -52,6 +52,21 @@ def init_schema(conn):
         )
         """
     )
+    # More people on one task: the task's own employee_name is the first
+    # participant, every further one is a row here with their own rate (and
+    # their own payout once a task without a work item is done).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tuning_schedule_task_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER NOT NULL,
+            employee_name TEXT NOT NULL,
+            rate REAL NOT NULL DEFAULT 0,
+            entry_id INTEGER,
+            UNIQUE(task_id, employee_name)
+        )
+        """
+    )
     task_columns = {row[1] for row in conn.execute("PRAGMA table_info(tuning_schedule_tasks)")}
     if "order_id" not in task_columns:
         # A task not tied to a work item may still belong to a project

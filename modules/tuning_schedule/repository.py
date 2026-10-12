@@ -51,8 +51,14 @@ def list_day_task_employee_ids(db, day):
             "FROM tuning_schedule_task_days d "
             "JOIN tuning_schedule_tasks t ON t.id = d.task_id "
             "JOIN employees ON employees.name = t.employee_name "
+            "WHERE d.work_date = ? AND employees.deleted_at IS NULL "
+            "UNION "
+            "SELECT DISTINCT employees.id "
+            "FROM tuning_schedule_task_days d "
+            "JOIN tuning_schedule_task_members m ON m.task_id = d.task_id "
+            "JOIN employees ON employees.name = m.employee_name "
             "WHERE d.work_date = ? AND employees.deleted_at IS NULL",
-            (day,),
+            (day, day),
         ).fetchall()
     }
 
@@ -157,6 +163,7 @@ def set_task_day_hours(db, day_id, planned_hours):
 
 
 def delete_task(db, task_id):
+    db.execute("DELETE FROM tuning_schedule_task_members WHERE task_id = ?", (task_id,))
     db.execute("DELETE FROM tuning_schedule_task_days WHERE task_id = ?", (task_id,))
     db.execute("DELETE FROM tuning_schedule_tasks WHERE id = ?", (task_id,))
     db.commit()
@@ -199,11 +206,82 @@ def list_day_tasks(db, day):
     those stay the single source of truth for a linked task rather than
     being copied onto tuning_schedule_tasks, so nothing here can drift out
     of sync with the order board. A free task (assignment_id IS NULL) uses
-    its own employee_name/title/rate/status columns instead."""
-    return db.execute(
+    its own employee_name/title/rate/status columns instead.
+
+    A task with more than one participant yields one row per participant
+    (the same task_id / day_id, that person's name and rate, is_member = 1
+    for everyone after the first) — so a person's column, their free time and
+    their roster all see the task."""
+    rows = [dict(row, is_member=0) for row in db.execute(
         _DAY_TASK_SELECT + "WHERE d.work_date = ? ORDER BY employee_name, t.id",
         (day,),
+    ).fetchall()]
+    if not rows:
+        return rows
+    task_ids = sorted({row["task_id"] for row in rows})
+    placeholders = ",".join("?" for _ in task_ids)
+    members = {}
+    for member in db.execute(
+        "SELECT task_id, employee_name, rate FROM tuning_schedule_task_members "
+        f"WHERE task_id IN ({placeholders}) ORDER BY id",
+        task_ids,
+    ).fetchall():
+        members.setdefault(member["task_id"], []).append(member)
+    result = []
+    for row in rows:
+        result.append(row)
+        for member in members.get(row["task_id"], []):
+            result.append(dict(
+                row, employee_name=member["employee_name"], rate=member["rate"],
+                is_member=1, primary_employee=row["employee_name"],
+            ))
+    result.sort(key=lambda row: (row["employee_name"], row["task_id"]))
+    return result
+
+
+def list_task_members(db, task_id):
+    return db.execute(
+        "SELECT * FROM tuning_schedule_task_members WHERE task_id = ? ORDER BY id", (task_id,)
     ).fetchall()
+
+
+def replace_task_members(db, task_id, members):
+    """Sets the further participants of a task to [(employee_name, rate)];
+    someone who stays keeps their payout record."""
+    keep = {name for name, _rate in members}
+    for row in list_task_members(db, task_id):
+        if row["employee_name"] not in keep:
+            db.execute("DELETE FROM tuning_schedule_task_members WHERE id = ?", (row["id"],))
+    for name, rate in members:
+        cursor = db.execute(
+            "UPDATE tuning_schedule_task_members SET rate = ? WHERE task_id = ? AND employee_name = ?",
+            (rate, task_id, name),
+        )
+        if cursor.rowcount == 0:
+            db.execute(
+                "INSERT INTO tuning_schedule_task_members (task_id, employee_name, rate) VALUES (?, ?, ?)",
+                (task_id, name, rate),
+            )
+    db.commit()
+
+
+def rename_task_member(db, task_id, old_name, new_name):
+    db.execute(
+        "UPDATE tuning_schedule_task_members SET employee_name = ? WHERE task_id = ? AND employee_name = ?",
+        (new_name, task_id, old_name),
+    )
+    db.commit()
+
+
+def set_member_entry(db, member_id, entry_id):
+    db.execute(
+        "UPDATE tuning_schedule_task_members SET entry_id = ? WHERE id = ?", (entry_id, member_id)
+    )
+    db.commit()
+
+
+def delete_task_members(db, task_id):
+    db.execute("DELETE FROM tuning_schedule_task_members WHERE task_id = ?", (task_id,))
 
 
 def get_day_task(db, task_id, day_id):

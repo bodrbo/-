@@ -150,6 +150,16 @@ def create_tuning_schedule_blueprint(
                 db, item, employee_name, rate, comment, day_rows,
                 create_order_assignment,
             )
+            if success:
+                # more people on the same work: each gets their own order task
+                # over the same days (the way the board hands one work to several)
+                for extra_name, extra_rate in services.collect_extra_participants(request.form):
+                    extra_ok, extra_message, _extra_id = services.create_linked_task(
+                        db, item, extra_name, extra_rate, comment, day_rows,
+                        create_order_assignment,
+                    )
+                    if not extra_ok:
+                        message += f" {extra_name}: {extra_message}"
         else:
             title = request.form.get("title", "")
             try:
@@ -161,6 +171,7 @@ def create_tuning_schedule_blueprint(
                 return redirect_to_day(day)
             success, message, _task_id = services.create_free_task(
                 db, employee_name, title, rate, comment, day_rows, project_id,
+                extras=services.collect_extra_participants(request.form),
             )
         set_notice(message, success)
         return redirect_to_day(day)
@@ -189,6 +200,7 @@ def create_tuning_schedule_blueprint(
             get_db(), task_id, day_id,
             payload.get("start_time"), payload.get("target_employee_id"),
             reassign_order_assignment or (lambda *_args: (False, "Передача недоступна.")),
+            raw_source_employee=payload.get("source_employee"),
         )
         if not success:
             return jsonify({"ok": False, "message": message}), 400
@@ -213,6 +225,7 @@ def create_tuning_schedule_blueprint(
             "terms": update_order_assignment_terms or (lambda *_args: (False, "Изменение недоступно.")),
             "update_status": update_order_assignment_status,
             "pay_free_task": pay_free_task,
+            "create_assignment": create_order_assignment,
             "statuses": assignment_status_values,
         }
         success, message = services.update_task(get_db(), task_id, request.form, hooks)

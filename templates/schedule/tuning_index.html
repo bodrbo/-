@@ -144,6 +144,9 @@
                   </div>
                 </div>
                 <strong>{{ card.title }}</strong>
+                {% if card.with_names %}
+                <span class="tuning-calendar-card-meta tuning-calendar-card-with">{{ 'с: ' ~ card.with_names|join(', ') }}</span>
+                {% endif %}
                 {% if card.order_id %}
                 <span class="tuning-calendar-card-meta">№{{ card.order_id }} · {{ card.equipment_label }}</span>
                 {% endif %}
@@ -218,6 +221,10 @@
             {% endfor %}
           </select>
           <span class="field-context">Сотрудники в смене на этот день и все администраторы (администратор попадёт в смену автоматически)</span>
+        <div class="task-extra-people" data-extra-people data-extra-source="task-employee">
+          <div class="task-extra-rows" id="taskExtraRows"></div>
+          <button type="button" class="btn-add" onclick="addExtraPerson('taskExtraRows', 'task-employee')">Ещё сотрудник в этой задаче</button>
+        </div>
         </div>
       </div>
 
@@ -429,6 +436,10 @@
           {% endfor %}
         </select>
       </label>
+        <div class="task-extra-people" data-extra-people data-extra-source="quickTaskEmployee">
+          <div class="task-extra-rows" id="quickTaskExtraRows"></div>
+          <button type="button" class="btn-add" onclick="addExtraPerson('quickTaskExtraRows', 'quickTaskEmployee')">Ещё сотрудник в этой задаче</button>
+        </div>
 
       <div class="quick-task-row">
         <label class="quick-task-field"><span>Начало</span>
@@ -520,6 +531,13 @@
           </label>
         </div>
         <p class="hint" id="taskEditorAdminNote" hidden>Администратор на окладе — ставка не нужна.</p>
+        <div class="quick-task-field"><span>Ещё сотрудники в задаче</span>
+        <div class="task-extra-people" data-extra-people data-extra-source="taskEditorEmployee">
+          <div class="task-extra-rows" id="taskEditorExtraRows"></div>
+          <button type="button" class="btn-add" onclick="addExtraPerson('taskEditorExtraRows', 'taskEditorEmployee')">Ещё сотрудник в этой задаче</button>
+        </div>
+          <p class="hint" id="taskEditorCoworkers" hidden></p>
+        </div>
       </div>
 
       <div class="quick-task-column">
@@ -719,6 +737,7 @@ async function finishTuningDrag(event) {
       body: JSON.stringify({
         start_time: startTime,
         target_employee_id: sameColumn ? null : Number(state.targetColumn.dataset.employeeId),
+        source_employee: state.sourceColumn.dataset.employeeName,
       }),
     });
     var payload = await response.json().catch(function () { return {}; });
@@ -820,6 +839,7 @@ function openQuickTask(employeeName, startMinutes) {
   document.getElementById('quickTaskOrder').value = '';
   document.getElementById('quickTaskName').value = '';
   loadQuickTaskWorks('');
+  clearExtraPeople('quickTaskExtraRows');
   updateQuickTaskRate();
   modal.hidden = false;
   document.body.classList.add('schedule-modal-open');
@@ -882,6 +902,61 @@ document.addEventListener('keydown', function (event) {
 var tuningEditorTask = null;
 var tuningSuppressClick = false;
 
+// More people on one task: a row = a person + their own rate. The options
+// are copied from the main employee select next to it.
+function addExtraPerson(containerId, sourceSelectId, name, rate) {
+  var container = document.getElementById(containerId);
+  var source = document.getElementById(sourceSelectId);
+  if (!container || !source) return;
+  var row = document.createElement('div');
+  row.className = 'task-extra-row';
+  var select = document.createElement('select');
+  select.name = 'extra_employee_name[]';
+  select.setAttribute('aria-label', 'Ещё сотрудник');
+  var blank = document.createElement('option');
+  blank.value = '';
+  blank.textContent = 'Выберите сотрудника';
+  select.appendChild(blank);
+  Array.prototype.forEach.call(source.options, function (option) {
+    if (!option.value) return;
+    var copy = document.createElement('option');
+    copy.value = option.value;
+    copy.textContent = option.textContent;
+    copy.dataset.admin = option.dataset.admin || '0';
+    select.appendChild(copy);
+  });
+  var rateInput = document.createElement('input');
+  rateInput.type = 'text';
+  rateInput.inputMode = 'decimal';
+  rateInput.name = 'extra_rate[]';
+  rateInput.placeholder = 'Ставка, ₽/ч';
+  rateInput.setAttribute('aria-label', 'Ставка, ₽/ч');
+  var remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'icon-btn danger task-editor-day-remove';
+  remove.title = 'Убрать сотрудника';
+  remove.setAttribute('aria-label', 'Убрать сотрудника');
+  remove.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l10 10M15 5L5 15"/></svg>';
+  remove.addEventListener('click', function () { row.remove(); });
+  var syncRate = function () {
+    var option = select.options[select.selectedIndex];
+    var isAdmin = !!option && option.dataset.admin === '1';
+    rateInput.hidden = isAdmin;  // an administrator is salaried — no rate
+    if (isAdmin) rateInput.value = '';
+  };
+  select.addEventListener('change', syncRate);
+  if (name) select.value = name;
+  if (rate) rateInput.value = String(rate);
+  row.append(select, rateInput, remove);
+  container.appendChild(row);
+  syncRate();
+}
+
+function clearExtraPeople(containerId) {
+  var container = document.getElementById(containerId);
+  if (container) container.innerHTML = '';
+}
+
 function openTaskEditor(card, event, fromButton) {
   if (!fromButton && event && event.target.closest && event.target.closest('select, option, button, a')) return;
   if (tuningSuppressClick || tuningDrag || tuningDragSaving) return;
@@ -917,6 +992,14 @@ function openTaskEditor(card, event, fromButton) {
   var days = document.getElementById('taskEditorDays');
   days.innerHTML = '';
   task.days.forEach(function (day) { addTaskEditorDay(day.date, day.start, day.hours); });
+  clearExtraPeople('taskEditorExtraRows');
+  (task.members || []).forEach(function (member) {
+    addExtraPerson('taskEditorExtraRows', 'taskEditorEmployee', member.name, member.rate);
+  });
+  var coworkers = document.getElementById('taskEditorCoworkers');
+  coworkers.hidden = !(task.coworkers && task.coworkers.length);
+  coworkers.textContent = coworkers.hidden ? '' : 'На этой работе также: ' + task.coworkers.join(', ')
+    + ' (у каждого своя задача — открывайте её отдельно).';
   syncTaskEditorRate();
   var modal = document.getElementById('taskEditorModal');
   modal.hidden = false;

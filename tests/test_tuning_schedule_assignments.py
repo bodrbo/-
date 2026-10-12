@@ -1354,5 +1354,311 @@ class TuningScheduleTaskEditorTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertNotIn("/schedule/tuning", response.headers["Location"])
 
 
+class TuningScheduleSeveralPeopleTests(_TuningScheduleFixture, unittest.TestCase):
+    """One task, several people: one card in each person's column, one
+    status, a rate and a payout per person."""
+
+    EMPLOYEE_C = "Мастеров Третий"
+
+    def setUp(self):
+        super().setUp()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            employee_id = db.execute(
+                "INSERT INTO employees (name, created_at, deleted_at) VALUES (?, '2026-09-01 09:00', NULL)",
+                (self.EMPLOYEE_C,)).lastrowid
+            db.execute("INSERT INTO employee_positions (employee_id, position, created_at) "
+                       "VALUES (?, 'Тюнингмэн', 'x')", (employee_id,))
+            db.execute("DELETE FROM tuning_schedule_task_members")
+            db.commit()
+        for name in (self.EMPLOYEE_A, self.EMPLOYEE_B, self.EMPLOYEE_C):
+            self.put_on_shift(name)
+
+    def tearDown(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM tuning_schedule_task_members")
+            db.execute("DELETE FROM entries WHERE employee = ?", (self.EMPLOYEE_C,))
+            db.execute("DELETE FROM employee_positions WHERE employee_id IN "
+                       "(SELECT id FROM employees WHERE name = ?)", (self.EMPLOYEE_C,))
+            db.execute("DELETE FROM employees WHERE name = ?", (self.EMPLOYEE_C,))
+            db.commit()
+        super().tearDown()
+
+    def create(self, extras=(), title="Совместная работа", employee=None, rate="100", start="10:00",
+               hours="2", order_id="", item_id=""):
+        self.login_admin()
+        data = MultiDict([
+            ("employee_name", employee or self.EMPLOYEE_A), ("rate", rate), ("comment", ""),
+            ("title", title), ("return_date", self.DAY), ("work_date[]", self.DAY),
+            ("start_time[]", start), ("planned_hours[]", hours),
+            ("order_id", str(order_id)), ("order_item_id", str(item_id)),
+        ])
+        for name, extra_rate in extras:
+            data.add("extra_employee_name[]", name)
+            data.add("extra_rate[]", str(extra_rate))
+        return self.client.post("/schedule/tuning/tasks", data=data)
+
+    def task(self, title="Совместная работа"):
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT * FROM tuning_schedule_tasks WHERE title = ? ORDER BY id DESC LIMIT 1", (title,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def members(self, task_id):
+        with application_module.app.app_context():
+            return [dict(r) for r in application_module.get_db().execute(
+                "SELECT * FROM tuning_schedule_task_members WHERE task_id = ? ORDER BY id", (task_id,)
+            ).fetchall()]
+
+    def notice(self):
+        with self.client.session_transaction() as session:
+            return session.get("schedule_notice") or {}
+
+    def day_rows(self):
+        with application_module.app.app_context():
+            return application_module.tuning_schedule_repository.list_day_tasks(
+                application_module.get_db(), self.DAY)
+
+    def entries(self, employee):
+        with application_module.app.app_context():
+            return [e["amount"] for e in application_module.get_db().execute(
+                "SELECT amount FROM entries WHERE employee = ? ORDER BY id", (employee,)).fetchall()]
+
+    def save(self, task_id, extras=(), status="pending", employee=None, rate="100",
+             days=None, title="Совместная работа"):
+        self.login_admin()
+        data = MultiDict([
+            ("employee_name", employee or self.EMPLOYEE_A), ("title", title), ("rate", rate),
+            ("comment", ""), ("status", status), ("order_id", ""), ("return_date", self.DAY),
+        ])
+        for day in (days or [(self.DAY, "10:00", "2")]):
+            data.add("work_date[]", day[0]); data.add("start_time[]", day[1]); data.add("planned_hours[]", day[2])
+        for name, extra_rate in extras:
+            data.add("extra_employee_name[]", name); data.add("extra_rate[]", str(extra_rate))
+        return self.client.post(f"/schedule/tuning/tasks/{task_id}/update", data=data)
+
+    # ---- creating
+
+    def test_one_task_with_several_people_has_a_card_in_each_column(self):
+        self.create(extras=[(self.EMPLOYEE_B, 120), (self.EMPLOYEE_C, 90)])
+        task = self.task()
+        self.assertEqual([(m["employee_name"], m["rate"]) for m in self.members(task["id"])],
+                         [(self.EMPLOYEE_B, 120), (self.EMPLOYEE_C, 90)])
+        rows = [r for r in self.day_rows() if r["task_id"] == task["id"]]
+        self.assertEqual(sorted((r["employee_name"], r["rate"], r["is_member"]) for r in rows),
+                         sorted([(self.EMPLOYEE_A, 100, 0), (self.EMPLOYEE_B, 120, 1), (self.EMPLOYEE_C, 90, 1)]))
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        self.assertEqual(page.count("tuning-calendar-card status-"), 3)
+        self.assertIn(f"с: {self.EMPLOYEE_B}, {self.EMPLOYEE_C}", page)
+
+    def test_a_single_person_task_is_unchanged(self):
+        self.create()
+        self.assertEqual(self.members(self.task()["id"]), [])
+        self.assertEqual(len([r for r in self.day_rows() if r["title"] == "Совместная работа"]), 1)
+
+    def test_bad_extras_create_nothing(self):
+        for extras in ([(self.EMPLOYEE_A, 100)], [(self.EMPLOYEE_B, 100), (self.EMPLOYEE_B, 50)],
+                       [("Никто Нигде", 100)], [(self.EMPLOYEE_B, 0)]):
+            self.create(extras=extras)
+            self.assertIsNone(self.task(), extras)
+            self.assertEqual(self.notice()["type"], "error")
+
+    def test_a_blank_extra_row_is_ignored(self):
+        self.create(extras=[("", ""), (self.EMPLOYEE_B, 50)])
+        self.assertEqual([m["employee_name"] for m in self.members(self.task()["id"])], [self.EMPLOYEE_B])
+
+    def test_an_extra_administrator_needs_no_rate(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("INSERT INTO employee_positions (employee_id, position, created_at) VALUES (?, 'Администратор', 'x')",
+                       (self.employee_id(self.EMPLOYEE_C),))
+            db.commit()
+        self.create(extras=[(self.EMPLOYEE_C, "")])
+        self.assertEqual([(m["employee_name"], m["rate"]) for m in self.members(self.task()["id"])],
+                         [(self.EMPLOYEE_C, 0)])
+
+    def test_a_task_of_a_work_gives_each_person_their_own_order_task(self):
+        self.create(extras=[(self.EMPLOYEE_B, 150)], title="", order_id=self.order_id, item_id=self.item_id)
+        by_name = {a["employee_name"]: a for a in self.assignments()}
+        self.assertEqual({n: (a["rate"], a["norm_hours"], a["due_from"]) for n, a in by_name.items()},
+                         {self.EMPLOYEE_A: (100, 2, self.DAY), self.EMPLOYEE_B: (150, 2, self.DAY)})
+        self.assertEqual(len(self.cards(self.EMPLOYEE_A)) + len(self.cards(self.EMPLOYEE_B)), 2)
+
+    # ---- the editor
+
+    def test_the_editor_adds_changes_and_removes_people(self):
+        self.create()
+        task = self.task()
+        self.save(task["id"], extras=[(self.EMPLOYEE_B, 120)])
+        self.assertEqual([(m["employee_name"], m["rate"]) for m in self.members(task["id"])],
+                         [(self.EMPLOYEE_B, 120)])
+        self.save(task["id"], extras=[(self.EMPLOYEE_B, 140), (self.EMPLOYEE_C, 80)])
+        self.assertEqual([(m["employee_name"], m["rate"]) for m in self.members(task["id"])],
+                         [(self.EMPLOYEE_B, 140), (self.EMPLOYEE_C, 80)])
+        self.save(task["id"], extras=[])
+        self.assertEqual(self.members(task["id"]), [])
+
+    def test_a_person_busy_at_that_time_cannot_be_added(self):
+        self.create(title="Занятая", employee=self.EMPLOYEE_B, start="10:00", hours="3")
+        self.create()
+        task = self.task()
+        self.save(task["id"], extras=[(self.EMPLOYEE_B, 100)])
+        self.assertEqual(self.notice()["type"], "error")
+        self.assertIn(f"{self.EMPLOYEE_B}: {self.DAY} это время занято", self.notice()["message"])
+        self.assertEqual(self.members(task["id"]), [])
+
+    def test_a_person_off_the_shift_cannot_be_added(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM tuning_schedule_day_crew WHERE employee_id = ?", (self.employee_id(self.EMPLOYEE_C),))
+            db.commit()
+        self.create()
+        task = self.task()
+        self.save(task["id"], extras=[(self.EMPLOYEE_C, 100)])
+        self.assertIn("не стоит в смене", self.notice()["message"])
+
+    def test_the_editor_payload_lists_the_people(self):
+        self.create(extras=[(self.EMPLOYEE_B, 120)])
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        self.assertIn('"members": [{', page)
+        self.assertIn('id="taskEditorExtraRows"', page)
+        self.assertIn('id="quickTaskExtraRows"', page)
+        self.assertIn('id="taskExtraRows"', page)
+        self.assertIn("function addExtraPerson", page)
+
+    def test_a_work_task_lists_the_coworkers_and_refuses_a_second_assignment(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.assign([(self.EMPLOYEE_A, 100, 2), (self.EMPLOYEE_B, 100, 2)])
+        task = None
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT t.id FROM tuning_schedule_tasks t WHERE t.employee_name = ?", (self.EMPLOYEE_A,)).fetchone()
+            task = row["id"]
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        import html as html_module
+        import json
+        import re
+        payloads = [json.loads(html_module.unescape(m)) for m in re.findall(r"data-editor='([^']*)'", page)]
+        mine = next(p for p in payloads if p["employee_name"] == self.EMPLOYEE_A)
+        self.assertEqual(mine["coworkers"], [self.EMPLOYEE_B])
+        self.save(task, employee=self.EMPLOYEE_A, extras=[(self.EMPLOYEE_B, 100)], title="x")
+        self.assertIn("уже назначен на эту работу", self.notice()["message"])
+
+    def test_a_work_task_gets_one_more_person_from_the_editor(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.assign([(self.EMPLOYEE_A, 100, 2)])
+        with application_module.app.app_context():
+            task = application_module.get_db().execute(
+                "SELECT id FROM tuning_schedule_tasks WHERE employee_name = ?", (self.EMPLOYEE_A,)).fetchone()["id"]
+        self.save(task, extras=[(self.EMPLOYEE_C, 130)], title="x")
+        self.assertEqual(self.notice()["type"], "success")
+        by_name = {a["employee_name"]: a for a in self.assignments()}
+        self.assertEqual((by_name[self.EMPLOYEE_C]["rate"], by_name[self.EMPLOYEE_C]["norm_hours"]), (130, 2))
+        self.assertEqual(len(self.cards(self.EMPLOYEE_C)), 1)
+
+    # ---- pay
+
+    def test_finishing_the_task_pays_everyone_once(self):
+        self.create(extras=[(self.EMPLOYEE_B, 120), (self.EMPLOYEE_C, 90)], hours="2")
+        task = self.task()
+        self.save(task["id"], status="done", extras=[(self.EMPLOYEE_B, 120), (self.EMPLOYEE_C, 90)])
+        self.assertEqual(self.entries(self.EMPLOYEE_A), [200])
+        self.assertEqual(self.entries(self.EMPLOYEE_B), [240])
+        self.assertEqual(self.entries(self.EMPLOYEE_C), [180])
+        self.save(task["id"], status="done", extras=[(self.EMPLOYEE_B, 120), (self.EMPLOYEE_C, 90)])
+        self.assertEqual(self.entries(self.EMPLOYEE_B), [240])
+
+    def test_a_person_added_to_a_finished_task_is_paid(self):
+        self.create()
+        task = self.task()
+        self.save(task["id"], status="done")
+        self.save(task["id"], status="done", extras=[(self.EMPLOYEE_C, 50)])
+        self.assertEqual(self.entries(self.EMPLOYEE_C), [100])
+
+    def test_the_status_picker_of_a_card_pays_the_group(self):
+        self.create(extras=[(self.EMPLOYEE_B, 120)])
+        task = self.task()
+        self.login_admin()
+        response = self.client.post(f"/schedule/tuning/tasks/{task['id']}/status", json={"status": "done"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual((self.entries(self.EMPLOYEE_A), self.entries(self.EMPLOYEE_B)), ([200], [240]))
+
+    # ---- delete
+
+    def test_deleting_removes_the_people_with_the_task(self):
+        self.create(extras=[(self.EMPLOYEE_B, 120)])
+        task = self.task()
+        self.login_admin()
+        self.client.post(f"/schedule/tuning/tasks/{task['id']}/delete", data={"return_date": self.DAY})
+        self.assertIsNone(self.task())
+        self.assertEqual(self.members(task["id"]), [])
+
+    def test_a_task_paid_to_a_member_is_not_deleted(self):
+        self.create(extras=[(self.EMPLOYEE_B, 120)])
+        task = self.task()
+        self.save(task["id"], status="done", extras=[(self.EMPLOYEE_B, 120)])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("UPDATE tuning_schedule_tasks SET entry_id = NULL WHERE id = ?", (task["id"],))
+            db.commit()
+        self.client.post(f"/schedule/tuning/tasks/{task['id']}/delete", data={"return_date": self.DAY})
+        self.assertIsNotNone(self.task())
+        self.assertEqual(self.notice()["type"], "error")
+
+    # ---- moving cards
+
+    def move(self, task, start="13:00", source=None, target_employee=None):
+        self.login_admin()
+        with application_module.app.app_context():
+            day = application_module.get_db().execute(
+                "SELECT id FROM tuning_schedule_task_days WHERE task_id = ?", (task["id"],)).fetchone()["id"]
+        payload = {"start_time": start}
+        if source:
+            payload["source_employee"] = source
+        if target_employee:
+            payload["target_employee_id"] = self.employee_id(target_employee)
+        return self.client.post(f"/schedule/tuning/tasks/{task['id']}/days/{day}/move", json=payload)
+
+    def test_moving_the_time_moves_every_persons_card(self):
+        self.create(extras=[(self.EMPLOYEE_B, 120)])
+        task = self.task()
+        response = self.move(task, "13:00", source=self.EMPLOYEE_B)
+        self.assertEqual(response.status_code, 200)
+        starts = {r["employee_name"]: r["start_time"] for r in self.day_rows() if r["task_id"] == task["id"]}
+        self.assertEqual(starts, {self.EMPLOYEE_A: "13:00", self.EMPLOYEE_B: "13:00"})
+
+    def test_moving_is_refused_when_a_participant_is_busy_then(self):
+        self.create(title="Занятая", employee=self.EMPLOYEE_B, start="13:00", hours="1")
+        self.create(extras=[(self.EMPLOYEE_B, 120)])
+        task = self.task()
+        response = self.move(task, "13:30")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(self.EMPLOYEE_B, response.get_json()["message"])
+
+    def test_dragging_a_members_card_to_another_column_replaces_that_person(self):
+        self.create(extras=[(self.EMPLOYEE_B, 120)])
+        task = self.task()
+        response = self.move(task, "10:00", source=self.EMPLOYEE_B, target_employee=self.EMPLOYEE_C)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([m["employee_name"] for m in self.members(task["id"])], [self.EMPLOYEE_C])
+        self.assertEqual(self.task()["employee_name"], self.EMPLOYEE_A)
+
+    def test_a_card_cannot_be_dragged_onto_a_person_already_in_the_task(self):
+        self.create(extras=[(self.EMPLOYEE_B, 120)])
+        task = self.task()
+        response = self.move(task, "10:00", source=self.EMPLOYEE_A, target_employee=self.EMPLOYEE_B)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("уже участвует", response.get_json()["message"])
+
+    def test_a_person_in_a_task_cannot_be_taken_off_the_roster(self):
+        self.create(extras=[(self.EMPLOYEE_B, 120)])
+        with application_module.app.app_context():
+            ids = application_module.tuning_schedule_repository.list_day_task_employee_ids(
+                application_module.get_db(), self.DAY)
+        self.assertIn(self.employee_id(self.EMPLOYEE_B), ids)
+
+
 if __name__ == "__main__":
     unittest.main()

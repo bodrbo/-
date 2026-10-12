@@ -319,6 +319,9 @@ def calendar_view(db, day, day_crew):
     latest = min(24 * 60, latest)
     total_minutes = max(60, latest - earliest)
 
+    participants = {}
+    for task in raw_tasks:
+        participants.setdefault(task["task_id"], []).append(task["employee_name"])
     cards_by_employee = {employee["name"]: [] for employee in day_crew}
     for task in raw_tasks:
         if task["employee_name"] not in cards_by_employee:
@@ -326,11 +329,19 @@ def calendar_view(db, day, day_crew):
         task["is_linked"] = task["assignment_id"] is not None
         # an administrator's task can carry Telegram reminders, with or
         # without a project
-        task["can_remind"] = repository.is_administrator(db, task["employee_name"])
+        # (reminders belong to the task, so only its first participant's card
+        # carries the bell)
+        task["can_remind"] = (
+            not task.get("is_member")
+            and repository.is_administrator(db, task["employee_name"])
+        )
         task["reminders"] = (
             repository.list_task_reminders(db, task["assignment_id"], task["task_id"])
             if task["can_remind"] else []
         )
+        task["with_names"] = [
+            name for name in participants.get(task["task_id"], []) if name != task["employee_name"]
+        ]
         if task["order_id"] is not None:
             task["equipment_label"] = (
                 (task["motor_model"] or "Мотор") if task["equipment_type"] == "motor"
@@ -412,9 +423,54 @@ def _roster_note(employee_name, added_days):
     return f" {employee_name} добавлен в смену на {days}."
 
 
-def create_free_task(db, employee_name, title, rate, comment, day_rows, order_id=None):
+def clean_extra_participants(db, raw_extras, primary_name, errors):
+    """Further people on one task: raw_extras = [(employee_name, raw_rate)]
+    as entered (blank rows skipped). Returns [(name, rate)]; problems go to
+    `errors`. Each person may appear once, never the first participant."""
+    eligible = {employee["name"] for employee in repository.list_tuning_crew_employees(db)}
+    seen = {primary_name}
+    result = []
+    for raw_name, raw_rate in raw_extras:
+        name = _normalise_text(raw_name, EMPLOYEE_NAME_MAX_LENGTH)
+        if not name:
+            continue
+        if name not in eligible:
+            errors.append("Выберите сотрудника из списка тюнингмэнов.")
+        elif name in seen:
+            errors.append(f"{name} указан в задаче дважды.")
+        else:
+            result.append((name, _clean_rate(db, name, raw_rate, errors)))
+            seen.add(name)
+    return result
+
+
+def collect_extra_participants(form):
+    """The 'ещё сотрудники' rows of a task form -> [(name, raw_rate)]."""
+    names = form.getlist("extra_employee_name[]")
+    rates = form.getlist("extra_rate[]")
+    return [(name, rates[i] if i < len(rates) else "") for i, name in enumerate(names)
+            if str(name or "").strip()]
+
+
+def _pay_unpaid_members(db, task, pay_free_task):
+    """Pays every further participant of a finished free task their own
+    rate x the task's hours, once (their payout is remembered per person)."""
+    total_hours = sum(row["planned_hours"] for row in repository.list_task_days(db, task["id"]))
+    for member in repository.list_task_members(db, task["id"]):
+        if member["entry_id"]:
+            continue
+        entry_id = pay_free_task(db, {
+            "id": task["id"], "employee_name": member["employee_name"], "rate": member["rate"],
+            "title": task["title"], "order_id": task["order_id"], "entry_id": None,
+        }, total_hours)
+        if entry_id:
+            repository.set_member_entry(db, member["id"], entry_id)
+
+
+def create_free_task(db, employee_name, title, rate, comment, day_rows, order_id=None, extras=()):
     """A task that is not tied to a work item. With `order_id` it still
-    belongs to that project (tuning order) and is shown with it."""
+    belongs to that project (tuning order) and is shown with it. `extras`
+    are raw (name, rate) rows of further participants of the same task."""
     errors = []
     employee_name = _normalise_text(employee_name, EMPLOYEE_NAME_MAX_LENGTH)
     title = _normalise_text(title, TASK_TITLE_MAX_LENGTH)
@@ -428,6 +484,7 @@ def create_free_task(db, employee_name, title, rate, comment, day_rows, order_id
     if order_id is not None and repository.get_linkable_order(db, order_id) is None:
         errors.append("Проект не найден или уже закрыт.")
     clean_days = _clean_task_days(day_rows, errors)
+    members = clean_extra_participants(db, extras, employee_name, errors)
     if errors:
         return False, " ".join(errors), None
     added_days = _ensure_on_roster(db, employee_name, clean_days)
@@ -436,6 +493,10 @@ def create_free_task(db, employee_name, title, rate, comment, day_rows, order_id
     )
     for work_date, start_time, hours in clean_days:
         repository.add_task_day(db, task_id, work_date, start_time, hours)
+    if members:
+        repository.replace_task_members(db, task_id, members)
+        for name, _rate in members:
+            added_days += [d for d in _ensure_on_roster(db, name, clean_days)]
     return True, "Задача добавлена в расписание." + _roster_note(employee_name, added_days), task_id
 
 
@@ -505,28 +566,35 @@ def set_task_status(db, task_id, status, pay_free_task, update_order_assignment_
             return True, f"Статус обновлён — так же и на доске задач заказа №{order_id}."
         return True, "Статус обновлён."
     repository.set_task_status(db, task_id, status, current_timestamp())
-    if status == "done" and not task["entry_id"]:
-        total_hours = sum(
-            row["planned_hours"] for row in repository.list_task_days(db, task_id)
-        )
-        entry_id = pay_free_task(db, task, total_hours)
-        if entry_id:
-            repository.set_task_entry(db, task_id, entry_id)
+    if status == "done":
+        if not task["entry_id"]:
+            total_hours = sum(
+                row["planned_hours"] for row in repository.list_task_days(db, task_id)
+            )
+            entry_id = pay_free_task(db, task, total_hours)
+            if entry_id:
+                repository.set_task_entry(db, task_id, entry_id)
+        _pay_unpaid_members(db, repository.get_task(db, task_id), pay_free_task)
     return True, "Статус обновлён."
 
 
-def move_task_card(db, task_id, day_id, raw_start, raw_target_employee_id, reassign_order_assignment):
+def move_task_card(db, task_id, day_id, raw_start, raw_target_employee_id, reassign_order_assignment,
+                   raw_source_employee=None):
     """Drag-and-drop of a calendar card: a new start time on the same day,
     optionally in another employee's column. Returns (ok, message, card)
     where card = {start, end, employee_name} on success.
 
-    The card must fit before midnight and not overlap another card of the
-    target employee that day; the target must be on that day's roster.
+    The card must fit before midnight and not overlap another card of any
+    participant that day; the target must be on that day's roster.
     Changing the employee moves the whole task, so it is refused for a
     multi-day task and for a finished one; for an order task it goes through
     `reassign_order_assignment(db, assignment_id, employee_name)` (the same
     hand-over the order board uses: payout/materials follow, the new person
-    is notified), for a free task the card's own employee is changed."""
+    is notified), for a free task the card's own employee is changed.
+    A task with several people shows a card in each person's column:
+    `raw_source_employee` is the column the card was dragged from, so
+    dragging a further participant's card to another column replaces just
+    that person."""
     row = repository.get_day_task(db, task_id, day_id)
     if row is None:
         return False, "Задача не найдена. Обновите страницу.", None
@@ -538,7 +606,11 @@ def move_task_card(db, task_id, day_id, raw_start, raw_target_employee_id, reass
         return False, "Задача не помещается до конца суток.", None
 
     day_iso = row["work_date"]
-    current_name = row["employee_name"]
+    primary_name = row["employee_name"]
+    members = {m["employee_name"] for m in repository.list_task_members(db, task_id)}
+    source = str(raw_source_employee or "").strip()
+    moving_member = source if source and source != primary_name and source in members else None
+    current_name = moving_member or primary_name
     target_name = current_name
     if raw_target_employee_id not in (None, ""):
         try:
@@ -551,14 +623,19 @@ def move_task_card(db, task_id, day_id, raw_start, raw_target_employee_id, reass
         if target_id not in names:
             return False, "Сотрудник не найден или не подходит для расписания тюнинга.", None
         target_name = names[target_id]
+        if target_name != current_name and (target_name == primary_name or target_name in members):
+            return False, f"{target_name} уже участвует в этой задаче.", None
 
+    participants = {primary_name} | members
+    participants.discard(current_name)
+    participants.add(target_name)
     for other in repository.list_day_tasks(db, day_iso):
-        if other["employee_name"] != target_name or other["day_id"] == day_id:
+        if other["employee_name"] not in participants or other["task_id"] == task_id:
             continue
         other_start = _minutes(other["start_time"]) or 0
         other_end = other_start + round(other["planned_hours"] * 60)
         if start_minutes < other_end and other_start < end_minutes:
-            return False, f"{target_name}: это время занято задачей «{other['title']}».", None
+            return False, f"{other['employee_name']}: это время занято задачей «{other['title']}».", None
 
     message = "Задача перенесена."
     if target_name != current_name:
@@ -566,7 +643,10 @@ def move_task_card(db, task_id, day_id, raw_start, raw_target_employee_id, reass
             return False, (
                 "Задача идёт несколько дней — сменить сотрудника можно на доске задач заказа."
             ), None
-        if row["assignment_id"] is not None:
+        if moving_member:
+            repository.rename_task_member(db, task_id, current_name, target_name)
+            message = f"В задаче {current_name} заменён на {target_name}."
+        elif row["assignment_id"] is not None:
             if row["status"] == "done":
                 return False, "Выполненную задачу нельзя передать другому сотруднику.", None
             ok, text = reassign_order_assignment(db, row["assignment_id"], target_name)
@@ -588,17 +668,39 @@ def editor_payload(db, card):
     task = repository.get_task(db, card["task_id"])
     linked = task["assignment_id"] is not None
     assignment = repository.get_assignment(db, task["assignment_id"]) if linked else None
-    paid_entry = (assignment["entry_id"] if linked else task["entry_id"])
+    members = repository.list_task_members(db, task["id"])
+    paid_entry = (assignment["entry_id"] if linked else task["entry_id"]) or any(
+        member["entry_id"] for member in members
+    )
+    # the card may belong to a further participant; the editor always shows
+    # the task's first participant and lists the others
+    primary_name = assignment["employee_name"] if linked else task["employee_name"]
+    primary_rate = assignment["rate"] if linked else task["rate"]
+    coworkers = []
+    if linked:
+        coworkers = [
+            row["employee_name"] for row in db.execute(
+                "SELECT employee_name FROM tuning_item_assignments "
+                "WHERE item_id = ? AND id != ? AND assignment_status != 'rejected' ORDER BY id",
+                (assignment["item_id"], assignment["id"]),
+            ).fetchall()
+        ]
     return {
         "task_id": task["id"],
         "is_linked": linked,
         "title": card["title"],
-        "employee_name": card["employee_name"],
+        "employee_name": primary_name,
         "order_id": card["order_id"],
-        "rate": card["rate"],
+        "rate": primary_rate,
         "status": card["status"],
         "comment": card["comment"] or "",
-        "is_admin": repository.is_administrator(db, card["employee_name"]),
+        "is_admin": repository.is_administrator(db, primary_name),
+        "members": [
+            {"name": member["employee_name"], "rate": member["rate"],
+             "is_admin": repository.is_administrator(db, member["employee_name"])}
+            for member in members
+        ],
+        "coworkers": coworkers,
         "paid": bool(paid_entry),
         "days": [
             {"date": day["work_date"], "start": day["start_time"], "hours": day["planned_hours"]}
@@ -653,6 +755,19 @@ def update_task(db, task_id, form, hooks):
                 if order_id != task["order_id"] and repository.get_linkable_order(db, order_id) is None:
                     errors.append("Проект не найден или уже закрыт.")
     rate = _clean_rate(db, employee_name, form.get("rate"), errors)
+    extras = clean_extra_participants(
+        db, collect_extra_participants(form), employee_name, errors
+    )
+    if linked and not errors:
+        taken = {
+            row["employee_name"] for row in db.execute(
+                "SELECT employee_name FROM tuning_item_assignments WHERE item_id = ? AND id != ?",
+                (assignment["item_id"], assignment["id"]),
+            ).fetchall()
+        }
+        for name, _extra_rate in extras:
+            if name in taken:
+                errors.append(f"{name} уже назначен на эту работу.")
 
     day_rows = [
         row for row in zip(
@@ -670,23 +785,25 @@ def update_task(db, task_id, form, hooks):
         elif current_status == "done" and linked:
             errors.append("Выполненную задачу нельзя передать другому сотруднику.")
     if not errors:
-        is_admin = repository.is_administrator(db, employee_name)
         for work_date, start_time, hours in clean_days:
             start = _minutes(start_time)
             end = start + round(hours * 60)
             if end > 24 * 60:
                 errors.append(f"{work_date}: задача не помещается до конца суток.")
                 continue
-            if not is_admin and repository.get_day_crew_shift_by_name(db, work_date, employee_name) is None:
-                errors.append(f"{employee_name} не стоит в смене на {work_date}.")
-                continue
-            for other in repository.list_other_day_tasks(db, work_date, task_id):
-                if other["employee_name"] != employee_name:
+            # every participant must be on the shift and free at that time
+            for person in [employee_name] + [name for name, _rate in extras]:
+                if not repository.is_administrator(db, person) \
+                        and repository.get_day_crew_shift_by_name(db, work_date, person) is None:
+                    errors.append(f"{person} не стоит в смене на {work_date}.")
                     continue
-                other_start = _minutes(other["start_time"]) or 0
-                if start < other_start + round(other["planned_hours"] * 60) and other_start < end:
-                    errors.append(f"{employee_name}: {work_date} это время занято задачей «{other['title']}».")
-                    break
+                for other in repository.list_other_day_tasks(db, work_date, task_id):
+                    if other["employee_name"] != person:
+                        continue
+                    other_start = _minutes(other["start_time"]) or 0
+                    if start < other_start + round(other["planned_hours"] * 60) and other_start < end:
+                        errors.append(f"{person}: {work_date} это время занято задачей «{other['title']}».")
+                        break
     if errors:
         return False, " ".join(errors)
 
@@ -718,10 +835,26 @@ def update_task(db, task_id, form, hooks):
                 notes.append(text)
             elif paid:
                 notes.append(text)
+        item = repository.get_order_item(
+            db, repository.get_assignment_order_id(db, task["assignment_id"]), assignment["item_id"]
+        )
+        for name, extra_rate in extras:
+            # one more person on the same work: their own order task over the same days
+            ok, text, _new_id = create_linked_task(
+                db, item, name, extra_rate, comment, clean_days, hooks["create_assignment"]
+            )
+            notes.append(f"{name} добавлен в задачу." if ok else text)
+            if not ok:
+                break
     else:
         repository.update_free_task(db, task_id, title, rate, comment, order_id)
+        repository.replace_task_members(db, task_id, extras)
+        for name, _extra_rate in extras:
+            added_days += _ensure_on_roster(db, name, clean_days)
     if status != current_status:
         set_task_status(db, task_id, status, hooks["pay_free_task"], hooks["update_status"])
+    elif not linked and current_status == "done":
+        _pay_unpaid_members(db, repository.get_task(db, task_id), hooks["pay_free_task"])
     return True, ("Задача сохранена. " + " ".join(notes)).strip() + _roster_note(employee_name, added_days)
 
 
@@ -735,7 +868,7 @@ def delete_task(db, task_id, revoke_order_assignment):
         return False, "Задача уже удалена."
     if task["assignment_id"] is not None:
         return revoke_order_assignment(db, task["assignment_id"])
-    if task["entry_id"]:
+    if task["entry_id"] or any(m["entry_id"] for m in repository.list_task_members(db, task_id)):
         return False, (
             "Задача уже оплачена — сначала удалите выплату на странице «Зарплаты», затем саму задачу."
         )

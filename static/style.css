@@ -12112,6 +12112,13 @@ button.partner-open-price-save svg {
 .task-editor-day { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, .8fr) 38px; gap: 6px; align-items: center; }
 .task-editor-day input { min-width: 0; width: 100%; }
 .task-editor-actions .task-editor-delete { margin-left: auto; }
+.task-extra-people { display: grid; gap: 6px; margin-top: 6px; }
+.task-extra-rows { display: grid; gap: 6px; }
+.task-extra-rows:empty { display: none; }
+.task-extra-row { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) 38px; gap: 6px; align-items: center; }
+.task-extra-row select, .task-extra-row input { min-width: 0; width: 100%; }
+.task-extra-row input[hidden] { display: none; }
+.tuning-calendar-card-with { font-style: italic; }
 .task-editor-row2 { grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); }
 .task-reminder-card { width: min(520px, 100%); max-height: none; margin: auto; }
 .task-reminder-body { padding: 16px 22px 22px; display: grid; gap: 10px; }
