@@ -6247,6 +6247,7 @@ def _process_tuning_form(
     item_ids = form.getlist("item_id[]")
     item_discount_values = form.getlist("item_discount_value[]")
     item_discount_types = form.getlist("item_discount_type[]")
+    item_removed = form.getlist("item_removed[]")
 
     def _get(lst, i):
         return lst[i] if i < len(lst) else ""
@@ -6369,7 +6370,9 @@ def _process_tuning_form(
                 "list_price": list_price,
                 "discount_type": work_discount_type, "discount_value": work_discount_value,
             })
-            subtotal += price
+            # a work taken off the order stays in the list but isn't paid for
+            if _get(item_removed, i).strip() != "1":
+                subtotal += price
 
     if not items and not any("Работа" in e for e in errors):
         errors.append("Добавьте хотя бы одну работу.")

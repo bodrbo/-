@@ -4503,6 +4503,10 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .work-row .work-discount { flex: 1 1 86px; min-width: 0; }
 .work-row .work-discount-type { flex: 0 0 auto; width: 58px; }
 .work-row .work-price-was { color: var(--muted); font-weight: 500; margin-right: 4px; }
+.work-row.work-row-removed { opacity: .6; }
+.work-row.work-row-removed .work-name,
+.work-row.work-row-removed .work-price { text-decoration: line-through; }
+.work-row .work-removed-badge { flex: 0 0 auto; }
 /* a work with its own discount: price before, price after, and the discount */
 .work-discounted { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 8px; }
 .work-discounted .work-price-was { color: var(--muted); font-weight: 500; }

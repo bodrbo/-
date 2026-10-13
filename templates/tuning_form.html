@@ -36,8 +36,12 @@
 </div>
 
 {% macro work_row(item=None) %}
-<div class="work-row{{ ' subcontract-work-row' if edit_order and edit_order.source == 'subcontract_request' }}">
+{% set work_removed = item and item.status == 'removed' %}
+<div class="work-row{{ ' subcontract-work-row' if edit_order and edit_order.source == 'subcontract_request' }}{{ ' work-row-removed' if work_removed }}"
+     data-removed="{{ 1 if work_removed else 0 }}">
   <input type="hidden" name="item_id[]" value="{{ item.id if item else '' }}">
+  <input type="hidden" name="item_removed[]" value="{{ 1 if work_removed else 0 }}">
+  {% if work_removed %}<span class="status-badge status-cancelled work-removed-badge" title="Задача снята — не входит в сумму заказа">Задача снята</span>{% endif %}
   <textarea name="work_name[]" placeholder="Название работы" class="work-name" rows="1"
             oninput="autoGrowWorkName(this)"
             onkeydown="if (event.key === 'Enter') event.preventDefault();">{{ item.work_name if item else '' }}</textarea>
@@ -1847,6 +1851,9 @@ function updateOrderTotal() {
   var goodsSubtotal = {{ goods_subtotal|default(0) }};
   var workSubtotal = 0;
   document.querySelectorAll('#work-container .work-row').forEach(function (row) {
+    // a work taken off the order ("Задача снята") stays in the list for the
+    // record but is not part of what the client owes
+    if (row.dataset.removed === '1') return;
     var directInput = row.querySelector('.work-direct-price');
     if (directInput) {
       workSubtotal += parseFloat((directInput.value || '').replace(/\s/g, '').replace(',', '.')) || 0;
