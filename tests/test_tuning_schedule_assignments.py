@@ -1835,5 +1835,93 @@ class TuningSchedulePeriodTests(_TuningScheduleFixture, unittest.TestCase):
                 db.commit()
 
 
+class TuningScheduleDayTotalsTests(_TuningScheduleFixture, unittest.TestCase):
+    """Under each name in the calendar: the norm-hours of the person's tasks
+    that day and what they would earn."""
+
+    def add_task(self, employee, hours, rate, title="Задача", status="pending", day=None, members=()):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            task_id = db.execute(
+                "INSERT INTO tuning_schedule_tasks (assignment_id, employee_name, title, rate, status, "
+                "comment, created_at) VALUES (NULL, ?, ?, ?, ?, '', 'x')", (employee, title, rate, status),
+            ).lastrowid
+            db.execute("INSERT INTO tuning_schedule_task_days (task_id, work_date, start_time, planned_hours) "
+                       "VALUES (?, ?, '09:00', ?)", (task_id, day or self.DAY, hours))
+            for name, member_rate in members:
+                db.execute("INSERT INTO tuning_schedule_task_members (task_id, employee_name, rate) "
+                           "VALUES (?, ?, ?)", (task_id, name, member_rate))
+            db.commit()
+        return task_id
+
+    def totals(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            context = application_module.tuning_schedule_services.day_view(
+                db, application_module.dt.date.fromisoformat(self.DAY))
+            return application_module.tuning_schedule_services.calendar_view(
+                db, application_module.dt.date.fromisoformat(self.DAY), context["day_crew"])["day_totals"]
+
+    def page(self):
+        self.login_admin()
+        return self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+
+    def setUp(self):
+        super().setUp()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM tuning_schedule_task_members")
+            db.commit()
+        for name in (self.EMPLOYEE_A, self.EMPLOYEE_B):
+            self.put_on_shift(name)
+
+    def tearDown(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM tuning_schedule_task_members")
+            db.commit()
+        super().tearDown()
+
+    def test_hours_and_potential_earnings_are_summed_over_the_days_tasks(self):
+        self.add_task(self.EMPLOYEE_A, 2, 100)
+        self.add_task(self.EMPLOYEE_A, 1.5, 200)
+        totals = self.totals()
+        self.assertEqual(totals[self.EMPLOYEE_A], {"hours": 3.5, "earnings": 500.0, "tasks": 2})
+        page = self.page()
+        self.assertIn("3,5 ч · 500 ₽", page.replace("\xa0", " "))
+
+    def test_a_person_without_tasks_says_so(self):
+        self.add_task(self.EMPLOYEE_A, 2, 100)
+        self.assertEqual(self.totals()[self.EMPLOYEE_B], {"hours": 0.0, "earnings": 0.0, "tasks": 0})
+        self.assertIn("Нет задач", self.page())
+
+    def test_an_administrators_day_shows_hours_only(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("INSERT INTO employee_positions (employee_id, position, created_at) VALUES (?, 'Администратор', 'x')",
+                       (self.employee_id(self.EMPLOYEE_B),))
+            db.commit()
+        self.add_task(self.EMPLOYEE_B, 4, 0)
+        page = self.page().replace("\xa0", " ")
+        self.assertIn("4 ч</small>", page.replace("\n", "").replace("  ", ""))
+        self.assertEqual(self.totals()[self.EMPLOYEE_B]["earnings"], 0)
+
+    def test_declined_tasks_do_not_count(self):
+        self.add_task(self.EMPLOYEE_A, 2, 100)
+        self.add_task(self.EMPLOYEE_A, 5, 300, status="rejected")
+        self.assertEqual(self.totals()[self.EMPLOYEE_A], {"hours": 2.0, "earnings": 200.0, "tasks": 1})
+
+    def test_a_person_added_to_a_task_counts_at_their_own_rate(self):
+        self.add_task(self.EMPLOYEE_A, 2, 100, members=[(self.EMPLOYEE_B, 150)])
+        totals = self.totals()
+        self.assertEqual(totals[self.EMPLOYEE_A]["earnings"], 200.0)
+        self.assertEqual((totals[self.EMPLOYEE_B]["hours"], totals[self.EMPLOYEE_B]["earnings"]), (2.0, 300.0))
+
+    def test_only_the_days_own_tasks_are_counted(self):
+        self.add_task(self.EMPLOYEE_A, 2, 100)
+        self.add_task(self.EMPLOYEE_A, 6, 100, day="2026-10-13")
+        self.assertEqual(self.totals()[self.EMPLOYEE_A]["hours"], 2.0)
+
+
 if __name__ == "__main__":
     unittest.main()

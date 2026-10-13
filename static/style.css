@@ -11720,6 +11720,8 @@ button.partner-open-price-save svg {
 .tuning-calendar-head div { display: grid; min-width: 0; }
 .tuning-calendar-head strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .tuning-calendar-head small { overflow: hidden; margin-top: 2px; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.tuning-calendar-head .tuning-calendar-day-total { color: var(--ink-soft); font-weight: 700; font-variant-numeric: tabular-nums; }
+.tuning-calendar-head .tuning-calendar-day-total.is-empty { color: var(--muted); font-weight: 400; }
 .tuning-calendar-time-axis {
   position: sticky;
   z-index: 6;

@@ -473,7 +473,19 @@ def calendar_view(db, day, day_crew):
             "top_px": round((minute - earliest) * PX_PER_MINUTE, 2),
         })
 
+    # what each person has on this day: the norm-hours of their cards and
+    # what those hours would earn (rate x hours; an administrator's tasks
+    # carry no rate). Declined tasks are not counted.
+    day_totals = {}
+    for name, cards in cards_by_employee.items():
+        counted = [card for card in cards if card["status"] != "rejected"]
+        day_totals[name] = {
+            "hours": round(sum(card["planned_hours"] for card in counted), 2),
+            "earnings": round(sum(card["planned_hours"] * (card["rate"] or 0) for card in counted), 2),
+            "tasks": len(counted),
+        }
     return {
+        "day_totals": day_totals,
         "cards_by_employee": cards_by_employee,
         "hour_marks": hour_marks,
         "grid_height": round(total_minutes * PX_PER_MINUTE, 2),

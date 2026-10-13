@@ -99,7 +99,14 @@
               {% else %}
               <span class="schedule-avatar-fallback">{{ employee.name[0] }}</span>
               {% endif %}
-              <div><strong>{{ employee.name }}</strong><small>{{ employee.position_label }}</small></div>
+              {% set total = day_totals.get(employee.name) %}
+              <div>
+                <strong>{{ employee.name }}</strong><small>{{ employee.position_label }}</small>
+                <small class="tuning-calendar-day-total{{ ' is-empty' if not total or not total.tasks }}"
+                       title="Нормочасы по задачам на этот день{{ ' и потенциальный заработок по ним' if total and total.earnings }}">
+                  {% if total and total.tasks %}{{ ('%g'|format(total.hours)).replace('.', ',') }} ч{% if total.earnings %} · {{ total.earnings|money }} ₽{% endif %}{% else %}Нет задач{% endif %}
+                </small>
+              </div>
             </div>
             {% endfor %}
           </div>
