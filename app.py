@@ -13973,7 +13973,7 @@ def _render_client_dashboard(
             "WHERE order_id = ? ORDER BY id",
             (o["id"],),
         ).fetchall()
-        goods_columns = "id, product_name, quantity, unit_price, unit"
+        goods_columns = "id, product_id, product_name, quantity, unit_price, unit"
         if is_admin_view:
             goods_columns += ", cost_price"
         goods_items = db.execute(
@@ -14817,6 +14817,64 @@ def client_approve_item(token, item_id):
             url="/tuning",
         )
     return redirect(url_for("client_dashboard", token=token))
+
+
+def _client_product_compatibility(db, product_id):
+    """'Yamaha 15–40 л.с.' lines of the motors a product is made for."""
+    lines = []
+    for rule in db.execute(
+        "SELECT motor_brand, power_min, power_max FROM supply_product_motor_compatibility "
+        "WHERE product_id = ? ORDER BY motor_brand, power_min, power_max", (product_id,)
+    ).fetchall():
+        def hp(value):
+            return ("%g" % round(float(value), 1)).replace(".", ",")
+        if rule["power_min"] is not None and rule["power_max"] is not None:
+            power = f" {hp(rule['power_min'])}–{hp(rule['power_max'])} л.с."
+        elif rule["power_min"] is not None:
+            power = f" от {hp(rule['power_min'])} л.с."
+        elif rule["power_max"] is not None:
+            power = f" до {hp(rule['power_max'])} л.с."
+        else:
+            power = ""
+        lines.append(f"{rule['motor_brand']}{power}")
+    return lines
+
+
+@app.route("/client/<token>/products/<int:product_id>")
+def client_product_card(token, product_id):
+    """A product card for the client's cabinet: what the product is and how it
+    looks (photo, description, article, category, which motors it fits) —
+    only for products that are in this client's own orders. Nothing about
+    cost, supplier or stock leaves here."""
+    db = get_db()
+    client = db.execute("SELECT id FROM clients WHERE token = ?", (token,)).fetchone()
+    if client is None:
+        return jsonify({"error": "not_found"}), 404
+    in_orders = db.execute(
+        "SELECT 1 FROM tuning_order_products p JOIN tuning_orders o ON o.id = p.order_id "
+        "WHERE p.product_id = ? AND o.client_id = ? LIMIT 1",
+        (product_id, client["id"]),
+    ).fetchone()
+    product = db.execute(
+        "SELECT sp.name, sp.sku, sp.description, sp.photo_filename, sp.external_photo_url, "
+        "sc.name AS category_name FROM supply_products sp "
+        "LEFT JOIN supply_categories sc ON sc.id = sp.category_id WHERE sp.id = ?",
+        (product_id,),
+    ).fetchone()
+    if in_orders is None or product is None:
+        return jsonify({"error": "not_found"}), 404
+    if product["photo_filename"]:
+        photo_url = url_for("static", filename=f"supply_photos/{product['photo_filename']}")
+    else:
+        photo_url = product["external_photo_url"] or ""
+    return jsonify({
+        "name": product["name"],
+        "sku": product["sku"] or "",
+        "description": (product["description"] or "").strip(),
+        "photo_url": photo_url,
+        "category": product["category_name"] or "",
+        "compatibility": _client_product_compatibility(db, product_id),
+    })
 
 
 @app.route("/client/<token>/hull-sheet/<int:sheet_id>")

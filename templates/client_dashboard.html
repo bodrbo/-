@@ -472,7 +472,9 @@
               <tbody>
                 {% for g in o.goods_items %}
                 <tr>
-                  <td>{{ g.product_name }}</td>
+                  <td>{% if g.product_id %}<button type="button" class="client-product-link"
+                          data-product-url="{{ url_for('client_product_card', token=client.token, product_id=g.product_id) }}"
+                          onclick="openProductCard(this)" title="Открыть карточку товара">{{ g.product_name }}</button>{% else %}{{ g.product_name }}{% endif %}</td>
                   <td class="amount">{{ g.quantity|float|round(2) }} {{ cost_units|selectattr('value', 'equalto', g.unit)|map(attribute='label')|first }}</td>
                   {% if is_admin_view %}<td class="amount client-admin-cost">{{ g.cost_price|money }}</td>{% endif %}
                   <td class="amount">{{ g.unit_price|money }}</td>
@@ -611,6 +613,29 @@
     {% endif %}
   </section>
   {% endif %}
+
+  <div id="product-modal" class="photo-modal hidden" onclick="if (event.target === this) closeProductCard();">
+    <div class="photo-modal-inner client-product-card" role="dialog" aria-modal="true" aria-labelledby="product-card-title">
+      <button type="button" class="photo-modal-close" onclick="closeProductCard()" aria-label="Закрыть">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 5l10 10M15 5L5 15"/>
+        </svg>
+      </button>
+      <div class="client-product-scroll">
+      <div class="client-product-photo" id="product-card-photo" hidden></div>
+      <div class="client-product-body">
+        <h3 id="product-card-title"></h3>
+        <p class="client-product-meta" id="product-card-meta"></p>
+        <p class="client-product-description" id="product-card-description"></p>
+        <div class="client-product-fits" id="product-card-fits" hidden>
+          <strong>Подходит к моторам</strong>
+          <ul id="product-card-fits-list"></ul>
+        </div>
+        <p class="alert" id="product-card-error" role="alert" hidden>Не удалось загрузить карточку товара.</p>
+      </div>
+      </div>
+    </div>
+  </div>
 
   <div id="photo-modal" class="photo-modal hidden" onclick="if (event.target === this) closePhotoModal();">
     <div class="photo-modal-inner">
@@ -835,6 +860,65 @@ document.addEventListener('keydown', function (e) {
     });
   }
 }());
+</script>
+<script>
+// A product of the order opens its catalog card: photo, description, article.
+function openProductCard(button) {
+  var modal = document.getElementById('product-modal');
+  var photo = document.getElementById('product-card-photo');
+  var error = document.getElementById('product-card-error');
+  document.getElementById('product-card-title').textContent = button.textContent.trim();
+  document.getElementById('product-card-meta').textContent = '';
+  document.getElementById('product-card-description').textContent = 'Загружаем…';
+  document.getElementById('product-card-fits').hidden = true;
+  photo.hidden = true;
+  photo.innerHTML = '';
+  error.hidden = true;
+  modal.classList.remove('hidden');
+  fetch(button.dataset.productUrl, {credentials: 'same-origin', headers: {'Accept': 'application/json'}})
+    .then(function (response) {
+      if (!response.ok) throw new Error('load');
+      return response.json();
+    })
+    .then(function (product) {
+      document.getElementById('product-card-title').textContent = product.name;
+      var meta = [];
+      if (product.sku) meta.push('Артикул: ' + product.sku);
+      if (product.category) meta.push(product.category);
+      document.getElementById('product-card-meta').textContent = meta.join(' · ');
+      document.getElementById('product-card-description').textContent =
+        product.description || 'Описание пока не добавлено.';
+      if (product.photo_url) {
+        var image = document.createElement('img');
+        image.src = product.photo_url;
+        image.alt = product.name;
+        image.referrerPolicy = 'no-referrer';
+        photo.appendChild(image);
+        photo.hidden = false;
+      }
+      var fits = product.compatibility || [];
+      var list = document.getElementById('product-card-fits-list');
+      list.innerHTML = '';
+      fits.forEach(function (line) {
+        var item = document.createElement('li');
+        item.textContent = line;
+        list.appendChild(item);
+      });
+      document.getElementById('product-card-fits').hidden = !fits.length;
+    })
+    .catch(function () {
+      document.getElementById('product-card-description').textContent = '';
+      error.hidden = false;
+    });
+}
+
+function closeProductCard() {
+  document.getElementById('product-modal').classList.add('hidden');
+}
+
+document.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape') closeProductCard();
+});
 </script>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 

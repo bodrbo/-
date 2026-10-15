@@ -4524,6 +4524,27 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
   letter-spacing: .02em; background: rgba(46, 160, 90, .14); color: var(--success);
 }
 .work-discount-total { color: var(--success); }
+/* a product of the order in the client's cabinet: its catalog card in a window */
+.client-product-link {
+  padding: 0; border: 0; background: none; color: var(--brass-strong); font: inherit; font-weight: 600;
+  text-align: left; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; cursor: pointer;
+}
+.client-product-link:hover { color: var(--brass); }
+.client-product-card {
+  width: min(560px, 92vw); position: relative; background: var(--paper);
+  border-radius: 14px; padding: 0; text-align: left;
+}
+.client-product-card .photo-modal-close { top: 10px; right: 10px; z-index: 3; }
+.client-product-scroll { max-height: 88vh; overflow-y: auto; overflow-x: hidden; border-radius: 14px; }
+.client-product-photo { background: var(--paper-alt); display: flex; justify-content: center; border-radius: 14px 14px 0 0; }
+.client-product-photo img { display: block; max-width: 100%; max-height: 360px; width: auto; height: auto; object-fit: contain; }
+.client-product-body { padding: 18px 22px 22px; display: grid; gap: 10px; }
+.client-product-body h3 { margin: 0; font-size: 19px; color: var(--ink); }
+.client-product-meta { margin: 0; color: var(--muted); font-size: 12px; }
+.client-product-meta:empty { display: none; }
+.client-product-description { margin: 0; color: var(--ink-soft); line-height: 1.5; white-space: pre-line; }
+.client-product-fits strong { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.client-product-fits ul { margin: 6px 0 0; padding-left: 18px; color: var(--ink-soft); }
 .subcontract-price-field {
   display: grid;
   flex: 1 1 175px;
