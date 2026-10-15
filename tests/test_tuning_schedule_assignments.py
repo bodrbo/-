@@ -1676,8 +1676,49 @@ class TuningScheduleSeveralPeopleTests(_TuningScheduleFixture, unittest.TestCase
         payloads = [json.loads(html_module.unescape(m)) for m in re.findall(r"data-editor='([^']*)'", page)]
         mine = next(p for p in payloads if p["employee_name"] == self.EMPLOYEE_A)
         self.assertEqual(mine["coworkers"], [self.EMPLOYEE_B])
+        # B already has a card at that very time (a task of its own on the same work) — the time clash
         self.save(task, employee=self.EMPLOYEE_A, extras=[(self.EMPLOYEE_B, 100)], title="x")
-        self.assertIn("уже назначен на эту работу", self.notice()["message"])
+        self.assertEqual(self.notice()["type"], "error")
+        self.assertIn(f"{self.EMPLOYEE_B}: {self.DAY} это время занято", self.notice()["message"])
+        self.assertNotIn("уже назначен", self.notice()["message"])
+
+    def test_a_person_with_another_task_on_the_same_work_can_still_be_added(self):
+        """The reported bug: 'уже назначен на эту работу' although the person is free at that time."""
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.put_on_shift(self.EMPLOYEE_C)
+        self.assign([(self.EMPLOYEE_A, 100, 5.5)])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            task = db.execute("SELECT id FROM tuning_schedule_tasks WHERE employee_name = ?",
+                              (self.EMPLOYEE_A,)).fetchone()["id"]
+            # C has other tasks on this very work: a declined one, one given for another day
+            for status, due in (("rejected", self.DAY), ("accepted", "2026-10-20")):
+                db.execute(
+                    "INSERT INTO tuning_item_assignments (item_id, employee_name, rate, norm_hours, comment, "
+                    "assignment_status, assigned_at, due_from) VALUES (?, ?, 100, 2, '', ?, '2026-10-01 10:00', ?)",
+                    (self.item_id, self.EMPLOYEE_C, status, due))
+            db.commit()
+        self.save(task, employee=self.EMPLOYEE_A, extras=[(self.EMPLOYEE_C, 130)], title="x",
+                  days=[(self.DAY, "09:00", "5.5")])
+        self.assertEqual(self.notice()["type"], "success", self.notice())
+        mine = [a for a in self.assignments() if a["employee_name"] == self.EMPLOYEE_C and a["assignment_status"] == "pending"]
+        self.assertEqual([(a["rate"], a["norm_hours"]) for a in mine], [(130, 5.5)])
+
+    def test_a_declined_assignment_does_not_block_handing_the_task_over(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.assign([(self.EMPLOYEE_A, 100, 2)])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO tuning_item_assignments (item_id, employee_name, rate, norm_hours, comment, "
+                "assignment_status, assigned_at) VALUES (?, ?, 100, 2, '', 'rejected', '2026-10-01 10:00')",
+                (self.item_id, self.EMPLOYEE_B))
+            db.commit()
+        assignment_id = self.assignments()[0]["id"]
+        self.login_admin()
+        with mock.patch.object(application_module, "send_telegram_notification_to_employee"):
+            self.client.post(f"/tuning/assignments/{assignment_id}/employee", data={"employee_name": self.EMPLOYEE_B})
+        self.assertEqual(self.assignments()[0]["employee_name"], self.EMPLOYEE_B)
 
     def test_a_work_task_gets_one_more_person_from_the_editor(self):
         self.put_on_shift(self.EMPLOYEE_A)

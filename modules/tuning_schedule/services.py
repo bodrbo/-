@@ -949,16 +949,9 @@ def update_task(db, task_id, form, hooks):
     extras = clean_extra_participants(
         db, collect_extra_participants(form), employee_name, errors, clean_days
     )
-    if linked and not errors:
-        taken = {
-            row["employee_name"] for row in db.execute(
-                "SELECT employee_name FROM tuning_item_assignments WHERE item_id = ? AND id != ?",
-                (assignment["item_id"], assignment["id"]),
-            ).fetchall()
-        }
-        for name, _extra_rate, _extra_hours in extras:
-            if name in taken:
-                errors.append(f"{name} уже назначен на эту работу.")
+    # (A person who already has another task on this work — on another day,
+    # unplaced, or declined — is no obstacle: what matters is that they are on
+    # the shift and free at that time, which is checked below.)
 
     renamed = employee_name != current_name
     if renamed and not errors:

@@ -12445,7 +12445,7 @@ def _reassign_tuning_assignment(db, assignment_id, new_name):
         return False, "Этого сотрудника нельзя назначить на задачи тюнинга.", order_id, item_id
     duplicate = db.execute(
         "SELECT 1 FROM tuning_item_assignments WHERE item_id = ? AND employee_name = ? "
-        "AND partner_id IS NULL",
+        "AND partner_id IS NULL AND assignment_status != 'rejected'",
         (assignment["item_id"], new_name),
     ).fetchone()
     if duplicate is not None:
