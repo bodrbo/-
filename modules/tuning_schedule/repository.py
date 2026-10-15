@@ -222,17 +222,30 @@ def list_day_tasks(db, day):
     placeholders = ",".join("?" for _ in task_ids)
     members = {}
     for member in db.execute(
-        "SELECT task_id, employee_name, rate FROM tuning_schedule_task_members "
+        "SELECT task_id, employee_name, rate, hours FROM tuning_schedule_task_members "
         f"WHERE task_id IN ({placeholders}) ORDER BY id",
         task_ids,
     ).fetchall():
         members.setdefault(member["task_id"], []).append(member)
+    totals = {
+        row["task_id"]: row["total"] for row in db.execute(
+            "SELECT task_id, SUM(planned_hours) AS total FROM tuning_schedule_task_days "
+            f"WHERE task_id IN ({placeholders}) GROUP BY task_id",
+            task_ids,
+        ).fetchall()
+    }
     result = []
     for row in rows:
         result.append(row)
+        total = totals.get(row["task_id"]) or 0
         for member in members.get(row["task_id"], []):
+            # a person with their own norm-hours gets their share of this day
+            hours = row["planned_hours"]
+            if member["hours"] is not None and total > 0:
+                hours = round(row["planned_hours"] * member["hours"] / total, 2)
             result.append(dict(
                 row, employee_name=member["employee_name"], rate=member["rate"],
+                planned_hours=hours, member_hours=member["hours"],
                 is_member=1, primary_employee=row["employee_name"],
             ))
     result.sort(key=lambda row: (row["employee_name"], row["task_id"]))
@@ -246,21 +259,24 @@ def list_task_members(db, task_id):
 
 
 def replace_task_members(db, task_id, members):
-    """Sets the further participants of a task to [(employee_name, rate)];
-    someone who stays keeps their payout record."""
-    keep = {name for name, _rate in members}
+    """Sets the further participants of a task to [(employee_name, rate,
+    hours)] — hours None = the task's own; someone who stays keeps their
+    payout record."""
+    keep = {member[0] for member in members}
     for row in list_task_members(db, task_id):
         if row["employee_name"] not in keep:
             db.execute("DELETE FROM tuning_schedule_task_members WHERE id = ?", (row["id"],))
-    for name, rate in members:
+    for name, rate, hours in members:
         cursor = db.execute(
-            "UPDATE tuning_schedule_task_members SET rate = ? WHERE task_id = ? AND employee_name = ?",
-            (rate, task_id, name),
+            "UPDATE tuning_schedule_task_members SET rate = ?, hours = ? "
+            "WHERE task_id = ? AND employee_name = ?",
+            (rate, hours, task_id, name),
         )
         if cursor.rowcount == 0:
             db.execute(
-                "INSERT INTO tuning_schedule_task_members (task_id, employee_name, rate) VALUES (?, ?, ?)",
-                (task_id, name, rate),
+                "INSERT INTO tuning_schedule_task_members (task_id, employee_name, rate, hours) "
+                "VALUES (?, ?, ?, ?)",
+                (task_id, name, rate, hours),
             )
     db.commit()
 

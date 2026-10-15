@@ -911,7 +911,7 @@ var tuningSuppressClick = false;
 
 // More people on one task: a row = a person + their own rate. The options
 // are copied from the main employee select next to it.
-function addExtraPerson(containerId, sourceSelectId, name, rate) {
+function addExtraPerson(containerId, sourceSelectId, name, rate, hours) {
   var container = document.getElementById(containerId);
   var source = document.getElementById(sourceSelectId);
   if (!container || !source) return;
@@ -938,6 +938,14 @@ function addExtraPerson(containerId, sourceSelectId, name, rate) {
   rateInput.name = 'extra_rate[]';
   rateInput.placeholder = 'Ставка, ₽/ч';
   rateInput.setAttribute('aria-label', 'Ставка, ₽/ч');
+  // this person's own norm-hours for the whole task; blank = the task's hours
+  var hoursInput = document.createElement('input');
+  hoursInput.type = 'text';
+  hoursInput.inputMode = 'decimal';
+  hoursInput.name = 'extra_hours[]';
+  hoursInput.placeholder = 'Часы';
+  hoursInput.title = 'Нормочасы этого сотрудника на всю задачу. Пусто — столько же, сколько у задачи.';
+  hoursInput.setAttribute('aria-label', 'Нормочасы сотрудника (пусто — как у задачи)');
   var remove = document.createElement('button');
   remove.type = 'button';
   remove.className = 'icon-btn danger task-editor-day-remove';
@@ -954,7 +962,8 @@ function addExtraPerson(containerId, sourceSelectId, name, rate) {
   select.addEventListener('change', syncRate);
   if (name) select.value = name;
   if (rate) rateInput.value = String(rate);
-  row.append(select, rateInput, remove);
+  if (hours) hoursInput.value = String(hours);
+  row.append(select, rateInput, hoursInput, remove);
   container.appendChild(row);
   syncRate();
 }
@@ -1001,7 +1010,7 @@ function openTaskEditor(card, event, fromButton) {
   task.days.forEach(function (day) { addTaskEditorDay(day.date, day.start, day.hours); });
   clearExtraPeople('taskEditorExtraRows');
   (task.members || []).forEach(function (member) {
-    addExtraPerson('taskEditorExtraRows', 'taskEditorEmployee', member.name, member.rate);
+    addExtraPerson('taskEditorExtraRows', 'taskEditorEmployee', member.name, member.rate, member.hours);
   });
   var coworkers = document.getElementById('taskEditorCoworkers');
   coworkers.hidden = !(task.coworkers && task.coworkers.length);

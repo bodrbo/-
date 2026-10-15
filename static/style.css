@@ -12151,7 +12151,7 @@ button.partner-open-price-save svg {
 .task-extra-people { display: grid; gap: 6px; margin-top: 6px; }
 .task-extra-rows { display: grid; gap: 6px; }
 .task-extra-rows:empty { display: none; }
-.task-extra-row { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) 38px; gap: 6px; align-items: center; }
+.task-extra-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, .9fr) minmax(0, .7fr) 38px; gap: 6px; align-items: center; }
 .task-extra-row select, .task-extra-row input { min-width: 0; width: 100%; }
 .task-extra-row input[hidden] { display: none; }
 .tuning-calendar-card-with { font-style: italic; }

@@ -543,42 +543,97 @@ def _roster_note(employee_name, added_days):
     return f" {employee_name} добавлен в смену на {days}."
 
 
-def clean_extra_participants(db, raw_extras, primary_name, errors):
-    """Further people on one task: raw_extras = [(employee_name, raw_rate)]
-    as entered (blank rows skipped). Returns [(name, rate)]; problems go to
-    `errors`. Each person may appear once, never the first participant."""
+def person_days(clean_days, person_hours):
+    """The days of a task as one participant has them: with their own
+    norm-hours (None = the task's own) spread over the days in proportion to
+    the task's hours of each day; the last day takes the rounding remainder."""
+    if person_hours is None:
+        return list(clean_days)
+    total = sum(hours for _date, _start, hours in clean_days)
+    if total <= 0:
+        return list(clean_days)
+    shares = [round(hours * person_hours / total, 2) for _date, _start, hours in clean_days]
+    shares[-1] = round(person_hours - sum(shares[:-1]), 2)
+    return [(date, start, share) for (date, start, _hours), share in zip(clean_days, shares)]
+
+
+def scaled_day_rows(day_rows, person_hours):
+    """Raw (date, start, hours) form rows of a task, as one participant with
+    their own norm-hours has them (unchanged when that isn't set/parsable)."""
+    if person_hours is None:
+        return list(day_rows)
+    try:
+        hours = [float(str(row[2]).strip().replace(",", ".")) for row in day_rows]
+    except (ValueError, IndexError):
+        return list(day_rows)
+    total = sum(hours)
+    if total <= 0:
+        return list(day_rows)
+    shares = [round(value * person_hours / total, 2) for value in hours]
+    shares[-1] = round(person_hours - sum(shares[:-1]), 2)
+    return [(row[0], row[1], str(share)) for row, share in zip(day_rows, shares)]
+
+
+def clean_extra_participants(db, raw_extras, primary_name, errors, clean_days=None):
+    """Further people on one task: raw_extras = [(employee_name, raw_rate,
+    raw_hours)] as entered (blank rows skipped; raw_hours blank = the task's
+    own hours). Returns [(name, rate, hours-or-None)]; problems go to
+    `errors`. Each person may appear once, never the first participant. With
+    `clean_days` a person's share of every day is checked to fit a day."""
     eligible = {employee["name"] for employee in repository.list_tuning_crew_employees(db)}
     seen = {primary_name}
     result = []
-    for raw_name, raw_rate in raw_extras:
+    for raw in raw_extras:
+        raw_name, raw_rate = raw[0], raw[1]
+        raw_hours = raw[2] if len(raw) > 2 else ""
         name = _normalise_text(raw_name, EMPLOYEE_NAME_MAX_LENGTH)
         if not name:
             continue
         if name not in eligible:
             errors.append("Выберите сотрудника из списка тюнингмэнов.")
-        elif name in seen:
+            continue
+        if name in seen:
             errors.append(f"{name} указан в задаче дважды.")
-        else:
-            result.append((name, _clean_rate(db, name, raw_rate, errors)))
-            seen.add(name)
+            continue
+        hours = None
+        if str(raw_hours or "").strip():
+            try:
+                hours = float(str(raw_hours).strip().replace(",", "."))
+            except ValueError:
+                hours = 0
+            if hours <= 0:
+                errors.append(f"{name}: часы должны быть числом больше нуля.")
+                continue
+            if clean_days and any(
+                not (0 < share <= MAX_DAY_HOURS) for _d, _s, share in person_days(clean_days, hours)
+            ):
+                errors.append(f"{name}: столько часов не помещается в сутки по дням задачи.")
+                continue
+        result.append((name, _clean_rate(db, name, raw_rate, errors), hours))
+        seen.add(name)
     return result
 
 
 def collect_extra_participants(form):
-    """The 'ещё сотрудники' rows of a task form -> [(name, raw_rate)]."""
+    """The 'ещё сотрудники' rows of a task form -> [(name, raw_rate, raw_hours)]."""
     names = form.getlist("extra_employee_name[]")
     rates = form.getlist("extra_rate[]")
-    return [(name, rates[i] if i < len(rates) else "") for i, name in enumerate(names)
-            if str(name or "").strip()]
+    hours = form.getlist("extra_hours[]")
+    return [
+        (name, rates[i] if i < len(rates) else "", hours[i] if i < len(hours) else "")
+        for i, name in enumerate(names) if str(name or "").strip()
+    ]
 
 
 def _pay_unpaid_members(db, task, pay_free_task):
     """Pays every further participant of a finished free task their own
-    rate x the task's hours, once (their payout is remembered per person)."""
-    total_hours = sum(row["planned_hours"] for row in repository.list_task_days(db, task["id"]))
+    rate x their hours (the task's own when they have none), once (their
+    payout is remembered per person)."""
+    task_hours = sum(row["planned_hours"] for row in repository.list_task_days(db, task["id"]))
     for member in repository.list_task_members(db, task["id"]):
         if member["entry_id"]:
             continue
+        total_hours = member["hours"] if member["hours"] is not None else task_hours
         entry_id = pay_free_task(db, {
             "id": task["id"], "employee_name": member["employee_name"], "rate": member["rate"],
             "title": task["title"], "order_id": task["order_id"], "entry_id": None,
@@ -604,7 +659,7 @@ def create_free_task(db, employee_name, title, rate, comment, day_rows, order_id
     if order_id is not None and repository.get_linkable_order(db, order_id) is None:
         errors.append("Проект не найден или уже закрыт.")
     clean_days = _clean_task_days(day_rows, errors)
-    members = clean_extra_participants(db, extras, employee_name, errors)
+    members = clean_extra_participants(db, extras, employee_name, errors, clean_days)
     if errors:
         return False, " ".join(errors), None
     added_days = _ensure_on_roster(db, employee_name, clean_days)
@@ -615,8 +670,8 @@ def create_free_task(db, employee_name, title, rate, comment, day_rows, order_id
         repository.add_task_day(db, task_id, work_date, start_time, hours)
     if members:
         repository.replace_task_members(db, task_id, members)
-        for name, _rate in members:
-            added_days += [d for d in _ensure_on_roster(db, name, clean_days)]
+        for name, _rate, member_hours in members:
+            added_days += _ensure_on_roster(db, name, person_days(clean_days, member_hours))
     return True, "Задача добавлена в расписание." + _roster_note(employee_name, added_days), task_id
 
 
@@ -721,11 +776,16 @@ def move_task_card(db, task_id, day_id, raw_start, raw_target_employee_id, reass
     start_minutes = _minutes(str(raw_start or "").strip())
     if start_minutes is None:
         return False, "Некорректное время начала.", None
-    end_minutes = start_minutes + round(row["planned_hours"] * 60)
-    if end_minutes > 24 * 60:
-        return False, "Задача не помещается до конца суток.", None
-
     day_iso = row["work_date"]
+    # each participant has their own hours of this day (the task's, or their own norm)
+    own_hours = {
+        other["employee_name"]: other["planned_hours"]
+        for other in repository.list_day_tasks(db, day_iso) if other["task_id"] == task_id
+    }
+    for person, person_hours in own_hours.items():
+        if start_minutes + round(person_hours * 60) > 24 * 60:
+            return False, "Задача не помещается до конца суток.", None
+    end_minutes = start_minutes + round(row["planned_hours"] * 60)
     primary_name = row["employee_name"]
     members = {m["employee_name"] for m in repository.list_task_members(db, task_id)}
     source = str(raw_source_employee or "").strip()
@@ -749,12 +809,15 @@ def move_task_card(db, task_id, day_id, raw_start, raw_target_employee_id, reass
     participants = {primary_name} | members
     participants.discard(current_name)
     participants.add(target_name)
+    hours_of = dict(own_hours)
+    hours_of[target_name] = own_hours.get(current_name, row["planned_hours"])
     for other in repository.list_day_tasks(db, day_iso):
         if other["employee_name"] not in participants or other["task_id"] == task_id:
             continue
         other_start = _minutes(other["start_time"]) or 0
         other_end = other_start + round(other["planned_hours"] * 60)
-        if start_minutes < other_end and other_start < end_minutes:
+        person_end = start_minutes + round(hours_of.get(other["employee_name"], row["planned_hours"]) * 60)
+        if start_minutes < other_end and other_start < person_end:
             return False, f"{other['employee_name']}: это время занято задачей «{other['title']}».", None
 
     message = "Задача перенесена."
@@ -816,7 +879,7 @@ def editor_payload(db, card):
         "comment": card["comment"] or "",
         "is_admin": repository.is_administrator(db, primary_name),
         "members": [
-            {"name": member["employee_name"], "rate": member["rate"],
+            {"name": member["employee_name"], "rate": member["rate"], "hours": member["hours"],
              "is_admin": repository.is_administrator(db, member["employee_name"])}
             for member in members
         ],
@@ -875,20 +938,6 @@ def update_task(db, task_id, form, hooks):
                 if order_id != task["order_id"] and repository.get_linkable_order(db, order_id) is None:
                     errors.append("Проект не найден или уже закрыт.")
     rate = _clean_rate(db, employee_name, form.get("rate"), errors)
-    extras = clean_extra_participants(
-        db, collect_extra_participants(form), employee_name, errors
-    )
-    if linked and not errors:
-        taken = {
-            row["employee_name"] for row in db.execute(
-                "SELECT employee_name FROM tuning_item_assignments WHERE item_id = ? AND id != ?",
-                (assignment["item_id"], assignment["id"]),
-            ).fetchall()
-        }
-        for name, _extra_rate in extras:
-            if name in taken:
-                errors.append(f"{name} уже назначен на эту работу.")
-
     day_rows = [
         row for row in zip(
             form.getlist("work_date[]"), form.getlist("start_time[]"), form.getlist("planned_hours[]")
@@ -897,6 +946,19 @@ def update_task(db, task_id, form, hooks):
     clean_days = _clean_task_days(day_rows, errors)
     if not errors and len(clean_days) < len(day_rows):
         errors.append("Одна и та же дата указана дважды.")
+    extras = clean_extra_participants(
+        db, collect_extra_participants(form), employee_name, errors, clean_days
+    )
+    if linked and not errors:
+        taken = {
+            row["employee_name"] for row in db.execute(
+                "SELECT employee_name FROM tuning_item_assignments WHERE item_id = ? AND id != ?",
+                (assignment["item_id"], assignment["id"]),
+            ).fetchall()
+        }
+        for name, _extra_rate, _extra_hours in extras:
+            if name in taken:
+                errors.append(f"{name} уже назначен на эту работу.")
 
     renamed = employee_name != current_name
     if renamed and not errors:
@@ -905,14 +967,19 @@ def update_task(db, task_id, form, hooks):
         elif current_status == "done" and linked:
             errors.append("Выполненную задачу нельзя передать другому сотруднику.")
     if not errors:
-        for work_date, start_time, hours in clean_days:
+        # every participant's own hours of each day (a person with their own
+        # norm-hours has a shorter or longer card than the task's)
+        shares = {employee_name: {d: h for d, _s, h in clean_days}}
+        for name, _extra_rate, extra_hours in extras:
+            shares[name] = {d: h for d, _s, h in person_days(clean_days, extra_hours)}
+        for work_date, start_time, _hours in clean_days:
             start = _minutes(start_time)
-            end = start + round(hours * 60)
-            if end > 24 * 60:
-                errors.append(f"{work_date}: задача не помещается до конца суток.")
-                continue
             # every participant must be on the shift and free at that time
-            for person in [employee_name] + [name for name, _rate in extras]:
+            for person, per_day in shares.items():
+                end = start + round(per_day[work_date] * 60)
+                if end > 24 * 60:
+                    errors.append(f"{person}: {work_date} задача не помещается до конца суток.")
+                    continue
                 if not repository.is_administrator(db, person) \
                         and repository.get_day_crew_shift_by_name(db, work_date, person) is None:
                     errors.append(f"{person} не стоит в смене на {work_date}.")
@@ -958,10 +1025,11 @@ def update_task(db, task_id, form, hooks):
         item = repository.get_order_item(
             db, repository.get_assignment_order_id(db, task["assignment_id"]), assignment["item_id"]
         )
-        for name, extra_rate in extras:
+        for name, extra_rate, extra_hours in extras:
             # one more person on the same work: their own order task over the same days
             ok, text, _new_id = create_linked_task(
-                db, item, name, extra_rate, comment, clean_days, hooks["create_assignment"]
+                db, item, name, extra_rate, comment, person_days(clean_days, extra_hours),
+                hooks["create_assignment"],
             )
             notes.append(f"{name} добавлен в задачу." if ok else text)
             if not ok:
@@ -969,8 +1037,8 @@ def update_task(db, task_id, form, hooks):
     else:
         repository.update_free_task(db, task_id, title, rate, comment, order_id)
         repository.replace_task_members(db, task_id, extras)
-        for name, _extra_rate in extras:
-            added_days += _ensure_on_roster(db, name, clean_days)
+        for name, _extra_rate, extra_hours in extras:
+            added_days += _ensure_on_roster(db, name, person_days(clean_days, extra_hours))
     if status != current_status:
         set_task_status(db, task_id, status, hooks["pay_free_task"], hooks["update_status"])
     elif not linked and current_status == "done":

@@ -1485,6 +1485,140 @@ class TuningScheduleSeveralPeopleTests(_TuningScheduleFixture, unittest.TestCase
                          {self.EMPLOYEE_A: (100, 2, self.DAY), self.EMPLOYEE_B: (150, 2, self.DAY)})
         self.assertEqual(len(self.cards(self.EMPLOYEE_A)) + len(self.cards(self.EMPLOYEE_B)), 2)
 
+    # ---- own norm-hours per person
+
+    def hours_of(self, task_id, day=None):
+        with application_module.app.app_context():
+            rows = application_module.tuning_schedule_repository.list_day_tasks(
+                application_module.get_db(), day or self.DAY)
+        return {r["employee_name"]: r["planned_hours"] for r in rows if r["task_id"] == task_id}
+
+    def test_a_person_can_have_their_own_norm_hours(self):
+        self.login_admin()
+        self.client.post("/schedule/tuning/tasks", data=MultiDict([
+            ("employee_name", self.EMPLOYEE_A), ("rate", "100"), ("comment", ""), ("title", "Разные часы"),
+            ("return_date", self.DAY), ("work_date[]", self.DAY), ("start_time[]", "10:00"),
+            ("planned_hours[]", "4"), ("order_id", ""), ("order_item_id", ""),
+            ("extra_employee_name[]", self.EMPLOYEE_B), ("extra_rate[]", "150"), ("extra_hours[]", "2"),
+            ("extra_employee_name[]", self.EMPLOYEE_C), ("extra_rate[]", "90"), ("extra_hours[]", ""),
+        ]))
+        task = self.task("Разные часы")
+        self.assertEqual(self.hours_of(task["id"]),
+                         {self.EMPLOYEE_A: 4.0, self.EMPLOYEE_B: 2.0, self.EMPLOYEE_C: 4.0})
+        members = {m["employee_name"]: m for m in self.members(task["id"])}
+        self.assertEqual((members[self.EMPLOYEE_B]["hours"], members[self.EMPLOYEE_C]["hours"]), (2.0, None))
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        self.assertIn("10:00–12:00", page)   # the shorter card of the person with 2 hours
+        self.assertIn("10:00–14:00", page)
+
+    def test_the_hours_are_spread_over_the_days_in_proportion(self):
+        self.put_on_shift(self.EMPLOYEE_B, day="2026-10-13")
+        self.put_on_shift(self.EMPLOYEE_A, day="2026-10-13")
+        self.create()
+        task = self.task()
+        self.login_admin()
+        data = MultiDict([
+            ("employee_name", self.EMPLOYEE_A), ("title", "Совместная работа"), ("rate", "100"), ("comment", ""),
+            ("status", "pending"), ("order_id", ""), ("return_date", self.DAY),
+            ("work_date[]", self.DAY), ("start_time[]", "10:00"), ("planned_hours[]", "3"),
+            ("work_date[]", "2026-10-13"), ("start_time[]", "10:00"), ("planned_hours[]", "1"),
+            ("extra_employee_name[]", self.EMPLOYEE_B), ("extra_rate[]", "100"), ("extra_hours[]", "2"),
+        ])
+        self.client.post(f"/schedule/tuning/tasks/{task['id']}/update", data=data)
+        self.assertEqual(self.notice()["type"], "success", self.notice())
+        self.assertEqual(self.hours_of(task["id"])[self.EMPLOYEE_B], 1.5)
+        self.assertEqual(self.hours_of(task["id"], "2026-10-13")[self.EMPLOYEE_B], 0.5)
+
+    def test_bad_personal_hours_are_refused(self):
+        for hours in ("0", "-1", "abc", "40"):
+            self.login_admin()
+            self.client.post("/schedule/tuning/tasks", data=MultiDict([
+                ("employee_name", self.EMPLOYEE_A), ("rate", "100"), ("comment", ""), ("title", "Плохие часы"),
+                ("return_date", self.DAY), ("work_date[]", self.DAY), ("start_time[]", "10:00"),
+                ("planned_hours[]", "2"), ("order_id", ""), ("order_item_id", ""),
+                ("extra_employee_name[]", self.EMPLOYEE_B), ("extra_rate[]", "100"), ("extra_hours[]", hours),
+            ]))
+            self.assertIsNone(self.task("Плохие часы"), hours)
+            self.assertEqual(self.notice()["type"], "error")
+
+    def test_everyone_is_paid_for_their_own_hours(self):
+        self.login_admin()
+        self.client.post("/schedule/tuning/tasks", data=MultiDict([
+            ("employee_name", self.EMPLOYEE_A), ("rate", "100"), ("comment", ""), ("title", "Оплата часов"),
+            ("return_date", self.DAY), ("work_date[]", self.DAY), ("start_time[]", "10:00"),
+            ("planned_hours[]", "4"), ("order_id", ""), ("order_item_id", ""),
+            ("extra_employee_name[]", self.EMPLOYEE_B), ("extra_rate[]", "150"), ("extra_hours[]", "2"),
+        ]))
+        task = self.task("Оплата часов")
+        self.client.post(f"/schedule/tuning/tasks/{task['id']}/status", json={"status": "done"})
+        self.assertEqual(self.entries(self.EMPLOYEE_A), [400])     # 4 h x 100
+        self.assertEqual(self.entries(self.EMPLOYEE_B), [300])     # 2 h x 150
+
+    def test_the_day_totals_use_each_persons_own_hours(self):
+        self.login_admin()
+        self.client.post("/schedule/tuning/tasks", data=MultiDict([
+            ("employee_name", self.EMPLOYEE_A), ("rate", "100"), ("comment", ""), ("title", "Итоги часов"),
+            ("return_date", self.DAY), ("work_date[]", self.DAY), ("start_time[]", "10:00"),
+            ("planned_hours[]", "4"), ("order_id", ""), ("order_item_id", ""),
+            ("extra_employee_name[]", self.EMPLOYEE_B), ("extra_rate[]", "150"), ("extra_hours[]", "2"),
+        ]))
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            services = application_module.tuning_schedule_services
+            day = application_module.dt.date.fromisoformat(self.DAY)
+            totals = services.calendar_view(db, day, services.day_view(db, day)["day_crew"])["day_totals"]
+        self.assertEqual((totals[self.EMPLOYEE_A]["hours"], totals[self.EMPLOYEE_A]["earnings"]), (4.0, 400.0))
+        self.assertEqual((totals[self.EMPLOYEE_B]["hours"], totals[self.EMPLOYEE_B]["earnings"]), (2.0, 300.0))
+
+    def test_the_editor_payload_and_form_carry_the_hours(self):
+        self.login_admin()
+        self.client.post("/schedule/tuning/tasks", data=MultiDict([
+            ("employee_name", self.EMPLOYEE_A), ("rate", "100"), ("comment", ""), ("title", "Часы в редакторе"),
+            ("return_date", self.DAY), ("work_date[]", self.DAY), ("start_time[]", "10:00"),
+            ("planned_hours[]", "4"), ("order_id", ""), ("order_item_id", ""),
+            ("extra_employee_name[]", self.EMPLOYEE_B), ("extra_rate[]", "150"), ("extra_hours[]", "2"),
+        ]))
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        import html as html_module
+        import json
+        import re
+        payloads = [json.loads(html_module.unescape(m)) for m in re.findall(r"data-editor='([^']*)'", page)]
+        mine = next(p for p in payloads if p["title"] == "Часы в редакторе")
+        self.assertEqual([(m["name"], m["rate"], m["hours"]) for m in mine["members"]],
+                         [(self.EMPLOYEE_B, 150.0, 2.0)])
+        self.assertIn("extra_hours[]", page)
+
+    def test_moving_a_card_respects_a_longer_personal_share(self):
+        self.login_admin()
+        self.client.post("/schedule/tuning/tasks", data=MultiDict([
+            ("employee_name", self.EMPLOYEE_A), ("rate", "100"), ("comment", ""), ("title", "Длинный участник"),
+            ("return_date", self.DAY), ("work_date[]", self.DAY), ("start_time[]", "10:00"),
+            ("planned_hours[]", "1"), ("order_id", ""), ("order_item_id", ""),
+            ("extra_employee_name[]", self.EMPLOYEE_B), ("extra_rate[]", "100"), ("extra_hours[]", "3"),
+        ]))
+        self.create(title="Позже у второго", employee=self.EMPLOYEE_B, start="13:00", hours="1")
+        task = self.task("Длинный участник")
+        # at 11:00 the first person is done at 12:00 but the second works till 14:00 — clashes with 13:00
+        response = self.move(task, "11:00")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(self.EMPLOYEE_B, response.get_json()["message"])
+        self.assertEqual(self.move(task, "09:00").status_code, 200)   # 09:00–12:00 is free
+        late = self.move(task, "22:00")                                # 3 h from 22:00 passes midnight
+        self.assertEqual(late.status_code, 400)
+
+    def test_an_extra_person_of_a_work_gets_an_order_task_with_their_hours(self):
+        self.login_admin()
+        with mock.patch.object(application_module, "send_telegram_notification_to_employee"):
+            self.client.post("/schedule/tuning/tasks", data=MultiDict([
+                ("employee_name", self.EMPLOYEE_A), ("rate", "100"), ("comment", ""), ("title", ""),
+                ("return_date", self.DAY), ("work_date[]", self.DAY), ("start_time[]", "10:00"),
+                ("planned_hours[]", "4"), ("order_id", str(self.order_id)), ("order_item_id", str(self.item_id)),
+                ("extra_employee_name[]", self.EMPLOYEE_B), ("extra_rate[]", "150"), ("extra_hours[]", "1.5"),
+            ]))
+        by_name = {a["employee_name"]: a for a in self.assignments()}
+        self.assertEqual((by_name[self.EMPLOYEE_A]["norm_hours"], by_name[self.EMPLOYEE_B]["norm_hours"]), (4, 1.5))
+        self.assertEqual(self.cards(self.EMPLOYEE_B)[0]["planned_hours"], 1.5)
+
     # ---- the editor
 
     def test_the_editor_adds_changes_and_removes_people(self):

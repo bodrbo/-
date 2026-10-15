@@ -67,6 +67,11 @@ def init_schema(conn):
         )
         """
     )
+    member_columns = {row[1] for row in conn.execute("PRAGMA table_info(tuning_schedule_task_members)")}
+    if "hours" not in member_columns:
+        # this person's own norm-hours for the whole task (NULL = the same as
+        # the task's own hours); spread over the task's days in proportion
+        conn.execute("ALTER TABLE tuning_schedule_task_members ADD COLUMN hours REAL")
     task_columns = {row[1] for row in conn.execute("PRAGMA table_info(tuning_schedule_tasks)")}
     if "order_id" not in task_columns:
         # A task not tied to a work item may still belong to a project

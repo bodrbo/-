@@ -159,9 +159,16 @@ def create_tuning_schedule_blueprint(
             if success:
                 # more people on the same work: each gets their own order task
                 # over the same days (the way the board hands one work to several)
-                for extra_name, extra_rate in services.collect_extra_participants(request.form):
+                for extra_name, extra_rate, extra_hours in services.collect_extra_participants(request.form):
+                    own_hours = None
+                    if str(extra_hours or "").strip():
+                        try:
+                            own_hours = float(str(extra_hours).strip().replace(",", "."))
+                        except ValueError:
+                            own_hours = None
                     extra_ok, extra_message, _extra_id = services.create_linked_task(
-                        db, item, extra_name, extra_rate, comment, day_rows,
+                        db, item, extra_name, extra_rate, comment,
+                        services.scaled_day_rows(day_rows, own_hours),
                         create_order_assignment,
                     )
                     if not extra_ok:
