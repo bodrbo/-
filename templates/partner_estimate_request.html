@@ -111,7 +111,7 @@
               {% for tuning_client in tuning_client_choices %}
               <div class="combo-option" data-value="{{ tuning_client.id }}"
                    data-label="{{ tuning_client.client_name }}"
-                   data-search="{{ (tuning_client.client_name ~ ' ' ~ tuning_client.phone)|lower }}">
+                   data-search="{{ (tuning_client.client_name ~ ' ' ~ tuning_client.phone ~ ' ' ~ (tuning_client.phone|messenger_phone_digits))|lower }}">
                 <span class="combo-option-name">{{ tuning_client.client_name }}</span>
                 {% if tuning_client.phone %}<span class="combo-option-sku">{{ tuning_client.phone }}</span>{% endif %}
               </div>

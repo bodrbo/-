@@ -427,6 +427,109 @@ window.initSearchableComboboxes(document);
   });
 })();
 
+// The phone field of a tuning order offers the same clients as the name
+// field: typing a few digits (in any format: +7, 8, spaces, brackets, dashes)
+// lists the tuning clients whose number contains them; picking one fills the
+// name, the client link and the phone, exactly as picking by name does.
+(function () {
+  function digitsOf(value) {
+    var digits = String(value || "").replace(/\D/g, "");
+    if (digits.length > 1 && digits.charAt(0) === "8") digits = "7" + digits.slice(1);
+    return digits;
+  }
+
+  document.querySelectorAll("[data-tuning-client-combo]").forEach(function (wrap) {
+    var nameInput = wrap.querySelector("[data-combo-input]");
+    var nameValue = wrap.querySelector("[data-combo-value]");
+    var clientId = wrap.querySelector("[data-tuning-client-id]");
+    var form = wrap.closest("form");
+    var phone = form && form.querySelector("[data-tuning-client-phone]");
+    var options = Array.prototype.slice.call(wrap.querySelectorAll("[data-tuning-client-option]"));
+    if (!nameInput || !nameValue || !clientId || !phone || !options.length) return;
+    if (phone.hasAttribute("data-phone-suggest-initialized")) return;
+    phone.setAttribute("data-phone-suggest-initialized", "");
+
+    // the list opens right under the phone field, styled like the name one
+    var holder = document.createElement("div");
+    holder.className = "combo-field";
+    phone.parentNode.insertBefore(holder, phone);
+    holder.appendChild(phone);
+    var list = document.createElement("div");
+    list.className = "combo-dropdown hidden";
+    list.setAttribute("role", "listbox");
+    holder.appendChild(list);
+    phone.setAttribute("autocomplete", "off");
+    phone.setAttribute("role", "combobox");
+    phone.setAttribute("aria-autocomplete", "list");
+    phone.setAttribute("aria-expanded", "false");
+
+    var clients = options.map(function (option) {
+      return {
+        id: option.getAttribute("data-client-id") || "",
+        name: option.getAttribute("data-label") || "",
+        phone: option.getAttribute("data-client-phone") || "",
+        digits: digitsOf(option.getAttribute("data-client-phone")),
+      };
+    }).filter(function (client) { return client.digits; });
+
+    function close() {
+      list.classList.add("hidden");
+      list.innerHTML = "";
+      phone.setAttribute("aria-expanded", "false");
+    }
+
+    function pick(client) {
+      nameInput.value = client.name;
+      nameInput.dataset.selectedLabel = client.name;
+      nameValue.value = client.name;
+      clientId.value = client.id;
+      phone.value = client.phone;
+      nameInput.classList.remove("combo-input-error");
+      close();
+    }
+
+    function render() {
+      var query = digitsOf(phone.value);
+      if (query.length < 3) { close(); return; }
+      var found = clients.filter(function (client) { return client.digits.indexOf(query) !== -1; });
+      found.sort(function (a, b) { return a.digits.indexOf(query) - b.digits.indexOf(query); });
+      list.innerHTML = "";
+      if (!found.length) { close(); return; }
+      found.slice(0, 8).forEach(function (client) {
+        var item = document.createElement("div");
+        item.className = "combo-option";
+        item.setAttribute("role", "option");
+        var name = document.createElement("span");
+        name.className = "combo-option-name";
+        name.textContent = client.name;
+        var number = document.createElement("span");
+        number.className = "combo-option-sku";
+        number.textContent = client.phone;
+        item.appendChild(name);
+        item.appendChild(number);
+        item.addEventListener("mousedown", function (event) { event.preventDefault(); });
+        item.addEventListener("click", function () { pick(client); });
+        list.appendChild(item);
+      });
+      list.classList.remove("hidden");
+      phone.setAttribute("aria-expanded", "true");
+    }
+
+    var timer = null;
+    phone.addEventListener("input", function () {
+      clearTimeout(timer);
+      timer = setTimeout(render, 120);
+    });
+    phone.addEventListener("focus", function () { if (digitsOf(phone.value).length >= 3) render(); });
+    phone.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") close();
+    });
+    document.addEventListener("click", function (event) {
+      if (!holder.contains(event.target)) close();
+    });
+  });
+})();
+
 // Wide-screen navigation rail. Its collapsed state is local to this browser;
 // the same markup remains the existing burger dropdown below the desktop
 // breakpoint, so no separate mobile navigation can drift out of sync.

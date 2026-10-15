@@ -972,7 +972,7 @@
               {% for client in tuning_client_choices|default([]) %}
               <div class="combo-option" data-value="{{ client.client_name }}"
                    data-label="{{ client.client_name }}"
-                   data-search="{{ (client.client_name ~ ' ' ~ client.phone)|lower }}"
+                   data-search="{{ (client.client_name ~ ' ' ~ client.phone ~ ' ' ~ (client.phone|messenger_phone_digits))|lower }}"
                    data-tuning-client-option data-client-id="{{ client.id }}"
                    data-client-phone="{{ client.phone }}">
                 <span class="combo-option-name">{{ client.client_name }}</span>
@@ -985,9 +985,9 @@
         </div>
         <div class="field field-narrow">
           <label for="phone">Телефон</label>
-          <input type="text" id="phone" name="phone" inputmode="tel" data-tuning-client-phone
+          <input type="text" id="phone" name="phone" inputmode="tel" data-tuning-client-phone autocomplete="off"
                  value="{{ form_values.phone if form_values else '' }}">
-          <span class="field-context">Необязательно</span>
+          <span class="field-context">Необязательно. Начните вводить номер — подскажем клиентов из базы</span>
         </div>
         <div class="field field-narrow">
           <label for="preferred_contact_method">Канал связи</label>
