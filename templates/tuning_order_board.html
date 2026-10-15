@@ -91,7 +91,12 @@
       <strong>{{ order.client_name }}</strong>
       <span class="hint" style="margin:0;">{{ order.boat_model or order.motor_model or '—' }}</span>
     </div>
-    <span class="status-badge status-{{ order.status }}">{{ order.status|order_status_label }}</span>
+    <span class="board-order-badges">
+      <span class="status-badge status-{{ order.status }}">{{ order.status|order_status_label }}</span>
+      {% if pending_price_count and order.source != 'subcontract_request' %}
+      <span class="status-badge status-awaiting-calc" title="Работ без цены: {{ pending_price_count }} — их нужно рассчитать">Ждёт расчёта · {{ pending_price_count }}</span>
+      {% endif %}
+    </span>
   </section>
 
   {% if items %}

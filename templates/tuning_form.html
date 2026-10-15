@@ -176,6 +176,9 @@
   <div class="panel" style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
     <h2 style="margin:0;">Статус {{ 'субподряда' if edit_order.source == 'subcontract_request' else 'заказа' }}</h2>
     <span class="status-badge status-{{ edit_order.status }}">{{ edit_order.status|order_status_label }}</span>
+    {% if pending_price_count and edit_order.source != 'subcontract_request' %}
+    <span class="status-badge status-awaiting-calc" title="Работ без цены: {{ pending_price_count }} — их нужно рассчитать">Ждёт расчёта · {{ pending_price_count }}</span>
+    {% endif %}
     <form action="{{ url_for('copy_tuning_order', order_id=edit_order.id) }}" method="post"
           class="tuning-copy-order-form"
           onsubmit="return confirm('Создать копию заказа №{{ edit_order.id }}?');">

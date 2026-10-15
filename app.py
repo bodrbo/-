@@ -939,6 +939,23 @@ app.jinja_env.filters["ru_date"] = format_ru_date
 app.jinja_env.filters["money"] = format_money
 
 
+# Orders carry one more flag on top of their status: some of their works have
+# no price yet and still have to be calculated.
+PENDING_PRICE_COUNT_SQL = (
+    "(SELECT COUNT(*) FROM tuning_order_items WHERE order_id = {table}.id "
+    "AND status != 'removed' AND COALESCE(price_pending, 0) = 1)"
+)
+
+
+def tuning_order_pending_price_count(db, order_id):
+    """How many works of the order (not taken off it) wait for a price."""
+    return db.execute(
+        "SELECT COUNT(*) FROM tuning_order_items "
+        "WHERE order_id = ? AND status != 'removed' AND COALESCE(price_pending, 0) = 1",
+        (order_id,),
+    ).fetchone()[0]
+
+
 def item_list_price(item):
     """A work's price before its own discount (its price when it has none)."""
     keys = item.keys()
@@ -8399,6 +8416,7 @@ def tuning_index():
     allowed_statuses = {item["value"] for item in ORDER_STATUSES}
     if selected_status not in allowed_statuses:
         selected_status = ""
+    awaiting_only = request.args.get("awaiting", "") == "1"  # only orders with works to calculate
     date_from = request.args.get("date_from", "").strip()
     date_to = request.args.get("date_to", "").strip()
     date_filter_error = None
@@ -8434,9 +8452,12 @@ def tuning_index():
     if selected_status:
         conditions.append("status = ?")
         params.append(selected_status)
+    if awaiting_only:
+        conditions.append(PENDING_PRICE_COUNT_SQL.format(table="tuning_orders") + " > 0")
     where = " WHERE " + " AND ".join(conditions) if conditions else ""
     order_rows = db.execute(
         "SELECT tuning_orders.*, "
+        + PENDING_PRICE_COUNT_SQL.format(table="tuning_orders") + " AS pending_price_count, "
         "COALESCE((SELECT SUM(price) FROM tuning_order_items "
         "WHERE order_id = tuning_orders.id AND status != 'removed' "
         "AND COALESCE(price_pending, 0) = 0), 0) AS work_total, "
@@ -8517,12 +8538,13 @@ def tuning_index():
         order["total"] for order in orders if order["status"] == "done"
     )
     filters_active = bool(
-        search_query or selected_status or date_from or date_to
+        search_query or selected_status or date_from or date_to or awaiting_only
     )
     active_filter_count = sum((
         bool(search_query),
         bool(selected_status),
         bool(date_from or date_to),
+        awaiting_only,
     ))
     return render_template(
         "tuning_index.html",
@@ -8531,6 +8553,7 @@ def tuning_index():
         completed_orders_total=completed_orders_total,
         search_query=search_query,
         selected_status=selected_status,
+        awaiting_only=awaiting_only,
         date_from=date_from,
         date_to=date_to,
         filters_active=filters_active,
@@ -9230,7 +9253,8 @@ def _render_tuning_equipment_catalog(equipment_type):
     order_rows = db.execute(
         "SELECT o.*, "
         "(SELECT GROUP_CONCAT(i.work_name, ' · ') FROM tuning_order_items i "
-        " WHERE i.order_id = o.id AND i.status != 'removed') AS work_names "
+        " WHERE i.order_id = o.id AND i.status != 'removed') AS work_names, "
+        + PENDING_PRICE_COUNT_SQL.format(table="o") + " AS pending_price_count "
         f"FROM tuning_orders o WHERE {order_scope} "
         "ORDER BY o.order_date DESC, o.id DESC"
     ).fetchall()
@@ -9328,7 +9352,8 @@ def _render_tuning_equipment_profile(profile_id, expected_type):
     order_rows = db.execute(
         "SELECT o.*, "
         "(SELECT GROUP_CONCAT(i.work_name, ' · ') FROM tuning_order_items i "
-        " WHERE i.order_id = o.id AND i.status != 'removed') AS work_names "
+        " WHERE i.order_id = o.id AND i.status != 'removed') AS work_names, "
+        + PENDING_PRICE_COUNT_SQL.format(table="o") + " AS pending_price_count "
         f"FROM tuning_orders o WHERE {order_scope} "
         "ORDER BY o.order_date DESC, o.id DESC"
     ).fetchall()
@@ -11410,6 +11435,7 @@ def edit_tuning_order(order_id):
         reminder_recipients = _note_reminder_recipients(db)
         return render_template(
             "tuning_form.html", edit_order=order, errors=None, form_values=form_values,
+            pending_price_count=tuning_order_pending_price_count(db, order_id),
             deadline_view=deadline_view,
             items_prefill=items, boat_motors_prefill=boat_motors,
             sale_channels=_sales_channel_choices(db),
@@ -11477,6 +11503,7 @@ def edit_tuning_order(order_id):
         ).fetchall()
         return render_template(
             "tuning_form.html", edit_order=order, errors=errors, form_values=request.form,
+            pending_price_count=tuning_order_pending_price_count(db, order_id),
             deadline_view=_tuning_order_deadline_view(
                 order["deadline_date"], order["completed_at"], order["status"]
             ),
@@ -12651,6 +12678,7 @@ def tuning_order_board(order_id):
     assignable_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
     return render_template(
         "tuning_order_board.html",
+        pending_price_count=tuning_order_pending_price_count(db, order_id),
         assignable_partners=_tuning_partner_choices(db),
         reminder_recipients=_note_reminder_recipients(db),
         payouts_missing=payouts_missing,

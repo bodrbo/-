@@ -3991,6 +3991,15 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .status-badge.status-succeeded::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232f6b4f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5'/%3E%3C/svg%3E");
 }
+/* an order with works that still have no price: a second badge next to its status */
+.status-badge.status-awaiting-calc { background: rgba(176, 112, 24, 0.16); color: #8a560f; margin-left: 6px; }
+.status-badge.status-awaiting-calc::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238a560f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='8' r='5.5'/%3E%3Cpath d='M8 5v3.4l2 1.2'/%3E%3C/svg%3E");
+}
+.board-order-badges { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.board-order-badges .status-awaiting-calc { margin-left: 0; }
+.tuning-orders-filter-checkbox { display: flex; align-items: center; gap: 8px; min-height: 40px; font-size: 13px; white-space: nowrap; }
+.tuning-orders-filter-form .tuning-orders-filter-checkbox input { width: auto; min-height: 0; margin: 0; }
 .status-badge.status-handed_over { background: rgba(47, 107, 79, 0.16); color: var(--success); }
 .status-badge.status-handed_over::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232f6b4f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 8.5l3 3 3-3M8 8.5l3 3 3-3'/%3E%3C/svg%3E");
@@ -6692,7 +6701,7 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
 }
 .tuning-orders-filter-form {
   display: grid;
-  grid-template-columns: minmax(230px, 1.6fr) minmax(170px, 1fr) 155px 155px auto;
+  grid-template-columns: minmax(230px, 1.6fr) minmax(170px, 1fr) auto 155px 155px auto;
   align-items: end;
   gap: 12px;
   padding: 14px 16px 16px;

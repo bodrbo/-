@@ -131,6 +131,13 @@
           {% endfor %}
         </select>
       </label>
+      <label class="tuning-orders-filter-check" for="tuning-orders-awaiting">
+        <span>Расчёт</span>
+        <div class="tuning-orders-filter-checkbox">
+          <input type="checkbox" id="tuning-orders-awaiting" name="awaiting" value="1"{% if awaiting_only %} checked{% endif %}>
+          Только ждущие расчёта
+        </div>
+      </label>
       <label for="tuning-orders-date-from">
         <span>С даты</span>
         <input type="date" id="tuning-orders-date-from" name="date_from" value="{{ date_from }}">
@@ -264,7 +271,7 @@
               <small>Работы: {{ o.work_total|money }} ₽{% if o.discount_value %} · до скидки{% endif %}</small>
               <small>Товары: {{ o.goods_total|money }} ₽{% if o.discount_value %} · до скидки{% endif %}</small>
             </td>
-            <td><span class="status-badge status-{{ o.status }}">{{ o.status|order_status_label }}</span></td>
+            <td><span class="status-badge status-{{ o.status }}">{{ o.status|order_status_label }}</span>{% if o.pending_price_count and o.source != 'subcontract_request' %} <span class="status-badge status-awaiting-calc" title="Работ без цены: {{ o.pending_price_count }} — их нужно рассчитать">Ждёт расчёта</span>{% endif %}</td>
             <td class="row-actions">
               <a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="icon-btn" title="Редактировать">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -719,7 +726,7 @@
               {% if not is_motor_catalog %}<td>{% if order.motors %}{% for motor in order.motors %}{{ motor.motor_model }}{% if motor.motor_serial_number %} <span class="muted">№ {{ motor.motor_serial_number }}</span>{% endif %}{{ ', ' if not loop.last }}{% endfor %}{% else %}—{% endif %}</td>{% endif %}
               <td class="boat-order-works">{{ order.work_names or 'Работы пока не добавлены' }}</td>
               <td class="amount">{{ order.total|money }}</td>
-              <td><span class="status-badge status-{{ order.status }}">{{ order.status|order_status_label }}</span></td>
+              <td><span class="status-badge status-{{ order.status }}">{{ order.status|order_status_label }}</span>{% if order.pending_price_count and order.source != 'subcontract_request' %} <span class="status-badge status-awaiting-calc" title="Работ без цены: {{ order.pending_price_count }} — их нужно рассчитать">Ждёт расчёта</span>{% endif %}</td>
             </tr>
             {% endfor %}
           </tbody>
