@@ -284,6 +284,27 @@ def place_assignment_period(
     }
 
 
+def drop_tasks_of_assignment(db, assignment_id):
+    """Takes an order task's cards off the schedule (days, further people and
+    reminders go with them) — for when the order task itself is deleted."""
+    for task_id in repository.list_task_ids_of_assignment(db, assignment_id):
+        repository.delete_task_reminders(db, task_id)
+        repository.delete_task(db, task_id)  # also its days and further people
+    db.execute("DELETE FROM tuning_task_reminders WHERE assignment_id = ?", (assignment_id,))
+
+
+def drop_orphan_tasks(db):
+    """Removes ghost cards: schedule tasks that point at an order task which
+    no longer exists. Returns how many were removed."""
+    task_ids = repository.list_orphan_task_ids(db)
+    for task_id in task_ids:
+        repository.delete_task_reminders(db, task_id)
+        repository.delete_task(db, task_id)
+    if task_ids:
+        db.commit()
+    return len(task_ids)
+
+
 def place_pending_period_tasks(db, day_iso):
     """Order tasks given for a period that cover `day_iso` and have no card
     yet (the person wasn't on the shift when it was assigned, or it was
@@ -463,7 +484,15 @@ def calendar_view(db, day, day_crew):
         task["height_px"] = round(
             max(MIN_CARD_MINUTES, end_minutes - start_minutes) * PX_PER_MINUTE, 2
         )
-        task["editor"] = editor_payload(db, task)
+        try:
+            task["editor"] = editor_payload(db, task)
+        except Exception:  # one odd card must never take the whole schedule down
+            task["editor"] = {
+                "task_id": task["task_id"], "is_linked": False, "title": task["title"],
+                "employee_name": task["employee_name"], "order_id": task["order_id"],
+                "rate": task["rate"], "status": task["status"], "comment": task["comment"] or "",
+                "is_admin": False, "members": [], "coworkers": [], "paid": False, "days": [],
+            }
         cards_by_employee[task["employee_name"]].append(task)
 
     hour_marks = []
@@ -849,8 +878,8 @@ def editor_payload(db, card):
     """Everything the schedule's task editor shows for one calendar card
     (a list_day_tasks row): the task's own fields and all its days."""
     task = repository.get_task(db, card["task_id"])
-    linked = task["assignment_id"] is not None
-    assignment = repository.get_assignment(db, task["assignment_id"]) if linked else None
+    assignment = repository.get_assignment(db, task["assignment_id"]) if task["assignment_id"] is not None else None
+    linked = assignment is not None   # (a card whose order task is gone is shown as a plain task)
     members = repository.list_task_members(db, task["id"])
     paid_entry = (assignment["entry_id"] if linked else task["entry_id"]) or any(
         member["entry_id"] for member in members

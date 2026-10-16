@@ -11566,6 +11566,12 @@ def edit_tuning_order(order_id):
     }
     submitted_ids = {item["item_id"] for item in data["items"] if item["item_id"] in existing_ids}
     for removed_id in existing_ids - submitted_ids:
+        # the tasks of a removed work leave the tuning schedule with it (a
+        # card whose task is gone would have nothing to belong to)
+        for assignment in db.execute(
+            "SELECT id FROM tuning_item_assignments WHERE item_id = ?", (removed_id,)
+        ).fetchall():
+            tuning_schedule_services.drop_tasks_of_assignment(db, assignment["id"])
         db.execute("DELETE FROM tuning_item_assignments WHERE item_id = ?", (removed_id,))
         db.execute("DELETE FROM work_item_photos WHERE item_id = ?", (removed_id,))
         db.execute("DELETE FROM work_item_videos WHERE item_id = ?", (removed_id,))

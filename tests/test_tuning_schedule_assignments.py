@@ -2098,5 +2098,92 @@ class TuningScheduleDayTotalsTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertEqual(self.totals()[self.EMPLOYEE_A]["hours"], 2.0)
 
 
+class TuningScheduleGhostCardTests(_TuningScheduleFixture, unittest.TestCase):
+    """A card whose order task no longer exists must not take the schedule
+    page down (it did: 'internal server error')."""
+
+    def ghost(self, day=None, assignment_id=999999):
+        self.put_on_shift(self.EMPLOYEE_A, day=day)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            task_id = db.execute(
+                "INSERT INTO tuning_schedule_tasks (assignment_id, employee_name, title, rate, status, comment, "
+                "created_at) VALUES (?, ?, 'Призрак', 100, 'pending', '', 'x')",
+                (assignment_id, self.EMPLOYEE_A)).lastrowid
+            db.execute("INSERT INTO tuning_schedule_task_days (task_id, work_date, start_time, planned_hours) "
+                       "VALUES (?, ?, '09:00', 2)", (task_id, day or self.DAY))
+            db.execute("INSERT INTO tuning_task_reminders (assignment_id, remind_at, created_at) "
+                       "VALUES (?, '2030-01-01 10:00', 'x')", (assignment_id,))
+            db.commit()
+        return task_id
+
+    def tasks(self):
+        with application_module.app.app_context():
+            return application_module.get_db().execute(
+                "SELECT id FROM tuning_schedule_tasks WHERE title = 'Призрак'").fetchall()
+
+    def test_the_page_opens_when_a_card_has_lost_its_order_task(self):
+        self.ghost()
+        self.login_admin()
+        response = self.client.get(f"/schedule/tuning?date={self.DAY}")
+        self.assertEqual(response.status_code, 200)
+
+    def test_ghost_cards_are_cleared_away(self):
+        self.ghost()
+        self.login_admin()
+        self.client.get(f"/schedule/tuning?date={self.DAY}")
+        self.assertEqual(self.tasks(), [])
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        self.assertNotIn("Призрак", page)
+
+    def test_a_card_with_a_living_order_task_is_left_alone(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.assign([(self.EMPLOYEE_A, 100, 2)])
+        before = len(self.cards(self.EMPLOYEE_A))
+        self.login_admin()
+        self.client.get(f"/schedule/tuning?date={self.DAY}")
+        self.assertEqual(len(self.cards(self.EMPLOYEE_A)), before)
+        self.assertEqual(before, 1)
+
+    def test_a_broken_payload_of_one_card_does_not_break_the_page(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.assign([(self.EMPLOYEE_A, 100, 2)])
+        self.login_admin()
+        with mock.patch.object(application_module.tuning_schedule_services, "editor_payload",
+                               side_effect=RuntimeError("boom")):
+            response = self.client.get(f"/schedule/tuning?date={self.DAY}")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("tuning-calendar-card", response.get_data(as_text=True))
+
+    def test_removing_a_work_from_the_order_takes_its_cards_off_the_schedule(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            second = db.execute(
+                "INSERT INTO tuning_order_items (order_id, work_name, cost_price, multiplier, price, price_pending, "
+                "status) VALUES (?, 'Вторая работа', 100, 2, 200, 0, 'pending')", (self.order_id,)).lastrowid
+            db.commit()
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.login_admin()
+        with mock.patch.object(application_module, "send_telegram_notification_to_employee"):
+            self.client.post(f"/tuning/{self.order_id}/item/{second}/assign", data=MultiDict([
+                ("employee_name[]", self.EMPLOYEE_A), ("rate[]", "100"), ("norm_hours[]", "1"),
+                ("comment", ""), ("due_from", self.DAY), ("due_to", "")]))
+        self.assertEqual(len(self.cards(self.EMPLOYEE_A)), 1)
+        data = MultiDict([
+            ("client_name", "Клиент Мультизадач"), ("client_id", str(self.client_id)), ("equipment_type", "boat"),
+            ("boat_model", "Salute 585 HT"), ("boat_registration_number", ""), ("motor_model", ""),
+            ("motor_serial_number", ""), ("phone", "+79990003344"), ("order_date", "2026-09-01"),
+            ("sale_channel", "direct"), ("discount_type", "percent"), ("discount_value", "0"),
+            ("work_name[]", "Полировка корпуса"), ("cost_price[]", "500"), ("multiplier[]", "2"),
+            ("item_id[]", str(self.item_id)),
+        ])
+        self.client.post(f"/tuning/edit/{self.order_id}", data=data)  # the second work is no longer in the form
+        self.assertEqual(self.cards(self.EMPLOYEE_A), [])
+        with application_module.app.app_context():
+            self.assertEqual(application_module.get_db().execute(
+                "SELECT COUNT(*) FROM tuning_schedule_tasks WHERE employee_name = ?", (self.EMPLOYEE_A,)).fetchone()[0], 0)
+        self.assertEqual(self.client.get(f"/schedule/tuning?date={self.DAY}").status_code, 200)
+
+
 if __name__ == "__main__":
     unittest.main()

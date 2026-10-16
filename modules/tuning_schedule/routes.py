@@ -43,8 +43,10 @@ def create_tuning_schedule_blueprint(
         db = get_db()
         day = services.parse_day(request.args.get("date"))
         try:
-            # period tasks of people who are on the shift this day but have
-            # no card yet get their days (idempotent; never blocks the page)
+            # ghost cards of deleted order tasks go; period tasks of people who
+            # are on the shift this day but have no card yet get their days
+            # (both idempotent, and never block the page)
+            services.drop_orphan_tasks(db)
             services.place_pending_period_tasks(db, day.isoformat())
         except Exception:
             db.rollback()

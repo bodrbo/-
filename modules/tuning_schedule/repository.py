@@ -348,6 +348,22 @@ def get_assignment(db, assignment_id):
     ).fetchone()
 
 
+def list_task_ids_of_assignment(db, assignment_id):
+    return [row["id"] for row in db.execute(
+        "SELECT id FROM tuning_schedule_tasks WHERE assignment_id = ?", (assignment_id,)
+    ).fetchall()]
+
+
+def list_orphan_task_ids(db):
+    """Schedule tasks of an order task (assignment_id set) whose order task no
+    longer exists — ghost cards."""
+    return [row["id"] for row in db.execute(
+        "SELECT t.id FROM tuning_schedule_tasks t "
+        "WHERE t.assignment_id IS NOT NULL "
+        "AND NOT EXISTS (SELECT 1 FROM tuning_item_assignments a WHERE a.id = t.assignment_id)"
+    ).fetchall()]
+
+
 def delete_task_reminders(db, task_id):
     db.execute("DELETE FROM tuning_task_reminders WHERE schedule_task_id = ?", (task_id,))
 
