@@ -31,6 +31,22 @@ def create_tuning_schedule_blueprint(
     def redirect_to_day(day):
         return redirect(url_for("tuning_schedule.index", date=day))
 
+    def wants_json():
+        """The task windows submit with fetch(): they get the verdict as JSON
+        (an error is shown inside the window, so nothing typed is lost)."""
+        return request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+    def respond(success, message, day):
+        if wants_json():
+            if success:
+                set_notice(message, True)  # shown on the page that opens next
+            return jsonify({
+                "ok": bool(success), "message": message,
+                "redirect": url_for("tuning_schedule.index", date=day),
+            }), (200 if success else 400)
+        set_notice(message, success)
+        return redirect_to_day(day)
+
     def set_notice(message, success):
         session["schedule_notice"] = {
             "message": message,
@@ -152,8 +168,7 @@ def create_tuning_schedule_blueprint(
             except ValueError:
                 item = None
             if item is None:
-                set_notice("Работа не найдена в заказе.", False)
-                return redirect_to_day(day)
+                return respond(False, "Работа не найдена в заказе.", day)
             success, message, _task_id = services.create_linked_task(
                 db, item, employee_name, rate, comment, day_rows,
                 create_order_assignment,
@@ -182,14 +197,12 @@ def create_tuning_schedule_blueprint(
             except ValueError:
                 project_id = None
             if order_id and project_id is None:
-                set_notice("Проект не найден.", False)
-                return redirect_to_day(day)
+                return respond(False, "Проект не найден.", day)
             success, message, _task_id = services.create_free_task(
                 db, employee_name, title, rate, comment, day_rows, project_id,
                 extras=services.collect_extra_participants(request.form),
             )
-        set_notice(message, success)
-        return redirect_to_day(day)
+        return respond(success, message, day)
 
     @blueprint.route("/schedule/tuning/tasks/<int:task_id>/days", methods=["POST"])
     @manage_required
@@ -244,8 +257,7 @@ def create_tuning_schedule_blueprint(
             "statuses": assignment_status_values,
         }
         success, message = services.update_task(get_db(), task_id, request.form, hooks)
-        set_notice(message, success)
-        return redirect_to_day(day)
+        return respond(success, message, day)
 
     @blueprint.route("/schedule/tuning/tasks/<int:task_id>/delete", methods=["POST"])
     @manage_required

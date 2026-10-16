@@ -1180,7 +1180,7 @@ class TuningScheduleTaskEditorTests(_TuningScheduleFixture, unittest.TestCase):
         before = self.days(task["id"])
         self.save(task["id"], title="Другое", days=[("2026-10-20", "09:00", "1")])
         self.assertEqual(self.notice()["type"], "error")
-        self.assertIn("не стоит в смене на 2026-10-20", self.notice()["message"])
+        self.assertIn("не стоит в смене на 20/10/2026", self.notice()["message"])
         self.assertEqual(self.days(task["id"]), before)
         self.assertEqual(self.task()["title"], "Уборка цеха")
 
@@ -1639,7 +1639,7 @@ class TuningScheduleSeveralPeopleTests(_TuningScheduleFixture, unittest.TestCase
         task = self.task()
         self.save(task["id"], extras=[(self.EMPLOYEE_B, 100)])
         self.assertEqual(self.notice()["type"], "error")
-        self.assertIn(f"{self.EMPLOYEE_B}: {self.DAY} это время занято", self.notice()["message"])
+        self.assertIn(f"{self.EMPLOYEE_B}: 12/10/2026 это время занято", self.notice()["message"])
         self.assertEqual(self.members(task["id"]), [])
 
     def test_a_person_off_the_shift_cannot_be_added(self):
@@ -1679,7 +1679,7 @@ class TuningScheduleSeveralPeopleTests(_TuningScheduleFixture, unittest.TestCase
         # B already has a card at that very time (a task of its own on the same work) — the time clash
         self.save(task, employee=self.EMPLOYEE_A, extras=[(self.EMPLOYEE_B, 100)], title="x")
         self.assertEqual(self.notice()["type"], "error")
-        self.assertIn(f"{self.EMPLOYEE_B}: {self.DAY} это время занято", self.notice()["message"])
+        self.assertIn(f"{self.EMPLOYEE_B}: 12/10/2026 это время занято", self.notice()["message"])
         self.assertNotIn("уже назначен", self.notice()["message"])
 
     def test_a_person_with_another_task_on_the_same_work_can_still_be_added(self):
@@ -2190,6 +2190,97 @@ class TuningScheduleGhostCardTests(_TuningScheduleFixture, unittest.TestCase):
             self.assertEqual(application_module.get_db().execute(
                 "SELECT COUNT(*) FROM tuning_schedule_tasks WHERE employee_name = ?", (self.EMPLOYEE_A,)).fetchone()[0], 0)
         self.assertEqual(self.client.get(f"/schedule/tuning?date={self.DAY}").status_code, 200)
+
+
+class TuningScheduleBackgroundSaveTests(_TuningScheduleFixture, unittest.TestCase):
+    """The task windows save in the background: a refusal comes back as JSON
+    (shown inside the window, nothing typed is lost); a plain form post still
+    redirects as before."""
+
+    XHR = {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"}
+
+    def form(self, **overrides):
+        data = {"employee_name": self.EMPLOYEE_A, "rate": "100", "comment": "", "title": "Фоновая задача",
+                "return_date": self.DAY, "work_date[]": self.DAY, "start_time[]": "10:00",
+                "planned_hours[]": "2", "order_id": "", "order_item_id": ""}
+        data.update(overrides)
+        return data
+
+    def post(self, data, headers=None, url="/schedule/tuning/tasks"):
+        self.login_admin()
+        return self.client.post(url, data=data, headers=headers or {})
+
+    def notice(self):
+        with self.client.session_transaction() as session:
+            return session.get("schedule_notice")
+
+    def count(self):
+        with application_module.app.app_context():
+            return application_module.get_db().execute(
+                "SELECT COUNT(*) FROM tuning_schedule_tasks WHERE title = 'Фоновая задача'").fetchone()[0]
+
+    def test_a_refusal_comes_back_as_json_and_creates_nothing(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        response = self.post(self.form(title=""), self.XHR)
+        self.assertEqual(response.status_code, 400)
+        data = response.get_json()
+        self.assertFalse(data["ok"])
+        self.assertIn("название", data["message"])
+        self.assertEqual(self.count(), 0)
+        self.assertIsNone(self.notice())   # no stale notice waiting for the next page
+
+    def test_other_refusals_too(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        for overrides, text in (({"employee_name": "Никто"}, "сотрудника"),
+                                ({"rate": "0"}, "Ставка"),
+                                ({"planned_hours[]": "0"}, "часы"),
+                                ({"order_id": "99999999"}, "Проект")):
+            response = self.post(self.form(**overrides), self.XHR)
+            self.assertEqual(response.status_code, 400, overrides)
+            self.assertIn(text.lower(), response.get_json()["message"].lower(), overrides)
+        self.assertEqual(self.count(), 0)
+
+    def test_a_success_returns_the_page_to_open_and_keeps_the_notice_for_it(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        response = self.post(self.form(), self.XHR)
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data["ok"])
+        self.assertIn(f"/schedule/tuning?date={self.DAY}", data["redirect"])
+        self.assertEqual(self.count(), 1)
+        self.assertEqual(self.notice()["type"], "success")
+
+    def test_a_plain_form_post_still_redirects(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        response = self.post(self.form(title=""))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.notice()["type"], "error")
+        response = self.post(self.form())
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.count(), 1)
+
+    def test_the_editor_saves_in_the_background_too(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.post(self.form())
+        with application_module.app.app_context():
+            task_id = application_module.get_db().execute(
+                "SELECT id FROM tuning_schedule_tasks WHERE title = 'Фоновая задача'").fetchone()["id"]
+        edit = self.form(status="pending")
+        bad = self.post(dict(edit, title=""), self.XHR, url=f"/schedule/tuning/tasks/{task_id}/update")
+        self.assertEqual((bad.status_code, bad.get_json()["ok"]), (400, False))
+        good = self.post(dict(edit, title="Фоновая задача", comment="новый"), self.XHR,
+                         url=f"/schedule/tuning/tasks/{task_id}/update")
+        self.assertEqual((good.status_code, good.get_json()["ok"]), (200, True))
+
+    def test_the_three_task_forms_use_it_and_have_a_place_for_the_error(self):
+        self.login_admin()
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        for form_id in ("tuningScheduleTaskForm", "quickTaskForm", "taskEditorForm"):
+            form = page.split(f'id="{form_id}"')[1].split("</form>")[0]
+            self.assertIn("data-ajax-task-form", form.split(">")[0], form_id)
+            self.assertIn('class="alert task-form-error', form, form_id)
+        self.assertIn("'X-Requested-With': 'XMLHttpRequest'", page)
+        self.assertIn("function showTaskFormError", page)
 
 
 if __name__ == "__main__":

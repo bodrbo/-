@@ -12154,6 +12154,8 @@ button.partner-open-price-save svg {
 .task-editor-day { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, .8fr) 38px; gap: 6px; align-items: center; }
 .task-editor-day input { min-width: 0; width: 100%; }
 .task-editor-actions .task-editor-delete { margin-left: auto; }
+.task-form-error { margin: 0 0 4px; flex: 1 1 100%; grid-column: 1 / -1; }
+.task-form-error[hidden] { display: none; }
 .task-extra-people { display: grid; gap: 6px; margin-top: 6px; }
 .task-extra-rows { display: grid; gap: 6px; }
 .task-extra-rows:empty { display: none; }

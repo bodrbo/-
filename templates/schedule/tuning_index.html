@@ -198,7 +198,8 @@
   <details class="panel form-panel collapsible-panel" open>
     <summary><span>Добавить задачу</span><span class="chev" aria-hidden="true"></span></summary>
     <div class="collapsible-body">
-    <form method="post" action="{{ url_for('tuning_schedule.create_task') }}" class="entry-form" id="tuningScheduleTaskForm">
+    <form method="post" action="{{ url_for('tuning_schedule.create_task') }}" class="entry-form" id="tuningScheduleTaskForm" data-ajax-task-form>
+      <div class="alert task-form-error" role="alert" hidden></div>
       <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
 
       <div class="field-row-inner">
@@ -427,7 +428,8 @@
       </div>
       <button type="button" class="schedule-modal-close" data-quick-close aria-label="Закрыть">×</button>
     </header>
-    <form method="post" action="{{ url_for('tuning_schedule.create_task') }}" class="quick-task-body" id="quickTaskForm">
+    <form method="post" action="{{ url_for('tuning_schedule.create_task') }}" class="quick-task-body" id="quickTaskForm" data-ajax-task-form>
+      <div class="alert task-form-error quick-task-wide" role="alert" hidden></div>
       <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
       <input type="hidden" name="work_date[]" value="{{ day.isoformat() }}">
 
@@ -502,7 +504,8 @@
       </div>
       <button type="button" class="schedule-modal-close" data-editor-close aria-label="Закрыть">×</button>
     </header>
-    <form method="post" class="quick-task-body" id="taskEditorForm">
+    <form method="post" class="quick-task-body" id="taskEditorForm" data-ajax-task-form>
+      <div class="alert task-form-error quick-task-wide" role="alert" hidden></div>
       <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
 
       <div class="quick-task-column">
@@ -836,8 +839,52 @@ function quickTaskTimeLabel(minutes) {
     + (snapped % 60 < 10 ? '0' : '') + (snapped % 60);
 }
 
+// The task windows submit in the background: a refusal is shown inside the
+// window (red box at its top) and everything typed stays, so it can be fixed
+// right away; on success the page reloads with the green notice.
+function showTaskFormError(form, message) {
+  var box = form.querySelector('.task-form-error');
+  if (!box) return;
+  box.textContent = message;
+  box.hidden = false;
+  box.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+}
+
+function clearTaskFormError(form) {
+  var box = form && form.querySelector('.task-form-error');
+  if (box) { box.hidden = true; box.textContent = ''; }
+}
+
+document.querySelectorAll('form[data-ajax-task-form]').forEach(function (form) {
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    clearTaskFormError(form);
+    var submit = form.querySelector('button[type="submit"]:not([form])');
+    if (submit) submit.disabled = true;
+    fetch(form.action || window.location.href, {
+      method: 'POST',
+      body: new FormData(form),
+      credentials: 'same-origin',
+      headers: {'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json'},
+    }).then(function (response) {
+      return response.json().then(function (data) { return {ok: response.ok, data: data}; });
+    }).then(function (result) {
+      if (result.ok && result.data && result.data.ok) {
+        window.location.href = result.data.redirect || window.location.href;
+        return;
+      }
+      showTaskFormError(form, (result.data && result.data.message) || 'Не удалось сохранить задачу.');
+      if (submit) submit.disabled = false;
+    }).catch(function () {
+      showTaskFormError(form, 'Не удалось сохранить задачу: проверьте соединение и обновите страницу.');
+      if (submit) submit.disabled = false;
+    });
+  });
+});
+
 function openQuickTask(employeeName, startMinutes) {
   var modal = document.getElementById('quickTaskModal');
+  clearTaskFormError(document.getElementById('quickTaskForm'));
   var employee = document.getElementById('quickTaskEmployee');
   employee.value = employeeName;
   document.getElementById('quickTaskStart').value = quickTaskTimeLabel(startMinutes);
@@ -980,6 +1027,7 @@ function openTaskEditor(card, event, fromButton) {
   try { task = JSON.parse(card.dataset.editor); } catch (error) { return; }
   tuningEditorTask = task;
   var form = document.getElementById('taskEditorForm');
+  clearTaskFormError(form);
   form.action = '/schedule/tuning/tasks/' + task.task_id + '/update';
   document.getElementById('taskEditorDeleteForm').action = '/schedule/tuning/tasks/' + task.task_id + '/delete';
   document.getElementById('taskEditorTitle').textContent = task.title;

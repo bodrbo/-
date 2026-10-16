@@ -19,6 +19,15 @@ MAX_DAY_HOURS = 16
 PX_PER_MINUTE = 1.25
 
 
+def _ru_day(value):
+    """A date (object or ISO string) as DD/MM/YYYY — the way dates read elsewhere in the app."""
+    try:
+        day = value if isinstance(value, dt.date) else dt.date.fromisoformat(str(value)[:10])
+        return day.strftime("%d/%m/%Y")
+    except ValueError:
+        return str(value)
+
+
 def _normalise_text(value, limit):
     return " ".join(str(value or "").strip().split())[:limit]
 
@@ -47,7 +56,7 @@ def _clean_task_days(day_rows, errors):
             continue
         parsed_time = _parse_hhmm(raw_start_time)
         if parsed_time is None:
-            errors.append(f"Укажите время старта на {work_date.isoformat()}.")
+            errors.append(f"Укажите время старта на {_ru_day(work_date)}.")
             continue
         start_time = f"{parsed_time[0]:02d}:{parsed_time[1]:02d}"
         try:
@@ -55,11 +64,11 @@ def _clean_task_days(day_rows, errors):
         except ValueError:
             hours = 0
         if hours <= 0:
-            errors.append(f"Укажите часы на {work_date.isoformat()}.")
+            errors.append(f"Укажите часы на {_ru_day(work_date)}.")
             continue
         if hours > MAX_DAY_HOURS:
             errors.append(
-                f"Слишком много часов на {work_date.isoformat()} "
+                f"Слишком много часов на {_ru_day(work_date)} "
                 f"— не больше {MAX_DAY_HOURS} за один день."
             )
             continue
@@ -1000,18 +1009,18 @@ def update_task(db, task_id, form, hooks):
             for person, per_day in shares.items():
                 end = start + round(per_day[work_date] * 60)
                 if end > 24 * 60:
-                    errors.append(f"{person}: {work_date} задача не помещается до конца суток.")
+                    errors.append(f"{person}: {_ru_day(work_date)} задача не помещается до конца суток.")
                     continue
                 if not repository.is_administrator(db, person) \
                         and repository.get_day_crew_shift_by_name(db, work_date, person) is None:
-                    errors.append(f"{person} не стоит в смене на {work_date}.")
+                    errors.append(f"{person} не стоит в смене на {_ru_day(work_date)}.")
                     continue
                 for other in repository.list_other_day_tasks(db, work_date, task_id):
                     if other["employee_name"] != person:
                         continue
                     other_start = _minutes(other["start_time"]) or 0
                     if start < other_start + round(other["planned_hours"] * 60) and other_start < end:
-                        errors.append(f"{person}: {work_date} это время занято задачей «{other['title']}».")
+                        errors.append(f"{person}: {_ru_day(work_date)} это время занято задачей «{other['title']}».")
                         break
     if errors:
         return False, " ".join(errors)
