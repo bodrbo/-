@@ -2117,6 +2117,13 @@ class TuningScheduleGhostCardTests(_TuningScheduleFixture, unittest.TestCase):
             db.commit()
         return task_id
 
+    def tearDown(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM tuning_task_reminders WHERE assignment_id = 999999")
+            db.commit()
+        super().tearDown()
+
     def tasks(self):
         with application_module.app.app_context():
             return application_module.get_db().execute(
