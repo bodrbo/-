@@ -19,6 +19,27 @@ def init_schema(conn):
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS excursion_boat_rates (
+            role TEXT NOT NULL,
+            boat TEXT NOT NULL,
+            rate REAL NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (role, boat)
+        )
+        """
+    )
+    # One row per role once its boat rates were saved for the first time and
+    # the last week's payroll was recalculated by them.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS excursion_boat_rates_applied (
+            role TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
     if rates_is_new:
         timestamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
         conn.executemany(

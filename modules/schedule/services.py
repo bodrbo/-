@@ -1012,7 +1012,7 @@ def auto_close_schedule_items(
         labor_items = []
         for assignment in assignments:
             role = assignment["role"]
-            rate = get_role_rate(db, role)
+            rate = get_role_rate(db, role, item["boat"])
             if not rate and role == "guide":
                 # No "guide" rate configured yet at Зарплаты -> Ставки ->
                 # Ставки экскурсий — falling back to the captain rate keeps

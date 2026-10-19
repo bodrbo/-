@@ -89,8 +89,8 @@ class ScheduleAutoCloseTests(unittest.TestCase):
         )
 
     @staticmethod
-    def get_role_rate(db, role):
-        return payroll_rates_repository.get_excursion_role_rate(db, role)
+    def get_role_rate(db, role, boat=None):
+        return payroll_rates_repository.get_excursion_role_rate(db, role, boat)
 
     def test_skipped_items_are_reported_with_their_reason(self):
         with application_module.app.app_context():

@@ -79,6 +79,40 @@
       </table>
     </div>
   </section>
+
+  {% for role in boat_rate_roles %}
+  <section class="panel">
+    <h2 style="margin:0 0 6px;">{{ roles.get(role, role) }} — ставки по катерам</h2>
+    <p class="hint">Для каждого катера можно задать свою ставку ₽/час. Пустое поле — катер оплачивается по общей ставке должности{% for r in rates if r.role == role %} ({{ r.rate|money }} ₽/час){% endfor %}.</p>
+    {% if not boat_rates_applied.get(role) %}
+    <p class="hint">При первом сохранении уже начисленная за последнюю неделю зарплата этой должности пересчитается по новым ставкам (вручную изменённые ставки останутся как есть).</p>
+    {% endif %}
+    {% if boats %}
+    <form method="post" action="{{ url_for('payroll_rates.update_boat_rates') }}">
+      <input type="hidden" name="role" value="{{ role }}">
+      <div class="table-scroll">
+        <table class="records">
+          <thead><tr><th>Катер</th><th>Ставка, ₽/час</th></tr></thead>
+          <tbody>
+            {% for boat in boats %}
+            {% set own = boat_rates[role].get(boat) %}
+            <tr>
+              <td>{{ boat }}<input type="hidden" name="boat[]" value="{{ boat }}"></td>
+              <td><input type="text" inputmode="decimal" name="boat_rate[]" value="{{ ('%g'|format(own)) if own else '' }}" placeholder="по общей" style="width:120px;"></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="entry-form" style="margin-top:12px;">
+        <div class="field field-submit"><button type="submit">Сохранить ставки по катерам</button></div>
+      </div>
+    </form>
+    {% else %}
+    <p class="hint">В автопарке пока нет катеров.</p>
+    {% endif %}
+  </section>
+  {% endfor %}
   {% else %}
   <section class="panel">
     <h2 style="margin:0 0 6px;">Ставки тюнинга</h2>

@@ -5452,11 +5452,23 @@ def _sync_closed_schedule_item(db, item_id, before, after):
             entry["state"] = "delete"
             messages.append(f"{employee} убран из экипажа — начисление удалено.")
         elif employee in before_crew and employee in after_crew and before_crew[employee] != after_crew[employee]:
-            new_rate = payroll_rates_repository.get_excursion_role_rate(db, after_crew[employee])
+            new_rate = payroll_rates_repository.get_excursion_role_rate(
+                db, after_crew[employee], after["boat"]
+            )
             if new_rate:
                 entry["rate"] = new_rate
                 entry["state"] = "update"
                 messages.append(f"У {employee} изменилась роль — ставка {format_money(new_rate)} ₽/ч.")
+        elif employee in before_crew and employee in after_crew and before["boat"] != after["boat"]:
+            # The boat changed and the role's rate depends on the boat: follow
+            # it, unless the entry carries a hand-edited rate.
+            old_rate = payroll_rates_repository.get_excursion_role_rate(db, after_crew[employee], before["boat"])
+            new_rate = payroll_rates_repository.get_excursion_role_rate(db, after_crew[employee], after["boat"])
+            if new_rate and old_rate and new_rate != old_rate \
+                    and round(float(entry["rate"] or 0), 2) == round(float(old_rate), 2):
+                entry["rate"] = new_rate
+                entry["state"] = "update"
+                messages.append(f"У {employee} ставка по катеру: {format_money(new_rate)} ₽/ч.")
         if entry["state"] != "delete" and hours_before != hours_after \
                 and round(float(entry["quantity"] or 0), 2) == hours_before:
             entry["quantity"] = hours_after
@@ -5474,7 +5486,7 @@ def _sync_closed_schedule_item(db, item_id, before, after):
     for employee, role in after["crew"]:
         if employee in before_crew or employee in existing_names:
             continue
-        rate = payroll_rates_repository.get_excursion_role_rate(db, role)
+        rate = payroll_rates_repository.get_excursion_role_rate(db, role, after["boat"])
         if not rate:
             needs_review = True
         labor.append({
@@ -5576,6 +5588,108 @@ def _sync_closed_schedule_item(db, item_id, before, after):
     if messages:
         messages.insert(0, "Учёт рейса обновлён:" if trip is not None else "Зарплата за рейс обновлена:")
     return messages
+
+
+def _reprice_boat_rate_entries(db, role, since_date):
+    """Brings the already-accrued pay of the last days in line with the
+    role's per-boat rates (Зарплаты -> Ставки): for every closed boat trip
+    since `since_date`, each crew member in that role whose entry still
+    carries the role's general rate gets the boat's rate. A rate somebody
+    edited by hand is left alone. The trip's totals and the investor split
+    are recalculated like in the trip editor, and the minimum-shift top-ups
+    of the touched days are re-evaluated. Returns the text for the notice."""
+    items = db.execute(
+        "SELECT id, boat, accounting_trip_id FROM schedule_items "
+        "WHERE deleted_at IS NULL AND accounting_trip_id IS NOT NULL AND boat IS NOT NULL AND boat != '' "
+        "AND substr(starts_at, 1, 10) >= ? ORDER BY starts_at, id",
+        (since_date,),
+    ).fetchall()
+    updated_entries = updated_trips = manual = failed = 0
+    touched = []
+    touched_days = set()
+    for item in items:
+        crew = [
+            row["employee_name"] for row in db.execute(
+                "SELECT employee_name FROM schedule_assignments WHERE schedule_item_id = ? AND role = ?",
+                (item["id"], role),
+            ).fetchall()
+        ]
+        trip = db.execute("SELECT * FROM trips WHERE id = ?", (item["accounting_trip_id"],)).fetchone()
+        if not crew or trip is None:
+            continue
+        entries = [dict(row) for row in db.execute(
+            "SELECT e.* FROM trip_labor tl JOIN entries e ON e.id = tl.entry_id "
+            "WHERE tl.trip_id = ? ORDER BY e.id", (trip["id"],),
+        ).fetchall()]
+        general_rate = payroll_rates_repository.get_excursion_role_rate(db, role)
+        boat_rate = payroll_rates_repository.get_excursion_role_rate(db, role, item["boat"])
+        if not boat_rate or not general_rate or boat_rate == general_rate:
+            continue
+        changed = []
+        for entry in entries:
+            if entry["employee"] not in crew:
+                continue
+            if round(float(entry["rate"] or 0), 2) != round(float(general_rate), 2):
+                manual += 1
+                continue
+            entry["rate"] = boat_rate
+            changed.append(entry)
+        if not changed:
+            continue
+
+        form = MultiDict()
+        form["boat"] = trip["boat"]
+        form["trip_date"] = trip["trip_date"]
+        form["trip_time"] = trip["trip_time"]
+        form["sale_channel"] = trip["sale_channel"]
+        form["commission_pct"] = str(trip["commission_pct"])
+        form["revenue"] = str(trip["revenue"])
+        form["fuel_cost"] = str(trip["fuel_cost"])
+        form["mooring_cost"] = str(trip["mooring_cost"])
+        for entry in entries:
+            form.add("employee[]", entry["employee"])
+            form.add("work_type[]", entry["work_type"])
+            form.add("quantity[]", str(entry["quantity"]))
+            form.add("rate[]", str(entry["rate"]))
+        for expense in db.execute(
+            "SELECT description, amount FROM trip_expenses WHERE trip_id = ?", (trip["id"],)
+        ).fetchall():
+            form.add("expense_desc[]", expense["description"])
+            form.add("expense_amount[]", str(expense["amount"]))
+        errors, data = _process_trip_form(db, form, exclude_trip_id=trip["id"])
+        if errors:
+            failed += 1
+            continue
+        for entry in changed:
+            db.execute(
+                "UPDATE entries SET rate = ?, amount = ? WHERE id = ?",
+                (entry["rate"], round(float(entry["rate"]) * float(entry["quantity"]), 2), entry["id"]),
+            )
+            touched.append((entry["employee"], entry["work_date"]))
+            touched_days.add(entry["work_date"][:10])
+        _write_trip_fields(
+            db, trip["id"], data, trip["entry_id"],
+            commission_is_manual=trip["commission_is_manual"], needs_review=trip["needs_review"],
+        )
+        updated_entries += len(changed)
+        updated_trips += 1
+    db.commit()
+    if touched_days:
+        _apply_schedule_minimum_shift(db, min(touched_days), max(touched_days))
+
+    if not updated_entries:
+        text = "За последнюю неделю нечего пересчитывать."
+    else:
+        text = (
+            f"Пересчитаны начисления за последнюю неделю: {updated_entries} шт. в {updated_trips} рейсах."
+        )
+    if manual:
+        text += f" Начислений с вручную изменённой ставкой не трогали: {manual}."
+    if failed:
+        text += f" Не удалось пересчитать рейсов: {failed} — проверьте их в разделе «Рейсы и инвесторы»."
+    if any(_payroll_week_settled(db, employee, work_date) for employee, work_date in touched):
+        text += _SETTLED_WEEK_WARNING.rstrip()
+    return text
 
 
 @app.route("/trips/expense/add", methods=["POST"])
@@ -5996,7 +6110,7 @@ app.register_blueprint(
         create_trip_from_schedule=lambda db, payload, needs_review=False: (
             _create_trip_from_schedule_payload(db, payload, needs_review=needs_review)
         ),
-        get_role_rate=lambda db, role: payroll_rates_repository.get_excursion_role_rate(db, role),
+        get_role_rate=lambda db, role, boat=None: payroll_rates_repository.get_excursion_role_rate(db, role, boat),
         apply_minimum_shift=lambda db, start_date, end_date: (
             _apply_schedule_minimum_shift(db, start_date, end_date)
         ),
@@ -6068,6 +6182,11 @@ app.register_blueprint(
     create_payroll_rates_blueprint(
         get_db=get_db,
         access_required=admin_login_required,
+        list_boats=lambda db: [boat["name"] for boat in fleet_boats_for_db(db)],
+        # Deferred-name lambda: _reprice_boat_rate_entries is defined below.
+        recalculate_boat_rates=lambda db, role, since_date: (
+            _reprice_boat_rate_entries(db, role, since_date)
+        ),
     )
 )
 

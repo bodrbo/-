@@ -16,6 +16,11 @@ EXCURSION_ROLES = {
 # down to "one number per role" loses no information that existed before.
 # No seed for "guide" — deliberately left at 0 ("не задано") rather than
 # guessed; see modules/schedule/services.py's auto-close fallback.
+# Roles whose rate can differ per boat (Зарплаты -> Ставки -> the boat
+# distribution under the role). A boat without its own rate is paid the
+# role's general rate.
+BOAT_RATE_ROLES = ("guide_captain",)
+
 DEFAULT_EXCURSION_ROLE_RATES = {
     "captain": 1100,
     "guide_captain": 1870,
