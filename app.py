@@ -2713,6 +2713,11 @@ def init_db(db_path=None, include_bootstrap_data=True):
         # field when fiscalizing. NULL for payments recorded before this
         # column existed, or wherever the admin skipped picking one.
         conn.execute("ALTER TABLE tuning_payments ADD COLUMN payment_type TEXT")
+    if "is_correction" not in tuning_payment_cols:
+        # 1 = the payment really happened earlier (on paid_at) without a
+        # fiscal receipt, so its receipt goes to ModulKassa as a correction
+        # receipt (SALE_CORRECTION) instead of an ordinary SALE.
+        conn.execute("ALTER TABLE tuning_payments ADD COLUMN is_correction INTEGER NOT NULL DEFAULT 0")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS modulkassa_receipts (
@@ -7089,7 +7094,7 @@ def _modulkassa_contact_from_phone(phone):
     return phone or ""
 
 
-def _modulkassa_fiscalize_payment(db, order, payment_id, amount, payment_type):
+def _modulkassa_fiscalize_payment(db, order, payment_id, amount, payment_type, correction_date=None):
     """Best-effort — sends one order payment to ModulKassa as a single
     "Оплата по заказу №..." line (see chat: client pays for the whole
     project, not itemized work, so a lump line is what's meaningful here).
@@ -7104,16 +7109,29 @@ def _modulkassa_fiscalize_payment(db, order, payment_id, amount, payment_type):
         doc_num=f"order-{order['id']}-payment-{payment_id}",
         position_name=f"Оплата по заказу №{order['id']}",
         contact=_modulkassa_contact_from_phone(order["phone"]),
-        amount=amount, payment_type=payment_type,
+        amount=amount, payment_type=payment_type, correction_date=correction_date,
     )
 
 
+def _modulkassa_correction_info(correction_date):
+    """correctionInfo of a self-initiated correction receipt: the date the
+    payment was really taken is the "date of the corrected settlement"."""
+    day = dt.datetime.strptime(correction_date[:10], "%Y-%m-%d")
+    return {
+        "reason": "INDEPENDENT",
+        "documentDate": day.replace(tzinfo=RECEIPT_LOCAL_TZ).isoformat(timespec="seconds"),
+    }
+
+
 def _modulkassa_post_document(
-    db, table, payment_id, doc_num, position_name, contact, amount, payment_type
+    db, table, payment_id, doc_num, position_name, contact, amount, payment_type,
+    correction_date=None,
 ):
     """Queues one SALE document (a single service line) in ModulKassa and
     records it in `table` (modulkassa_receipts for tuning payments,
-    schedule_modulkassa_receipts for excursion payments). Never raises."""
+    schedule_modulkassa_receipts for excursion payments). With
+    correction_date (YYYY-MM-DD) it queues a SALE_CORRECTION document for a
+    payment taken on that day without a receipt. Never raises."""
     if not _modulkassa_configured():
         return
     doc_id = str(uuid.uuid4())
@@ -7121,7 +7139,7 @@ def _modulkassa_post_document(
     body = {
         "id": doc_id,
         "docNum": doc_num,
-        "docType": "SALE",
+        "docType": "SALE_CORRECTION" if correction_date else "SALE",
         "checkoutDateTime": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
         "email": contact,
         "printReceipt": False,
@@ -7136,6 +7154,8 @@ def _modulkassa_post_document(
         }],
         "moneyPositions": [{"paymentType": payment_type, "sum": amount}],
     }
+    if correction_date:
+        body["correctionInfo"] = _modulkassa_correction_info(correction_date)
     try:
         resp = requests.post(
             f"{MODULKASSA_BASE_URL}/v2/doc", json=body,
@@ -11455,6 +11475,8 @@ def edit_tuning_order(order_id):
             work_videos_by_item=work_videos_by_item,
             video_error=session.pop("tuning_video_error", None),
             video_notice=session.pop("tuning_video_notice", None),
+            payment_error=session.pop("tuning_payment_error", None),
+            today_iso=dt.date.today().isoformat(),
             assign_pending=_pop_assign_pending(order_id),
             assign_notice=session.pop("tuning_assign_notice", None),
             assign_error=session.pop("tuning_assign_error", None),
@@ -13061,17 +13083,43 @@ def add_tuning_payment(order_id):
         amount = float(amount_raw)
     except ValueError:
         amount = None
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    paid_at = now
+    correction_date = None
+    if request.form.get("is_correction"):
+        correction_date = _parse_correction_payment_date(request.form.get("payment_date"))
+        if correction_date is None:
+            session["tuning_payment_error"] = (
+                "Для чека коррекции укажите дату платежа — не позже сегодняшней."
+            )
+            return redirect(url_for("edit_tuning_order", order_id=order_id) + "#payments")
+        # The money was taken on that day, so the ledger (and project income)
+        # records it there, not on the day of the correction.
+        paid_at = f"{correction_date} 12:00"
     if amount is not None and amount > 0:
-        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
         cur = db.execute(
-            "INSERT INTO tuning_payments (order_id, amount, paid_at, created_at, project_id, payment_type) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (order_id, amount, now, now, _project_id_for_tuning_order(db, order_id), payment_type),
+            "INSERT INTO tuning_payments "
+            "(order_id, amount, paid_at, created_at, project_id, payment_type, is_correction) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (order_id, amount, paid_at, now, _project_id_for_tuning_order(db, order_id),
+             payment_type, 1 if correction_date else 0),
         )
         db.commit()
         if payment_type:
-            _modulkassa_fiscalize_payment(db, order, cur.lastrowid, amount, payment_type)
+            _modulkassa_fiscalize_payment(
+                db, order, cur.lastrowid, amount, payment_type, correction_date=correction_date
+            )
     return redirect(url_for("edit_tuning_order", order_id=order_id))
+
+
+def _parse_correction_payment_date(raw):
+    """YYYY-MM-DD of a correction receipt's payment, or None when it is
+    missing, malformed or in the future."""
+    try:
+        day = dt.datetime.strptime((raw or "").strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    return day.isoformat() if day <= dt.date.today() else None
 
 
 @app.route("/tuning/<int:order_id>/pay/<int:payment_id>/delete", methods=["POST"])
@@ -13115,7 +13163,10 @@ def retry_modulkassa_receipt(order_id, payment_id):
         "SELECT * FROM tuning_payments WHERE id = ? AND order_id = ?", (payment_id, order_id)
     ).fetchone()
     if order is not None and payment is not None and payment["payment_type"]:
-        _modulkassa_fiscalize_payment(db, order, payment_id, payment["amount"], payment["payment_type"])
+        _modulkassa_fiscalize_payment(
+            db, order, payment_id, payment["amount"], payment["payment_type"],
+            correction_date=payment["paid_at"][:10] if payment["is_correction"] else None,
+        )
     return redirect(url_for("edit_tuning_order", order_id=order_id))
 
 

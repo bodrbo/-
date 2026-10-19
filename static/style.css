@@ -4000,6 +4000,9 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .board-order-badges .status-awaiting-calc { margin-left: 0; }
 .tuning-orders-filter-checkbox { display: flex; align-items: center; gap: 8px; min-height: 40px; font-size: 13px; white-space: nowrap; }
 .tuning-orders-filter-form .tuning-orders-filter-checkbox input { width: auto; min-height: 0; margin: 0; }
+.entry-form .field-checkbox { flex: 0 0 auto; align-self: flex-end; }
+.entry-form .field-checkbox .checkbox-inline { display: flex; align-items: center; gap: 8px; min-height: 40px; font-size: 14px; white-space: nowrap; margin: 0; }
+.entry-form .field-checkbox .checkbox-inline input { width: auto; min-height: 0; margin: 0; }
 .status-badge.status-handed_over { background: rgba(47, 107, 79, 0.16); color: var(--success); }
 .status-badge.status-handed_over::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232f6b4f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 8.5l3 3 3-3M8 8.5l3 3 3-3'/%3E%3C/svg%3E");

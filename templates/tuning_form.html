@@ -665,10 +665,13 @@
     </div>
   </details>
 
-  <details class="panel collapsible-panel" open>
+  <details class="panel collapsible-panel" id="payments" open>
     <summary><span>Платежи по заказу</span><span class="chev" aria-hidden="true"></span></summary>
     <div class="collapsible-body">
-    <form action="{{ url_for('add_tuning_payment', order_id=edit_order.id) }}" method="post" class="entry-form">
+    {% if payment_error %}
+    <div class="alert" role="alert">{{ payment_error }}</div>
+    {% endif %}
+    <form action="{{ url_for('add_tuning_payment', order_id=edit_order.id) }}" method="post" class="entry-form" id="paymentForm">
       <div class="field field-narrow field-fixed">
         <label for="amount">Сумма платежа, ₽</label>
         <input type="text" inputmode="decimal" id="amount" name="amount" required>
@@ -681,13 +684,38 @@
           <option value="CARD">Безналичный</option>
         </select>
       </div>
+      <div class="field field-checkbox">
+        <label class="checkbox-inline" for="is_correction">
+          <input type="checkbox" id="is_correction" name="is_correction" value="1">
+          Чек коррекции
+        </label>
+      </div>
+      <div class="field field-narrow" id="paymentDateField" hidden>
+        <label for="payment_date">Дата платежа</label>
+        <input type="date" id="payment_date" name="payment_date" max="{{ today_iso }}">
+      </div>
       <div class="field field-submit">
         <button type="submit">Записать платёж</button>
       </div>
     </form>
     {% if modulkassa_configured %}
-    <p class="hint">Способ оплаты нужен, чтобы автоматически пробить кассовый чек через МодульКассу.</p>
+    <p class="hint">Способ оплаты нужен, чтобы автоматически пробить кассовый чек через МодульКассу. «Чек коррекции» — для платежа, который уже был принят, но чек по нему не пробили: платёж запишется указанной датой, а чек уйдёт как чек коррекции.</p>
     {% endif %}
+    <script>
+      (function () {
+        var box = document.getElementById('is_correction');
+        var field = document.getElementById('paymentDateField');
+        var date = document.getElementById('payment_date');
+        if (!box || !field || !date) return;
+        function sync() {
+          field.hidden = !box.checked;
+          date.required = box.checked;
+          if (!box.checked) date.value = '';
+        }
+        box.addEventListener('change', sync);
+        sync();
+      })();
+    </script>
 
     {% if payments %}
     <div class="table-scroll">
@@ -699,7 +727,7 @@
           {% for p in payments %}
           <tr>
             <td class="muted">{{ p.paid_at[:10]|ru_date }}</td>
-            <td class="amount">{{ p.amount|money }}</td>
+            <td class="amount">{{ p.amount|money }}{% if p.is_correction %} <span class="status-badge status-pending">Чек коррекции</span>{% endif %}</td>
             <td class="muted">{{ 'Наличные' if p.payment_type == 'CASH' else ('Безналичный' if p.payment_type == 'CARD' else ('Онлайн (ЮKassa)' if p.is_online else '—')) }}</td>
             <td>
               {% if p.receipt_status %}
