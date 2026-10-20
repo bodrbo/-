@@ -238,11 +238,72 @@ def _version_static_assets(endpoint, values):
     except OSError:
         pass
 
-# Signs the investor-login session cookie. Set SECRET_KEY as a real
-# environment variable in production so sessions survive restarts/deploys —
-# without it, a fresh random key is generated each process start (safe,
-# just logs everyone out on every restart/redeploy).
-app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+def _resolve_secret_key(env_value, key_path):
+    """Key that signs the session cookies. SECRET_KEY from the environment
+    when set; otherwise a random key kept in `key_path` so it survives
+    restarts and is shared by every worker process (a fresh random key per
+    process would log everybody out on each restart and whenever another
+    worker answered the request). Falls back to a per-process key when the
+    file can't be read or written."""
+    if env_value:
+        return env_value
+    try:
+        with open(key_path, "r", encoding="utf-8") as handle:
+            stored = handle.read().strip()
+        if len(stored) >= 32:
+            return stored
+    except OSError:
+        pass
+    generated = secrets.token_hex(32)
+    try:
+        # O_EXCL so two workers starting together don't overwrite each other's key.
+        descriptor = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(generated)
+        return generated
+    except FileExistsError:
+        try:
+            with open(key_path, "r", encoding="utf-8") as handle:
+                stored = handle.read().strip()
+            if len(stored) >= 32:
+                return stored
+        except OSError:
+            pass
+    except OSError:
+        pass
+    return generated
+
+
+# Signs the session cookies (admin, employee and investor logins). Set
+# SECRET_KEY as a real environment variable in production; without it a key
+# is generated once and kept in .secret_key next to the database.
+app.secret_key = _resolve_secret_key(
+    os.environ.get("SECRET_KEY"),
+    os.path.join(
+        os.path.dirname(os.path.abspath(os.environ.get("WORKHOURS_DB_PATH") or __file__)),
+        ".secret_key",
+    ),
+)
+
+# A signed-in person stays signed in: the login cookie is persistent (it
+# survives closing the browser or the installed app) and its lifetime is
+# renewed on every visit, so only SESSION_LIFETIME_DAYS of not using the
+# site (30 by default) ends it. Logging out ends it at once.
+SESSION_LIFETIME_DAYS = max(1, min(365, int(os.environ.get("SESSION_LIFETIME_DAYS", "30") or 30)))
+SESSION_AUTH_KEYS = ("admin_id", "team_id", "investor_id")
+app.config.update(
+    PERMANENT_SESSION_LIFETIME=dt.timedelta(days=SESSION_LIFETIME_DAYS),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "").lower() in ("1", "true", "yes"),
+    SESSION_REFRESH_EACH_REQUEST=True,
+)
+
+
+@app.before_request
+def _keep_logged_in_sessions():
+    if not session.get("_permanent") and any(session.get(key) for key in SESSION_AUTH_KEYS):
+        session.permanent = True
 
 DB_PATH = os.environ.get("WORKHOURS_DB_PATH") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "workhours.db"
@@ -4377,6 +4438,7 @@ def _ensure_employee_admin_account(db, team_account):
 
 def _start_admin_session(account):
     session.clear()
+    session.permanent = True
     session["admin_id"] = account["id"]
     session["admin_name"] = account["admin_name"]
     if account["employee_id"] is not None:
@@ -17775,6 +17837,7 @@ def investor_login():
         ), 401
 
     session.clear()
+    session.permanent = True
     session["investor_id"] = row["id"]
     session["investor_name"] = row["investor_name"]
     return redirect(url_for("investor_dashboard"))
@@ -17954,6 +18017,7 @@ def team_login():
         return redirect(url_for("index"))
 
     session.clear()
+    session.permanent = True
     session["team_id"] = row["id"]
     session["team_employee_name"] = row["employee_name"]
     session["team_username"] = row["username"]
