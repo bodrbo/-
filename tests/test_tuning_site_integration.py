@@ -36,6 +36,10 @@ class TuningSiteIntegrationTests(unittest.TestCase):
                 "tilda_webhook_log",
             ):
                 db.execute(f"DELETE FROM {table}")
+            db.execute(
+                "DELETE FROM tuning_boat_profiles "
+                "WHERE model_key LIKE 'integration test %'"
+            )
             db.commit()
 
     @staticmethod
@@ -78,6 +82,116 @@ class TuningSiteIntegrationTests(unittest.TestCase):
         self.assertEqual(wrong.status_code, 401)
         self.assertEqual(wrong.headers["WWW-Authenticate"], "Bearer")
         self.assertTrue(wrong.is_json)
+
+    def test_boat_catalog_requires_bearer_and_returns_only_boats(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO tuning_boat_profiles "
+                "(model_key, model_name, equipment_type, brand, created_at, updated_at) "
+                "VALUES ('integration test boat', 'Bayliner 192', 'boat', 'Bayliner', "
+                "'2026-10-20 10:00', '2026-10-20 10:00')"
+            )
+            db.execute(
+                "INSERT INTO tuning_boat_profiles "
+                "(model_key, model_name, equipment_type, brand, created_at, updated_at) "
+                "VALUES ('integration test motor', 'Bayliner Motor', 'motor', 'Bayliner', "
+                "'2026-10-20 10:00', '2026-10-20 10:00')"
+            )
+            db.commit()
+
+        unauthorized = self.client.get(
+            "/api/integrations/tuning-boat-catalog?q=Bayliner"
+        )
+        response = self.client.get(
+            "/api/integrations/tuning-boat-catalog?q=Bayliner&limit=8",
+            headers=self.auth(),
+        )
+
+        self.assertEqual(unauthorized.status_code, 401)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["model_name"] for item in response.get_json()["items"]],
+            ["Bayliner 192"],
+        )
+
+    def test_boat_catalog_fuzzy_search_transliterates_cyrillic(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            profile_id = db.execute(
+                "INSERT INTO tuning_boat_profiles "
+                "(model_key, model_name, equipment_type, brand, created_at, updated_at) "
+                "VALUES ('integration test bayliner', 'Bayliner 192', 'boat', 'Bayliner', "
+                "'2026-10-20 10:00', '2026-10-20 10:00')"
+            ).lastrowid
+            db.execute(
+                "INSERT INTO tuning_boat_profiles "
+                "(model_key, model_name, equipment_type, brand, created_at, updated_at) "
+                "VALUES ('integration test axopar', 'Axopar 28', 'boat', 'Axopar', "
+                "'2026-10-20 10:00', '2026-10-20 10:00')"
+            )
+            db.commit()
+
+        response = self.client.get(
+            "/api/integrations/tuning-boat-catalog?q=Байэланер&limit=8",
+            headers=self.auth(),
+        )
+        items = response.get_json()["items"]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(items)
+        self.assertEqual(items[0]["id"], profile_id)
+        self.assertEqual(items[0]["model_name"], "Bayliner 192")
+
+    def test_valid_boat_profile_id_replaces_free_text_with_canonical_model(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            profile_id = db.execute(
+                "INSERT INTO tuning_boat_profiles "
+                "(model_key, model_name, equipment_type, brand, created_at, updated_at) "
+                "VALUES ('integration test canonical', 'Bayliner 192', 'boat', 'Bayliner', "
+                "'2026-10-20 10:00', '2026-10-20 10:00')"
+            ).lastrowid
+            db.commit()
+
+        response = self.client.post(
+            "/api/integrations/tuning-leads",
+            json=self.payload(
+                boat_profile_id=profile_id,
+                boat_model="Байлайнер пользователя",
+            ),
+            headers=self.auth(),
+        )
+
+        with application_module.app.app_context():
+            order = application_module.get_db().execute(
+                "SELECT boat_model FROM tuning_orders WHERE id = ?",
+                (response.get_json()["order_id"],),
+            ).fetchone()
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(order["boat_model"], "Bayliner 192")
+
+    def test_invalid_or_motor_profile_id_is_rejected(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            motor_id = db.execute(
+                "INSERT INTO tuning_boat_profiles "
+                "(model_key, model_name, equipment_type, brand, created_at, updated_at) "
+                "VALUES ('integration test motor id', 'Yamaha F150', 'motor', 'Yamaha', "
+                "'2026-10-20 10:00', '2026-10-20 10:00')"
+            ).lastrowid
+            db.commit()
+
+        for profile_id in (motor_id, 99999999, "not-an-id"):
+            with self.subTest(profile_id=profile_id):
+                response = self.client.post(
+                    "/api/integrations/tuning-leads",
+                    json=self.payload(boat_profile_id=profile_id),
+                    headers=self.auth(),
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json()["error"], "invalid_payload")
 
     def test_success_creates_client_order_project_and_note(self):
         response = self.client.post(

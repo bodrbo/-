@@ -27,6 +27,7 @@ import sqlite3
 import calendar
 import datetime as dt
 import threading
+from difflib import SequenceMatcher
 from functools import wraps
 from concurrent.futures import ThreadPoolExecutor
 
@@ -11217,6 +11218,15 @@ _TUNING_LEAD_TEXT_LIMITS = {
 }
 _TUNING_LEAD_REQUIRED_FIELDS = ("request_id", "name", "phone")
 
+_TUNING_CYRILLIC_TRANSLITERATION = str.maketrans({
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e",
+    "ё": "e", "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k",
+    "л": "l", "м": "m", "н": "n", "о": "o", "п": "p", "р": "r",
+    "с": "s", "т": "t", "у": "u", "ф": "f", "х": "h", "ц": "ts",
+    "ч": "ch", "ш": "sh", "щ": "sch", "ъ": "", "ы": "y", "ь": "",
+    "э": "e", "ю": "yu", "я": "ya",
+})
+
 
 def _tuning_lead_json_error(status, error, message):
     return jsonify(ok=False, error=error, message=message), status
@@ -11240,6 +11250,20 @@ def _validate_tuning_lead_payload(payload):
         if len(value) > limit:
             return None, f"Поле «{field}» длиннее допустимых {limit} символов."
         data[field] = value
+
+    raw_profile_id = payload.get("boat_profile_id")
+    if raw_profile_id in (None, ""):
+        data["boat_profile_id"] = None
+    else:
+        if isinstance(raw_profile_id, bool):
+            return None, "Поле «boat_profile_id» должно быть целым числом."
+        try:
+            profile_id = int(raw_profile_id)
+        except (TypeError, ValueError):
+            return None, "Поле «boat_profile_id» должно быть целым числом."
+        if profile_id <= 0 or str(profile_id) != str(raw_profile_id).strip():
+            return None, "Поле «boat_profile_id» должно быть положительным целым числом."
+        data["boat_profile_id"] = profile_id
     return data, None
 
 
@@ -11254,9 +11278,7 @@ def _tuning_site_token_is_valid(authorization):
     )
 
 
-@app.route("/api/integrations/tuning-leads", methods=["POST"])
-def tuning_site_lead_webhook():
-    """Create one tuning-center lead from tuning.bodrbo.ru JSON."""
+def _tuning_site_authorization_error():
     if not TUNING_SITE_WEBHOOK_SECRET:
         return _tuning_lead_json_error(
             503,
@@ -11269,6 +11291,95 @@ def tuning_site_lead_webhook():
         )
         response.headers["WWW-Authenticate"] = "Bearer"
         return response, status
+    return None
+
+
+def _tuning_catalog_search_key(value):
+    transliterated = (value or "").strip().lower().translate(
+        _TUNING_CYRILLIC_TRANSLITERATION
+    )
+    return " ".join(
+        "".join(char if char.isalnum() else " " for char in transliterated).split()
+    )
+
+
+def _tuning_boat_catalog_rank(query_key, profile):
+    model_key = _tuning_catalog_search_key(profile["model_name"])
+    brand_key = _tuning_catalog_search_key(profile["brand"] or "")
+    searchable = " ".join(part for part in (brand_key, model_key) if part)
+    if not query_key:
+        return (0, 0.0)
+    if model_key == query_key:
+        return (5, 1.0)
+    if model_key.startswith(query_key) or brand_key.startswith(query_key):
+        return (4, 1.0)
+    if query_key in model_key or query_key in brand_key:
+        return (3, len(query_key) / max(len(searchable), 1))
+    ratios = [
+        SequenceMatcher(None, query_key, candidate).ratio()
+        for candidate in (model_key, brand_key, *searchable.split())
+        if candidate
+    ]
+    ratio = max(ratios, default=0.0)
+    return (2 if ratio >= 0.62 else 0, ratio)
+
+
+@app.route("/api/integrations/tuning-boat-catalog", methods=["GET"])
+def tuning_site_boat_catalog():
+    """Return a small, ranked boat-only catalog for bodrbo-tuning.ru."""
+    authorization_error = _tuning_site_authorization_error()
+    if authorization_error is not None:
+        return authorization_error
+
+    query = request.args.get("q", "").strip()
+    if len(query) > 200:
+        return _tuning_lead_json_error(
+            400, "invalid_query", "Параметр «q» длиннее допустимых 200 символов."
+        )
+    try:
+        limit = int(request.args.get("limit", "8"))
+    except (TypeError, ValueError):
+        return _tuning_lead_json_error(
+            400, "invalid_query", "Параметр «limit» должен быть целым числом."
+        )
+    if limit < 1 or limit > 20:
+        return _tuning_lead_json_error(
+            400, "invalid_query", "Параметр «limit» должен быть от 1 до 20."
+        )
+
+    profiles = get_db().execute(
+        "SELECT id, model_name, brand FROM tuning_boat_profiles "
+        "WHERE equipment_type = 'boat' AND TRIM(model_name) != ''"
+    ).fetchall()
+    query_key = _tuning_catalog_search_key(query)
+    ranked = []
+    for profile in profiles:
+        rank_group, ratio = _tuning_boat_catalog_rank(query_key, profile)
+        if query_key and rank_group == 0:
+            continue
+        ranked.append((rank_group, ratio, profile))
+    ranked.sort(
+        key=lambda item: (
+            -item[0], -item[1], item[2]["model_name"].casefold(), item[2]["id"]
+        )
+    )
+    items = [
+        {
+            "id": profile["id"],
+            "model_name": profile["model_name"],
+            **({"brand": profile["brand"]} if profile["brand"] else {}),
+        }
+        for _, _, profile in ranked[:limit]
+    ]
+    return jsonify(ok=True, items=items), 200
+
+
+@app.route("/api/integrations/tuning-leads", methods=["POST"])
+def tuning_site_lead_webhook():
+    """Create one tuning-center lead from tuning.bodrbo.ru JSON."""
+    authorization_error = _tuning_site_authorization_error()
+    if authorization_error is not None:
+        return authorization_error
 
     payload = request.get_json(silent=True) if request.is_json else None
     data, validation_error = _validate_tuning_lead_payload(payload)
@@ -11278,6 +11389,19 @@ def tuning_site_lead_webhook():
         )
 
     db = get_db()
+    if data["boat_profile_id"] is not None:
+        profile = db.execute(
+            "SELECT model_name FROM tuning_boat_profiles "
+            "WHERE id = ? AND equipment_type = 'boat'",
+            (data["boat_profile_id"],),
+        ).fetchone()
+        if profile is None:
+            return _tuning_lead_json_error(
+                400,
+                "invalid_payload",
+                "Указанная модель лодки отсутствует в каталоге.",
+            )
+        data["boat_model"] = profile["model_name"]
     source_ref = f"tuning_site:{data['request_id']}"
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     order_date = _external_order_date(data["submitted_at"], now[:10])
