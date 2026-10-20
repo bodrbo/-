@@ -14260,7 +14260,8 @@ def _render_client_dashboard(
     visible_orders = orders
     if is_tuning_partner:
         for order in orders:
-            partner_request_counts[order["partner_request_direction"]] += 1
+            if order["status"] != "cancelled":
+                partner_request_counts[order["partner_request_direction"]] += 1
         requested_view = request.args.get("requests", "").strip()
         if requested_view in partner_request_counts:
             partner_request_view = requested_view

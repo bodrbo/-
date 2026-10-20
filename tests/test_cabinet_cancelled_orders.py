@@ -30,7 +30,8 @@ class CabinetCancelledOrdersTests(unittest.TestCase):
     def cleanup(self, db):
         for row in db.execute("SELECT id FROM clients WHERE token = ?", (self.TOKEN,)).fetchall():
             order_ids = [r["id"] for r in db.execute(
-                "SELECT id FROM tuning_orders WHERE client_id = ?", (row["id"],)).fetchall()]
+                "SELECT id FROM tuning_orders WHERE client_id = ? OR partner_id = ?",
+                (row["id"], row["id"])).fetchall()]
             for order_id in order_ids:
                 db.execute("DELETE FROM partner_commissions WHERE order_id = ?", (order_id,))
                 db.execute("DELETE FROM tuning_payments WHERE order_id = ?", (order_id,))
@@ -117,6 +118,24 @@ class CabinetCancelledOrdersTests(unittest.TestCase):
         self.add_order(partner_id, "cancelled", 6000, 0)
         page = self.client.get(f"/admin/clients/{partner_id}/cabinet?section=tuning").get_data(as_text=True)
         self.assert_stats(page, 1, "10 000", "0", "10 000")
+
+    def test_the_incoming_and_outgoing_counters_skip_cancelled_orders(self):
+        partner_id = self.make_client("partner")
+        self.add_order(partner_id, "in_progress", 1000, 0)
+        self.add_order(partner_id, "cancelled", 1000, 0)
+        self.add_order(partner_id, "cancelled", 1000, 0)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            incoming = self.add_order(partner_id, "approved", 1000, 0)
+            cancelled_incoming = self.add_order(partner_id, "cancelled", 1000, 0)
+            for order_id in (incoming, cancelled_incoming):
+                db.execute(
+                    "UPDATE tuning_orders SET source = ?, partner_id = ?, client_id = NULL WHERE id = ?",
+                    (application_module.SUBCONTRACT_REQUEST_SOURCE, partner_id, order_id))
+            db.commit()
+        page = self.client.get(f"/admin/clients/{partner_id}/cabinet?section=tuning").get_data(as_text=True)
+        self.assertRegex(page, r"Входящие заявки</span><strong>1</strong>")
+        self.assertRegex(page, r"Исходящие заявки</span><strong>1</strong>")
 
     def test_a_commission_on_a_cancelled_order_is_not_shown_in_the_partner_income(self):
         partner_id = self.make_client("partner")
