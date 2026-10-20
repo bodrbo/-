@@ -14040,7 +14040,8 @@ def _partner_income_summary(db, partner_id, partner_profile):
     rows = db.execute(
         "SELECT pc.*, o.equipment_type, o.boat_model, o.motor_model, o.status, o.order_date "
         "FROM partner_commissions pc JOIN tuning_orders o ON o.id = pc.order_id "
-        "WHERE pc.partner_id = ? ORDER BY pc.recorded_at DESC, pc.id DESC",
+        "WHERE pc.partner_id = ? AND o.status != 'cancelled' "
+        "ORDER BY pc.recorded_at DESC, pc.id DESC",
         (partner_id,),
     ).fetchall()
     entries = []
@@ -14147,6 +14148,9 @@ def _render_client_dashboard(
     sales_channel_labels = sales_channel_repository.label_map(db)
     paid_total = 0.0
     remaining_total = 0.0
+    # A cancelled order stays in the list but is left out of the cabinet's
+    # statistics (count, sums, paid, still to pay).
+    counted_orders = [o for o in order_rows if o["status"] != "cancelled"]
     for o in order_rows:
         if is_admin_view:
             payments, paid_amount, remaining = _order_payment_totals(
@@ -14246,10 +14250,11 @@ def _render_client_dashboard(
             order["payments"] = payments
             order["internal_notes"] = _order_notes(db, o["id"])
         orders.append(order)
-        paid_total += paid_amount
-        remaining_total += remaining
+        if o["status"] != "cancelled":
+            paid_total += paid_amount
+            remaining_total += remaining
 
-    grand_total = sum(o["total"] for o in order_rows)
+    grand_total = sum(o["total"] for o in counted_orders)
     partner_request_view = "outgoing"
     partner_request_counts = {"incoming": 0, "outgoing": 0}
     visible_orders = orders
@@ -14291,6 +14296,7 @@ def _render_client_dashboard(
         "client_dashboard.html", client=client, orders=orders,
         partner_income=partner_income,
         visible_orders=visible_orders, grand_total=grand_total,
+        orders_count=len(counted_orders),
         paid_total=paid_total, remaining_total=remaining_total,
         primary_equipment=(
             tuning_equipment_label(orders[0])
