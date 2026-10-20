@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Инвентаризация — Снабжение</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<meta name="theme-color" content="#3498db">
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Боцман">
+</head>
+<body>
+
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100">
+      <g fill="var(--brass)">
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/>
+      </g>
+      <g fill="none" stroke="var(--brass)" stroke-width="2.6" stroke-linecap="round" opacity="0.85">
+        <path d="M55 15A24 24 0 0 1 62 22" transform="rotate(-6 50 50)"/>
+        <path d="M18 60A24 24 0 0 1 15 51" transform="rotate(4 50 50)"/>
+      </g>
+      <circle cx="50" cy="50" r="15" fill="none" stroke="var(--ink)" stroke-width="4"/>
+      <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
+    </svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="topbar-top-row">
+      <div class="brand">{% include '_topbar_brand.html' %}</div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 5.5h14M3 10h14M3 14.5h14"/>
+        </svg>
+      </button>
+    </div>
+    {% include '_admin_main_nav.html' %}
+    <div class="title-block">
+      <span class="kicker">Снабжение</span>
+      <h1>Инвентаризация{% if warehouse %} · {{ warehouse.name }}{% endif %}</h1>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
+        <svg class="push-toggle-off" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8z"/>
+          <path d="M8.3 16a1.7 1.7 0 003.4 0"/>
+        </svg>
+        <svg class="push-toggle-on" viewBox="0 0 20 20" fill="currentColor" stroke="none">
+          <path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8z"/>
+        </svg>
+      </button>
+      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout">
+        <button type="submit">Выйти</button>
+      </form>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <nav class="sub-tabs">
+    <a href="{{ url_for('supply_warehouses') }}" class="{{ 'active' if sub_page == 'warehouses' }}">Склады</a>
+    <a href="{{ url_for('supply_catalog') }}" class="{{ 'active' if sub_page == 'catalog' }}">Каталог</a>
+    <a href="{{ url_for('supply_lockers') }}" class="{{ 'active' if sub_page == 'lockers' }}">Постаматы</a>
+    <a href="{{ url_for('supply_inventory') }}" class="{{ 'active' if sub_page == 'inventory' }}">Инвентаризация</a>
+    <a href="{{ url_for('supply_requests') }}" class="{{ 'active' if sub_page == 'requests' }}">Заявки на снабжение</a>
+  </nav>
+
+  {% if not warehouse %}
+  <section class="panel">
+    <h2>Выберите склад</h2>
+    <p class="hint">Система показывает товары склада по одному, как карточки: свайп вправо сохраняет данные карточки, свайп влево пропускает её. Сначала идут карточки, которые ещё не проверяли или проверяли давно, в порядке расположения на полках.</p>
+    {% if warehouses %}
+    <div class="inv-warehouses">
+      {% for w in warehouses %}
+      <a class="inv-warehouse{{ ' is-empty' if not w.position_count }}" href="{{ url_for('supply_inventory_warehouse', warehouse_id=w.id) }}">
+        <strong>{{ w.name }}</strong>
+        <span class="muted">{{ w.address or 'адрес не указан' }}</span>
+        <span class="inv-warehouse-stats">
+          <span>Позиций: <b>{{ w.position_count }}</b></span>
+          <span>Не проверено: <b>{{ w.unchecked_count }}</b></span>
+          <span>Последняя проверка: <b>{{ w.last_checked[:10]|ru_date if w.last_checked else '—' }}</b></span>
+        </span>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+      {% include '_empty_state_logo.html' %}
+      <div class="t">Складов пока нет</div>
+      <div class="s">Добавьте склад на вкладке «Склады».</div>
+    </div>
+    {% endif %}
+  </section>
+  {% else %}
+  <a href="{{ url_for('supply_inventory') }}" class="term" style="display:inline-block; margin-bottom:14px;">← Назад к выбору склада</a>
+
+  <section class="inv-stage" id="invStage" data-save-url="{{ url_for('save_supply_inventory_card', warehouse_id=warehouse.id) }}" hidden>
+    <div class="inv-progress" id="invProgress" aria-live="polite"></div>
+    <div class="inv-deck" id="invDeck"></div>
+    <div class="inv-actions" id="invActions">
+      <button type="button" class="inv-btn inv-btn-skip" id="invSkip" aria-label="Пропустить карточку">
+        <span aria-hidden="true">✕</span> Пропустить
+      </button>
+      <button type="button" class="inv-btn inv-btn-save" id="invSave" aria-label="Сохранить карточку">
+        Сохранить <span aria-hidden="true">✓</span>
+      </button>
+    </div>
+    <p class="hint inv-hint">Свайп влево — пропустить, вправо — сохранить. На компьютере можно перетаскивать карточку мышью или нажимать ← и →.</p>
+  </section>
+
+  <section class="panel inv-done" id="invDone" hidden>
+    <h2>Готово</h2>
+    <p id="invDoneText"></p>
+    <div class="inv-done-actions">
+      <button type="button" id="invRetrySkipped" hidden>Пройти пропущенные</button>
+      <a class="btn-secondary" href="{{ url_for('supply_inventory_warehouse', warehouse_id=warehouse.id) }}" id="invReload" hidden>Продолжить проверку</a>
+      <a class="btn-secondary" href="{{ url_for('supply_inventory') }}">К выбору склада</a>
+    </div>
+  </section>
+
+  <section class="panel inv-empty" id="invEmpty" hidden>
+    <div class="empty-state">
+      {% include '_empty_state_logo.html' %}
+      <div class="t">На складе нет позиций для проверки</div>
+      <div class="s">Оприходуйте товары через страницу товара в каталоге.</div>
+    </div>
+  </section>
+
+  <script id="invData" type="application/json">{{ cards|tojson }}</script>
+  <script>
+  (function () {
+    var stage = document.getElementById('invStage');
+    var deck = document.getElementById('invDeck');
+    var progress = document.getElementById('invProgress');
+    var done = document.getElementById('invDone');
+    var empty = document.getElementById('invEmpty');
+    var saveUrl = stage.dataset.saveUrl;
+    var queue = JSON.parse(document.getElementById('invData').textContent);
+    var totalPositions = {{ total_positions|tojson }};
+    var batchTotal = queue.length;
+    var skipped = [];
+    var saved = 0;
+    var index = 0;
+    var busy = false;
+    var card = null;
+    var photoFile = null;
+
+    function fmt(value) {
+      var number = Number(value);
+      return isNaN(number) ? '' : String(Math.round(number * 1000) / 1000).replace('.', ',');
+    }
+    function esc(text) {
+      var div = document.createElement('div');
+      div.textContent = text == null ? '' : String(text);
+      return div.innerHTML;
+    }
+
+    function updateProgress() {
+      progress.innerHTML = 'Карточка <b>' + Math.min(index + 1, batchTotal) + '</b> из <b>' + batchTotal +
+        '</b> · сохранено <b>' + saved + '</b> · пропущено <b>' + skipped.length + '</b>';
+    }
+
+    function render() {
+      deck.innerHTML = '';
+      card = null;
+      photoFile = null;
+      if (index >= queue.length) { finish(); return; }
+      var data = queue[index];
+      stage.hidden = false;
+      var el = document.createElement('article');
+      el.className = 'inv-card';
+      el.innerHTML =
+        '<div class="inv-stamp inv-stamp-save" aria-hidden="true">СОХРАНИТЬ</div>' +
+        '<div class="inv-stamp inv-stamp-skip" aria-hidden="true">ПРОПУСК</div>' +
+        '<div class="inv-photo">' +
+          (data.photo ? '<img src="' + esc(data.photo) + '" alt="" draggable="false" referrerpolicy="no-referrer">' :
+            '<span class="inv-photo-empty">Нет фото</span>') +
+        '</div>' +
+        '<div class="inv-photo-tools"><label class="inv-photo-btn">Заменить фото' +
+          '<input type="file" accept="image/*" data-field="photo" hidden></label></div>' +
+        '<div class="inv-fields">' +
+          '<label class="inv-field inv-field-wide"><span>Название</span><input type="text" data-field="name" maxlength="255" value="' + esc(data.name) + '"></label>' +
+          '<label class="inv-field"><span>Артикул</span><input type="text" data-field="sku" maxlength="120" value="' + esc(data.sku) + '"></label>' +
+          '<label class="inv-field"><span>Остаток <em>(расчётный: ' + fmt(data.quantity) + ')</em></span>' +
+            '<input type="text" inputmode="decimal" data-field="quantity" value="' + fmt(data.quantity) + '"></label>' +
+          '<fieldset class="inv-address"><legend>Адрес на складе</legend>' +
+            '<label class="inv-field"><span>Зона</span><input type="text" data-field="zone" maxlength="60" value="' + esc(data.zone) + '"></label>' +
+            '<label class="inv-field"><span>Стеллаж</span><input type="text" data-field="rack" maxlength="60" value="' + esc(data.rack) + '"></label>' +
+            '<label class="inv-field"><span>Место</span><input type="text" data-field="spot" maxlength="60" value="' + esc(data.spot) + '"></label>' +
+          '</fieldset>' +
+        '</div>' +
+        '<div class="alert inv-error" role="alert" hidden></div>';
+      deck.appendChild(el);
+      card = el;
+      deck.classList.toggle('has-more', index + 1 < queue.length);
+      el.querySelector('input[data-field="photo"]').addEventListener('change', function (event) {
+        var file = event.target.files && event.target.files[0];
+        if (!file) return;
+        photoFile = file;
+        var holder = el.querySelector('.inv-photo');
+        holder.innerHTML = '<img alt="" draggable="false">';
+        holder.firstChild.src = URL.createObjectURL(file);
+      });
+      el.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' && event.target.tagName === 'INPUT' && event.target.type === 'text') {
+          event.preventDefault();
+          saveCard();
+        }
+      });
+      attachDrag(el);
+      updateProgress();
+    }
+
+    function field(name) { return card.querySelector('[data-field="' + name + '"]'); }
+
+    function showError(message) {
+      var box = card.querySelector('.inv-error');
+      box.textContent = message;
+      box.hidden = false;
+    }
+
+    function setStamps(dx) {
+      var progressRatio = Math.min(Math.abs(dx) / 110, 1);
+      card.querySelector('.inv-stamp-save').style.opacity = dx > 0 ? progressRatio : 0;
+      card.querySelector('.inv-stamp-skip').style.opacity = dx < 0 ? progressRatio : 0;
+    }
+
+    function place(dx, dy, animate) {
+      card.style.transition = animate ? 'transform .28s ease, opacity .28s ease' : 'none';
+      card.style.transform = 'translate(' + dx + 'px,' + dy * 0.25 + 'px) rotate(' + (dx / 22) + 'deg)';
+    }
+
+    function flyAway(direction, then) {
+      var width = Math.max(window.innerWidth, 600);
+      place(direction * width, 0, true);
+      card.style.opacity = '0';
+      setTimeout(then, 260);
+    }
+
+    function skipCard() {
+      if (busy || !card) return;
+      busy = true;
+      skipped.push(queue[index]);
+      flyAway(-1, function () { index += 1; busy = false; render(); });
+    }
+
+    function saveCard() {
+      if (busy || !card) return;
+      busy = true;
+      card.classList.add('is-saving');
+      place(40, 0, true);
+      setStamps(120);
+      card.querySelector('.inv-error').hidden = true;
+      var data = queue[index];
+      var form = new FormData();
+      form.append('stock_id', data.stock_id);
+      form.append('expected', data.quantity);
+      ['name', 'sku', 'quantity', 'zone', 'rack', 'spot'].forEach(function (name) {
+        form.append(name, field(name).value);
+      });
+      if (photoFile) form.append('photo', photoFile);
+      fetch(saveUrl, {method: 'POST', body: form, headers: {'X-Requested-With': 'XMLHttpRequest'}, credentials: 'same-origin'})
+        .then(function (response) {
+          return response.json().then(function (body) { return {ok: response.ok && body.ok, body: body}; });
+        })
+        .then(function (result) {
+          if (!result.ok) { throw new Error(result.body.message || 'Не удалось сохранить.'); }
+          saved += 1;
+          flyAway(1, function () { index += 1; busy = false; render(); });
+        })
+        .catch(function (error) {
+          card.classList.remove('is-saving');
+          place(0, 0, true);
+          setStamps(0);
+          showError(error && error.message ? error.message : 'Не удалось сохранить — проверьте соединение.');
+          busy = false;
+        });
+    }
+
+    function attachDrag(el) {
+      var startX = 0, startY = 0, dragging = false, pointerId = null;
+      el.addEventListener('pointerdown', function (event) {
+        if (busy) return;
+        if (event.target.closest('input, label, button, a, textarea, select, fieldset')) return;
+        dragging = true; pointerId = event.pointerId;
+        startX = event.clientX; startY = event.clientY;
+        try { el.setPointerCapture(pointerId); } catch (e) {}
+      });
+      el.addEventListener('pointermove', function (event) {
+        if (!dragging) return;
+        var dx = event.clientX - startX, dy = event.clientY - startY;
+        place(dx, dy, false);
+        setStamps(dx);
+      });
+      function release(event) {
+        if (!dragging) return;
+        dragging = false;
+        var dx = event.clientX - startX;
+        if (dx > 110) { saveCard(); }
+        else if (dx < -110) { skipCard(); }
+        else { place(0, 0, true); setStamps(0); }
+      }
+      el.addEventListener('pointerup', release);
+      el.addEventListener('pointercancel', function () {
+        if (dragging) { dragging = false; place(0, 0, true); setStamps(0); }
+      });
+    }
+
+    function finish() {
+      stage.hidden = true;
+      if (!batchTotal) { empty.hidden = false; return; }
+      done.hidden = false;
+      var text = 'Сохранено карточек: ' + saved + '. Пропущено: ' + skipped.length + '.';
+      if (totalPositions > batchTotal) {
+        text += ' Проверено ' + batchTotal + ' из ' + totalPositions + ' позиций склада — остальные откроются при следующем заходе.';
+        document.getElementById('invReload').hidden = false;
+      }
+      document.getElementById('invDoneText').textContent = text;
+      document.getElementById('invRetrySkipped').hidden = !skipped.length;
+    }
+
+    document.getElementById('invSkip').addEventListener('click', skipCard);
+    document.getElementById('invSave').addEventListener('click', saveCard);
+    document.getElementById('invRetrySkipped').addEventListener('click', function () {
+      queue = skipped; skipped = []; index = 0; batchTotal = queue.length; saved = 0;
+      done.hidden = true;
+      render();
+    });
+    document.addEventListener('keydown', function (event) {
+      if (!card || busy || event.target.closest('input, textarea, select')) return;
+      if (event.key === 'ArrowLeft') { event.preventDefault(); skipCard(); }
+      if (event.key === 'ArrowRight') { event.preventDefault(); saveCard(); }
+    });
+
+    render();
+  })();
+  </script>
+  {% endif %}
+
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+
+</body>
+</html>

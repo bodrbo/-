@@ -3246,6 +3246,31 @@ def init_db(db_path=None, include_bootstrap_data=True):
         )
         """
     )
+    supply_stock_cols = [row[1] for row in conn.execute("PRAGMA table_info(supply_stock)").fetchall()]
+    if "inventoried_at" not in supply_stock_cols:
+        # When the position was last confirmed in the inventory mode
+        # (Снабжение → Инвентаризация); NULL = never. The mode serves the
+        # never-checked and longest-unchecked positions first.
+        conn.execute("ALTER TABLE supply_stock ADD COLUMN inventoried_at TEXT")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS supply_inventory_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            warehouse_id INTEGER NOT NULL,
+            product_id INTEGER NOT NULL,
+            expected_quantity REAL,
+            counted_quantity REAL NOT NULL,
+            previous_address TEXT,
+            new_address TEXT,
+            name_before TEXT,
+            name_after TEXT,
+            sku_before TEXT,
+            sku_after TEXT,
+            admin_name TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS supply_external_sync_state (
@@ -20666,6 +20691,165 @@ def supply_warehouse(warehouse_id):
         page_first=(offset + 1 if filtered_count else 0),
         page_last=min(offset + len(stock), filtered_count),
     )
+
+
+INVENTORY_BATCH_SIZE = 500
+
+
+def _inventory_cards(db, warehouse_id, limit=INVENTORY_BATCH_SIZE):
+    """Stock positions of a warehouse in the order they should be checked:
+    never-checked first, then the longest-unchecked, and along the shelves
+    (zone, rack, spot) within the same age. Only positions the system
+    thinks are in stock."""
+    rows = db.execute(
+        "SELECT supply_stock.id AS stock_id, supply_stock.product_id, supply_stock.quantity, "
+        "supply_stock.zone, supply_stock.rack, supply_stock.spot, supply_stock.inventoried_at, "
+        "supply_products.name, supply_products.sku, supply_products.photo_filename, "
+        "supply_products.external_photo_url "
+        "FROM supply_stock JOIN supply_products ON supply_products.id = supply_stock.product_id "
+        "WHERE supply_stock.warehouse_id = ? AND supply_stock.quantity > 0 "
+        "ORDER BY supply_stock.inventoried_at IS NOT NULL, supply_stock.inventoried_at, "
+        "COALESCE(supply_stock.zone, ''), COALESCE(supply_stock.rack, ''), COALESCE(supply_stock.spot, ''), "
+        "supply_products.name, supply_stock.id LIMIT ?",
+        (warehouse_id, limit),
+    ).fetchall()
+    return [_inventory_card_payload(row) for row in rows]
+
+
+def _inventory_card_payload(row):
+    if row["photo_filename"]:
+        photo = url_for("static", filename="supply_photos/" + row["photo_filename"])
+    else:
+        photo = row["external_photo_url"] or ""
+    return {
+        "stock_id": row["stock_id"],
+        "product_id": row["product_id"],
+        "name": row["name"] or "",
+        "sku": row["sku"] or "",
+        "photo": photo,
+        "quantity": float(row["quantity"] or 0),
+        "zone": row["zone"] or "",
+        "rack": row["rack"] or "",
+        "spot": row["spot"] or "",
+    }
+
+
+def _inventory_address(zone, rack, spot):
+    return " · ".join(part for part in (zone, rack, spot) if part) or None
+
+
+@app.route("/supply/inventory")
+@admin_login_required
+def supply_inventory():
+    db = get_db()
+    warehouses = db.execute(
+        "SELECT sw.*, "
+        "(SELECT COUNT(*) FROM supply_stock WHERE warehouse_id = sw.id AND quantity > 0) AS position_count, "
+        "(SELECT COUNT(*) FROM supply_stock WHERE warehouse_id = sw.id AND quantity > 0 "
+        " AND inventoried_at IS NULL) AS unchecked_count, "
+        "(SELECT MAX(inventoried_at) FROM supply_stock WHERE warehouse_id = sw.id) AS last_checked "
+        "FROM supply_warehouses sw ORDER BY sw.name"
+    ).fetchall()
+    return render_template(
+        "supply_inventory.html", active_page="supply", sub_page="inventory",
+        warehouses=warehouses, warehouse=None, cards=[], batch_size=INVENTORY_BATCH_SIZE,
+    )
+
+
+@app.route("/supply/inventory/<int:warehouse_id>")
+@admin_login_required
+def supply_inventory_warehouse(warehouse_id):
+    db = get_db()
+    warehouse = db.execute("SELECT * FROM supply_warehouses WHERE id = ?", (warehouse_id,)).fetchone()
+    if warehouse is None:
+        return redirect(url_for("supply_inventory"))
+    total = db.execute(
+        "SELECT COUNT(*) AS n FROM supply_stock WHERE warehouse_id = ? AND quantity > 0", (warehouse_id,)
+    ).fetchone()["n"]
+    return render_template(
+        "supply_inventory.html", active_page="supply", sub_page="inventory",
+        warehouses=[], warehouse=warehouse, cards=_inventory_cards(db, warehouse_id),
+        total_positions=total, batch_size=INVENTORY_BATCH_SIZE,
+    )
+
+
+@app.route("/supply/inventory/<int:warehouse_id>/save", methods=["POST"])
+@admin_login_required
+def save_supply_inventory_card(warehouse_id):
+    """Swipe right: stores the card's fields — name and article on the
+    product, quantity and address on its stock position in this warehouse —
+    stamps the position as checked and leaves a journal row with what the
+    system expected and what was counted."""
+    db = get_db()
+    stock = db.execute(
+        "SELECT * FROM supply_stock WHERE id = ? AND warehouse_id = ?",
+        (request.form.get("stock_id", type=int), warehouse_id),
+    ).fetchone()
+    if stock is None:
+        return jsonify(ok=False, message="Позиция не найдена — возможно, её уже убрали со склада."), 404
+    product = db.execute("SELECT * FROM supply_products WHERE id = ?", (stock["product_id"],)).fetchone()
+    if product is None:
+        return jsonify(ok=False, message="Товар не найден."), 404
+
+    name = " ".join(request.form.get("name", "").split())
+    sku = request.form.get("sku", "").strip()
+    zone = request.form.get("zone", "").strip()
+    rack = request.form.get("rack", "").strip()
+    spot = request.form.get("spot", "").strip()
+    quantity_raw = request.form.get("quantity", "").strip().replace(",", ".").replace("\xa0", "").replace(" ", "")
+    if not name:
+        return jsonify(ok=False, message="Укажите название товара."), 400
+    if len(name) > 255 or len(sku) > 120 or max(len(zone), len(rack), len(spot)) > 60:
+        return jsonify(ok=False, message="Слишком длинное значение в одном из полей."), 400
+    try:
+        quantity = float(quantity_raw)
+    except ValueError:
+        return jsonify(ok=False, message="Количество должно быть числом."), 400
+    if quantity != quantity or quantity in (float("inf"), float("-inf")) or quantity < 0:
+        return jsonify(ok=False, message="Количество не может быть отрицательным."), 400
+    quantity = round(quantity, 3)
+    expected = request.form.get("expected", type=float)
+
+    photo_file = request.files.get("photo")
+    new_photo = None
+    if photo_file and photo_file.filename:
+        ext = os.path.splitext(photo_file.filename)[1].lower()
+        if ext not in SUPPLY_PHOTO_EXTENSIONS:
+            return jsonify(ok=False, message="Фото должно быть изображением (jpg, png, webp…)."), 400
+        photos_dir = os.path.join(app.static_folder, "supply_photos")
+        os.makedirs(photos_dir, exist_ok=True)
+        new_photo = f"{product['id']}-{secrets.token_hex(6)}{ext}"
+        photo_file.save(os.path.join(photos_dir, new_photo))
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "INSERT INTO supply_inventory_log (warehouse_id, product_id, expected_quantity, counted_quantity, "
+        "previous_address, new_address, name_before, name_after, sku_before, sku_after, admin_name, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (warehouse_id, product["id"], expected if expected is not None else stock["quantity"], quantity,
+         _inventory_address(stock["zone"], stock["rack"], stock["spot"]), _inventory_address(zone, rack, spot),
+         product["name"], name, product["sku"], sku or None, session.get("admin_name"), now),
+    )
+    db.execute(
+        "UPDATE supply_products SET name = ?, sku = ? WHERE id = ?", (name, sku or None, product["id"])
+    )
+    if new_photo:
+        db.execute("UPDATE supply_products SET photo_filename = ? WHERE id = ?", (new_photo, product["id"]))
+    db.execute(
+        "UPDATE supply_stock SET quantity = ?, zone = ?, rack = ?, spot = ?, inventoried_at = ? WHERE id = ?",
+        (quantity, zone or None, rack or None, spot or None, now, stock["id"]),
+    )
+    db.commit()
+    if quantity < float(stock["quantity"] or 0):
+        _maybe_create_low_stock_request(db, product["id"])
+    row = db.execute(
+        "SELECT supply_stock.id AS stock_id, supply_stock.product_id, supply_stock.quantity, "
+        "supply_stock.zone, supply_stock.rack, supply_stock.spot, supply_products.name, supply_products.sku, "
+        "supply_products.photo_filename, supply_products.external_photo_url "
+        "FROM supply_stock JOIN supply_products ON supply_products.id = supply_stock.product_id "
+        "WHERE supply_stock.id = ?", (stock["id"],),
+    ).fetchone()
+    return jsonify(ok=True, message="Сохранено.", card=_inventory_card_payload(row))
 
 
 @app.route("/supply/warehouses/add", methods=["POST"])
