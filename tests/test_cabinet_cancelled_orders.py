@@ -105,6 +105,21 @@ class CabinetCancelledOrdersTests(unittest.TestCase):
         page = self.client.get(f"/client/{self.TOKEN}").get_data(as_text=True)
         self.assert_stats(page, 0, "0", "0", "0")
 
+    def test_the_terms_block_sits_right_after_the_equipment_block(self):
+        self.make_client()
+        page = self.client.get(f"/client/{self.TOKEN}").get_data(as_text=True)
+        equipment = page.index('<span class="k">Техника</span>')
+        terms = page.index('<span class="k">Условия</span>')
+        orders = page.index('<span class="k">Заказов</span>')
+        self.assertLess(equipment, terms)
+        self.assertLess(terms, orders)
+        self.assertIn("Предоплата 70%", page)
+
+    def test_the_partner_cabinet_has_no_terms_block(self):
+        partner_id = self.make_client("partner")
+        page = self.client.get(f"/admin/clients/{partner_id}/cabinet?section=tuning").get_data(as_text=True)
+        self.assertNotIn('<span class="k">Условия</span>', page)
+
     def test_the_admin_view_of_the_cabinet_counts_the_same_way(self):
         client_id = self.make_client()
         self.add_order(client_id, "approved", 8000, 500)
