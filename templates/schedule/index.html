@@ -339,13 +339,15 @@
           </span>
         </label>
         <label class="field schedule-client-price-field">
-          <span>Стоимость, ₽</span>
+          <span id="scheduleCustomerPriceLabel">Стоимость, ₽</span>
           <span class="schedule-money-input">
-            <input type="text" inputmode="decimal" name="customer_price" id="scheduleCustomerPrice"
-                   value="0" data-price-mode="auto"
-                   oninput="markScheduleClientPriceManual(this)">
+            <input type="text" inputmode="decimal" id="scheduleCustomerGuestPrice" data-guest-price
+                   aria-label="Цена для клиента" value="0"
+                   oninput="scheduleGuestPriceTyped(this)">
             <b>₽</b>
           </span>
+          <small class="schedule-price-total" id="scheduleCustomerPriceTotal" hidden></small>
+          <input type="hidden" name="customer_price" id="scheduleCustomerPrice" value="0" data-price-mode="auto">
         </label>
         <label class="field">
           <span>Количество гостей</span>
@@ -747,13 +749,14 @@
              oninput="syncScheduleParticipantCount()">
     </label>
     <label class="field schedule-participant-price">
-      <span>Стоимость</span>
+      <span>Цена за гостя</span>
       <span class="schedule-money-input">
-        <input type="text" inputmode="decimal" name="participant_price[]" value="0"
-               data-price-mode="auto" aria-label="Стоимость для клиента"
-               oninput="markScheduleClientPriceManual(this)">
+        <input type="text" inputmode="decimal" data-guest-price value="0"
+               aria-label="Цена за одного гостя" oninput="scheduleGuestPriceTyped(this)">
         <b>₽</b>
       </span>
+      <small class="schedule-price-total" data-price-total hidden></small>
+      <input type="hidden" name="participant_price[]" value="0" data-price-mode="auto">
     </label>
     <button type="button" class="icon-btn danger" onclick="removeScheduleParticipant(this)" aria-label="Убрать клиента">
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h12M8 3h4l1 3H7l1-3zM6 6l.7 11h6.6L14 6M8.5 9v5M11.5 9v5"/></svg>
@@ -1093,6 +1096,8 @@
     document.getElementById('scheduleRevenueTotal').textContent = '0 ₽';
     document.getElementById('scheduleCustomerPrice').value = '0';
     document.getElementById('scheduleCustomerPrice').dataset.priceMode = 'auto';
+    delete document.getElementById('scheduleCustomerGuestPrice').dataset.exact;
+    document.getElementById('scheduleCustomerGuestPrice').value = '0';
     document.getElementById('scheduleCustomerSourceRef').value = '';
     document.getElementById('scheduleCustomerPrepayment').value = '0';
     document.getElementById('scheduleCustomerPaymentDue').value = '0';
@@ -1240,6 +1245,7 @@
       renderScheduleAddons(item);
     }
     syncScheduleKind();
+    scheduleRefreshAllPrices();
     renderScheduleBookingPayments(item);
     setScheduleModalOpen(true);
   }
@@ -2165,7 +2171,7 @@
       <label class="field"><span>Имя</span><input name="client_name" value="${scheduleEscapeHtml(participant.client_name)}" required></label>
       <label class="field"><span>Телефон</span><input name="client_phone" type="tel" value="${scheduleEscapeHtml(participant.client_phone || '')}"></label>
       <label class="field"><span>Гостей</span><input name="guests_count" type="number" min="1" max="100" value="${participant.guests_count}"></label>
-      <label class="field"><span>Стоимость, ₽</span><input name="price" type="text" inputmode="decimal" value="${participant.price}"></label>
+      <label class="field"><span>Цена за гостя, ₽</span><input name="guest_price" type="text" inputmode="decimal" value="${scheduleRoundMoney(Number(participant.price || 0) / Math.max(1, Number(participant.guests_count || 1)))}"><small class="schedule-price-total" data-edit-total></small></label>
       <label class="field"><span>Канал продаж</span><span class="sales-channel-control"><select name="sales_partner_id" data-sales-channel-select><option value="">Не указан</option>${partnerOptions}</select><button type="button" class="sales-channel-add" onclick="openSalesChannelModal(this.previousElementSibling)" aria-label="Добавить канал продаж" title="Добавить канал продаж">+</button></span></label>
       <label class="field"><span>Канал связи</span><select name="preferred_contact_method"><option value="">Не указан</option>${contactMethodOptions}</select></label>
       <div class="schedule-detail-client-edit-actions">
@@ -2177,13 +2183,30 @@
       form.remove();
       viewToRestore.hidden = false;
     });
+    // The price is typed per guest; the total goes to the server. Untouched,
+    // the saved total is kept as it is (scaled when only the guests change).
+    const originalGuests = Math.max(1, Number(participant.guests_count || 1));
+    let guestPriceTouched = false;
+    function editedTotal() {
+      const guests = Math.max(1, Math.floor(Number(form.guests_count.value || 0)) || 1);
+      const perGuest = guestPriceTouched
+        ? normaliseScheduleMoney(form.guest_price.value)
+        : Number(participant.price || 0) / originalGuests;
+      return scheduleRoundMoney(perGuest * guests);
+    }
+    function showEditedTotal() {
+      form.querySelector('[data-edit-total]').textContent = `Итого: ${formatScheduleMoney(editedTotal())}`;
+    }
+    form.guest_price.addEventListener('input', () => { guestPriceTouched = true; showEditedTotal(); });
+    form.guests_count.addEventListener('input', showEditedTotal);
+    showEditedTotal();
     form.addEventListener('submit', event => {
       event.preventDefault();
       const payload = {
         client_name: form.client_name.value,
         client_phone: form.client_phone.value,
         guests_count: form.guests_count.value,
-        price: form.price.value,
+        price: String(editedTotal()),
         sales_partner_id: form.sales_partner_id.value,
         preferred_contact_method: form.preferred_contact_method.value,
       };
@@ -2931,15 +2954,101 @@
     counter.classList.toggle('over', capacity > 0 && guests > capacity);
     syncScheduleClientPrices();
   }
+  // The price a manager types is per guest (for a group programme and for
+  // every participant of a group trip): the total sent to the server — the
+  // hidden customer_price / participant_price[] — is that price times the
+  // guests, and follows the guests count. An individual rental is priced for
+  // the whole boat, so its field stays a plain total.
+  function schedulePriceContext(totalInput) {
+    if (totalInput.id === 'scheduleCustomerPrice') {
+      const selected = document.getElementById('scheduleService').selectedOptions[0];
+      const guests = Number(document.getElementById('scheduleBookingGuestsCount').value || 0);
+      return {
+        visible: document.getElementById('scheduleCustomerGuestPrice'),
+        totalText: document.getElementById('scheduleCustomerPriceTotal'),
+        label: document.getElementById('scheduleCustomerPriceLabel'),
+        perGuest: Boolean(selected && selected.value && (
+          selected.dataset.serviceType === 'group' || selected.dataset.activityType === 'city'
+        )),
+        guests: Number.isFinite(guests) && guests >= 1 ? Math.floor(guests) : 1,
+        fixed: String(document.getElementById('scheduleCustomerSourceRef').value || '').startsWith('orders:'),
+      };
+    }
+    const row = totalInput.closest('.schedule-participant-row');
+    const guests = Number(row.querySelector('[name="participant_guests[]"]').value || 0);
+    return {
+      visible: row.querySelector('[data-guest-price]'),
+      totalText: row.querySelector('[data-price-total]'),
+      label: null,
+      perGuest: true,
+      guests: Number.isFinite(guests) && guests >= 1 ? Math.floor(guests) : 1,
+      fixed: String(row.querySelector('[data-participant-source-ref]').value || '').startsWith('orders:'),
+    };
+  }
+  function scheduleRoundMoney(value) { return Math.round(value * 100) / 100; }
+  // Brings the visible per-guest field, the note under it and the hidden
+  // total in line. `typing` keeps the text the manager is typing untouched.
+  function scheduleRefreshPrice(totalInput, typing) {
+    const ctx = schedulePriceContext(totalInput);
+    const visible = ctx.visible;
+    if (!visible) return;
+    if (ctx.label) ctx.label.textContent = ctx.perGuest ? 'Цена за гостя, ₽' : 'Стоимость, ₽';
+    let total = normaliseScheduleMoney(totalInput.value);
+    if (!ctx.perGuest) {
+      delete visible.dataset.exact;
+      if (!typing) visible.value = String(scheduleRoundMoney(total));
+    } else {
+      const manual = totalInput.dataset.priceMode === 'manual';
+      let exact = visible.dataset.exact === undefined ? NaN : Number(visible.dataset.exact);
+      if (manual && !ctx.fixed && Number.isFinite(exact)) {
+        // a typed price follows the guests
+        total = scheduleRoundMoney(exact * ctx.guests);
+        totalInput.value = String(total);
+      } else {
+        // automatic, imported and loaded prices are totals: derive the per-guest one
+        exact = total / ctx.guests;
+      }
+      visible.dataset.exact = String(exact);
+      if (!typing) visible.value = String(scheduleRoundMoney(exact));
+    }
+    if (ctx.totalText) {
+      const show = ctx.perGuest && ctx.guests > 1;
+      ctx.totalText.hidden = !show;
+      ctx.totalText.textContent = show ? `Итого: ${formatScheduleMoney(total)} (${ctx.guests} гост.)` : '';
+    }
+  }
+  function scheduleGuestPriceTyped(visible) {
+    const totalInput = visible.id === 'scheduleCustomerGuestPrice'
+      ? document.getElementById('scheduleCustomerPrice')
+      : visible.closest('.schedule-participant-row').querySelector('[name="participant_price[]"]');
+    const ctx = schedulePriceContext(totalInput);
+    const typed = normaliseScheduleMoney(visible.value);
+    totalInput.dataset.priceMode = 'manual';
+    if (ctx.perGuest) {
+      visible.dataset.exact = String(typed);
+      totalInput.value = String(scheduleRoundMoney(typed * ctx.guests));
+    } else {
+      totalInput.value = String(typed);
+    }
+    scheduleRefreshPrice(totalInput, true);
+    markScheduleClientPriceManual(totalInput);
+  }
+  function scheduleRefreshAllPrices() {
+    scheduleRefreshPrice(document.getElementById('scheduleCustomerPrice'));
+    document.querySelectorAll('[name="participant_price[]"]').forEach((input) => scheduleRefreshPrice(input));
+  }
   function markScheduleClientPriceManual(input) {
     input.dataset.priceMode = 'manual';
     syncScheduleImportedPayment(input);
     syncScheduleRevenueTotal();
   }
   function markAllSchedulePricesAuto() {
-    document.getElementById('scheduleCustomerPrice').dataset.priceMode = 'auto';
+    const customer = document.getElementById('scheduleCustomerPrice');
+    customer.dataset.priceMode = 'auto';
+    delete document.getElementById('scheduleCustomerGuestPrice').dataset.exact;
     document.querySelectorAll('[name="participant_price[]"]').forEach((input) => {
       input.dataset.priceMode = 'auto';
+      delete input.closest('.schedule-participant-row').querySelector('[data-guest-price]').dataset.exact;
     });
   }
   function normaliseScheduleMoney(value) {
@@ -3009,27 +3118,37 @@
     const kind = document.querySelector('input[name="kind"]:checked').value;
     if (kind === 'booking') {
       const input = document.getElementById('scheduleCustomerPrice');
-      if (forceAuto) input.dataset.priceMode = 'auto';
+      if (forceAuto) {
+        input.dataset.priceMode = 'auto';
+        delete document.getElementById('scheduleCustomerGuestPrice').dataset.exact;
+      }
       if (input.dataset.priceMode !== 'manual') {
         const price = scheduleServicePriceForBooking(selected);
         input.value = String(Math.round(price * 100) / 100);
         syncScheduleImportedPayment(input);
       }
+      scheduleRefreshPrice(input);
+      if (input.dataset.priceMode === 'manual') syncScheduleImportedPayment(input);
     } else {
       const pricePerGuest = selected && selected.value
         ? Number(selected.dataset.price || 0)
         : 0;
       document.querySelectorAll('.schedule-participant-row').forEach((row) => {
         const input = row.querySelector('[name="participant_price[]"]');
-        if (forceAuto) input.dataset.priceMode = 'auto';
-        if (input.dataset.priceMode === 'manual') return;
-        const filled = row.querySelector('[data-participant-search]').value.trim()
-          || row.querySelector('[name="participant_phone[]"]').value.trim();
-        const guests = Number(row.querySelector('[name="participant_guests[]"]').value || 0);
-        const price = filled && Number.isFinite(guests)
-          ? pricePerGuest * Math.max(0, guests)
-          : 0;
-        input.value = String(Math.round(price * 100) / 100);
+        if (forceAuto) {
+          input.dataset.priceMode = 'auto';
+          delete row.querySelector('[data-guest-price]').dataset.exact;
+        }
+        if (input.dataset.priceMode !== 'manual') {
+          const filled = row.querySelector('[data-participant-search]').value.trim()
+            || row.querySelector('[name="participant_phone[]"]').value.trim();
+          const guests = Number(row.querySelector('[name="participant_guests[]"]').value || 0);
+          const price = filled && Number.isFinite(guests)
+            ? pricePerGuest * Math.max(0, guests)
+            : 0;
+          input.value = String(Math.round(price * 100) / 100);
+        }
+        scheduleRefreshPrice(input);
         syncScheduleImportedPayment(input);
       });
     }

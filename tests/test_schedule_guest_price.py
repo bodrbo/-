@@ -40,6 +40,35 @@ class ScheduleGuestPriceTests(unittest.TestCase):
         body = self.page[start:self.page.index("function syncScheduleRevenueTotal", start)]
         self.assertIn("pricePerGuest * Math.max(0, guests)", body)
 
+    def test_the_price_a_manager_types_is_per_guest_and_the_total_is_what_is_sent(self):
+        # participants: a visible per-guest field (not submitted) and a hidden total (submitted)
+        self.assertIn('<span>Цена за гостя</span>', self.page)
+        self.assertIn('data-guest-price value="0"', self.page)
+        self.assertIn('<input type="hidden" name="participant_price[]" value="0" data-price-mode="auto">', self.page)
+        self.assertNotIn('name="guest_price', self.page.split("function buildScheduleDetailClientEditForm")[0])
+        # booking: the same pair, with a label that follows the kind of service
+        self.assertIn('id="scheduleCustomerGuestPrice" data-guest-price', self.page)
+        self.assertIn('<input type="hidden" name="customer_price" id="scheduleCustomerPrice" value="0" data-price-mode="auto">', self.page)
+        self.assertIn("'Цена за гостя, ₽' : 'Стоимость, ₽'", self.page)
+
+    def test_a_typed_price_is_multiplied_by_the_guests_and_follows_them(self):
+        start = self.page.index("function scheduleRefreshPrice")
+        body = self.page[start:self.page.index("function scheduleGuestPriceTyped", start)]
+        self.assertIn("scheduleRoundMoney(exact * ctx.guests)", body)
+        typed = self.page[self.page.index("function scheduleGuestPriceTyped"):self.page.index("function scheduleRefreshAllPrices")]
+        self.assertIn("typed * ctx.guests", typed)
+        self.assertIn("priceMode = 'manual'", typed)
+
+    def test_an_imported_total_is_not_rescaled_by_the_guests(self):
+        body = self.page[self.page.index("function schedulePriceContext"):self.page.index("function scheduleRoundMoney")]
+        self.assertGreaterEqual(body.count("startsWith('orders:')"), 2)
+
+    def test_the_edit_form_of_a_guest_in_the_detail_view_takes_a_per_guest_price(self):
+        body = self.page[self.page.index("function buildScheduleDetailClientEditForm"):self.page.index("function scheduleApplyParticipantUpdate")]
+        self.assertIn("<span>Цена за гостя, ₽</span>", body)
+        self.assertIn("price: String(editedTotal())", body)
+        self.assertIn("perGuest * guests", body)
+
 
 if __name__ == "__main__":
     unittest.main()

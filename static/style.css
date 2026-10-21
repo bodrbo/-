@@ -6052,6 +6052,8 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-participant-price input,
 .schedule-client-price-field input { font-family: 'PT Mono', monospace; font-weight: 700; font-variant-numeric: tabular-nums; }
 .schedule-money-input { position: relative; display: block; }
+.schedule-price-total { display: block; margin-top: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.schedule-price-total[hidden] { display: none; }
 .schedule-money-input input { padding-right: 31px; }
 .schedule-money-input b {
   position: absolute;
