@@ -82,7 +82,7 @@
       <a href="{{ url_for('tuning_shop_map', date=selected_date, space=space.id) }}"
          class="shop-space-tab{{ ' is-active' if space.id == room.id }}"
          {% if space.id == room.id %}aria-current="page"{% endif %}>
-        {{ space.name }}<span class="shop-space-count" title="Лодок на {{ selected_date|ru_date }}">{{ space_boat_counts.get(space.id, 0) }}</span>
+        {{ space.name }}<span class="shop-space-kind">{{ space.kind_label }}</span><span class="shop-space-count" title="Лодок на {{ selected_date|ru_date }}">{{ space_boat_counts.get(space.id, 0) }}</span>
       </a>
       {% endfor %}
     </nav>
@@ -96,7 +96,15 @@
           <input type="hidden" name="date" value="{{ selected_date }}">
           <div class="field">
             <label for="spaceName">Название</label>
-            <input type="text" id="spaceName" name="name" maxlength="80" placeholder="Например, Ангар или Открытая площадка" required>
+            <input type="text" id="spaceName" name="name" maxlength="80" placeholder="Например, Ангар №2 или Двор у причала" required>
+          </div>
+          <div class="field field-narrow">
+            <label for="spaceKind">Тип</label>
+            <select id="spaceKind" name="kind" required>
+              {% for value, label in space_kinds.items() %}
+              <option value="{{ value }}">{{ label }}</option>
+              {% endfor %}
+            </select>
           </div>
           <div class="field field-narrow">
             <label for="spaceLength">Длина, м</label>
@@ -178,7 +186,7 @@
   <section class="panel shop-map-panel">
     <div class="shop-map-heading">
       <div>
-        <p class="boat-catalog-eyebrow">{{ room.name }}</p>
+        <p class="boat-catalog-eyebrow">{{ room.name }} · {{ room_kind_label }}</p>
         <h2>{{ room.length_m|float|round(2) }} × {{ room.width_m|float|round(2) }} м <span class="muted" style="font-size:.6em;font-weight:400;">на {{ selected_date|ru_date }}</span></h2>
       </div>
       <details class="shop-map-room-editor">
@@ -191,6 +199,14 @@
             <div class="field">
               <label for="roomName">Название</label>
               <input id="roomName" type="text" name="name" maxlength="80" value="{{ room.name }}" required>
+            </div>
+            <div class="field field-narrow">
+              <label for="roomKind">Тип</label>
+              <select id="roomKind" name="kind" required>
+                {% for value, label in space_kinds.items() %}
+                <option value="{{ value }}"{{ ' selected' if value == room.kind }}>{{ label }}</option>
+                {% endfor %}
+              </select>
             </div>
             <div class="field field-narrow">
               <label for="roomLength">Длина, м</label>
@@ -775,7 +791,7 @@
       item.type = "button";
       item.setAttribute("role", "menuitem");
       item.className = "shop-map-context-item";
-      item.textContent = space.name;
+      item.textContent = space.name + " · " + space.kind_label;
       item.addEventListener("click", function () {
         closeMenu();
         moveBoat(group.dataset.moveUrl, space.id);

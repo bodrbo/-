@@ -4001,6 +4001,10 @@ def init_db(db_path=None, include_bootstrap_data=True):
             (12.3, 18.0, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), "Цех"),
         )
     conn.execute("UPDATE shop_map_room SET name = 'Цех' WHERE name IS NULL OR name = ''")
+    if "kind" not in shop_map_room_cols:
+        conn.execute("ALTER TABLE shop_map_room ADD COLUMN kind TEXT")
+    # The shop floor that existed before space types is an indoor space.
+    conn.execute("UPDATE shop_map_room SET kind = ? WHERE kind IS NULL OR kind = ''", (SHOP_MAP_DEFAULT_SPACE_KIND,))
     # Fixed elements on the map (workbenches, shelving, ...) — rectangular
     # zones positioned from the room's own top-left corner (x along its
     # length, y along its width), the same axes the room SVG already draws
@@ -10040,6 +10044,9 @@ app.register_blueprint(
 )
 
 
+# What a space is: indoors (ангар) or outdoors (двор).
+SHOP_MAP_SPACE_KINDS = {"hangar": "Ангар", "yard": "Двор"}
+SHOP_MAP_DEFAULT_SPACE_KIND = "hangar"
 SHOP_MAP_SCALE = 24   # px per meter, drawn to scale
 SHOP_MAP_PADDING = 50  # px around the room rect for dimension labels
 SHOP_MAP_BOAT_GAP_M = 0.5  # minimum clearance required between two boats' hulls
@@ -10485,6 +10492,9 @@ def tuning_shop_map():
     timeline_days, timeline_events = _shop_map_timeline(db, selected_date)
     room_row = _shop_map_selected_room(db, request.args.get("space"))
     spaces = [dict(row) for row in db.execute("SELECT * FROM shop_map_room ORDER BY id").fetchall()]
+    for space in spaces:
+        space["kind_label"] = SHOP_MAP_SPACE_KINDS.get(space["kind"], SHOP_MAP_SPACE_KINDS[SHOP_MAP_DEFAULT_SPACE_KIND])
+    room_kind_label = next((s["kind_label"] for s in spaces if s["id"] == room_row["id"]), "")
     room = dict(room_row)
     room["room_w_px"] = room["length_m"] * SHOP_MAP_SCALE
     room["room_h_px"] = room["width_m"] * SHOP_MAP_SCALE
@@ -10578,7 +10588,8 @@ def tuning_shop_map():
     return render_template(
         "tuning_shop_map.html", active_page="tuning", sub_page="shop_map",
         room=room, scale=SHOP_MAP_SCALE, padding=SHOP_MAP_PADDING,
-        spaces=spaces, space_boat_counts=space_boat_counts,
+        spaces=spaces, space_boat_counts=space_boat_counts, space_kinds=SHOP_MAP_SPACE_KINDS,
+        room_kind_label=room_kind_label,
         elements=elements,
         boats_on_map=boats_on_map, boats_missing_dimensions=boats_missing_dimensions,
         boats_away=boats_away, selected_date=selected_date, today_iso=today_iso,
@@ -10607,8 +10618,11 @@ def update_shop_map_room():
     width_raw = request.form.get("width_m", "").strip().replace(",", ".")
     length_raw = request.form.get("length_m", "").strip().replace(",", ".")
     name = " ".join(request.form.get("name", room["name"] if room else "").split())
+    kind = request.form.get("kind", (room["kind"] if room else "") or SHOP_MAP_DEFAULT_SPACE_KIND).strip()
 
     errors = []
+    if kind not in SHOP_MAP_SPACE_KINDS:
+        errors.append("Выберите тип пространства: двор или ангар.")
     if not name:
         errors.append("Укажите название пространства.")
     elif len(name) > 80:
@@ -10633,14 +10647,14 @@ def update_shop_map_room():
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     if room is not None:
         db.execute(
-            "UPDATE shop_map_room SET width_m = ?, length_m = ?, name = ?, updated_at = ? WHERE id = ?",
-            (width_m, length_m, name, now, room["id"]),
+            "UPDATE shop_map_room SET width_m = ?, length_m = ?, name = ?, kind = ?, updated_at = ? WHERE id = ?",
+            (width_m, length_m, name, kind, now, room["id"]),
         )
         room_id = room["id"]
     else:
         room_id = db.execute(
-            "INSERT INTO shop_map_room (width_m, length_m, name, updated_at) VALUES (?, ?, ?, ?)",
-            (width_m, length_m, name, now),
+            "INSERT INTO shop_map_room (width_m, length_m, name, kind, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (width_m, length_m, name, kind, now),
         ).lastrowid
     db.commit()
     return _shop_map_redirect(room_id)
@@ -10963,7 +10977,10 @@ def add_shop_map_space():
     objects — one per line, the same format as the bulk form."""
     db = get_db()
     name = " ".join(request.form.get("name", "").split())
+    kind = request.form.get("kind", "").strip()
     errors = []
+    if kind not in SHOP_MAP_SPACE_KINDS:
+        errors.append("Выберите тип пространства: двор или ангар.")
     if not name:
         errors.append("Укажите название пространства.")
     elif len(name) > 80:
@@ -10996,8 +11013,8 @@ def add_shop_map_space():
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     room_id = db.execute(
-        "INSERT INTO shop_map_room (width_m, length_m, name, updated_at) VALUES (?, ?, ?, ?)",
-        (width_m, length_m, name, now),
+        "INSERT INTO shop_map_room (width_m, length_m, name, kind, updated_at) VALUES (?, ?, ?, ?, ?)",
+        (width_m, length_m, name, kind, now),
     ).lastrowid
     _insert_shop_map_elements(db, room_id, rows)
     db.commit()

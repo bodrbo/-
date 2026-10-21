@@ -54,9 +54,9 @@ class ShopMapSpacesTests(unittest.TestCase):
 
     # ---- helpers
 
-    def add_space(self, name="Тест-пространство", length="20", width="10", objects=""):
+    def add_space(self, name="Тест-пространство", length="20", width="10", objects="", kind="hangar"):
         return self.client.post("/tuning/shop-map/spaces/add", data={
-            "name": name, "length_m": length, "width_m": width, "bulk_text": objects})
+            "name": name, "length_m": length, "width_m": width, "bulk_text": objects, "kind": kind})
 
     def space_id(self, name):
         with application_module.app.app_context():
@@ -86,6 +86,56 @@ class ShopMapSpacesTests(unittest.TestCase):
             room = application_module._shop_map_default_room(application_module.get_db())
         self.assertTrue(room["name"])
         self.assertEqual(self.boat()["room_id"], room["id"])
+
+    # ---- the type of a space: двор or ангар
+
+    def kind_of(self, space):
+        with application_module.app.app_context():
+            return application_module._shop_map_room_by_id(application_module.get_db(), space)["kind"]
+
+    def test_the_existing_space_is_an_hangar(self):
+        self.assertEqual(self.kind_of(self.first_space), "hangar")
+
+    def test_a_space_is_added_as_a_yard_or_a_hangar(self):
+        self.add_space(name="Тест-пространство", kind="yard")
+        self.add_space(name="Тест-пространство 2", kind="hangar")
+        self.assertEqual(self.kind_of(self.space_id("Тест-пространство")), "yard")
+        self.assertEqual(self.kind_of(self.space_id("Тест-пространство 2")), "hangar")
+
+    def test_the_type_is_required_and_must_be_known(self):
+        for kind in ("", "garage", "ДВОР"):
+            self.add_space(kind=kind)
+            self.assertIsNone(self.space_id("Тест-пространство"), kind)
+            self.assertIn("тип пространства", self.notice("shop_map_space_error"))
+        response = self.client.post("/tuning/shop-map/spaces/add", data={
+            "name": "Тест-пространство", "length_m": "5", "width_m": "5"})
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNone(self.space_id("Тест-пространство"))
+
+    def test_the_type_can_be_changed_and_a_bad_one_is_refused(self):
+        self.add_space(kind="hangar")
+        space = self.space_id("Тест-пространство")
+        self.client.post("/tuning/shop-map/room", data={
+            "space": space, "name": "Тест-пространство", "kind": "yard", "length_m": "20", "width_m": "10"})
+        self.assertEqual(self.kind_of(space), "yard")
+        self.client.post("/tuning/shop-map/room", data={
+            "space": space, "name": "Тест-пространство", "kind": "bogus", "length_m": "20", "width_m": "10"})
+        self.assertEqual(self.kind_of(space), "yard")
+        self.assertIn("тип пространства", self.notice("shop_map_room_error"))
+        # an edit that doesn't send the type keeps it
+        self.client.post("/tuning/shop-map/room", data={
+            "space": space, "name": "Тест-пространство", "length_m": "21", "width_m": "10"})
+        self.assertEqual(self.kind_of(space), "yard")
+
+    def test_the_type_is_shown_on_the_tabs_the_heading_and_in_the_forms(self):
+        self.add_space(kind="yard")
+        space = self.space_id("Тест-пространство")
+        page = self.client.get(f"/tuning/shop-map?space={space}").get_data(as_text=True)
+        self.assertIn('<span class="shop-space-kind">Двор</span>', page)
+        self.assertIn('<span class="shop-space-kind">Ангар</span>', page)
+        self.assertIn("Тест-пространство · Двор", page)
+        self.assertIn('<option value="yard" selected>Двор</option>', page)
+        self.assertIn('id="spaceKind"', page)
 
     # ---- adding spaces
 

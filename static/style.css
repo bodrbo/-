@@ -4053,6 +4053,7 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .shop-space-tab { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--hairline); background: var(--paper); color: var(--ink); text-decoration: none; font-weight: 600; font-size: 14px; }
 .shop-space-tab:hover { border-color: var(--brass); }
 .shop-space-tab.is-active { background: var(--brass); border-color: var(--brass); color: var(--on-accent); }
+.shop-space-kind { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.7; }
 .shop-space-count { min-width: 22px; padding: 1px 7px; border-radius: 999px; background: rgba(15, 42, 53, 0.1); font-size: 12px; text-align: center; }
 .shop-space-tab.is-active .shop-space-count { background: rgba(255, 255, 255, 0.28); }
 .shop-space-delete { margin-top: 10px; }
