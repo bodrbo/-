@@ -1,0 +1,40 @@
+{% extends 'dealer/base.html' %}
+{% block title %}Прайс-лист — Дилерский центр{% endblock %}
+{% block heading %}Прайс-лист{% endblock %}
+{% block content %}
+<section class="panel">
+  <h2>Цены лодок и моторов</h2>
+  <p class="hint">Лодки и моторы берутся из каталогов тюнинг-центра. Цена здесь подставляется в новый заказ, а в самом заказе её можно изменить. Пустое поле — цена не задана.</p>
+  {% if positions %}
+  <form method="post" action="{{ url_for('dealer.prices') }}">
+    <div class="table-scroll">
+      <table class="records">
+        <thead><tr><th>Тип</th><th>Название</th><th>Марка</th><th>Цена, ₽</th></tr></thead>
+        <tbody>
+          {% for p in positions %}
+          <tr>
+            <td class="muted">{{ item_kinds.get(p.equipment_type, p.equipment_type) }}</td>
+            <td class="term">{{ p.model_name }}</td>
+            <td class="muted">{{ p.brand or '—' }}{% if p.power_hp %} · {{ p.power_hp|round(1) }} л.с.{% endif %}</td>
+            <td>
+              <input type="hidden" name="profile_id[]" value="{{ p.id }}">
+              <input type="text" inputmode="decimal" name="price[]" value="{{ ('%g'|format(p.price)) if p.price is not none else '' }}" placeholder="не задана" style="width:140px;">
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="entry-form" style="margin-top:12px;">
+      <div class="field field-submit"><button type="submit">Сохранить прайс-лист</button></div>
+    </div>
+  </form>
+  {% else %}
+  <div class="empty-state">
+    {% include '_empty_state_logo.html' %}
+    <div class="t">Каталоги пусты</div>
+    <div class="s">Добавьте лодки и моторы в «Каталог лодок» и «Каталог моторов».</div>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

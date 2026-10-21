@@ -1,0 +1,288 @@
+{% extends 'dealer/base.html' %}
+{% block title %}{{ ('Заказ №' ~ order.id) if order else 'Новый заказ' }} — Дилерский центр{% endblock %}
+{% block heading %}{{ ('Заказ №' ~ order.id) if order else 'Новый заказ' }}{% endblock %}
+{% block content %}
+{% set values = form_state if form_state else (order if order else {}) %}
+{% set discount_raw = values.get('discount_value') %}
+<a href="{{ url_for('dealer.orders') }}" class="term" style="display:inline-block; margin-bottom:14px;">← Все заказы</a>
+
+{% if error %}<div class="alert" role="alert"><strong>Не удалось сохранить:</strong> {{ error }}</div>{% endif %}
+
+{% if order %}
+<section class="panel dealer-status-panel">
+  <div class="dealer-status-row">
+    <div>
+      <span class="k dealer-k">Статус</span>
+      <span class="status-badge status-{{ 'done' if order.status == 'handed_over' else ('cancelled' if order.status == 'cancelled' else 'pending') }}">{{ status_label }}</span>
+    </div>
+    <form action="{{ url_for('dealer.update_status', order_id=order.id) }}" method="post" class="entry-form dealer-status-form">
+      <div class="field field-narrow">
+        <label for="dealerNewStatus">Перевести в статус</label>
+        <select id="dealerNewStatus" name="status">
+          {% for s in statuses %}
+          <option value="{{ s.value }}"{{ ' selected' if s.value == order.status }}>{{ s.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field field-submit"><button type="submit">Сменить статус</button></div>
+    </form>
+  </div>
+</section>
+{% endif %}
+
+<form method="post" id="dealerOrderForm" action="{{ url_for('dealer.order', order_id=order.id) if order else url_for('dealer.new_order') }}">
+  <section class="panel">
+    <h2>Клиент</h2>
+    <div class="entry-form">
+      <div class="field" data-tuning-client-combo>
+        <label for="client_name_search">Клиент</label>
+        {% set current_client_name = values.client_name or '' %}
+        <div class="combo-field" data-combo data-combo-allow-custom>
+          <input type="text" id="client_name_search" class="combo-input" data-combo-input
+                 value="{{ current_client_name }}" data-selected-label="{{ current_client_name }}"
+                 placeholder="Начните вводить имя или телефон…" autocomplete="off"
+                 role="combobox" aria-autocomplete="list" required>
+          <input type="hidden" name="client_name" data-combo-value value="{{ current_client_name }}">
+          <input type="hidden" name="client_id" data-tuning-client-id value="{{ values.client_id or '' }}">
+          <div class="combo-dropdown hidden" data-combo-dropdown>
+            <p class="combo-empty hidden" data-combo-empty>Новый клиент будет добавлен в общую базу клиентов.</p>
+            {% for client in client_choices %}
+            <div class="combo-option" data-value="{{ client.client_name }}"
+                 data-label="{{ client.client_name }}"
+                 data-search="{{ (client.client_name ~ ' ' ~ client.phone ~ ' ' ~ (client.phone|messenger_phone_digits))|lower }}"
+                 data-tuning-client-option data-client-id="{{ client.id }}"
+                 data-client-phone="{{ client.phone }}">
+              <span class="combo-option-name">{{ client.client_name }}</span>
+              {% if client.phone %}<span class="combo-option-sku">{{ client.phone }}</span>{% endif %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      <div class="field field-narrow">
+        <label for="phone">Телефон</label>
+        <input type="text" id="phone" name="phone" inputmode="tel" data-tuning-client-phone autocomplete="off" value="{{ values.phone or '' }}">
+      </div>
+      <div class="field field-narrow">
+        <label for="order_date">Дата заказа</label>
+        <input type="date" id="order_date" name="order_date" value="{{ values.order_date or today }}">
+      </div>
+      <div class="field field-narrow">
+        <label for="deadline_date">Передача клиенту</label>
+        <input type="date" id="deadline_date" name="deadline_date" value="{{ values.deadline_date or '' }}">
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Лодки и моторы</h2>
+    <p class="hint">Выберите лодку или мотор из каталога — цена подставится из прайс-листа, её можно изменить для этого заказа.</p>
+    <div class="table-scroll">
+      <table class="records dealer-items" id="dealerItems">
+        <thead><tr><th>Тип</th><th>Позиция из каталога</th><th>Серийный номер</th><th>Кол-во</th><th>Цена, ₽</th><th>Сумма, ₽</th><th></th></tr></thead>
+        <tbody id="dealerItemRows"></tbody>
+      </table>
+    </div>
+    <button type="button" class="btn-secondary dealer-add-row" id="dealerAddRow">+ Добавить позицию</button>
+    <datalist id="dealerCatalogBoat"></datalist>
+    <datalist id="dealerCatalogMotor"></datalist>
+  </section>
+
+  <section class="panel">
+    <h2>Скидка и итог</h2>
+    <div class="entry-form">
+      <div class="field field-narrow">
+        <label for="discount_value">Скидка на весь заказ</label>
+        <input type="text" inputmode="decimal" id="discount_value" name="discount_value" value="{{ ('%g'|format(discount_raw|float)) if discount_raw and discount_raw|float else '' }}" placeholder="0">
+      </div>
+      <div class="field field-narrow">
+        <label for="discount_type">Вид скидки</label>
+        <select id="discount_type" name="discount_type">
+          <option value="percent"{{ ' selected' if (values.discount_type or 'percent') == 'percent' }}>%</option>
+          <option value="amount"{{ ' selected' if values.discount_type == 'amount' }}>₽</option>
+        </select>
+      </div>
+    </div>
+    <div class="totals-grid dealer-totals">
+      <div class="panel total-card"><span class="k">Сумма позиций</span><span class="v" id="dealerSubtotal">0 ₽</span></div>
+      <div class="panel total-card"><span class="k">Скидка</span><span class="v" id="dealerDiscount">0 ₽</span></div>
+      <div class="panel total-card total-card-grand"><span class="k">Итого к оплате</span><span class="v" id="dealerTotal">0 ₽</span></div>
+    </div>
+    <div class="field">
+      <label for="comment">Комментарий</label>
+      <textarea id="comment" name="comment" rows="3" maxlength="2000">{{ values.comment or '' }}</textarea>
+    </div>
+    <div class="entry-form" style="margin-top:12px;">
+      <div class="field field-submit"><button type="submit">{{ 'Сохранить изменения' if order else 'Создать заказ' }}</button></div>
+    </div>
+  </section>
+</form>
+
+{% if order %}
+<section class="panel" id="payments">
+  <h2>Платежи</h2>
+  <div class="totals-grid dealer-totals">
+    <div class="panel total-card"><span class="k">Сумма заказа</span><span class="v">{{ order.total|money }} ₽</span></div>
+    <div class="panel total-card"><span class="k">Оплачено</span><span class="v" style="color:var(--success);">{{ paid|money }} ₽</span></div>
+    <div class="panel total-card total-card-grand"><span class="k">Осталось доплатить</span><span class="v">{{ remaining|money }} ₽</span></div>
+  </div>
+  <form action="{{ url_for('dealer.add_payment', order_id=order.id) }}" method="post" class="entry-form">
+    <div class="field field-narrow">
+      <label for="pay_amount">Сумма платежа, ₽</label>
+      <input type="text" inputmode="decimal" id="pay_amount" name="amount" required>
+    </div>
+    <div class="field field-narrow">
+      <label for="pay_type">Способ оплаты</label>
+      <select id="pay_type" name="payment_type" required>
+        <option value="" disabled selected>Выберите способ</option>
+        {% for value, label in payment_types.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field field-narrow">
+      <label for="pay_date">Дата платежа</label>
+      <input type="date" id="pay_date" name="paid_date" max="{{ today }}" value="{{ today }}">
+    </div>
+    <div class="field">
+      <label for="pay_note">Примечание</label>
+      <input type="text" id="pay_note" name="note" maxlength="300">
+    </div>
+    <div class="field field-submit"><button type="submit">Записать платёж</button></div>
+  </form>
+  {% if payments %}
+  <div class="table-scroll">
+    <table class="records">
+      <thead><tr><th>Дата</th><th>Сумма</th><th>Способ</th><th>Примечание</th><th></th></tr></thead>
+      <tbody>
+        {% for p in payments %}
+        <tr>
+          <td class="muted">{{ p.paid_at[:10]|ru_date }}</td>
+          <td class="amount">{{ p.amount|money }}</td>
+          <td class="muted">{{ payment_types.get(p.payment_type, '—') }}</td>
+          <td class="muted">{{ p.note or '' }}</td>
+          <td class="row-actions">
+            <form action="{{ url_for('dealer.delete_payment', order_id=order.id, payment_id=p.id) }}" method="post"
+                  onsubmit="return confirm('Удалить этот платёж?');">
+              <button type="submit" class="icon-btn danger" title="Удалить платёж">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l10 10M15 5L5 15"/></svg>
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="hint">Платежей пока нет.</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <form action="{{ url_for('dealer.delete_order', order_id=order.id) }}" method="post"
+        onsubmit="return confirm('Удалить заказ №{{ order.id }}? Это нельзя отменить.');">
+    <button type="submit" class="btn-secondary danger">Удалить заказ</button>
+    <span class="hint">Заказ с платежами удалить нельзя — переведите его в статус «Отменён».</span>
+  </form>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script id="dealerCatalogData" type="application/json">{{ catalog|tojson }}</script>
+<script id="dealerItemsData" type="application/json">{{ items|tojson }}</script>
+<script>
+(function () {
+  var catalog = JSON.parse(document.getElementById('dealerCatalogData').textContent);
+  var initial = JSON.parse(document.getElementById('dealerItemsData').textContent);
+  var KINDS = {{ item_kinds|tojson }};
+  var rows = document.getElementById('dealerItemRows');
+  var lists = {boat: document.getElementById('dealerCatalogBoat'), motor: document.getElementById('dealerCatalogMotor')};
+  catalog.forEach(function (position) {
+    var option = document.createElement('option');
+    option.value = position.name;
+    if (position.brand) { option.label = position.brand; }
+    lists[position.kind].appendChild(option);
+  });
+
+  function number(text) {
+    var value = parseFloat(String(text || '').replace(/\s/g, '').replace(',', '.'));
+    return isNaN(value) ? 0 : value;
+  }
+  function money(value) {
+    return Math.round(value).toLocaleString('ru-RU') + ' ₽';
+  }
+  function find(kind, name) {
+    var wanted = String(name || '').trim().toLowerCase();
+    return catalog.filter(function (p) { return p.kind === kind && p.name.toLowerCase() === wanted; })[0] || null;
+  }
+  function esc(text) {
+    var div = document.createElement('div');
+    div.textContent = text == null ? '' : String(text);
+    return div.innerHTML.replace(/"/g, '&quot;');
+  }
+
+  function recalc() {
+    var subtotal = 0;
+    rows.querySelectorAll('tr').forEach(function (row) {
+      var line = number(row.querySelector('[name="item_quantity[]"]').value) * number(row.querySelector('[name="item_price[]"]').value);
+      row.querySelector('.dealer-line-total').textContent = line ? money(line) : '—';
+      if (row.querySelector('[name="item_name[]"]').value.trim()) { subtotal += line; }
+    });
+    var type = document.getElementById('discount_type').value;
+    var value = number(document.getElementById('discount_value').value);
+    var discount = type === 'percent' ? subtotal * Math.min(value, 100) / 100 : Math.min(value, subtotal);
+    document.getElementById('dealerSubtotal').textContent = money(subtotal);
+    document.getElementById('dealerDiscount').textContent = discount ? '−' + money(discount) : '0 ₽';
+    document.getElementById('dealerTotal').textContent = money(Math.max(subtotal - discount, 0));
+  }
+
+  function addRow(item) {
+    item = item || {kind: 'boat', profile_id: '', name: '', serial_number: '', quantity: 1, price: ''};
+    var row = document.createElement('tr');
+    var kindOptions = Object.keys(KINDS).map(function (key) {
+      return '<option value="' + key + '"' + (key === item.kind ? ' selected' : '') + '>' + esc(KINDS[key]) + '</option>';
+    }).join('');
+    row.innerHTML =
+      '<td><select name="item_kind[]">' + kindOptions + '</select></td>' +
+      '<td><input type="text" name="item_name[]" maxlength="200" list="dealerCatalog' + (item.kind === 'motor' ? 'Motor' : 'Boat') + '" value="' + esc(item.name) + '" placeholder="Начните вводить название" autocomplete="off">' +
+        '<input type="hidden" name="item_profile_id[]" value="' + esc(item.profile_id) + '"></td>' +
+      '<td><input type="text" name="item_serial[]" maxlength="120" value="' + esc(item.serial_number) + '"></td>' +
+      '<td><input type="text" inputmode="numeric" name="item_quantity[]" value="' + esc(item.quantity) + '" style="width:64px;"></td>' +
+      '<td><input type="text" inputmode="decimal" name="item_price[]" value="' + esc(item.price === 0 || item.price ? Math.round(item.price * 100) / 100 : '') + '" style="width:130px;"></td>' +
+      '<td class="amount dealer-line-total">—</td>' +
+      '<td class="row-actions"><button type="button" class="icon-btn danger dealer-remove" title="Убрать позицию">' +
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l10 10M15 5L5 15"/></svg></button></td>';
+    rows.appendChild(row);
+
+    var kind = row.querySelector('[name="item_kind[]"]');
+    var name = row.querySelector('[name="item_name[]"]');
+    var profile = row.querySelector('[name="item_profile_id[]"]');
+    var price = row.querySelector('[name="item_price[]"]');
+    kind.addEventListener('change', function () {
+      name.setAttribute('list', 'dealerCatalog' + (kind.value === 'motor' ? 'Motor' : 'Boat'));
+      name.value = ''; profile.value = ''; recalc();
+    });
+    name.addEventListener('input', function () {
+      var match = find(kind.value, name.value);
+      profile.value = match ? match.id : '';
+      if (match && match.price != null && !price.value.trim()) { price.value = match.price; }
+      recalc();
+    });
+    row.querySelectorAll('input').forEach(function (input) { input.addEventListener('input', recalc); });
+    row.querySelector('.dealer-remove').addEventListener('click', function () {
+      row.remove();
+      if (!rows.children.length) { addRow(); }
+      recalc();
+    });
+    recalc();
+  }
+
+  initial.forEach(addRow);
+  if (!rows.children.length) { addRow(); }
+  document.getElementById('dealerAddRow').addEventListener('click', function () { addRow(); });
+  document.getElementById('discount_value').addEventListener('input', recalc);
+  document.getElementById('discount_type').addEventListener('change', recalc);
+  recalc();
+})();
+</script>
+{% endblock %}

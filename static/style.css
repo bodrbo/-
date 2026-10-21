@@ -4063,6 +4063,19 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .shop-map-context-caption, .shop-map-context-empty { padding: 2px 10px 6px; font-size: 12px; color: var(--muted); }
 .shop-map-context-item { display: block; width: 100%; font-family: inherit; text-align: left; padding: 9px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 14px; cursor: pointer; }
 .shop-map-context-item:hover, .shop-map-context-item:focus { background: var(--paper-alt); outline: none; }
+/* Дилерский центр */
+.dealer-list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.dealer-new-btn { display: inline-flex; align-items: center; min-height: 40px; padding: 0 18px; border-radius: 10px; background: var(--brass); color: var(--on-accent); font-weight: 700; text-decoration: none; }
+.dealer-filters { margin-top: 12px; }
+.dealer-reset { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; text-decoration: none; margin-left: 8px; }
+.dealer-phone { display: block; font-size: 12px; font-weight: 400; }
+tr.dealer-cancelled td { opacity: 0.55; }
+.dealer-status-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.dealer-k { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 6px; }
+.dealer-items input[type="text"], .dealer-items select { min-width: 0; }
+.dealer-items td:nth-child(2) input[type="text"] { min-width: 220px; }
+.dealer-add-row { margin-top: 10px; }
+.dealer-totals { margin-top: 14px; }
 .status-badge.status-handed_over { background: rgba(47, 107, 79, 0.16); color: var(--success); }
 .status-badge.status-handed_over::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232f6b4f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 8.5l3 3 3-3M8 8.5l3 3 3-3'/%3E%3C/svg%3E");

@@ -152,6 +152,10 @@ from modules.payroll_rates import (
     init_schema as init_payroll_rates_schema,
 )
 from modules.payroll_rates import repository as payroll_rates_repository
+from modules.dealer import (
+    create_dealer_blueprint,
+    init_schema as init_dealer_schema,
+)
 from modules.weather import constants as weather_constants
 from modules.weather import schema as weather_schema
 from modules.weather import services as weather_services
@@ -2348,6 +2352,7 @@ def init_db(db_path=None, include_bootstrap_data=True):
     init_schedule_schema(conn)
     init_tuning_schedule_schema(conn)
     init_payroll_rates_schema(conn)
+    init_dealer_schema(conn)
 
     conn.execute(
         """
@@ -6294,6 +6299,21 @@ app.register_blueprint(
         # Deferred-name lambda: _reprice_boat_rate_entries is defined below.
         recalculate_boat_rates=lambda db, role, since_date: (
             _reprice_boat_rate_entries(db, role, since_date)
+        ),
+    )
+)
+
+
+# =======================================================================
+# Дилерский центр: продажа лодок и моторов из каталога (см. modules/dealer)
+# =======================================================================
+app.register_blueprint(
+    create_dealer_blueprint(
+        get_db=get_db,
+        access_required=admin_only_no_demo_tenant,
+        client_choices=_tuning_client_choices,
+        resolve_client=lambda db, client_id, client_name, phone: _get_or_create_client(
+            db, phone, client_name, "", client_id=client_id
         ),
     )
 )

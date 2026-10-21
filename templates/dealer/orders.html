@@ -1,0 +1,79 @@
+{% extends 'dealer/base.html' %}
+{% block title %}Заказы — Дилерский центр{% endblock %}
+{% block heading %}Заказы{% endblock %}
+{% block content %}
+<div class="totals-grid">
+  <div class="panel total-card">
+    <span class="k">Заказов</span>
+    <span class="v">{{ counted }}</span>
+  </div>
+  <div class="panel total-card">
+    <span class="k">Сумма по заказам</span>
+    <span class="v">{{ total_sum|money }} ₽</span>
+  </div>
+  <div class="panel total-card">
+    <span class="k">Оплачено</span>
+    <span class="v" style="color:var(--success);">{{ paid_sum|money }} ₽</span>
+  </div>
+  <div class="panel total-card total-card-grand">
+    <span class="k">Осталось доплатить</span>
+    <span class="v">{{ remaining_sum|money }} ₽</span>
+  </div>
+</div>
+
+<section class="panel">
+  <div class="dealer-list-head">
+    <h2>Заказы на лодки и моторы</h2>
+    <a class="dealer-new-btn" href="{{ url_for('dealer.new_order') }}">+ Новый заказ</a>
+  </div>
+  <form method="get" class="entry-form dealer-filters">
+    <div class="field">
+      <label for="dealerSearch">Поиск</label>
+      <input type="search" id="dealerSearch" name="q" value="{{ search_query }}" placeholder="Клиент, телефон, номер, лодка или мотор">
+    </div>
+    <div class="field field-narrow">
+      <label for="dealerStatus">Статус</label>
+      <select id="dealerStatus" name="status" onchange="this.form.submit()">
+        <option value="">Все</option>
+        {% for s in statuses %}
+        <option value="{{ s.value }}"{{ ' selected' if s.value == selected_status }}>{{ s.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field field-submit">
+      <button type="submit">Найти</button>
+      {% if search_query or selected_status %}<a href="{{ url_for('dealer.orders') }}" class="btn-secondary dealer-reset">Сбросить</a>{% endif %}
+    </div>
+  </form>
+  {% if orders %}
+  <div class="table-scroll">
+    <table class="records" id="dealer-orders-table">
+      <thead>
+        <tr><th>№</th><th>Дата</th><th>Клиент</th><th>Позиции</th><th>Статус</th><th>Сумма</th><th>Оплачено</th><th>Остаток</th></tr>
+      </thead>
+      <tbody>
+        {% for o in orders %}
+        <tr class="row-clickable{{ ' dealer-cancelled' if o.status == 'cancelled' }}" onclick="window.location.href='{{ url_for('dealer.order', order_id=o.id) }}'">
+          <td><a href="{{ url_for('dealer.order', order_id=o.id) }}">№{{ o.id }}</a></td>
+          <td class="muted">{{ o.order_date|ru_date }}</td>
+          <td class="term">{{ o.client_name }}{% if o.phone %}<span class="muted dealer-phone">{{ o.phone }}</span>{% endif %}</td>
+          <td class="muted">{{ o.items_text }}</td>
+          <td><span class="status-badge status-{{ 'done' if o.status == 'handed_over' else ('cancelled' if o.status == 'cancelled' else 'pending') }}">{{ o.status_label }}</span></td>
+          <td class="amount">{{ o.total|money }}</td>
+          <td class="amount">{{ o.paid|money }}</td>
+          <td class="amount">{{ o.remaining|money if o.status != 'cancelled' else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    {% include '_empty_state_logo.html' %}
+    <div class="t">{{ 'Заказы не найдены' if search_query or selected_status else 'Заказов пока нет' }}</div>
+    <div class="s">{{ 'Измените запрос или сбросьте фильтры.' if search_query or selected_status else 'Создайте первый заказ на лодку или мотор из каталога.' }}</div>
+  </div>
+  {% endif %}
+  <p class="hint">Отменённые заказы остаются в списке, но в итоговые суммы не входят.</p>
+</section>
+{% endblock %}
