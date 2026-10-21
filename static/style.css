@@ -4047,6 +4047,21 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .inv-done-actions .btn-secondary { display: inline-flex; align-items: center; padding: 0 16px; min-height: 40px; text-decoration: none; }
 .inv-done-actions [hidden] { display: none; }
 .inv-done-actions button { min-height: 40px; padding: 0 18px; border-radius: 10px; border: 0; background: var(--brass); color: var(--on-accent); font-weight: 700; cursor: pointer; }
+/* Карты пространств: вкладки пространств и меню правой кнопки на лодке */
+.shop-spaces-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.shop-space-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.shop-space-tab { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--hairline); background: var(--paper); color: var(--ink); text-decoration: none; font-weight: 600; font-size: 14px; }
+.shop-space-tab:hover { border-color: var(--brass); }
+.shop-space-tab.is-active { background: var(--brass); border-color: var(--brass); color: var(--on-accent); }
+.shop-space-count { min-width: 22px; padding: 1px 7px; border-radius: 999px; background: rgba(15, 42, 53, 0.1); font-size: 12px; text-align: center; }
+.shop-space-tab.is-active .shop-space-count { background: rgba(255, 255, 255, 0.28); }
+.shop-space-delete { margin-top: 10px; }
+.shop-map-context-menu { position: fixed; z-index: 1000; min-width: 220px; max-width: 320px; padding: 6px; background: var(--paper); border: 1px solid var(--hairline); border-radius: 12px; box-shadow: 0 12px 32px rgba(15, 42, 53, 0.22); }
+.shop-map-context-menu[hidden] { display: none; }
+.shop-map-context-title { padding: 6px 10px 2px; font-weight: 700; font-size: 14px; color: var(--ink); }
+.shop-map-context-caption, .shop-map-context-empty { padding: 2px 10px 6px; font-size: 12px; color: var(--muted); }
+.shop-map-context-item { display: block; width: 100%; font-family: inherit; text-align: left; padding: 9px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 14px; cursor: pointer; }
+.shop-map-context-item:hover, .shop-map-context-item:focus { background: var(--paper-alt); outline: none; }
 .status-badge.status-handed_over { background: rgba(47, 107, 79, 0.16); color: var(--success); }
 .status-badge.status-handed_over::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232f6b4f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 8.5l3 3 3-3M8 8.5l3 3 3-3'/%3E%3C/svg%3E");

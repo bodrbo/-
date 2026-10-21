@@ -3989,11 +3989,18 @@ def init_db(db_path=None, include_bootstrap_data=True):
         )
         """
     )
+    # Карты пространств: shop_map_room holds every space (the shop floor, a
+    # yard, a storage hall, ...) — name plus length × width; its elements and
+    # boats belong to one space through room_id.
+    shop_map_room_cols = [row[1] for row in conn.execute("PRAGMA table_info(shop_map_room)").fetchall()]
+    if "name" not in shop_map_room_cols:
+        conn.execute("ALTER TABLE shop_map_room ADD COLUMN name TEXT")
     if conn.execute("SELECT COUNT(*) FROM shop_map_room").fetchone()[0] == 0:
         conn.execute(
-            "INSERT INTO shop_map_room (width_m, length_m, updated_at) VALUES (?, ?, ?)",
-            (12.3, 18.0, dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+            "INSERT INTO shop_map_room (width_m, length_m, updated_at, name) VALUES (?, ?, ?, ?)",
+            (12.3, 18.0, dt.datetime.now().strftime("%Y-%m-%d %H:%M"), "Цех"),
         )
+    conn.execute("UPDATE shop_map_room SET name = 'Цех' WHERE name IS NULL OR name = ''")
     # Fixed elements on the map (workbenches, shelving, ...) — rectangular
     # zones positioned from the room's own top-left corner (x along its
     # length, y along its width), the same axes the room SVG already draws
@@ -4037,6 +4044,15 @@ def init_db(db_path=None, include_bootstrap_data=True):
     shop_map_boats_cols = [row[1] for row in conn.execute("PRAGMA table_info(shop_map_boats)").fetchall()]
     if "rotation_deg" not in shop_map_boats_cols:
         conn.execute("ALTER TABLE shop_map_boats ADD COLUMN rotation_deg INTEGER NOT NULL DEFAULT 0")
+    first_space = conn.execute("SELECT MIN(id) FROM shop_map_room").fetchone()[0]
+    if "room_id" not in shop_map_boats_cols:
+        conn.execute("ALTER TABLE shop_map_boats ADD COLUMN room_id INTEGER")
+    shop_map_elements_cols = [row[1] for row in conn.execute("PRAGMA table_info(shop_map_elements)").fetchall()]
+    if "room_id" not in shop_map_elements_cols:
+        conn.execute("ALTER TABLE shop_map_elements ADD COLUMN room_id INTEGER")
+    # Everything placed before spaces existed stands in the first one.
+    conn.execute("UPDATE shop_map_boats SET room_id = ? WHERE room_id IS NULL", (first_space,))
+    conn.execute("UPDATE shop_map_elements SET room_id = ? WHERE room_id IS NULL", (first_space,))
     # Client relationships are classified only after all legacy tables have
     # received their newer client_id columns above.
     init_client_segments_schema(conn)
@@ -10116,23 +10132,47 @@ def _shop_map_boat_in_shop_on(boat, iso):
     )
 
 
-def _shop_map_boats(db, on_date=None):
+def _shop_map_default_room(db):
+    """The first (основное) space — where boats are placed automatically."""
+    return db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+
+
+def _shop_map_room_by_id(db, room_id):
+    return db.execute("SELECT * FROM shop_map_room WHERE id = ?", (room_id,)).fetchone()
+
+
+def _shop_map_selected_room(db, raw):
+    """The space asked for by ?space=/space field, else the first one."""
+    try:
+        room = _shop_map_room_by_id(db, int(raw)) if raw not in (None, "") else None
+    except (TypeError, ValueError):
+        room = None
+    return room if room is not None else _shop_map_default_room(db)
+
+
+def _shop_map_boats(db, on_date=None, room_id=None):
     """Boats placed on Карта цеха, one row per order. Position (x_m/y_m)
     is the only thing stored in shop_map_boats — length/width are read live
     from the boat's own catalog profile via the same model_key lookup the
     boat catalog itself uses. Presence in time comes from the order
     (see _shop_map_presence); with on_date only boats standing in the shop
-    that day are returned, otherwise every placed boat with its interval."""
+    that day are returned, otherwise every placed boat with its interval.
+    With room_id only the boats standing in that space."""
     rows = db.execute(
         "SELECT b.*, o.client_name, o.boat_model, o.status AS order_status, "
         "o.status, o.acceptance_date, o.order_date, o.deadline_date, o.completed_at "
         "FROM shop_map_boats b JOIN tuning_orders o ON o.id = b.order_id "
         "ORDER BY b.id"
     ).fetchall()
+    default_room = _shop_map_default_room(db)
+    default_room_id = default_room["id"] if default_room is not None else None
     boats = []
     away_periods = _shop_map_away_periods(db)
     for row in rows:
         boat = dict(row)
+        boat["room_id"] = row["room_id"] or default_room_id
+        if room_id is not None and boat["room_id"] != room_id:
+            continue
         boat["present_start"], boat["present_end"] = _shop_map_presence(row)
         if boat["present_start"] is None:
             continue
@@ -10202,11 +10242,13 @@ def _shop_map_boat_placement_errors(db, room, x_m, y_m, length_m, width_m, rotat
             or x_m + footprint_w > room["length_m"] + 0.001
             or y_m + footprint_h > room["width_m"] + 0.001
         ):
-            problems.append("Лодка выходит за пределы цеха.")
+            problems.append("Лодка выходит за пределы пространства.")
     cx, cy = x_m + footprint_w / 2, y_m + footprint_h / 2
     half_l, half_w = length_m / 2, width_m / 2
+    room_id = room["id"] if room is not None else None
     for el in db.execute(
-        "SELECT name, x_m, y_m, width_m, height_m FROM shop_map_elements"
+        "SELECT name, x_m, y_m, width_m, height_m FROM shop_map_elements "
+        "WHERE (? IS NULL OR room_id = ?)", (room_id, room_id),
     ).fetchall():
         el_cx, el_cy = el["x_m"] + el["width_m"] / 2, el["y_m"] + el["height_m"] / 2
         if _shop_map_obb_overlap(
@@ -10218,6 +10260,9 @@ def _shop_map_boat_placement_errors(db, room, x_m, y_m, length_m, width_m, rotat
     if interval is None and on_date is None and exclude_boat_id is not None:
         own = next((b for b in all_boats if b["id"] == exclude_boat_id), None)
         interval = (own["present_start"], own["present_end"]) if own else None
+    # Boats in other spaces are somewhere else entirely.
+    if room_id is not None:
+        all_boats = [b for b in all_boats if b["room_id"] == room_id]
     for boat in all_boats:
         if boat["id"] == exclude_boat_id:
             continue
@@ -10288,8 +10333,38 @@ def _shop_map_boat_with_profile(db, boat_id):
     return boat_row, (profile["length_m"] if profile else None), (profile["width_m"] if profile else None)
 
 
+def _shop_map_find_free_spot(db, room, length_m, width_m, rotation_deg, interval, exclude_boat_id=None):
+    """First collision-free top-left corner for a hull inside the space,
+    scanning it in 0.5 m steps against the boats present at the same time
+    (interval) — or None when nothing fits."""
+    if room is None or not length_m or not width_m:
+        return None
+    footprint_w, footprint_h = _shop_map_boat_footprint(length_m, width_m, rotation_deg)
+    y = 0.0
+    while y + footprint_h <= room["width_m"] + 0.001:
+        x = 0.0
+        while x + footprint_w <= room["length_m"] + 0.001:
+            if _shop_map_boat_placement_error(
+                db, room, x, y, length_m, width_m, rotation_deg,
+                exclude_boat_id=exclude_boat_id, interval=interval,
+            ) is None:
+                return x, y
+            x += 0.5
+        y += 0.5
+    return None
+
+
+def _shop_map_staggered_spot(db, room_id):
+    """Fallback position when nothing fits (or the hull has no size yet): a
+    staggered default an admin can adjust."""
+    count = db.execute(
+        "SELECT COUNT(*) FROM shop_map_boats WHERE room_id = ?", (room_id,)
+    ).fetchone()[0]
+    return 1.0 + (count % 5) * 3.0, 3.0 + (count // 5) * 3.0
+
+
 def _auto_place_boat_on_shop_map(db, order):
-    """Puts the order's boat on Карта цеха — called when the order enters
+    """Puts the order's boat on the first space of Карты пространств — called when the order enters
     "В работе" and when an acceptance date is set. Best-effort and
     idempotent: a missing/incomplete profile never blocks the caller (the
     map lists it under "нет размеров" until length/width are filled in),
@@ -10310,29 +10385,21 @@ def _auto_place_boat_on_shop_map(db, order):
         return
     x_m = y_m = None
     profile = _boat_dimensions(db, order["boat_model"])
-    room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+    room = _shop_map_default_room(db)
     if profile and profile["length_m"] and profile["width_m"] and room is not None:
-        length_m, width_m = profile["length_m"], profile["width_m"]
-        y = 0.0
-        while x_m is None and y + width_m <= room["width_m"] + 0.001:
-            x = 0.0
-            while x + length_m <= room["length_m"] + 0.001:
-                if _shop_map_boat_placement_error(
-                    db, room, x, y, length_m, width_m, 0, interval=(start, end)
-                ) is None:
-                    x_m, y_m = x, y
-                    break
-                x += 0.5
-            y += 0.5
+        spot = _shop_map_find_free_spot(
+            db, room, profile["length_m"], profile["width_m"], 0, (start, end)
+        )
+        if spot is not None:
+            x_m, y_m = spot
+    room_id = room["id"] if room is not None else None
     if x_m is None:
-        count = db.execute("SELECT COUNT(*) FROM shop_map_boats").fetchone()[0]
-        x_m = 1.0 + (count % 5) * 3.0
-        y_m = 3.0 + (count // 5) * 3.0
+        x_m, y_m = _shop_map_staggered_spot(db, room_id)
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
-        "INSERT INTO shop_map_boats (order_id, x_m, y_m, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (order_id, x_m, y_m, now, now),
+        "INSERT INTO shop_map_boats (order_id, x_m, y_m, created_at, updated_at, room_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (order_id, x_m, y_m, now, now, room_id),
     )
     db.commit()
 
@@ -10344,12 +10411,17 @@ def _parse_shop_map_date(raw, default):
         return default
 
 
-def _shop_map_redirect():
-    """Back to the map, keeping the date the admin was looking at."""
+def _shop_map_redirect(space_id=None):
+    """Back to the map, keeping the date and the space the admin was
+    looking at (space_id overrides the form's own `space` field)."""
+    params = {}
     selected = _parse_shop_map_date(request.form.get("date"), None)
     if selected:
-        return redirect(url_for("tuning_shop_map", date=selected))
-    return redirect(url_for("tuning_shop_map"))
+        params["date"] = selected
+    space = space_id if space_id is not None else request.form.get("space", type=int)
+    if space:
+        params["space"] = space
+    return redirect(url_for("tuning_shop_map", **params))
 
 
 def _shop_map_timeline(db, selected, span_before=10, span_after=20):
@@ -10411,7 +10483,8 @@ def tuning_shop_map():
     selected_date = _parse_shop_map_date(request.args.get("date"), today_iso)
     selected_day = dt.date.fromisoformat(selected_date)
     timeline_days, timeline_events = _shop_map_timeline(db, selected_date)
-    room_row = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+    room_row = _shop_map_selected_room(db, request.args.get("space"))
+    spaces = [dict(row) for row in db.execute("SELECT * FROM shop_map_room ORDER BY id").fetchall()]
     room = dict(room_row)
     room["room_w_px"] = room["length_m"] * SHOP_MAP_SCALE
     room["room_h_px"] = room["width_m"] * SHOP_MAP_SCALE
@@ -10420,7 +10493,7 @@ def tuning_shop_map():
 
     elements = []
     for row in db.execute(
-        "SELECT * FROM shop_map_elements ORDER BY y_m, x_m, id"
+        "SELECT * FROM shop_map_elements WHERE room_id = ? ORDER BY y_m, x_m, id", (room["id"],)
     ).fetchall():
         element = dict(row)
         element["x_px"] = SHOP_MAP_PADDING + element["x_m"] * SHOP_MAP_SCALE
@@ -10434,7 +10507,7 @@ def tuning_shop_map():
     # the map instead of being drawn at some made-up size.
     boats_on_map = []
     boats_missing_dimensions = []
-    for boat in _shop_map_boats(db, on_date=selected_date):
+    for boat in _shop_map_boats(db, on_date=selected_date, room_id=room["id"]):
         if boat["length_m"] and boat["width_m"]:
             boat["x_px"] = SHOP_MAP_PADDING + boat["x_m"] * SHOP_MAP_SCALE
             boat["y_px"] = SHOP_MAP_PADDING + boat["y_m"] * SHOP_MAP_SCALE
@@ -10480,7 +10553,7 @@ def tuning_shop_map():
             boats_missing_dimensions.append(boat)
 
     boats_away = []
-    for boat in _shop_map_boats(db):
+    for boat in _shop_map_boats(db, room_id=room["id"]):
         period = _shop_map_boat_away_on(boat, selected_date)
         if period is not None and boat["present_start"] <= selected_date and (
             boat["present_end"] is None or selected_date <= boat["present_end"]
@@ -10490,7 +10563,9 @@ def tuning_shop_map():
     # Rules are advisory: every boat standing on this day is checked against
     # the room, the zones and the other boats present that day; the results
     # are shown as warnings (a red dashed outline and a list under the map).
-    room_row = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+    space_boat_counts = {space["id"]: 0 for space in spaces}
+    for boat in _shop_map_boats(db, on_date=selected_date):
+        space_boat_counts[boat["room_id"]] = space_boat_counts.get(boat["room_id"], 0) + 1
     map_warnings = []
     for boat in boats_on_map:
         boat["warnings"] = _shop_map_boat_placement_errors(
@@ -10503,6 +10578,7 @@ def tuning_shop_map():
     return render_template(
         "tuning_shop_map.html", active_page="tuning", sub_page="shop_map",
         room=room, scale=SHOP_MAP_SCALE, padding=SHOP_MAP_PADDING,
+        spaces=spaces, space_boat_counts=space_boat_counts,
         elements=elements,
         boats_on_map=boats_on_map, boats_missing_dimensions=boats_missing_dimensions,
         boats_away=boats_away, selected_date=selected_date, today_iso=today_iso,
@@ -10516,6 +10592,9 @@ def tuning_shop_map():
         element_notice=session.pop("shop_map_element_notice", None),
         boat_error=session.pop("shop_map_boat_error", None),
         boat_warning=session.pop("shop_map_boat_warning", None),
+        boat_notice=session.pop("shop_map_boat_notice", None),
+        space_error=session.pop("shop_map_space_error", None),
+        space_notice=session.pop("shop_map_space_notice", None),
         map_warnings=map_warnings,
     )
 
@@ -10524,10 +10603,16 @@ def tuning_shop_map():
 @admin_login_required
 def update_shop_map_room():
     db = get_db()
+    room = _shop_map_selected_room(db, request.form.get("space"))
     width_raw = request.form.get("width_m", "").strip().replace(",", ".")
     length_raw = request.form.get("length_m", "").strip().replace(",", ".")
+    name = " ".join(request.form.get("name", room["name"] if room else "").split())
 
     errors = []
+    if not name:
+        errors.append("Укажите название пространства.")
+    elif len(name) > 80:
+        errors.append("Название пространства — не более 80 символов.")
 
     def _parse_positive(raw, label):
         try:
@@ -10543,22 +10628,22 @@ def update_shop_map_room():
     length_m = _parse_positive(length_raw, "Длина")
     if errors:
         session["shop_map_room_error"] = " ".join(errors)
-        return redirect(url_for("tuning_shop_map"))
+        return _shop_map_redirect(room["id"] if room else None)
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    room = db.execute("SELECT id FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
     if room is not None:
         db.execute(
-            "UPDATE shop_map_room SET width_m = ?, length_m = ?, updated_at = ? WHERE id = ?",
-            (width_m, length_m, now, room["id"]),
+            "UPDATE shop_map_room SET width_m = ?, length_m = ?, name = ?, updated_at = ? WHERE id = ?",
+            (width_m, length_m, name, now, room["id"]),
         )
+        room_id = room["id"]
     else:
-        db.execute(
-            "INSERT INTO shop_map_room (width_m, length_m, updated_at) VALUES (?, ?, ?)",
-            (width_m, length_m, now),
-        )
+        room_id = db.execute(
+            "INSERT INTO shop_map_room (width_m, length_m, name, updated_at) VALUES (?, ?, ?, ?)",
+            (width_m, length_m, name, now),
+        ).lastrowid
     db.commit()
-    return redirect(url_for("tuning_shop_map"))
+    return _shop_map_redirect(room_id)
 
 
 def _parse_shop_map_element_form(form, room):
@@ -10600,9 +10685,9 @@ def _parse_shop_map_element_form(form, room):
 
     if not errors and room is not None:
         if x_m is not None and width_m is not None and x_m + width_m > room["length_m"] + 0.001:
-            errors.append("Зона выходит за пределы цеха по длине.")
+            errors.append("Объект выходит за пределы пространства по длине.")
         if y_m is not None and height_m is not None and y_m + height_m > room["width_m"] + 0.001:
-            errors.append("Зона выходит за пределы цеха по ширине.")
+            errors.append("Объект выходит за пределы пространства по ширине.")
 
     if errors:
         return None, " ".join(errors)
@@ -10613,20 +10698,20 @@ def _parse_shop_map_element_form(form, room):
 @admin_login_required
 def add_shop_map_element():
     db = get_db()
-    room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+    room = _shop_map_selected_room(db, request.form.get("space"))
     data, error = _parse_shop_map_element_form(request.form, room)
     if error:
         session["shop_map_element_error"] = error
-        return redirect(url_for("tuning_shop_map"))
+        return _shop_map_redirect(room["id"] if room else None)
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
-        "INSERT INTO shop_map_elements (name, x_m, y_m, width_m, height_m, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (data["name"], data["x_m"], data["y_m"], data["width_m"], data["height_m"], now, now),
+        "INSERT INTO shop_map_elements (name, x_m, y_m, width_m, height_m, created_at, updated_at, room_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (data["name"], data["x_m"], data["y_m"], data["width_m"], data["height_m"], now, now, room["id"]),
     )
     db.commit()
-    return redirect(url_for("tuning_shop_map"))
+    return _shop_map_redirect(room["id"])
 
 
 @app.route("/tuning/shop-map/elements/bulk-add", methods=["POST"])
@@ -10637,12 +10722,26 @@ def bulk_add_shop_map_elements():
     # (one zone per line) so a batch of measurements can go in as a single
     # action instead of N round trips through the form.
     db = get_db()
-    room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
-    raw_text = request.form.get("bulk_text", "")
+    room = _shop_map_selected_room(db, request.form.get("space"))
+    rows, errors = _parse_shop_map_bulk_elements(request.form.get("bulk_text", ""), room)
+    if not rows and not errors:
+        errors.append("Вставьте хотя бы одну строку.")
+    if errors:
+        session["shop_map_element_error"] = " ".join(errors)
+        return _shop_map_redirect(room["id"])
 
+    _insert_shop_map_elements(db, room["id"], rows)
+    db.commit()
+    session["shop_map_element_notice"] = f"Добавлено объектов: {len(rows)}."
+    return _shop_map_redirect(room["id"])
+
+
+def _parse_shop_map_bulk_elements(raw_text, room):
+    """Lines "название; от левой стены; от верхней стены; длина; ширина"
+    -> (rows, errors); shared by the bulk-add form and the new-space form."""
     rows = []
     errors = []
-    for line_number, raw_line in enumerate(raw_text.splitlines(), start=1):
+    for line_number, raw_line in enumerate((raw_text or "").splitlines(), start=1):
         line = raw_line.strip()
         if not line:
             continue
@@ -10662,23 +10761,17 @@ def bulk_add_shop_map_elements():
             errors.append(f"Строка {line_number} («{name or '—'}»): {error}")
             continue
         rows.append(data)
+    return rows, errors
 
-    if not rows and not errors:
-        errors.append("Вставьте хотя бы одну строку.")
-    if errors:
-        session["shop_map_element_error"] = " ".join(errors)
-        return redirect(url_for("tuning_shop_map"))
 
+def _insert_shop_map_elements(db, room_id, rows):
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     for data in rows:
         db.execute(
-            "INSERT INTO shop_map_elements (name, x_m, y_m, width_m, height_m, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (data["name"], data["x_m"], data["y_m"], data["width_m"], data["height_m"], now, now),
+            "INSERT INTO shop_map_elements (name, x_m, y_m, width_m, height_m, created_at, updated_at, room_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (data["name"], data["x_m"], data["y_m"], data["width_m"], data["height_m"], now, now, room_id),
         )
-    db.commit()
-    session["shop_map_element_notice"] = f"Добавлено зон: {len(rows)}."
-    return redirect(url_for("tuning_shop_map"))
 
 
 @app.route("/tuning/shop-map/elements/<int:element_id>/edit", methods=["POST"])
@@ -10686,15 +10779,15 @@ def bulk_add_shop_map_elements():
 def update_shop_map_element(element_id):
     db = get_db()
     element = db.execute(
-        "SELECT id FROM shop_map_elements WHERE id = ?", (element_id,)
+        "SELECT id, room_id FROM shop_map_elements WHERE id = ?", (element_id,)
     ).fetchone()
     if element is None:
-        return redirect(url_for("tuning_shop_map"))
-    room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+        return _shop_map_redirect()
+    room = _shop_map_selected_room(db, element["room_id"])
     data, error = _parse_shop_map_element_form(request.form, room)
     if error:
         session["shop_map_element_error"] = error
-        return redirect(url_for("tuning_shop_map"))
+        return _shop_map_redirect(room["id"])
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     db.execute(
@@ -10703,16 +10796,17 @@ def update_shop_map_element(element_id):
         (data["name"], data["x_m"], data["y_m"], data["width_m"], data["height_m"], now, element_id),
     )
     db.commit()
-    return redirect(url_for("tuning_shop_map"))
+    return _shop_map_redirect(room["id"])
 
 
 @app.route("/tuning/shop-map/elements/<int:element_id>/delete", methods=["POST"])
 @admin_login_required
 def delete_shop_map_element(element_id):
     db = get_db()
+    element = db.execute("SELECT room_id FROM shop_map_elements WHERE id = ?", (element_id,)).fetchone()
     db.execute("DELETE FROM shop_map_elements WHERE id = ?", (element_id,))
     db.commit()
-    return redirect(url_for("tuning_shop_map"))
+    return _shop_map_redirect(element["room_id"] if element else None)
 
 
 @app.route("/tuning/shop-map/boats/<int:boat_id>/move", methods=["POST"])
@@ -10729,7 +10823,7 @@ def update_shop_map_boat_position(boat_id):
     profile = _boat_dimensions(db, boat_row["boat_model"])
     boat_length_m = profile["length_m"] if profile else None
     boat_width_m = profile["width_m"] if profile else None
-    room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+    room = _shop_map_selected_room(db, boat_row["room_id"])
 
     errors = []
 
@@ -10766,7 +10860,7 @@ def update_shop_map_boat_position(boat_id):
         (x_m, y_m, now, boat_id),
     )
     db.commit()
-    return _shop_map_redirect()
+    return _shop_map_redirect(room["id"] if room else None)
 
 
 @app.route("/tuning/shop-map/boats/<int:boat_id>/drag", methods=["POST"])
@@ -10790,7 +10884,7 @@ def drag_shop_map_boat(boat_id):
     if x_m != x_m or y_m != y_m or abs(x_m) > 1000 or abs(y_m) > 1000:
         return jsonify({"error": "Некорректные координаты."}), 400
 
-    room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+    room = _shop_map_selected_room(db, boat_row["room_id"])
     footprint_w, footprint_h = _shop_map_boat_footprint(length_m, width_m, boat_row["rotation_deg"])
     x_m, y_m = _shop_map_clamp_to_canvas(room, x_m, y_m, footprint_w, footprint_h)
     warning = _shop_map_save_warning(_shop_map_boat_placement_errors(
@@ -10833,7 +10927,7 @@ def rotate_shop_map_boat(boat_id):
     new_x_m = center_x - new_w / 2
     new_y_m = center_y - new_h / 2
 
-    room = db.execute("SELECT * FROM shop_map_room ORDER BY id LIMIT 1").fetchone()
+    room = _shop_map_selected_room(db, boat_row["room_id"])
     new_x_m, new_y_m = _shop_map_clamp_to_canvas(room, new_x_m, new_y_m, new_w, new_h)
     warning = _shop_map_save_warning(_shop_map_boat_placement_errors(
         db, room, new_x_m, new_y_m, length_m, width_m, new_rotation,
@@ -10856,9 +10950,133 @@ def rotate_shop_map_boat(boat_id):
 @admin_login_required
 def remove_shop_map_boat(boat_id):
     db = get_db()
+    boat = db.execute("SELECT room_id FROM shop_map_boats WHERE id = ?", (boat_id,)).fetchone()
     db.execute("DELETE FROM shop_map_boats WHERE id = ?", (boat_id,))
     db.commit()
-    return _shop_map_redirect()
+    return _shop_map_redirect(boat["room_id"] if boat and boat["room_id"] else None)
+
+
+@app.route("/tuning/shop-map/spaces/add", methods=["POST"])
+@admin_login_required
+def add_shop_map_space():
+    """A new space (name, length × width) with, optionally, its fixed
+    objects — one per line, the same format as the bulk form."""
+    db = get_db()
+    name = " ".join(request.form.get("name", "").split())
+    errors = []
+    if not name:
+        errors.append("Укажите название пространства.")
+    elif len(name) > 80:
+        errors.append("Название пространства — не более 80 символов.")
+    elif db.execute(
+        "SELECT 1 FROM shop_map_room WHERE LOWER(name) = LOWER(?)", (name,)
+    ).fetchone():
+        errors.append(f"Пространство «{name}» уже есть.")
+
+    def _positive(raw, label):
+        try:
+            value = float(raw.strip().replace(",", "."))
+            if value <= 0 or value != value or value > 1000:
+                raise ValueError
+            return value
+        except ValueError:
+            errors.append(f"{label} должна быть положительным числом в метрах.")
+            return None
+
+    length_m = _positive(request.form.get("length_m", ""), "Длина")
+    width_m = _positive(request.form.get("width_m", ""), "Ширина")
+    rows = []
+    if length_m and width_m:
+        probe = {"length_m": length_m, "width_m": width_m}
+        rows, element_errors = _parse_shop_map_bulk_elements(request.form.get("bulk_text", ""), probe)
+        errors.extend(element_errors)
+    if errors:
+        session["shop_map_space_error"] = " ".join(errors)
+        return _shop_map_redirect()
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    room_id = db.execute(
+        "INSERT INTO shop_map_room (width_m, length_m, name, updated_at) VALUES (?, ?, ?, ?)",
+        (width_m, length_m, name, now),
+    ).lastrowid
+    _insert_shop_map_elements(db, room_id, rows)
+    db.commit()
+    session["shop_map_space_notice"] = (
+        f"Пространство «{name}» добавлено" + (f", объектов: {len(rows)}." if rows else ".")
+    )
+    return _shop_map_redirect(room_id)
+
+
+@app.route("/tuning/shop-map/spaces/<int:room_id>/delete", methods=["POST"])
+@admin_login_required
+def delete_shop_map_space(room_id):
+    """Only an empty space can go (move its boats away first) and the last
+    one stays; its objects are deleted with it."""
+    db = get_db()
+    room = _shop_map_room_by_id(db, room_id)
+    if room is None:
+        return _shop_map_redirect()
+    if db.execute("SELECT COUNT(*) FROM shop_map_room").fetchone()[0] <= 1:
+        session["shop_map_space_error"] = "Последнее пространство удалить нельзя."
+        return _shop_map_redirect(room_id)
+    default_id = _shop_map_default_room(db)["id"]
+    if db.execute(
+        "SELECT COUNT(*) FROM shop_map_boats WHERE COALESCE(room_id, ?) = ?", (default_id, room_id)
+    ).fetchone()[0]:
+        session["shop_map_space_error"] = (
+            f"В пространстве «{room['name']}» стоят лодки — сначала перенесите их в другое пространство."
+        )
+        return _shop_map_redirect(room_id)
+    db.execute("DELETE FROM shop_map_elements WHERE room_id = ?", (room_id,))
+    db.execute("DELETE FROM shop_map_room WHERE id = ?", (room_id,))
+    db.commit()
+    session["shop_map_space_notice"] = f"Пространство «{room['name']}» удалено."
+    return _shop_map_redirect(_shop_map_default_room(db)["id"])
+
+
+@app.route("/tuning/shop-map/boats/<int:boat_id>/move-space", methods=["POST"])
+@admin_login_required
+def move_shop_map_boat_to_space(boat_id):
+    """Right-click on a boat -> move it to another space. The boat takes the
+    first free spot there (at its current heading, against the boats that
+    stand there at the same time); when nothing fits it lands on a staggered
+    default and the map warns about it. JSON, called from the context menu."""
+    db = get_db()
+    boat_row, length_m, width_m = _shop_map_boat_with_profile(db, boat_id)
+    if boat_row is None:
+        return jsonify({"ok": False, "error": "Лодка не найдена."}), 404
+    target = _shop_map_room_by_id(db, request.form.get("room_id", type=int))
+    if target is None:
+        return jsonify({"ok": False, "error": "Пространство не найдено."}), 404
+    source = _shop_map_selected_room(db, boat_row["room_id"])
+    if source is not None and source["id"] == target["id"]:
+        return jsonify({"ok": False, "error": "Лодка уже в этом пространстве."}), 400
+
+    rotation = boat_row["rotation_deg"]
+    spot = None
+    if length_m and width_m:
+        own = next((b for b in _shop_map_boats(db) if b["id"] == boat_id), None)
+        interval = (own["present_start"], own["present_end"]) if own else None
+        spot = _shop_map_find_free_spot(
+            db, target, length_m, width_m, rotation, interval, exclude_boat_id=boat_id
+        )
+    placed_free = spot is not None
+    x_m, y_m = spot if placed_free else _shop_map_staggered_spot(db, target["id"])
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    db.execute(
+        "UPDATE shop_map_boats SET room_id = ?, x_m = ?, y_m = ?, updated_at = ? WHERE id = ?",
+        (target["id"], x_m, y_m, now, boat_id),
+    )
+    db.commit()
+    order = db.execute(
+        "SELECT client_name, boat_model FROM tuning_orders WHERE id = ?", (boat_row["order_id"],)
+    ).fetchone()
+    label = f"{order['client_name']} — {order['boat_model']}" if order else "Лодка"
+    message = f"{label}: перенесена в «{target['name']}»."
+    if not placed_free:
+        message += " Свободного места там не нашлось — проверьте положение лодки на карте."
+    session["shop_map_boat_notice"] = message
+    return jsonify({"ok": True, "message": message, "room_id": target["id"], "free_spot": placed_free})
 
 
 @app.route("/tuning/diagnostics/hull")
@@ -12382,7 +12600,7 @@ def assign_tuning_item(order_id, item_id):
         # there's nothing to take it off the map for
         session["tuning_assign_error"] = (
             "Для работы на территории подрядчика укажите срок исполнения: "
-            "на это время лодка уберётся с карты цеха."
+            "на это время лодка уберётся с карты пространств."
         )
         return redirect(url_for(return_endpoint, order_id=order_id))
 
@@ -12677,7 +12895,7 @@ def update_tuning_assignment_location(assignment_id):
     at_partner = request.form.get("location", "").strip() == PARTNER_LOCATION_AT_PARTNER
     if at_partner and not assignment["due_from"]:
         session["tuning_board_error"] = (
-            "Сначала укажите срок исполнения задачи — на этот период лодка уберётся с карты цеха."
+            "Сначала укажите срок исполнения задачи — на этот период лодка уберётся с карты пространств."
         )
         return redirect(board)
     db.execute(
@@ -12686,8 +12904,8 @@ def update_tuning_assignment_location(assignment_id):
     )
     db.commit()
     session["tuning_board_notice"] = (
-        "Работа на территории подрядчика: лодка уберётся с карты цеха на период задачи."
-        if at_partner else "Работа на нашей территории: лодка остаётся на карте цеха."
+        "Работа на территории подрядчика: лодка уберётся с карты пространств на период задачи."
+        if at_partner else "Работа на нашей территории: лодка остаётся на карте пространств."
     )
     return redirect(board)
 

@@ -199,7 +199,7 @@ class ShopMapAutoPlacementTests(unittest.TestCase):
             )
             self.assertEqual(outside.status_code, 200)
             body = outside.get_json()
-            self.assertIn("за пределы цеха", body["warning"])
+            self.assertIn("за пределы пространства", body["warning"])
             with application_module.app.app_context():
                 room = application_module.get_db().execute(
                     "SELECT length_m FROM shop_map_room ORDER BY id LIMIT 1"

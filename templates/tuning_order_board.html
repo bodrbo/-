@@ -171,7 +171,7 @@
             {% if a.partner_id %}
             <form action="{{ url_for('update_tuning_assignment_location', assignment_id=a.id) }}" method="post" class="board-task-location-form">
               <select name="location" onchange="this.form.submit()" aria-label="Где выполняется работа"
-                      title="На территории подрядчика лодка убирается с карты цеха на период задачи">
+                      title="На территории подрядчика лодка убирается с карты пространств на период задачи">
                 <option value="own" {{ 'selected' if not a.at_partner }}>На нашей территории</option>
                 <option value="partner" {{ 'selected' if a.at_partner }}>На территории подрядчика</option>
               </select>
