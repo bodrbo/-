@@ -349,7 +349,8 @@
         </label>
         <label class="field">
           <span>Количество гостей</span>
-          <input type="number" name="guests_count" id="scheduleBookingGuestsCount" min="1" max="1000" placeholder="Необязательно">
+          <input type="number" name="guests_count" id="scheduleBookingGuestsCount" min="1" max="1000" placeholder="Необязательно"
+                 oninput="syncScheduleClientPrices()">
         </label>
         <label class="field">
           <span>Канал продаж</span>
@@ -2881,6 +2882,17 @@
     if (price !== undefined && price !== null) {
       priceInput.value = price;
       priceInput.dataset.priceMode = 'manual';
+      // A saved price that is exactly the programme price times the guests
+      // is the automatic one: keep it following the number of guests. Any
+      // other amount (a discount, an imported booking) stays as typed.
+      const serviceOption = document.getElementById('scheduleService').selectedOptions[0];
+      const perGuest = serviceOption && serviceOption.value ? Number(serviceOption.dataset.price || 0) : 0;
+      if (
+        perGuest > 0 && !String(sourceRef || '').startsWith('orders:')
+        && Math.abs(Number(price) - perGuest * Math.max(1, Number(guestsCount || 1))) < 0.005
+      ) {
+        priceInput.dataset.priceMode = 'auto';
+      }
     }
     if (String(sourceRef || '').startsWith('orders:')) {
       renderSchedulePaymentBreakdown(
@@ -2980,7 +2992,11 @@
       selected.dataset.serviceType === 'group'
       || selected.dataset.activityType === 'city'
     ) {
-      return Number(selected.dataset.price || 0);
+      // A group programme is priced per guest: the price of the whole
+      // booking is that price times the number of guests (one when the
+      // optional guests field is empty).
+      const guests = Number(document.getElementById('scheduleBookingGuestsCount').value || 0);
+      return Number(selected.dataset.price || 0) * (Number.isFinite(guests) && guests >= 1 ? Math.floor(guests) : 1);
     }
     const boat = document.getElementById('scheduleBoat').value;
     let prices = {};
