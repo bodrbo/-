@@ -4579,6 +4579,17 @@ tr.dealer-cancelled td { opacity: 0.55; }
   align-items: center;
 }
 .work-row .work-name { flex: 2 1 200px; min-width: 0; }
+/* drag-and-drop handle of a work row / goods row */
+.drag-handle { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 36px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; }
+.drag-handle svg { width: 18px; height: 18px; }
+.drag-handle:hover, .drag-handle:focus-visible { background: var(--paper-alt); color: var(--ink); outline: none; }
+.drag-handle:active { cursor: grabbing; }
+.drag-cell { width: 34px; padding-right: 0 !important; }
+.is-dragging { background: var(--paper); box-shadow: 0 8px 24px rgba(15, 42, 53, 0.22); outline: 2px solid var(--brass); outline-offset: 2px; position: relative; z-index: 2; }
+.is-sorting { cursor: grabbing; }
+.is-sorting textarea, .is-sorting input { pointer-events: none; }
+.sort-status { font-size: 12px; font-weight: 600; color: var(--success); margin-left: 8px; }
+.sort-status.is-error { color: var(--danger); }
 /* a wrapping, auto-growing field (see autoGrowWorkName) instead of a one-line input */
 .work-row textarea.work-name { resize: none; overflow: hidden; line-height: 1.4; min-height: 0; }
 .work-row .work-cost,

@@ -479,6 +479,6 @@ def get_order_item(db, order_id, item_id):
 def list_order_work_items(db, order_id):
     return db.execute(
         "SELECT id, work_name FROM tuning_order_items "
-        "WHERE order_id = ? AND status != 'removed' ORDER BY id",
+        "WHERE order_id = ? AND status != 'removed' ORDER BY position, id",
         (order_id,),
     ).fetchall()

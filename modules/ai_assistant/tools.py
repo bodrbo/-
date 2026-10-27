@@ -473,7 +473,7 @@ def _tuning_order_details(db, arguments, user):
 
     item_rows = db.execute(
         "SELECT id, work_name, cost_price, multiplier, price, status, photo_comment "
-        "FROM tuning_order_items WHERE order_id = ? ORDER BY id",
+        "FROM tuning_order_items WHERE order_id = ? ORDER BY position, id",
         (order_id,),
     ).fetchall()
     items = []
@@ -519,7 +519,7 @@ def _tuning_order_details(db, arguments, user):
 
     product_rows = db.execute(
         "SELECT id, product_id, product_name, quantity, unit_price, cost_price, unit, created_at "
-        "FROM tuning_order_products WHERE order_id = ? ORDER BY id",
+        "FROM tuning_order_products WHERE order_id = ? ORDER BY position, id",
         (order_id,),
     ).fetchall()
     payment_rows = db.execute(

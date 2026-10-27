@@ -530,7 +530,7 @@ def _tuning_order_items_with_assignments(db, order_id):
     order-edit page and the task board so both read the same shape."""
     items = []
     for row in db.execute(
-        "SELECT * FROM tuning_order_items WHERE order_id = ? ORDER BY id", (order_id,)
+        "SELECT * FROM tuning_order_items WHERE order_id = ? ORDER BY position, id", (order_id,)
     ).fetchall():
         item = dict(row)
         item["assignments"] = [
@@ -2822,6 +2822,15 @@ def init_db(db_path=None, include_bootstrap_data=True):
         # off from it while the order is "В работе" (see
         # _sync_order_goods_writeoff). NULL = no automatic write-off.
         conn.execute("ALTER TABLE tuning_order_products ADD COLUMN warehouse_id INTEGER")
+    if "position" not in order_product_cols:
+        # Same drag-and-drop order for the goods of an order.
+        conn.execute(
+            "ALTER TABLE tuning_order_products ADD COLUMN position INTEGER NOT NULL DEFAULT 1000000"
+        )
+        conn.execute(
+            "UPDATE tuning_order_products SET position = (SELECT COUNT(*) FROM tuning_order_products b "
+            "WHERE b.order_id = tuning_order_products.order_id AND b.id <= tuning_order_products.id)"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS partner_commissions (
@@ -3756,6 +3765,17 @@ def init_db(db_path=None, include_bootstrap_data=True):
         conn.execute(
             "ALTER TABLE tuning_order_items ADD COLUMN discount_value REAL NOT NULL DEFAULT 0"
         )
+    if "position" not in item_cols:
+        # Drag-and-drop order of the works in an order. Existing rows keep
+        # their present order (the rank by id); a row added anywhere else
+        # without a position lands at the end (the large default).
+        conn.execute(
+            "ALTER TABLE tuning_order_items ADD COLUMN position INTEGER NOT NULL DEFAULT 1000000"
+        )
+        conn.execute(
+            "UPDATE tuning_order_items SET position = (SELECT COUNT(*) FROM tuning_order_items b "
+            "WHERE b.order_id = tuning_order_items.order_id AND b.id <= tuning_order_items.id)"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS work_item_photos (
@@ -4336,7 +4356,7 @@ def _payroll_context(db, selected_week, selected_employee):
         "SELECT projects.id AS project_id, tuning_order_items.work_name AS work_name "
         "FROM projects JOIN tuning_order_items ON tuning_order_items.order_id = projects.tuning_order_id "
         "WHERE projects.tuning_order_id IS NOT NULL "
-        "ORDER BY projects.id, tuning_order_items.id"
+        "ORDER BY projects.id, tuning_order_items.position, tuning_order_items.id"
     ).fetchall():
         project_items.setdefault(row["project_id"], []).append(row["work_name"])
 
@@ -8414,11 +8434,11 @@ def tuning_order_act_pdf(order_id):
     order = dict(order)
     order["motors"] = _tuning_order_motors(db, order_id)
     items = db.execute(
-        "SELECT * FROM tuning_order_items WHERE order_id = ? AND status = 'done' ORDER BY id",
+        "SELECT * FROM tuning_order_items WHERE order_id = ? AND status = 'done' ORDER BY position, id",
         (order_id,),
     ).fetchall()
     goods = db.execute(
-        "SELECT * FROM tuning_order_products WHERE order_id = ? ORDER BY id", (order_id,)
+        "SELECT * FROM tuning_order_products WHERE order_id = ? ORDER BY position, id", (order_id,)
     ).fetchall()
     try:
         pdf_bytes = _build_act_pdf(order, items, goods)
@@ -8652,11 +8672,11 @@ def tuning_order_handover_pdf(order_id):
     order = dict(order)
     order["motors"] = _tuning_order_motors(db, order_id)
     items = db.execute(
-        "SELECT * FROM tuning_order_items WHERE order_id = ? AND status != 'removed' ORDER BY id",
+        "SELECT * FROM tuning_order_items WHERE order_id = ? AND status != 'removed' ORDER BY position, id",
         (order_id,),
     ).fetchall()
     goods = db.execute(
-        "SELECT * FROM tuning_order_products WHERE order_id = ? ORDER BY id", (order_id,)
+        "SELECT * FROM tuning_order_products WHERE order_id = ? ORDER BY position, id", (order_id,)
     ).fetchall()
     try:
         pdf_bytes = _build_handover_act_pdf(order, items, goods)
@@ -8854,7 +8874,7 @@ def tuning_subcontracts():
         subcontract["motors"] = motors_by_order.get(row["id"], [])
         items = db.execute(
             "SELECT price, partner_price, price_pending, status "
-            "FROM tuning_order_items WHERE order_id = ? ORDER BY id",
+            "FROM tuning_order_items WHERE order_id = ? ORDER BY position, id",
             (row["id"],),
         ).fetchall()
         active_items = [item for item in items if item["status"] != "removed"]
@@ -11490,20 +11510,20 @@ def copy_tuning_order(order_id):
     db.execute(
         "INSERT INTO tuning_order_items "
         "(order_id, work_name, cost_price, multiplier, price, partner_price, "
-        "price_pending, status, list_price, discount_type, discount_value) "
+        "price_pending, status, list_price, discount_type, discount_value, position) "
         "SELECT ?, work_name, cost_price, multiplier, price, partner_price, "
-        "price_pending, ?, list_price, discount_type, discount_value "
+        "price_pending, ?, list_price, discount_type, discount_value, position "
         "FROM tuning_order_items WHERE order_id = ? AND status != 'removed' "
-        "ORDER BY id",
+        "ORDER BY position, id",
         (copied_order_id, DEFAULT_WORK_STATUS, order_id),
     )
     db.execute(
         "INSERT INTO tuning_order_products "
         "(order_id, product_id, product_name, quantity, unit_price, "
-        "cost_price, unit, created_at) "
+        "cost_price, unit, created_at, position) "
         "SELECT ?, product_id, product_name, quantity, unit_price, "
-        "cost_price, unit, ? FROM tuning_order_products "
-        "WHERE order_id = ? ORDER BY id",
+        "cost_price, unit, ?, position FROM tuning_order_products "
+        "WHERE order_id = ? ORDER BY position, id",
         (copied_order_id, now, order_id),
     )
     db.execute(
@@ -11987,7 +12007,7 @@ def edit_tuning_order(order_id):
             "LEFT JOIN supply_writeoffs ON supply_writeoffs.tuning_order_product_id = tuning_order_products.id "
             "LEFT JOIN supply_warehouses ON supply_warehouses.id = supply_writeoffs.warehouse_id "
             "LEFT JOIN supply_warehouses chosen ON chosen.id = tuning_order_products.warehouse_id "
-            "WHERE tuning_order_products.order_id = ? ORDER BY tuning_order_products.id",
+            "WHERE tuning_order_products.order_id = ? ORDER BY tuning_order_products.position, tuning_order_products.id",
             (order_id,),
         ).fetchall()
         supply_warehouses_list = db.execute(
@@ -12183,24 +12203,24 @@ def edit_tuning_order(order_id):
         db.execute("DELETE FROM work_item_photos WHERE item_id = ?", (removed_id,))
         db.execute("DELETE FROM work_item_videos WHERE item_id = ?", (removed_id,))
         db.execute("DELETE FROM tuning_order_items WHERE id = ?", (removed_id,))
-    for item in data["items"]:
+    for position, item in enumerate(data["items"]):
         if item["item_id"] in existing_ids:
             db.execute(
                 "UPDATE tuning_order_items SET work_name=?, cost_price=?, multiplier=?, price=?, "
-                "price_pending=?, list_price=?, discount_type=?, discount_value=? WHERE id=?",
+                "price_pending=?, list_price=?, discount_type=?, discount_value=?, position=? WHERE id=?",
                 (item["work_name"], item["cost_price"], item["multiplier"], item["price"],
                  int(item["price_pending"]), item["list_price"], item["discount_type"],
-                 item["discount_value"], item["item_id"]),
+                 item["discount_value"], position, item["item_id"]),
             )
         else:
             db.execute(
                 "INSERT INTO tuning_order_items "
                 "(order_id, work_name, cost_price, multiplier, price, price_pending, status, "
-                "list_price, discount_type, discount_value) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "list_price, discount_type, discount_value, position) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (order_id, item["work_name"], item["cost_price"], item["multiplier"], item["price"],
                  int(item["price_pending"]), DEFAULT_WORK_STATUS, item["list_price"],
-                 item["discount_type"], item["discount_value"]),
+                 item["discount_type"], item["discount_value"], position),
             )
     _sync_tuning_boat_profiles(db)
     db.commit()
@@ -14442,6 +14462,55 @@ def set_tuning_order_product_warehouse(order_id, row_id):
     return redirect(back)
 
 
+def _apply_order_positions(db, table, order_id, raw_ids):
+    """Stores the drag-and-drop order of an order's works or goods: the ids
+    that belong to the order get positions 0, 1, 2... in the given order, the
+    ones not mentioned follow in their present order. Returns how many
+    positions were written."""
+    existing = [
+        row["id"] for row in db.execute(
+            f"SELECT id FROM {table} WHERE order_id = ? ORDER BY position, id", (order_id,)
+        ).fetchall()
+    ]
+    known = set(existing)
+    ordered = []
+    for raw in raw_ids:
+        try:
+            row_id = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if row_id in known and row_id not in ordered:
+            ordered.append(row_id)
+    ordered += [row_id for row_id in existing if row_id not in ordered]
+    for position, row_id in enumerate(ordered):
+        db.execute(f"UPDATE {table} SET position = ? WHERE id = ?", (position, row_id))
+    db.commit()
+    return len(ordered)
+
+
+@app.route("/tuning/<int:order_id>/works/reorder", methods=["POST"])
+@admin_login_required
+def reorder_tuning_order_works(order_id):
+    """Drag and drop in the list of works (saved at once, so the order is
+    kept even when the order form itself isn't saved)."""
+    db = get_db()
+    if db.execute("SELECT 1 FROM tuning_orders WHERE id = ?", (order_id,)).fetchone() is None:
+        return jsonify({"ok": False, "error": "Заказ не найден."}), 404
+    count = _apply_order_positions(db, "tuning_order_items", order_id, request.form.getlist("ids[]"))
+    return jsonify({"ok": True, "count": count})
+
+
+@app.route("/tuning/<int:order_id>/products/reorder", methods=["POST"])
+@admin_login_required
+def reorder_tuning_order_products(order_id):
+    """Drag and drop in the list of goods."""
+    db = get_db()
+    if db.execute("SELECT 1 FROM tuning_orders WHERE id = ?", (order_id,)).fetchone() is None:
+        return jsonify({"ok": False, "error": "Заказ не найден."}), 404
+    count = _apply_order_positions(db, "tuning_order_products", order_id, request.form.getlist("ids[]"))
+    return jsonify({"ok": True, "count": count})
+
+
 @app.route("/tuning/<int:order_id>/products/<int:row_id>/remove", methods=["POST"])
 @admin_login_required
 def remove_tuning_order_product(order_id, row_id):
@@ -14616,7 +14685,7 @@ def _render_client_dashboard(
             item_columns += ", cost_price, multiplier"
         items = db.execute(
             f"SELECT {item_columns} FROM tuning_order_items "
-            "WHERE order_id = ? ORDER BY id",
+            "WHERE order_id = ? ORDER BY position, id",
             (o["id"],),
         ).fetchall()
         goods_columns = "id, product_id, product_name, quantity, unit_price, unit"
@@ -14624,7 +14693,7 @@ def _render_client_dashboard(
             goods_columns += ", cost_price"
         goods_items = db.execute(
             f"SELECT {goods_columns} FROM tuning_order_products "
-            "WHERE order_id = ? ORDER BY id",
+            "WHERE order_id = ? ORDER BY position, id",
             (o["id"],),
         ).fetchall()
         order = dict(o)
@@ -15310,12 +15379,12 @@ def partner_order_estimate_pdf(token, order_id):
     )
     items = db.execute(
         "SELECT id, work_name, partner_price FROM tuning_order_items "
-        "WHERE order_id = ? AND status != 'removed' ORDER BY id",
+        "WHERE order_id = ? AND status != 'removed' ORDER BY position, id",
         (order_id,),
     ).fetchall()
     goods = db.execute(
         "SELECT product_name, quantity, unit_price, unit "
-        "FROM tuning_order_products WHERE order_id = ? ORDER BY id",
+        "FROM tuning_order_products WHERE order_id = ? ORDER BY position, id",
         (order_id,),
     ).fetchall()
     if not items and not goods:
@@ -15847,7 +15916,7 @@ def create_yookassa_goods_payment(order_id):
         return redirect(url_for("tuning_index"))
 
     goods = db.execute(
-        "SELECT * FROM tuning_order_products WHERE order_id = ? ORDER BY id", (order_id,)
+        "SELECT * FROM tuning_order_products WHERE order_id = ? ORDER BY position, id", (order_id,)
     ).fetchall()
     if not goods:
         session["yookassa_error"] = "В заказе нет товаров — нечего включить в счёт."
@@ -18204,7 +18273,7 @@ def _items_by_project(db):
         "FROM tuning_order_items "
         "JOIN tuning_orders ON tuning_orders.id = tuning_order_items.order_id "
         "JOIN projects ON projects.tuning_order_id = tuning_orders.id "
-        "ORDER BY tuning_order_items.id"
+        "ORDER BY tuning_order_items.position, tuning_order_items.id"
     ).fetchall()
     by_project = {}
     for r in rows:
@@ -20135,7 +20204,7 @@ def _item_profitability(db, order_id):
     per work item, so there's no meaningful way to split their payment
     across items — only costs can be traced to a specific one."""
     items = db.execute(
-        "SELECT * FROM tuning_order_items WHERE order_id = ? ORDER BY id", (order_id,)
+        "SELECT * FROM tuning_order_items WHERE order_id = ? ORDER BY position, id", (order_id,)
     ).fetchall()
     result = []
     for item in items:
