@@ -151,6 +151,8 @@ class SoftwareRequestTests(unittest.TestCase):
         self.assertIn(description, html)
         self.assertIn("Тестовый администратор", html)
         self.assertIn('<span class="nav-label">Настройки</span>', html)
+        self.assertIn("data-status-picker-form", html)        # the status is the clickable control
+        self.assertIn("status-picker.js", html)
 
         updated = self.client.post(
             f"/settings/software-requests/{created['request_id']}/status",

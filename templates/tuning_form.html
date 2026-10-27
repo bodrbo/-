@@ -1,3 +1,4 @@
+{% from '_status_picker.html' import status_picker %}
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -178,7 +179,7 @@
   {% if edit_order %}
   <div class="panel" style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
     <h2 style="margin:0;">Статус {{ 'субподряда' if edit_order.source == 'subcontract_request' else 'заказа' }}</h2>
-    <span class="status-badge status-{{ edit_order.status }}">{{ edit_order.status|order_status_label }}</span>
+    {{ status_picker(url_for('set_tuning_order_status', order_id=edit_order.id), edit_order.status, order_statuses, aria='Статус заказа') }}
     {% if pending_price_count and edit_order.source != 'subcontract_request' %}
     <span class="status-badge status-awaiting-calc" title="Работ без цены: {{ pending_price_count }} — их нужно рассчитать">Ждёт расчёта · {{ pending_price_count }}</span>
     {% endif %}
@@ -202,14 +203,6 @@
       </svg>
       Доска задач
     </a>
-    <form action="{{ url_for('set_tuning_order_status', order_id=edit_order.id) }}" method="post"
-          class="status-select-form tuning-order-status-select">
-      <select name="status" onchange="this.form.submit()">
-        {% for s in order_statuses %}
-        <option value="{{ s.value }}" {{ 'selected' if edit_order.status == s.value }}>{{ s.label }}</option>
-        {% endfor %}
-      </select>
-    </form>
   </div>
 
   <div class="panel order-summary-grid">
@@ -459,14 +452,7 @@
             </td>
             {% endif %}
             <td>
-              <form action="{{ url_for('set_tuning_item_status', order_id=edit_order.id, item_id=item.id) }}"
-                    method="post" class="status-select-form">
-                <select name="status" onchange="this.form.submit()">
-                  {% for s in work_statuses %}
-                  <option value="{{ s.value }}" {{ 'selected' if item.status == s.value }}>{{ s.label }}</option>
-                  {% endfor %}
-                </select>
-              </form>
+              {{ status_picker(url_for('set_tuning_item_status', order_id=edit_order.id, item_id=item.id), item.status, work_statuses, aria='Статус работы') }}
             </td>
             <td class="muted">
               <div class="tuning-item-task-actions">
@@ -2059,6 +2045,7 @@ document.addEventListener('DOMContentLoaded', updateYookassaSubmitState);
 </script>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 <script src="{{ url_for('static', filename='sortable.js') }}"></script>
+<script src="{{ url_for('static', filename='status-picker.js') }}"></script>
 
 </body>
 </html>

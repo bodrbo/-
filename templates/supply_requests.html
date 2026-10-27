@@ -91,7 +91,6 @@
             <th>Постамат доставки</th>
             <th>Статус</th>
             <th>Комментарий</th>
-            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -130,17 +129,15 @@
               </form>
             </td>
             <td>
-              <span class="status-badge status-supplyreq-{{ r.status }}">
-                {{ request_statuses|selectattr('value', 'equalto', r.status)|map(attribute='label')|first }}
-              </span>
-            </td>
-            <td class="muted">{{ r.status_comment or '—' }}</td>
-            <td>
-              <button type="button" class="btn-secondary"
+              <button type="button" class="status-badge status-supplyreq-{{ r.status }} status-picker-trigger"
+                      title="Нажмите, чтобы изменить статус и комментарий"
+                      aria-label="Статус заявки: {{ request_statuses|selectattr('value', 'equalto', r.status)|map(attribute='label')|first }}. Нажмите, чтобы изменить"
                       onclick='openRequestStatusModal({{ url_for("set_supply_request_status", request_id=r.id)|tojson }}, {{ r.status|tojson }}, {{ (r.status_comment or "")|tojson }})'>
-                Изменить статус
+                <span class="status-picker-label">{{ request_statuses|selectattr('value', 'equalto', r.status)|map(attribute='label')|first }}</span>
+                <svg class="status-picker-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg>
               </button>
             </td>
+            <td class="muted">{{ r.status_comment or '—' }}</td>
           </tr>
           {% endfor %}
         </tbody>

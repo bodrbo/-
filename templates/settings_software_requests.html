@@ -1,3 +1,4 @@
+{% from '_status_picker.html' import status_picker %}
 <!doctype html>
 <html lang="ru">
 <head>
@@ -75,14 +76,12 @@
         </a>
         {% endif %}
       </div>
-      <form action="{{ url_for('software_requests.set_status', request_id=item.id) }}" method="post" class="software-request-status-form">
-        <label for="software-request-status-{{ item.id }}">Статус</label>
-        <select id="software-request-status-{{ item.id }}" name="status" class="software-request-status software-request-status-{{ item.status }}" onchange="this.form.submit()">
-          {% for value, label in statuses.items() %}
-          <option value="{{ value }}" {{ 'selected' if item.status == value }}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </form>
+      <div class="software-request-status-form">
+        <span class="software-request-status-caption">Статус</span>
+        {% set status_options = [] %}
+        {% for value, label in statuses.items() %}{{ status_options.append({'value': value, 'label': label}) or '' }}{% endfor %}
+        {{ status_picker(url_for('software_requests.set_status', request_id=item.id), item.status, status_options, prefix='status-swreq-', aria='Статус заявки') }}
+      </div>
     </article>
     {% else %}
     <div class="panel empty-state software-request-empty">
@@ -95,6 +94,7 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script src="{{ url_for('static', filename='status-picker.js') }}"></script>
 <script>
   const navToggle = document.getElementById('navToggle');
   const mainNav = document.getElementById('mainNav');

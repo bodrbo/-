@@ -151,6 +151,9 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
     def update_status(order_id):
         ok, message = services.set_status(get_db(), order_id, request.form.get("status", ""))
         notice("success" if ok else "error", message)
+        target = request.form.get("next", "").strip()
+        if target.startswith("/") and not target.startswith("//") and "\\" not in target and len(target) <= 600:
+            return redirect(target)
         return redirect(url_for("dealer.order", order_id=order_id))
 
     @blueprint.route("/dealer/orders/<int:order_id>/payments", methods=["POST"])

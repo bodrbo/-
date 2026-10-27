@@ -644,7 +644,7 @@ class TuningScheduleStatusTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertIn(f"заказа №{self.order_id}", body["message"])
         self.assertEqual(self.assignments()[0]["assignment_status"], "in_progress")
         board = self.board()
-        self.assertIn('<option value="in_progress" selected>', board)
+        self.assertIn('name="status" value="in_progress" data-status-value', board)   # the board's clickable status
         self.assertIn("tuning-calendar-card status-in_progress", self.page())
 
     def test_a_status_changed_on_the_board_shows_on_the_card(self):

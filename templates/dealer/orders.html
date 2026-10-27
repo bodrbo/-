@@ -1,4 +1,5 @@
 {% extends 'dealer/base.html' %}
+{% from '_status_picker.html' import status_picker %}
 {% block title %}Заказы — Дилерский центр{% endblock %}
 {% block heading %}Заказы{% endblock %}
 {% block content %}
@@ -58,7 +59,7 @@
           <td class="muted">{{ o.order_date|ru_date }}</td>
           <td class="term">{{ o.client_name }}{% if o.phone %}<span class="muted dealer-phone">{{ o.phone }}</span>{% endif %}</td>
           <td class="muted">{{ o.items_text }}</td>
-          <td><span class="status-badge status-{{ 'done' if o.status == 'handed_over' else ('cancelled' if o.status == 'cancelled' else 'pending') }}">{{ o.status_label }}</span></td>
+          <td>{{ status_picker(url_for('dealer.update_status', order_id=o.id), o.status, statuses, prefix='status-dealer-', next_url=request.full_path.rstrip('?'), aria='Статус заказа №' ~ o.id) }}</td>
           <td class="amount">{{ o.total|money }}</td>
           <td class="amount">{{ o.paid|money }}</td>
           <td class="amount">{{ o.remaining|money if o.status != 'cancelled' else '—' }}</td>

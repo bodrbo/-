@@ -1,3 +1,4 @@
+{% from '_status_picker.html' import status_picker %}
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -271,7 +272,7 @@
               <small>Работы: {{ o.work_total|money }} ₽{% if o.discount_value %} · до скидки{% endif %}</small>
               <small>Товары: {{ o.goods_total|money }} ₽{% if o.discount_value %} · до скидки{% endif %}</small>
             </td>
-            <td><span class="status-badge status-{{ o.status }}">{{ o.status|order_status_label }}</span>{% if o.pending_price_count and o.source != 'subcontract_request' %} <span class="status-badge status-awaiting-calc" title="Работ без цены: {{ o.pending_price_count }} — их нужно рассчитать">Ждёт расчёта</span>{% endif %}</td>
+            <td>{{ status_picker(url_for('set_tuning_order_status', order_id=o.id), o.status, order_statuses, next_url=request.full_path.rstrip('?'), aria='Статус заказа №' ~ o.id) }}{% if o.pending_price_count and o.source != 'subcontract_request' %} <span class="status-badge status-awaiting-calc" title="Работ без цены: {{ o.pending_price_count }} — их нужно рассчитать">Ждёт расчёта</span>{% endif %}</td>
             <td class="row-actions">
               <a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="icon-btn" title="Редактировать">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -741,6 +742,7 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script src="{{ url_for('static', filename='status-picker.js') }}"></script>
 {% if boat_profile is defined and boat_profile.model_3d_url %}
 <script type="module" src="{{ url_for('static', filename='vendor/model-viewer.min.js') }}"></script>
 {% endif %}

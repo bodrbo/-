@@ -1752,7 +1752,7 @@ class TuningTaskContractorLocationTests(_ContractorFixture, unittest.TestCase):
         self.assertIn("Выполнена, передана", page)
         self.set_status("handed_over")
         page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
-        self.assertRegex(page, r'value="handed_over"\s+selected')
+        self.assertIn('name="status" value="handed_over" data-status-value', page)
         self.assertIn("Лодка вернулась", page)
 
     def test_the_map_says_the_boat_waits_to_be_collected(self):

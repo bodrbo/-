@@ -1009,6 +1009,10 @@ body.software-request-widget-enabled main.wrap:not(.schedule-shell) {
 .software-request-status-new { border-color: rgba(52,152,219,.42); background-color: #edf6fc; color: #267caf; }
 .software-request-status-in_progress { border-color: rgba(168,99,26,.4); background-color: #fff4e5; color: var(--warning); }
 .software-request-status-done { border-color: rgba(47,107,79,.4); background-color: #eaf5ef; color: var(--success); }
+.software-request-status-form .software-request-status-caption { color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.status-badge.status-swreq-new { background: #edf6fc; color: #267caf; }
+.status-badge.status-swreq-in_progress { background: #fff4e5; color: var(--warning); }
+.status-badge.status-swreq-done { background: #eaf5ef; color: var(--success); }
 .software-request-empty-mark {
   display: grid;
   place-items: center;
@@ -4070,7 +4074,14 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
 .dealer-reset { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; text-decoration: none; margin-left: 8px; }
 .dealer-phone { display: block; font-size: 12px; font-weight: 400; }
 tr.dealer-cancelled td { opacity: 0.55; }
-.dealer-status-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.dealer-status-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.dealer-status-row .dealer-k { margin-bottom: 0; }
+.dealer-status-hint { margin: 0; }
+.status-badge.status-dealer-new_request { background: rgba(142, 68, 173, 0.16); color: #8e44ad; }
+.status-badge.status-dealer-estimate { background: rgba(98, 112, 127, 0.14); color: var(--muted); }
+.status-badge.status-dealer-approved, .status-badge.status-dealer-awaiting_delivery { background: rgba(46, 134, 193, 0.16); color: var(--brass-strong); }
+.status-badge.status-dealer-ready, .status-badge.status-dealer-handed_over { background: rgba(47, 107, 79, 0.16); color: var(--success); }
+.status-badge.status-dealer-cancelled { background: rgba(179, 64, 44, 0.14); color: var(--danger); }
 .dealer-k { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 6px; }
 .dealer-items input[type="text"], .dealer-items select { min-width: 0; }
 .dealer-items td:nth-child(2) input[type="text"] { min-width: 220px; }
@@ -4517,6 +4528,22 @@ tr.dealer-cancelled td { opacity: 0.55; }
 .status-badge.status-supplyreq-delivered::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232f6b4f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5'/%3E%3C/svg%3E");
 }
+/* Кликабельный статус: бейдж открывает список статусов (templates/_status_picker.html) */
+.status-picker-form { display: inline-block; margin: 0; }
+.status-picker { position: relative; display: inline-block; }
+.status-badge.status-picker-trigger { cursor: pointer; border: 0; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; padding-right: 8px; }
+.status-badge.status-picker-trigger:hover { filter: brightness(0.96); box-shadow: 0 0 0 2px rgba(15, 42, 53, 0.12); }
+.status-badge.status-picker-trigger:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.status-picker-chevron { width: 11px; height: 11px; flex: 0 0 auto; opacity: 0.7; }
+.status-picker.is-saving .status-picker-trigger { opacity: 0.6; pointer-events: none; }
+.status-picker-menu { z-index: 1000; display: flex; flex-direction: column; gap: 2px; min-width: 190px; max-width: 320px; max-height: min(70vh, 420px); overflow-y: auto; padding: 6px; background: var(--paper); border: 1px solid var(--hairline); border-radius: 12px; box-shadow: 0 12px 32px rgba(15, 42, 53, 0.22); }
+.status-picker-menu[hidden] { display: none; }
+.status-picker-option { display: flex; align-items: center; width: 100%; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; cursor: pointer; text-align: left; }
+.status-picker-option:hover, .status-picker-option:focus-visible { background: var(--paper-alt); outline: none; }
+.status-picker-option.is-current { background: var(--paper-alt); }
+.status-picker-option:disabled { opacity: 0.45; cursor: not-allowed; }
+.status-badge.status-accepted { background: rgba(46, 134, 193, 0.16); color: var(--brass-strong); }
+.status-badge.status-rejected { background: rgba(179, 64, 44, 0.14); color: var(--danger); }
 .status-badge.status-supplyreq-clickable { cursor: pointer; border: none; font: inherit; }
 
 .status-select-form { display: inline-block; margin: 0; }

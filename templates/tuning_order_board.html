@@ -1,3 +1,4 @@
+{% from '_status_picker.html' import status_picker %}
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -104,9 +105,7 @@
     {% for item in items %}
     <section class="board-column" role="listitem">
       <div class="board-work-block status-{{ item.status }}" id="board-work-{{ item.id }}">
-        <span class="status-badge status-{{ item.status }}">
-          {{ work_statuses|selectattr('value', 'equalto', item.status)|map(attribute='label')|first }}
-        </span>
+        {{ status_picker(url_for('set_tuning_item_status', order_id=order.id, item_id=item.id), item.status, work_statuses, next_url=url_for('tuning_order_board', order_id=order.id) ~ '#board-work-' ~ item.id, aria='Статус работы') }}
         <h3>{{ item.work_name }}</h3>
         <div class="board-work-price{{ ' work-price-pending' if item.price_pending }}">
           {% if not item.price_pending and item_discount_amount(item) > 0 %}<s class="work-price-was">{{ item_list_price(item)|money }} ₽</s> {{ item.price|money }} ₽ <span class="work-discount-badge" title="Скидка на работу">−{{ item_discount_label(item) }}</span>
@@ -121,18 +120,12 @@
         <div class="board-task-branch">
           <div class="board-task-card">
             <div class="board-task-header">
-              <form action="{{ url_for('set_tuning_assignment_status', assignment_id=a.id) }}"
-                    method="post" class="status-select-form">
-                <select name="status" onchange="this.form.submit()">
-                  {% for s in assignment_statuses %}
-                  <option value="{{ s.value }}" {{ 'selected' if a.assignment_status == s.value and not (s.value == 'done' and a.returned_at) }}>{{ s.label }}</option>
-                  {% if s.value == 'done' and a.partner_id %}
-                  <option value="handed_over" {{ 'selected' if a.assignment_status == 'done' and a.returned_at }}
-                          title="Работа выполнена, лодка забрана у подрядчика — возвращается на карту цеха">Выполнена, передана</option>
-                  {% endif %}
-                  {% endfor %}
-                </select>
-              </form>
+              {% set a_options = [] %}
+              {% for s in assignment_statuses %}
+              {{ a_options.append({'value': s.value, 'label': s.label}) or '' }}
+              {% if s.value == 'done' and a.partner_id %}{{ a_options.append({'value': 'handed_over', 'label': 'Выполнена, передана'}) or '' }}{% endif %}
+              {% endfor %}
+              {{ status_picker(url_for('set_tuning_assignment_status', assignment_id=a.id), ('handed_over' if (a.assignment_status == 'done' and a.returned_at) else a.assignment_status), a_options, aria='Статус задачи') }}
               <form action="{{ url_for('revoke_tuning_assignment', assignment_id=a.id) }}" method="post"
                     class="board-task-revoke-form"
                     onsubmit="return confirm('Отозвать задачу у {{ a.employee_name }}? Она исчезнет из его списка задач.{% if a.entry_id %} Уже начисленная выплата ({{ (a.rate * a.norm_hours)|money }} ₽) будет удалена.{% endif %}');">
@@ -357,6 +350,7 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script src="{{ url_for('static', filename='status-picker.js') }}"></script>
 <script>
 // On the contractor's premises the boat leaves the shop map for the task's
 // period, so that choice needs a due date.

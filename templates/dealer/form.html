@@ -1,4 +1,5 @@
 {% extends 'dealer/base.html' %}
+{% from '_status_picker.html' import status_picker %}
 {% block title %}{{ ('Заказ №' ~ order.id) if order else 'Новый заказ' }} — Дилерский центр{% endblock %}
 {% block heading %}{{ ('Заказ №' ~ order.id) if order else 'Новый заказ' }}{% endblock %}
 {% block content %}
@@ -11,21 +12,9 @@
 {% if order %}
 <section class="panel dealer-status-panel">
   <div class="dealer-status-row">
-    <div>
-      <span class="k dealer-k">Статус</span>
-      <span class="status-badge status-{{ 'done' if order.status == 'handed_over' else ('cancelled' if order.status == 'cancelled' else 'pending') }}">{{ status_label }}</span>
-    </div>
-    <form action="{{ url_for('dealer.update_status', order_id=order.id) }}" method="post" class="entry-form dealer-status-form">
-      <div class="field field-narrow">
-        <label for="dealerNewStatus">Перевести в статус</label>
-        <select id="dealerNewStatus" name="status">
-          {% for s in statuses %}
-          <option value="{{ s.value }}"{{ ' selected' if s.value == order.status }}>{{ s.label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="field field-submit"><button type="submit">Сменить статус</button></div>
-    </form>
+    <span class="k dealer-k">Статус заказа</span>
+    {{ status_picker(url_for('dealer.update_status', order_id=order.id), order.status, statuses, prefix='status-dealer-', aria='Статус заказа') }}
+    <span class="hint dealer-status-hint">Нажмите на статус, чтобы выбрать другой.</span>
   </div>
 </section>
 {% endif %}

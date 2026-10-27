@@ -1,3 +1,4 @@
+{% from '_status_picker.html' import status_picker %}
 <div class="table-scroll">
   <table class="records">
     <thead>
@@ -22,19 +23,7 @@
         <td class="muted">{{ d.reported_at[:10]|ru_date }}</td>
         <td class="muted">{{ d.employee_name }}</td>
         <td>
-          <div style="display:flex; align-items:center; gap:10px;">
-            <span class="status-badge status-defect-{{ d.status }}">
-              {{ defect_statuses|selectattr('value', 'equalto', d.status)|map(attribute='label')|first }}
-            </span>
-            <form action="{{ url_for('fleet.set_defect_status', boat_index=boat_index, defect_id=d.id) }}"
-                  method="post" class="status-select-form">
-              <select name="status" onchange="this.form.submit()">
-                {% for s in defect_statuses %}
-                <option value="{{ s.value }}" {{ 'selected' if d.status == s.value }}>{{ s.label }}</option>
-                {% endfor %}
-              </select>
-            </form>
-          </div>
+          {{ status_picker(url_for('fleet.set_defect_status', boat_index=boat_index, defect_id=d.id), d.status, defect_statuses, prefix='status-defect-', aria='Статус неисправности') }}
         </td>
         <td class="muted">
           {% if archive_mode %}

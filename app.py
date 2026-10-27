@@ -12466,7 +12466,20 @@ def set_tuning_order_status(order_id):
         db.commit()
         if status == "in_progress":
             _auto_place_boat_on_shop_map(db, order)
-    return redirect(url_for("edit_tuning_order", order_id=order_id))
+    return _redirect_back_or(url_for("edit_tuning_order", order_id=order_id))
+
+
+def _redirect_back_or(default_url):
+    """Redirect to the page the form came from (its hidden `next` field — a
+    path on this site only) or to default_url. Used by the clickable statuses
+    that also live in lists."""
+    target = request.form.get("next", "").strip()
+    if (
+        target.startswith("/") and not target.startswith("//")
+        and "\\" not in target and "\n" not in target and len(target) <= 600
+    ):
+        return redirect(target)
+    return redirect(default_url)
 
 
 def _tuning_assignment_has_payout(db, assignment):
@@ -12586,7 +12599,7 @@ def set_tuning_item_status(order_id, item_id):
         # Moving a work item to/from "Задача снята" changes whether its
         # price counts toward the order — keep subtotal/total in sync.
         _recompute_order_totals(db, order_id)
-    return redirect(url_for("edit_tuning_order", order_id=order_id))
+    return _redirect_back_or(url_for("edit_tuning_order", order_id=order_id))
 
 
 @app.route("/tuning/<int:order_id>/item/<int:item_id>/assign", methods=["POST"])

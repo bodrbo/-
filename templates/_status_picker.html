@@ -1,0 +1,37 @@
+{# A status you can click: the badge itself opens the list of statuses and the
+   chosen one is posted to `action` (field `name`, default "status").
+
+   status_picker(action, current, options, prefix='status-', label=None,
+                 extra=None, name='status', next_url=None, aria=None)
+     options   [{'value': ..., 'label': ...}, ...]  (a dict may add 'disabled': true)
+     prefix    CSS class prefix of the badge colour: prefix ~ value
+     extra     {'field': 'value'} hidden fields sent with the form
+     next_url  path to come back to after the change (checked on the server)
+
+   The behaviour lives in static/status-picker.js (included by the page). #}
+{% macro status_picker(action, current, options, prefix='status-', label=None, extra=None, name='status', next_url=None, aria=None) %}
+{% set shown = label if label else (options|selectattr('value', 'equalto', current)|map(attribute='label')|first|default(current)) %}
+<form action="{{ action }}" method="post" class="status-picker-form" data-status-picker-form>
+  {% if extra %}{% for key, value in extra.items() %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}{% endif %}
+  {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+  <input type="hidden" name="{{ name }}" value="{{ current }}" data-status-value>
+  <span class="status-picker" data-status-picker>
+    <button type="button" class="status-badge {{ prefix }}{{ current }} status-picker-trigger" data-status-trigger
+            aria-haspopup="listbox" aria-expanded="false"
+            aria-label="{{ aria or 'Статус' }}: {{ shown }}. Нажмите, чтобы выбрать другой"
+            title="Нажмите, чтобы изменить статус">
+      <span class="status-picker-label">{{ shown }}</span>
+      <svg class="status-picker-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg>
+    </button>
+    <span class="status-picker-menu" role="listbox" data-status-menu hidden>
+      {% for option in options %}
+      <button type="button" role="option" class="status-picker-option{{ ' is-current' if option.value == current }}"
+              data-value="{{ option.value }}" aria-selected="{{ 'true' if option.value == current else 'false' }}"
+              {% if option.disabled %}disabled{% endif %}>
+        <span class="status-badge {{ prefix }}{{ option.value }}">{{ option.label }}</span>
+      </button>
+      {% endfor %}
+    </span>
+  </span>
+</form>
+{% endmacro %}
