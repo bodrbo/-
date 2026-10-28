@@ -338,7 +338,7 @@
         </div>
       </form>
 
-      <div class="totals-grid">
+      <div class="totals-grid" id="team-income-totals">
         <div class="panel total-card total-card-grand">
           <span class="k">Заработано за период</span>
           <span class="v">{{ total|money }} ₽</span>
@@ -352,6 +352,7 @@
       </p>
       {% endif %}
 
+      <div class="live-region" id="team-income-entries">
       <h3>Записи за период</h3>
       {% if entries %}
       <div class="table-scroll team-income-table">
@@ -400,6 +401,7 @@
         <div class="s">Смените период в фильтре выше.</div>
       </div>
       {% endif %}
+      </div>
     </div>
   </details>
 
@@ -415,7 +417,7 @@
       {% endif %}
       {% if my_tasks %}
       {% for task in my_tasks %}
-      <div class="task-card">
+      <div class="task-card" id="team-task-{{ task.kind }}-{{ task.id }}">
         <div>
           {% if task.kind == 'defect' %}
           <strong>{{ task.defect_boat }}</strong> —
@@ -458,11 +460,11 @@
         </div>
         {% elif task.kind == 'defect' and task.assignment_status == 'accepted' %}
         <div class="team-task-status-row">
-          {{ status_picker(url_for('team_task_set_status', assignment_id=task.id), task.defect_status, defect_statuses, prefix='status-defect-', extra=({'boat_index': boat_index} if can_access_fleet else None), aria='Статус неисправности') }}
+          {{ status_picker(url_for('team_task_set_status', assignment_id=task.id), task.defect_status, defect_statuses, prefix='status-defect-', extra=({'boat_index': boat_index} if can_access_fleet else None), aria='Статус неисправности', refresh='#team-task-defect-' ~ task.id ~ '|#team-income-totals|#team-income-entries') }}
         </div>
         {% elif task.kind == 'tuning' and task.assignment_status in ('accepted', 'in_progress') %}
         <div class="team-task-status-row">
-          {{ status_picker(url_for('team_tuning_task_set_status', assignment_id=task.id), task.assignment_status, [{'value': 'accepted', 'label': 'Принята', 'disabled': true}] + tuning_progress_statuses, extra=({'boat_index': boat_index} if can_access_fleet else None), aria='Статус задачи') }}
+          {{ status_picker(url_for('team_tuning_task_set_status', assignment_id=task.id), task.assignment_status, [{'value': 'accepted', 'label': 'Принята', 'disabled': true}] + tuning_progress_statuses, extra=({'boat_index': boat_index} if can_access_fleet else None), aria='Статус задачи', refresh='#team-task-tuning-' ~ task.id ~ '|#team-income-totals|#team-income-entries') }}
         </div>
         {% elif task.kind == 'tuning' and task.assignment_status == 'done' %}
         <div class="team-task-status-row">
@@ -931,6 +933,7 @@ document.addEventListener('keydown', function (e) {
 </script>
 {% endif %}
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script src="{{ url_for('static', filename='live-save.js') }}"></script>
 <script src="{{ url_for('static', filename='status-picker.js') }}"></script>
 {% if can_access_fleet %}<script src="{{ url_for('static', filename='offline.js') }}"></script>{% endif %}
 

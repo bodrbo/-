@@ -2,16 +2,19 @@
    chosen one is posted to `action` (field `name`, default "status").
 
    status_picker(action, current, options, prefix='status-', label=None,
-                 extra=None, name='status', next_url=None, aria=None)
+                 extra=None, name='status', next_url=None, aria=None, refresh=None)
      options   [{'value': ..., 'label': ...}, ...]  (a dict may add 'disabled': true)
      prefix    CSS class prefix of the badge colour: prefix ~ value
      extra     {'field': 'value'} hidden fields sent with the form
      next_url  path to come back to after the change (checked on the server)
+     refresh   'selector|selector' — blocks of the page that depend on the status;
+               they are re-read from the server after the change is saved
 
-   The behaviour lives in static/status-picker.js (included by the page). #}
-{% macro status_picker(action, current, options, prefix='status-', label=None, extra=None, name='status', next_url=None, aria=None) %}
+   The behaviour lives in static/status-picker.js (included by the page together
+   with static/live-save.js, which saves the change in the background). #}
+{% macro status_picker(action, current, options, prefix='status-', label=None, extra=None, name='status', next_url=None, aria=None, refresh=None) %}
 {% set shown = label if label else (options|selectattr('value', 'equalto', current)|map(attribute='label')|first|default(current)) %}
-<form action="{{ action }}" method="post" class="status-picker-form" data-status-picker-form>
+<form action="{{ action }}" method="post" class="status-picker-form" data-status-picker-form{% if refresh %} data-live-refresh="{{ refresh }}"{% endif %}>
   {% if extra %}{% for key, value in extra.items() %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}{% endif %}
   {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
   <input type="hidden" name="{{ name }}" value="{{ current }}" data-status-value>

@@ -12189,6 +12189,7 @@ button.partner-open-price-save svg {
 
 .board-task-header { display: flex; align-items: center; gap: 6px; }
 .board-task-header .status-select-form { flex: 1; min-width: 0; }
+.live-region { display: contents; }
 /* Доска задач: индикатор фонового сохранения */
 .board-save-state { position: fixed; left: 16px; bottom: 16px; z-index: 1100; display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px); padding: 10px 14px; border-radius: 12px; background: var(--ink); color: #fff; font-size: 13px; font-weight: 600; box-shadow: 0 8px 24px rgba(15, 42, 53, 0.3); }
 .board-save-state[hidden] { display: none; }

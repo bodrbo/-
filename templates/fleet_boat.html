@@ -187,7 +187,7 @@
   <details id="current-defects" class="panel collapsible-panel"{{ ' open' if defects_open }}>
     <summary>
       <span>Текущие неисправности</span>
-      {% if open_defects_count %}<span class="badge">{{ open_defects_count }}</span>{% endif %}
+      <span class="live-region" id="fleet-defects-current-count">{% if open_defects_count %}<span class="badge">{{ open_defects_count }}</span>{% endif %}</span>
       <span class="chev" aria-hidden="true"></span>
     </summary>
     <div class="collapsible-body">
@@ -203,6 +203,7 @@
         </div>
         <p class="hint">Новая запись получит статус «Новая». Анамнез, диагноз и план работ можно заполнить в её карточке.</p>
       </form>
+      <div class="live-region" id="fleet-defects-current">
       {% if current_defects %}
       {% set defect_rows = current_defects %}
       {% set archive_mode = false %}
@@ -214,16 +215,17 @@
         <div class="s">Все обнаруженные проблемы устранены.</div>
       </div>
       {% endif %}
+      </div>
     </div>
   </details>
 
   <details class="panel collapsible-panel defect-archive-panel" id="fleet-defect-archive"{{ ' open' if archive_open }}>
     <summary>
       <span>Архив неисправностей</span>
-      {% if archived_defects_total %}<span class="badge badge-success">{{ archived_defects_total }}</span>{% endif %}
+      <span class="live-region" id="fleet-archive-count">{% if archived_defects_total %}<span class="badge badge-success">{{ archived_defects_total }}</span>{% endif %}</span>
       <span class="chev" aria-hidden="true"></span>
     </summary>
-    <div class="collapsible-body">
+    <div class="collapsible-body" id="fleet-archive-body">
       {% if archived_defects_total == 0 and not archive_filter_from and not archive_filter_to %}
       <div class="empty-state">
         {% include '_empty_state_logo.html' %}
@@ -666,6 +668,7 @@ document.addEventListener('keydown', function (e) {
 });
 </script>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script src="{{ url_for('static', filename='live-save.js') }}"></script>
 <script src="{{ url_for('static', filename='status-picker.js') }}"></script>
 
 </body>

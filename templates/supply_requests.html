@@ -95,7 +95,7 @@
         </thead>
         <tbody>
           {% for r in requests %}
-          <tr>
+          <tr id="supply-request-row-{{ r.id }}">
             <td class="muted">{{ r.created_at[:10]|ru_date }}</td>
             <td>{{ r.employee_name }}</td>
             <td>
@@ -159,7 +159,7 @@
           <path d="M5 5l10 10M15 5L5 15"/>
         </svg>
       </button>
-      <form id="request-status-form" method="post" class="assign-modal-card">
+      <form id="request-status-form" method="post" class="assign-modal-card" data-live-save>
         <h3>Изменить статус заявки</h3>
         <div class="field">
           <label for="request-status-select">Статус</label>
@@ -182,6 +182,35 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script src="{{ url_for('static', filename='live-save.js') }}"></script>
+<script>
+// The new status and comment appear in the row at once; the request is saved
+// in the background and the row is then re-read from the server (a delivery
+// can change more than the status).
+document.getElementById('request-status-form').addEventListener('submit', function (event) {
+  var form = event.currentTarget;
+  var match = /\/requests\/(\d+)\/status/.exec(form.getAttribute('action') || '');
+  if (!window.LiveSave || !match || event.defaultPrevented) return;
+  event.preventDefault();
+  var select = document.getElementById('request-status-select');
+  var comment = document.getElementById('request-status-comment').value.trim();
+  var body = new FormData(form);
+  var rowId = 'supply-request-row-' + match[1];
+  var row = document.getElementById(rowId);
+  if (row) {
+    var badge = row.querySelector('.status-picker-trigger');
+    badge.className = badge.className.replace(/status-supplyreq-\S+/, 'status-supplyreq-' + select.value);
+    badge.querySelector('.status-picker-label').textContent = select.options[select.selectedIndex].text.trim();
+    badge.closest('td').nextElementSibling.textContent = comment || '—';
+  }
+  closeRequestStatusModal();
+  window.LiveSave.send(form, {
+    body: body,
+    refresh: '#' + rowId,
+    onFailed: function () { window.LiveSave.reread('#' + rowId); }
+  });
+});
+</script>
 <script>
 function openRequestStatusModal(actionUrl, currentStatus, currentComment) {
   document.getElementById('request-status-form').action = actionUrl;

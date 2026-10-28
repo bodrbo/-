@@ -1,8 +1,11 @@
 /* A clickable status (see templates/_status_picker.html): the badge opens a
-   list of statuses; picking another one sets the hidden field and submits the
-   form. The list is positioned with position: fixed so it is never clipped by
-   a scrolling table, and it works with the mouse, a finger and the keyboard
-   (Enter / Space / ↓ open it, ↑ ↓ move, Enter picks, Esc closes). */
+   list of statuses; picking another one shows it at once and saves it in the
+   background (static/live-save.js) — the page is not reloaded. Where that
+   script is absent (the order task board has its own, board-live.js) the form
+   is simply submitted. The list is positioned with position: fixed so it is
+   never clipped by a scrolling table, and it works with the mouse, a finger
+   and the keyboard (Enter / Space / ↓ open it, ↑ ↓ move, Enter picks, Esc
+   closes). */
 (function () {
   "use strict";
   var openPicker = null;
@@ -59,21 +62,69 @@
     try { option.focus({ preventScroll: true }); } catch (error) { option.focus(); }
   }
 
+  // shows a status on the badge (the hidden field holds what will be saved)
+  function show(picker, value, text) {
+    var form = picker.closest("[data-status-picker-form]");
+    var input = form.querySelector("[data-status-value]");
+    var trigger = picker.querySelector("[data-status-trigger]");
+    var prefix = trigger.getAttribute("data-status-prefix") || "status-";
+    trigger.classList.remove(prefix + input.value);
+    trigger.classList.add(prefix + value);
+    input.value = value;
+    var label = picker.querySelector(".status-picker-label");
+    if (label && text) { label.textContent = text; }
+    picker.querySelectorAll(".status-picker-option").forEach(function (option) {
+      var current = option.getAttribute("data-value") === value;
+      option.classList.toggle("is-current", current);
+      option.setAttribute("aria-selected", current ? "true" : "false");
+    });
+  }
+
+  function optionLabel(picker, value) {
+    var option = picker.querySelector('.status-picker-option[data-value="' + value + '"]');
+    return option ? option.textContent.replace(/\s+/g, " ").trim() : "";
+  }
+
+  function save(picker, form, previous) {
+    var seq = (form._statusSeq || 0) + 1;
+    form._statusSeq = seq;
+    picker.classList.add("is-saving");
+    window.LiveSave.send(form, {
+      refresh: form.getAttribute("data-live-refresh"),
+      onSaved: function (doc) {
+        if (form._statusSeq !== seq) { return; }
+        picker.classList.remove("is-saving");
+        // what the server really stored wins over what was clicked
+        var action = form.getAttribute("action");
+        var stored = Array.prototype.filter.call(doc.querySelectorAll("[data-status-picker-form]"), function (other) {
+          return other.getAttribute("action") === action;
+        })[0];
+        var input = form.querySelector("[data-status-value]");
+        var value = stored && stored.querySelector("[data-status-value]").value;
+        if (value && value !== input.value) { show(picker, value, optionLabel(picker, value)); }
+      },
+      onFailed: function () {
+        if (form._statusSeq !== seq) { return; }
+        picker.classList.remove("is-saving");
+        show(picker, previous.value, previous.label);
+      }
+    });
+  }
+
   function choose(picker, option) {
     var form = picker.closest("[data-status-picker-form]");
     var input = form.querySelector("[data-status-value]");
     var value = option.getAttribute("data-value");
-    var current = input.value;
-    close();
-    if (value === current) { return; }
-    input.value = value;
-    // show the new status at once (the page may not reload — see board-live.js)
-    var trigger = picker.querySelector("[data-status-trigger]");
-    var prefix = trigger.getAttribute("data-status-prefix") || "status-";
-    trigger.classList.remove(prefix + current);
-    trigger.classList.add(prefix + value);
     var label = picker.querySelector(".status-picker-label");
-    if (label) { label.textContent = option.textContent.replace(/\s+/g, " ").trim(); }
+    var previous = { value: input.value, label: label ? label.textContent : "" };
+    close();
+    if (value === previous.value) { return; }
+    // show the new status at once
+    show(picker, value, option.textContent.replace(/\s+/g, " ").trim());
+    if (window.LiveSave && !form.closest(".tuning-board-page")) {
+      save(picker, form, previous);
+      return;
+    }
     picker.classList.add("is-saving");
     if (form.requestSubmit) { form.requestSubmit(); } else { form.submit(); }
   }

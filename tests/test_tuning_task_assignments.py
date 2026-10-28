@@ -541,6 +541,20 @@ class TuningTaskRevokeTests(_TuningTaskFixture, unittest.TestCase):
         team = self.client.get("/team/").get_data(as_text=True)
         self.assertNotIn("Полировка корпуса", team)
 
+    def test_the_tuningmans_task_status_is_saved_in_the_background_and_refreshes_the_income(self):
+        self.assign(self.EMPLOYEE_A, 100, 2)
+        assignment_id = self.assignment_ids()[self.EMPLOYEE_A]
+        self.login_team(self.USERNAME_A, self.EMPLOYEE_A)
+        self.client.post(f"/team/tuning-tasks/{assignment_id}/respond", data={"response": "accepted"})
+        page = self.client.get("/team/").get_data(as_text=True)
+        card = f'id="team-task-tuning-{assignment_id}"'
+        self.assertIn(card, page)
+        self.assertIn(f'/team/tuning-tasks/{assignment_id}/status', page)
+        self.assertRegex(page, rf'data-live-refresh="#team-task-tuning-{assignment_id}\|#team-income-totals\|#team-income-entries"')
+        for region in ('id="team-income-totals"', 'id="team-income-entries"'):
+            self.assertIn(region, page)
+        self.assertLess(page.index("live-save.js"), page.index("status-picker.js"))
+
     def test_the_board_offers_the_revoke_button_for_every_task(self):
         self.assign_many([(self.EMPLOYEE_A, 100, 2), (self.EMPLOYEE_B, 100, 1)])
         ids = self.assignment_ids()

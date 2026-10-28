@@ -80,7 +80,7 @@
         <span class="software-request-status-caption">Статус</span>
         {% set status_options = [] %}
         {% for value, label in statuses.items() %}{{ status_options.append({'value': value, 'label': label}) or '' }}{% endfor %}
-        {{ status_picker(url_for('software_requests.set_status', request_id=item.id), item.status, status_options, prefix='status-swreq-', aria='Статус заявки') }}
+        {{ status_picker(url_for('software_requests.set_status', request_id=item.id), item.status, status_options, prefix='status-swreq-', aria='Статус заявки', refresh='.software-request-filters|.software-requests-total') }}
       </div>
     </article>
     {% else %}
@@ -94,6 +94,7 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script src="{{ url_for('static', filename='live-save.js') }}"></script>
 <script src="{{ url_for('static', filename='status-picker.js') }}"></script>
 <script>
   const navToggle = document.getElementById('navToggle');

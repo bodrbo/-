@@ -742,6 +742,7 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script src="{{ url_for('static', filename='live-save.js') }}"></script>
 <script src="{{ url_for('static', filename='status-picker.js') }}"></script>
 {% if boat_profile is defined and boat_profile.model_3d_url %}
 <script type="module" src="{{ url_for('static', filename='vendor/model-viewer.min.js') }}"></script>

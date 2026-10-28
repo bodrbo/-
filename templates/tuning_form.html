@@ -278,7 +278,7 @@
     </div>
   </div>
 
-  <div class="hero-grid">
+  <div class="hero-grid" id="tuning-hero">
     <div class="hero-card">
       <span class="k">Общая сумма</span>
       <span class="v tabular">{{ edit_order.total|money }} ₽</span>
@@ -441,7 +441,7 @@
         <thead><tr><th>Работа</th><th>{{ 'Открытая цена, ₽' if edit_order.source == 'subcontract_request' else 'Цена, ₽' }}</th>{% if edit_order.source == 'subcontract_request' %}<th>Закрытая цена, ₽</th>{% endif %}<th>Статус</th><th>Задачи</th><th>Медиа</th></tr></thead>
         <tbody>
           {% for item in items_prefill %}
-          <tr class="{{ 'row-removed' if item.status == 'removed' }}">
+          <tr id="tuning-item-row-{{ item.id }}" class="{{ 'row-removed' if item.status == 'removed' }}">
             <td>{{ item.work_name }}</td>
             <td class="amount{{ ' work-price-pending' if item.price_pending }}">
               {{ (item.price|money ~ ' ₽') if not item.price_pending else ('Ждёт цены' if edit_order.source == 'subcontract_request' else 'Ждёт расчёта') }}
@@ -452,7 +452,7 @@
             </td>
             {% endif %}
             <td>
-              {{ status_picker(url_for('set_tuning_item_status', order_id=edit_order.id, item_id=item.id), item.status, work_statuses, aria='Статус работы') }}
+              {{ status_picker(url_for('set_tuning_item_status', order_id=edit_order.id, item_id=item.id), item.status, work_statuses, aria='Статус работы', refresh='#tuning-item-row-' ~ item.id ~ '|#tuning-hero') }}
             </td>
             <td class="muted">
               <div class="tuning-item-task-actions">
@@ -2045,6 +2045,7 @@ document.addEventListener('DOMContentLoaded', updateYookassaSubmitState);
 </script>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 <script src="{{ url_for('static', filename='sortable.js') }}"></script>
+<script src="{{ url_for('static', filename='live-save.js') }}"></script>
 <script src="{{ url_for('static', filename='status-picker.js') }}"></script>
 
 </body>

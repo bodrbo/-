@@ -314,7 +314,8 @@ class ClientDashboardRoleTests(unittest.TestCase):
             f"/admin/clients/{self.client_id}/cabinet"
         ).get_data(as_text=True)
         self.assertIn("status-badge status-client-satisfied", directory)
-        self.assertIn('<option value="satisfied" selected>Довольный</option>', directory)
+        self.assertIn('name="status" value="satisfied" data-status-value', directory)
+        self.assertIn('<span class="status-picker-label">Довольный</span>', directory)
         self.assertIn("status-badge status-client-satisfied", cabinet)
         self.assertIn("Довольный", cabinet)
 
@@ -342,10 +343,8 @@ class ClientDashboardRoleTests(unittest.TestCase):
             f"/admin/clients/{self.client_id}/cabinet"
         ).get_data(as_text=True)
         self.assertIn("status-badge status-client-blacklisted", directory)
-        self.assertIn(
-            '<option value="blacklisted" selected>Чёрный список</option>',
-            directory,
-        )
+        self.assertIn('name="status" value="blacklisted" data-status-value', directory)
+        self.assertIn('<span class="status-picker-label">Чёрный список</span>', directory)
         self.assertIn("status-badge status-client-blacklisted", cabinet)
         self.assertIn("Чёрный список", cabinet)
 

@@ -23,7 +23,7 @@
         <td class="muted">{{ d.reported_at[:10]|ru_date }}</td>
         <td class="muted">{{ d.employee_name }}</td>
         <td>
-          {{ status_picker(url_for('fleet.set_defect_status', boat_index=boat_index, defect_id=d.id), d.status, defect_statuses, prefix='status-defect-', aria='Статус неисправности') }}
+          {{ status_picker(url_for('fleet.set_defect_status', boat_index=boat_index, defect_id=d.id), d.status, defect_statuses, prefix='status-defect-', aria='Статус неисправности', refresh='#fleet-defects-current|#fleet-defects-current-count|#fleet-archive-body|#fleet-archive-count') }}
         </td>
         <td class="muted">
           {% if archive_mode %}

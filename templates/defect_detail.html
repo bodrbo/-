@@ -150,23 +150,23 @@
         <p>Последовательность действий для устранения неисправности.</p>
       </div>
       {% if plan_items %}
-      <span class="defect-plan-progress">{{ completed_count }} / {{ plan_items|length }}</span>
+      <span class="defect-plan-progress" id="defect-plan-progress">{{ completed_count }} / {{ plan_items|length }}</span>
       {% endif %}
     </div>
 
     {% if plan_items %}
-    <div class="defect-plan-list">
+    <div class="defect-plan-list" id="defect-plan-list">
       {% for item in plan_items %}
       <div class="defect-plan-item {{ 'is-done' if item.status == 'done' }}">
         <span class="defect-plan-index">{{ loop.index }}</span>
         <span class="defect-plan-text">{{ item.description }}</span>
         {% if viewer_role == 'admin' %}
-        <form action="{{ url_for('fleet.set_defect_plan_item_status', boat_index=boat_index, defect_id=defect.id, item_id=item.id) }}" method="post">
+        <form action="{{ url_for('fleet.set_defect_plan_item_status', boat_index=boat_index, defect_id=defect.id, item_id=item.id) }}" method="post" data-live-save>
         {% else %}
-        <form action="{{ url_for('team_set_defect_plan_item_status', defect_id=defect.id, item_id=item.id) }}" method="post">
+        <form action="{{ url_for('team_set_defect_plan_item_status', defect_id=defect.id, item_id=item.id) }}" method="post" data-live-save>
         {% endif %}
           <input type="hidden" name="status" value="{{ 'pending' if item.status == 'done' else 'done' }}">
-          <button type="submit" class="status-badge status-plan-{{ item.status }}">
+          <button type="submit" class="status-badge status-plan-{{ item.status }}" data-label-done="{{ plan_statuses|selectattr('value', 'equalto', 'done')|map(attribute='label')|first }}" data-label-pending="{{ plan_statuses|selectattr('value', 'equalto', 'pending')|map(attribute='label')|first }}">
             {{ plan_statuses|selectattr('value', 'equalto', item.status)|map(attribute='label')|first }}
           </button>
         </form>
@@ -191,5 +191,35 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script src="{{ url_for('static', filename='live-save.js') }}"></script>
+<script>
+// A step of the plan is ticked on screen at once and saved in the background.
+document.addEventListener('submit', function (event) {
+  var form = event.target;
+  if (!window.LiveSave || !form.hasAttribute || !form.hasAttribute('data-live-save') || event.defaultPrevented) return;
+  event.preventDefault();
+  var row = form.closest('.defect-plan-item');
+  var badge = form.querySelector('.status-badge');
+  var input = form.querySelector('input[name="status"]');
+  function show(done) {
+    row.classList.toggle('is-done', done);
+    badge.classList.toggle('status-plan-done', done);
+    badge.classList.toggle('status-plan-pending', !done);
+    badge.textContent = (done ? badge.dataset.labelDone : badge.dataset.labelPending).trim();
+    input.value = done ? 'pending' : 'done';
+    var progress = document.getElementById('defect-plan-progress');
+    var items = document.querySelectorAll('#defect-plan-list .defect-plan-item');
+    if (progress) progress.textContent = document.querySelectorAll('#defect-plan-list .defect-plan-item.is-done').length + ' / ' + items.length;
+  }
+  var wasDone = row.classList.contains('is-done');
+  var body = new FormData(form);
+  show(!wasDone);
+  window.LiveSave.send(form, {
+    body: body,
+    refresh: '#defect-plan-list|#defect-plan-progress',
+    onFailed: function () { show(wasDone); }
+  });
+});
+</script>
 </body>
 </html>

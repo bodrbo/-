@@ -1,3 +1,4 @@
+{% from '_status_picker.html' import status_picker %}
 <!DOCTYPE html>
 <html lang="ru">
 {% set is_partner_directory = client_relationship == 'partner' %}
@@ -222,20 +223,7 @@
             </td>
             {% if not is_partner_directory %}
             <td>
-              <form action="{{ url_for('update_tuning_client_status', client_id=client.id) }}" method="post" class="status-badge status-client-{{ client.status }} tuning-client-status-form">
-                <input type="hidden" name="section" value="{{ client_section }}">
-                <input type="hidden" name="relationship" value="{{ client_relationship }}">
-                <input type="hidden" name="page" value="{{ page }}">
-                <input type="hidden" name="q" value="{{ search_query }}">
-                <span class="tuning-client-status-label">{{ {'satisfied': 'Довольный', 'neutral': 'Нейтральный', 'dissatisfied': 'Недовольный', 'blacklisted': 'Чёрный список'}.get(client.status, 'Нейтральный') }}</span>
-                <svg class="tuning-client-status-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg>
-                <select name="status" class="tuning-client-status" aria-label="Статус клиента {{ client.client_name }}" onchange="this.form.submit()">
-                  {% for status in client_statuses %}
-                  <option value="{{ status.value }}" {{ 'selected' if client.status == status.value }}>{{ status.label }}</option>
-                  {% endfor %}
-                </select>
-                <button type="submit" class="sr-only">Сохранить статус клиента {{ client.client_name }}</button>
-              </form>
+              {{ status_picker(url_for('update_tuning_client_status', client_id=client.id), client.status or 'neutral', client_statuses, prefix='status-client-', extra={'section': client_section, 'relationship': client_relationship, 'page': page, 'q': search_query}, aria='Статус клиента ' ~ client.client_name) }}
             </td>
             {% endif %}
             <td>{% if client.phone %}<a href="tel:{{ client.phone }}" class="tuning-client-phone">{{ client.phone }}</a>{% else %}<span class="muted">Не указан</span>{% endif %}</td>
@@ -325,6 +313,8 @@
 </main>
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script src="{{ url_for('static', filename='live-save.js') }}"></script>
+<script src="{{ url_for('static', filename='status-picker.js') }}"></script>
 <script>
 (function () {
   const dialog = document.querySelector('[data-client-create-dialog]');
