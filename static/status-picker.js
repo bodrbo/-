@@ -67,6 +67,13 @@
     close();
     if (value === current) { return; }
     input.value = value;
+    // show the new status at once (the page may not reload — see board-live.js)
+    var trigger = picker.querySelector("[data-status-trigger]");
+    var prefix = trigger.getAttribute("data-status-prefix") || "status-";
+    trigger.classList.remove(prefix + current);
+    trigger.classList.add(prefix + value);
+    var label = picker.querySelector(".status-picker-label");
+    if (label) { label.textContent = option.textContent.replace(/\s+/g, " ").trim(); }
     picker.classList.add("is-saving");
     if (form.requestSubmit) { form.requestSubmit(); } else { form.submit(); }
   }

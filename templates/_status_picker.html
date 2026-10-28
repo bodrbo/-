@@ -16,7 +16,7 @@
   {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
   <input type="hidden" name="{{ name }}" value="{{ current }}" data-status-value>
   <span class="status-picker" data-status-picker>
-    <button type="button" class="status-badge {{ prefix }}{{ current }} status-picker-trigger" data-status-trigger
+    <button type="button" class="status-badge {{ prefix }}{{ current }} status-picker-trigger" data-status-trigger data-status-prefix="{{ prefix }}"
             aria-haspopup="listbox" aria-expanded="false"
             aria-label="{{ aria or 'Статус' }}: {{ shown }}. Нажмите, чтобы выбрать другой"
             title="Нажмите, чтобы изменить статус">

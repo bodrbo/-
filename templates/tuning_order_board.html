@@ -68,6 +68,7 @@
 
   <a href="{{ url_for('edit_tuning_order', order_id=order.id) }}" class="term board-back-link">← К заказу №{{ order.id }}</a>
 
+  <div id="board-alerts">
   {% if budget_warning %}
   <div class="alert" role="alert">{{ budget_warning }}</div>
   {% endif %}
@@ -81,11 +82,12 @@
   {% endif %}
   {% include '_tuning_assign_shift_modal.html' %}
   {% if board_error %}
-  <div class="alert" role="alert">{{ board_error }}</div>
+  <div class="alert" role="alert" data-form-error>{{ board_error }}</div>
   {% endif %}
   {% if board_notice %}
   <div class="alert success" role="status">{{ board_notice }}</div>
   {% endif %}
+  </div>
 
   <section class="panel board-order-summary">
     <div>
@@ -103,7 +105,7 @@
   {% if items %}
   <div class="tuning-board" role="list" aria-label="Работы заказа и их задачи">
     {% for item in items %}
-    <section class="board-column" role="listitem">
+    <section class="board-column" role="listitem" data-item-id="{{ item.id }}">
       <div class="board-work-block status-{{ item.status }}" id="board-work-{{ item.id }}">
         {{ status_picker(url_for('set_tuning_item_status', order_id=order.id, item_id=item.id), item.status, work_statuses, next_url=url_for('tuning_order_board', order_id=order.id) ~ '#board-work-' ~ item.id, aria='Статус работы') }}
         <h3>{{ item.work_name }}</h3>
@@ -351,6 +353,7 @@
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 <script src="{{ url_for('static', filename='status-picker.js') }}"></script>
+<script src="{{ url_for('static', filename='board-live.js') }}"></script>
 <script>
 // On the contractor's premises the boat leaves the shop map for the task's
 // period, so that choice needs a due date.
