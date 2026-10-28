@@ -2192,6 +2192,81 @@ class TuningScheduleGhostCardTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertEqual(self.client.get(f"/schedule/tuning?date={self.DAY}").status_code, 200)
 
 
+class TuningScheduleBoardLinkTests(_TuningScheduleFixture, unittest.TestCase):
+    """A card of a task given from an order leads to that task on the order's
+    task board (and the board marks the task with an anchor to land on)."""
+
+    def schedule_page(self):
+        self.login_admin()
+        return self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+
+    def linked_assignment_id(self):
+        return self.assignments()[0]["id"]
+
+    def test_a_card_of_an_order_task_has_a_link_to_its_place_on_the_board(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.assign([(self.EMPLOYEE_A, 100, 2)])
+        url = f"/tuning/{self.order_id}/board#board-task-{self.linked_assignment_id()}"
+        page = self.schedule_page()
+        self.assertIn(f'class="tuning-card-bell tuning-card-board" href="{url}"', page)
+        self.assertIn("Открыть эту задачу на доске задач", page)
+
+    def test_the_editor_of_that_card_offers_the_same_link(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.assign([(self.EMPLOYEE_A, 100, 2)])
+        url = f"/tuning/{self.order_id}/board#board-task-{self.linked_assignment_id()}"
+        page = self.schedule_page()
+        self.assertIn('id="taskEditorBoardLink"', page)
+        self.assertIn(f'"board_url": "{url}"', page.replace("&#34;", '"').replace('"board_url":"', '"board_url": "'))
+
+    def test_a_free_task_has_no_link(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.login_admin()
+        self.client.post("/schedule/tuning/tasks", data=MultiDict([
+            ("employee_name", self.EMPLOYEE_A), ("rate", "100"), ("comment", ""), ("title", "Уборка"),
+            ("return_date", self.DAY), ("work_date[]", self.DAY), ("start_time[]", "09:00"),
+            ("planned_hours[]", "1")]))
+        page = self.schedule_page()
+        self.assertNotIn('class="tuning-card-bell tuning-card-board"', page)
+        self.assertNotIn('class="muted" title="Открыть на доске задач"', page)
+
+    def test_a_card_whose_order_task_is_gone_has_no_link_and_the_page_opens(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            task_id = db.execute(
+                "INSERT INTO tuning_schedule_tasks (assignment_id, employee_name, title, rate, status, comment, "
+                "created_at) VALUES (999998, ?, 'Призрак ссылки', 100, 'pending', '', 'x')",
+                (self.EMPLOYEE_A,)).lastrowid
+            db.execute("INSERT INTO tuning_schedule_task_days (task_id, work_date, start_time, planned_hours) "
+                       "VALUES (?, ?, '09:00', 2)", (task_id, self.DAY))
+            db.commit()
+        self.login_admin()
+        response = self.client.get(f"/schedule/tuning?date={self.DAY}")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('class="tuning-card-bell tuning-card-board"', response.get_data(as_text=True))
+        self.assertNotIn("board-task-999998", response.get_data(as_text=True))
+
+    def test_the_board_marks_every_task_with_an_anchor_to_land_on(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.assign([(self.EMPLOYEE_A, 100, 2)])
+        assignment_id = self.linked_assignment_id()
+        self.assertIn(f'class="board-task-card" id="board-task-{assignment_id}"', self.board())
+
+    def test_the_saved_scroll_position_does_not_override_an_anchor(self):
+        script = self.client.get("/static/loader.js").get_data(as_text=True)
+        restore = script.split("function restore()")[1].split("restore();")[0]
+        self.assertIn("if (location.hash) return;", restore)
+        self.assertLess(restore.index("if (location.hash) return;"), restore.index("window.scrollTo"))
+
+    def test_the_link_lands_on_the_board_page_itself(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.assign([(self.EMPLOYEE_A, 100, 2)])
+        response = self.client.get(f"/tuning/{self.order_id}/board")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("is-highlighted", response.get_data(as_text=True))       # the script that flashes the target
+
+
 class TuningScheduleBackgroundSaveTests(_TuningScheduleFixture, unittest.TestCase):
     """The task windows save in the background: a refusal comes back as JSON
     (shown inside the window, nothing typed is lost); a plain form post still

@@ -4134,6 +4134,7 @@ tr.dealer-cancelled td { opacity: 0.55; }
 .board-work-block.status-done { border-left-color: var(--success); }
 .board-work-block.status-removed { border-left-color: var(--danger); }
 .board-work-block.is-highlighted { animation: boardWorkHighlightFlash 1.4s ease-out; }
+.board-task-card.is-highlighted { animation: boardWorkHighlightFlash 2.2s ease-out; }
 @keyframes boardWorkHighlightFlash {
   from { background-color: #fff3b0; box-shadow: 0 0 0 3px #ffd633; }
   to { background-color: var(--paper); box-shadow: var(--shadow); }
@@ -12271,6 +12272,9 @@ button.partner-open-price-save svg {
 .tuning-card-status { max-width: 100%; min-width: 0; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: rgba(255,255,255,.22); color: #fff; font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; text-overflow: ellipsis; }
 .tuning-card-status:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
 .tuning-card-bell { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: rgba(255,255,255,.22); color: #fff; font-size: 10px; line-height: 1; cursor: pointer; }
+.tuning-card-board { text-decoration: none; }
+.task-editor-board-link { display: inline-flex; align-items: center; align-self: flex-start; min-height: 36px; padding: 0 14px; text-decoration: none; }
+.task-editor-board-link[hidden] { display: none; }
 .tuning-card-bell small { font-size: 9px; font-weight: 700; }
 .tuning-card-bell.has-reminders { background: rgba(255,255,255,.42); }
 .tuning-card-bell:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }

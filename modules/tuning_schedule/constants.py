@@ -6,5 +6,8 @@ DEFAULT_DAY_START_HOUR = 8
 DEFAULT_DAY_END_HOUR = 22
 MIN_CARD_MINUTES = 30
 DEFAULT_START_TIME = "09:00"
+# Where a task linked to an order lives on the order's task board (the
+# board's task card carries the id board-task-<assignment id>).
+BOARD_TASK_URL = "/tuning/{order_id}/board#board-task-{assignment_id}"
 DEFAULT_SHIFT_START = "09:00"
 DEFAULT_SHIFT_END = "18:00"

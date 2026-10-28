@@ -120,7 +120,7 @@
       <div class="board-branch-trunk">
         {% for a in item.assignments %}
         <div class="board-task-branch">
-          <div class="board-task-card">
+          <div class="board-task-card" id="board-task-{{ a.id }}">
             <div class="board-task-header">
               {% set a_options = [] %}
               {% for s in assignment_statuses %}

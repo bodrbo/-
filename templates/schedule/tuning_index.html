@@ -139,6 +139,12 @@
                           title="Напоминание в Telegram{{ ' (' ~ card.reminders|length ~ ')' if card.reminders }}"
                           aria-label="Напоминание в Telegram по задаче «{{ card.title }}»">🔔{% if card.reminders %}<small>{{ card.reminders|length }}</small>{% endif %}</button>
                   {% endif %}
+                  {% if card.board_url %}
+                  <a class="tuning-card-bell tuning-card-board" href="{{ card.board_url }}"
+                     onpointerdown="event.stopPropagation()" onclick="event.stopPropagation()"
+                     title="Открыть эту задачу на доске задач заказа №{{ card.order_id }}"
+                     aria-label="Открыть задачу «{{ card.title }}» на доске задач">⇱</a>
+                  {% endif %}
                   <button type="button" class="tuning-card-bell tuning-card-edit" onclick="openTaskEditor(this.closest('.tuning-calendar-card'), event, true)"
                           title="Открыть задачу" aria-label="Открыть задачу «{{ card.title }}»">✎</button>
                   <select class="tuning-card-status" aria-label="Статус задачи «{{ card.title }}»"
@@ -182,7 +188,7 @@
             {% for task in leftover_tasks %}
             <tr>
               <td>{{ task.employee_name }}</td>
-              <td>{{ task.title }}</td>
+              <td>{{ task.title }}{% if task.board_url %} <a href="{{ task.board_url }}" class="muted" title="Открыть на доске задач">на доске задач ⇱</a>{% endif %}</td>
               <td class="amount">{{ task.start_time }}</td>
               <td class="amount">{{ task.planned_hours|float|round(1) }} ч</td>
               <td>{{ assignment_statuses|selectattr('value', 'equalto', task.status)|map(attribute='label')|first }}</td>
@@ -513,6 +519,7 @@
           <input type="text" name="title" id="taskEditorName" maxlength="200">
         </label>
         <p class="hint" id="taskEditorLinkedNote" hidden></p>
+        <a class="btn-secondary task-editor-board-link" id="taskEditorBoardLink" href="#" hidden>Открыть на доске задач ⇱</a>
         <label class="quick-task-field"><span>Сотрудник</span>
           <select name="employee_name" id="taskEditorEmployee" required onchange="syncTaskEditorRate()">
             {% for employee in editor_employees %}
@@ -1041,6 +1048,9 @@ function openTaskEditor(card, event, fromButton) {
   var note = document.getElementById('taskEditorLinkedNote');
   note.hidden = !task.is_linked;
   note.textContent = 'Название и проект берутся из работы заказа. Ставка, часы и срок меняют начисление и доску задач.';
+  var boardLink = document.getElementById('taskEditorBoardLink');
+  boardLink.hidden = !task.board_url;
+  boardLink.href = task.board_url || '#';
   var employee = document.getElementById('taskEditorEmployee');
   employee.value = task.employee_name;
   var order = document.getElementById('taskEditorOrder');

@@ -131,6 +131,10 @@ window.addEventListener("pageshow", function (e) {
       if (state.open && state.open.indexOf(detailsKey(el, i)) !== -1) el.open = true;
     });
     if (typeof state.y !== "number") return;
+    // A link with an anchor (…/board#board-task-5) asks to land on that
+    // element: the page's own script scrolls there, so the position saved on
+    // the previous visit must not pull it away.
+    if (location.hash) return;
     // Two rAFs: the first lets the browser apply the layout change from
     // just-opened <details> panels, the second scrolls only once that's
     // actually painted — a single frame can still be mid-reflow.

@@ -7,7 +7,7 @@ from modules.schedule.services import current_timestamp, day_label, parse_day  #
 
 from . import repository
 from .constants import (
-    DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR, DEFAULT_SHIFT_END, DEFAULT_SHIFT_START,
+    BOARD_TASK_URL, DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR, DEFAULT_SHIFT_END, DEFAULT_SHIFT_START,
     MIN_CARD_MINUTES,
 )
 
@@ -406,6 +406,7 @@ def day_view(db, day):
     for row in repository.list_day_tasks(db, day.isoformat()):
         task = dict(row)
         task["is_linked"] = task["assignment_id"] is not None
+        task["board_url"] = board_task_url(db, task["assignment_id"])
         if task["order_id"] is not None:
             task["equipment_label"] = (
                 (task["motor_model"] or "Мотор") if task["equipment_type"] == "motor"
@@ -465,6 +466,7 @@ def calendar_view(db, day, day_crew):
         if task["employee_name"] not in cards_by_employee:
             continue
         task["is_linked"] = task["assignment_id"] is not None
+        task["board_url"] = board_task_url(db, task["assignment_id"])
         # an administrator's task can carry Telegram reminders, with or
         # without a project
         # (reminders belong to the task, so only its first participant's card
@@ -883,6 +885,17 @@ def move_task_card(db, task_id, day_id, raw_start, raw_target_employee_id, reass
     }
 
 
+def board_task_url(db, assignment_id):
+    """Link to the task on its order's task board, or None for a task that is
+    not tied to an order task (or whose order task is gone)."""
+    if assignment_id is None:
+        return None
+    order_id = repository.get_assignment_order_id(db, assignment_id)
+    if order_id is None:
+        return None
+    return BOARD_TASK_URL.format(order_id=order_id, assignment_id=assignment_id)
+
+
 def editor_payload(db, card):
     """Everything the schedule's task editor shows for one calendar card
     (a list_day_tasks row): the task's own fields and all its days."""
@@ -909,6 +922,7 @@ def editor_payload(db, card):
     return {
         "task_id": task["id"],
         "is_linked": linked,
+        "board_url": board_task_url(db, task["assignment_id"]) if linked else None,
         "title": card["title"],
         "employee_name": primary_name,
         "order_id": card["order_id"],
