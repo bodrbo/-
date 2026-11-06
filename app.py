@@ -6311,8 +6311,13 @@ app.register_blueprint(
         create_order_assignment=lambda db, item, employee_name, rate, hours, comment, **due: (
             _create_tuning_item_assignment(db, item, employee_name, rate, hours, comment, **due)
         ),
+        # Marked done from the schedule: the payout is dated with the day of
+        # the task itself, not the day of the click.
         update_order_assignment_status=lambda db, assignment_id, status: (
-            _set_tuning_item_assignment_status(db, assignment_id, status)
+            _set_tuning_item_assignment_status(
+                db, assignment_id, status,
+                work_date=tuning_schedule_services.assignment_payout_date(db, assignment_id),
+            )
         ),
         pay_free_task=lambda db, task, total_hours: (
             _pay_free_tuning_schedule_task(db, task, total_hours)
@@ -12605,14 +12610,143 @@ def _pay_free_tuning_schedule_task(db, task, total_hours):
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     # a task attached to a project (order) is paid against that project
     project_id = _project_id_for_tuning_order(db, task["order_id"]) if task["order_id"] else None
+    # dated with the day of the task itself, not the day it was marked done
+    work_date = tuning_schedule_services.task_payout_date(db, task["id"]) or dt.date.today().isoformat()
     cur = db.execute(
         "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at, project_id) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (task["employee_name"], task["title"], task["rate"], total_hours,
-         amount, dt.date.today().isoformat(), now, project_id),
+         amount, work_date, now, project_id),
     )
     db.commit()
     return cur.lastrowid
+
+
+def _recalculate_schedule_payouts(db, apply=False, include_settled=False):
+    """Lines up the payouts of finished tuning-schedule tasks with the day of
+    the task itself (the last day of a multi-day task): moves the entry of a
+    payout dated otherwise and creates the payout of a finished task that
+    never got one. A payout whose entry was deleted on the Зарплаты page is
+    only reported — it may have been deleted on purpose. A change that
+    touches a payroll week already marked paid is skipped unless
+    include_settled. Without `apply` nothing is written. Safe to re-run.
+    Returns [{action: move|create|deleted, employee, title, amount, old_date,
+    new_date, skipped}]."""
+    changes = []
+
+    def settled(employee, *days):
+        return any(_payroll_week_settled(db, employee, day) for day in days if day)
+
+    def handle(title, employee, entry_id, amount, pay_date, create):
+        entry = (
+            db.execute("SELECT work_date FROM entries WHERE id = ?", (entry_id,)).fetchone()
+            if entry_id else None
+        )
+        change = {
+            "employee": employee, "title": title, "amount": amount,
+            "old_date": None, "new_date": pay_date, "skipped": False,
+        }
+        if entry is not None:
+            old_date = (entry["work_date"] or "")[:10]
+            if old_date == pay_date:
+                return
+            change.update(action="move", old_date=old_date)
+            change["skipped"] = not include_settled and settled(employee, old_date, pay_date)
+            if apply and not change["skipped"]:
+                db.execute("UPDATE entries SET work_date = ? WHERE id = ?", (pay_date, entry_id))
+        elif entry_id:
+            change.update(action="deleted", skipped=True)
+        elif amount > 0:
+            change.update(action="create")
+            change["skipped"] = not include_settled and settled(employee, pay_date)
+            if apply and not change["skipped"]:
+                create()
+        else:
+            return  # a salaried task (administrator) — no payout expected
+        changes.append(change)
+
+    tasks = db.execute(
+        "SELECT t.*, (SELECT MAX(d.work_date) FROM tuning_schedule_task_days d WHERE d.task_id = t.id) AS pay_date "
+        "FROM tuning_schedule_tasks t ORDER BY t.id"
+    ).fetchall()
+    for task in tasks:
+        pay_date = task["pay_date"]
+        if not pay_date:
+            continue
+        if task["assignment_id"] is not None:
+            assignment = db.execute(
+                "SELECT tia.*, ti.work_name FROM tuning_item_assignments tia "
+                "LEFT JOIN tuning_order_items ti ON ti.id = tia.item_id WHERE tia.id = ?",
+                (task["assignment_id"],),
+            ).fetchone()
+            if assignment is None or assignment["assignment_status"] != "done" or assignment["partner_id"]:
+                continue
+            handle(
+                task["title"] or assignment["work_name"] or "", assignment["employee_name"],
+                assignment["entry_id"], assignment["rate"] * assignment["norm_hours"], pay_date,
+                lambda a=assignment, d=pay_date: _pay_tuning_assignment(db, a, work_date=d),
+            )
+            continue
+        if task["status"] != "done":
+            continue
+        total_hours = sum(
+            row["planned_hours"] for row in tuning_schedule_repository.list_task_days(db, task["id"])
+        )
+
+        def create_primary(task=task, hours=total_hours):
+            entry_id = _pay_free_tuning_schedule_task(db, task, hours)
+            if entry_id:
+                tuning_schedule_repository.set_task_entry(db, task["id"], entry_id)
+
+        handle(task["title"], task["employee_name"], task["entry_id"],
+               task["rate"] * total_hours, pay_date, create_primary)
+        for member in tuning_schedule_repository.list_task_members(db, task["id"]):
+            member_hours = member["hours"] if member["hours"] is not None else total_hours
+
+            def create_member(task=task, member=member, hours=member_hours):
+                entry_id = _pay_free_tuning_schedule_task(db, {
+                    "id": task["id"], "employee_name": member["employee_name"], "rate": member["rate"],
+                    "title": task["title"], "order_id": task["order_id"], "entry_id": None,
+                }, hours)
+                if entry_id:
+                    tuning_schedule_repository.set_member_entry(db, member["id"], entry_id)
+
+            handle(task["title"], member["employee_name"], member["entry_id"],
+                   member["rate"] * member_hours, pay_date, create_member)
+    if apply:
+        db.commit()
+    return changes
+
+
+@app.route("/schedule/tuning/payouts", methods=["GET", "POST"])
+@admin_login_required
+def tuning_schedule_payouts():
+    """Preview (GET) and run (POST) of _recalculate_schedule_payouts: payouts of
+    finished schedule tasks get the day of the task."""
+    db = get_db()
+    include_settled = request.values.get("include_settled") == "1"
+    if request.method == "POST":
+        changes = _recalculate_schedule_payouts(db, apply=True, include_settled=include_settled)
+        done = [change for change in changes if not change["skipped"]]
+        moved = sum(1 for change in done if change["action"] == "move")
+        created = sum(1 for change in done if change["action"] == "create")
+        session["schedule_payouts_notice"] = (
+            f"Готово: дат выплат исправлено — {moved}, создано выплат — {created}."
+        )
+        return redirect(url_for("tuning_schedule_payouts", include_settled="1" if include_settled else None))
+    changes = _recalculate_schedule_payouts(db, apply=False, include_settled=include_settled)
+    for change in changes:
+        change["amount_text"] = format_money(change["amount"])
+        change["old_text"] = format_ru_date(change["old_date"]) if change["old_date"] else ""
+        change["new_text"] = format_ru_date(change["new_date"])
+    return render_template(
+        "schedule/tuning_payouts.html",
+        changes=changes,
+        pending=[change for change in changes if not change["skipped"]],
+        include_settled=include_settled,
+        notice=session.pop("schedule_payouts_notice", None),
+        active_page="schedule",
+    )
 
 
 @app.route("/tuning/<int:order_id>/item/<int:item_id>/status", methods=["POST"])
@@ -13310,7 +13444,7 @@ def set_tuning_assignment_status(assignment_id):
     )
 
 
-def _set_tuning_item_assignment_status(db, assignment_id, status, handed_over=False):
+def _set_tuning_item_assignment_status(db, assignment_id, status, handed_over=False, work_date=None):
     """Core of set_tuning_assignment_status, pulled out so
     modules/tuning_schedule can move a linked task through the same
     states (and trigger the same first-time-done payout) as the order
@@ -13318,7 +13452,8 @@ def _set_tuning_item_assignment_status(db, assignment_id, status, handed_over=Fa
     drift out of sync with tuning_item_assignments.assignment_status —
     that column stays the one source of truth for a linked task's status.
     Caller has already validated `status` is a real ASSIGNMENT_STATUSES
-    value. handed_over marks a contractor's finished task as also collected
+    value. work_date dates the first-time-done payout (default: today; the
+    schedule passes the day of the task). handed_over marks a contractor's finished task as also collected
     ("Выполнена, передана": the status stays "done", returned_at records the
     day the boat came back); any other status change clears that mark."""
     db.execute(
@@ -13330,7 +13465,7 @@ def _set_tuning_item_assignment_status(db, assignment_id, status, handed_over=Fa
     if status == "done":
         _pay_tuning_assignment(db, db.execute(
             "SELECT * FROM tuning_item_assignments WHERE id = ?", (assignment_id,)
-        ).fetchone())
+        ).fetchone(), work_date=work_date)
     db.commit()
 
 

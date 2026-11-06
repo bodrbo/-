@@ -704,6 +704,18 @@ def collect_extra_participants(form):
     ]
 
 
+def task_payout_date(db, task_id):
+    """The day a finished free task is paid on: the day of the task itself
+    (the last one for a task over several days), not the day it was marked
+    done. None when the task has no days."""
+    return repository.task_last_day(db, task_id)
+
+
+def assignment_payout_date(db, assignment_id):
+    """The same for an order task that stands in the schedule."""
+    return repository.assignment_last_day(db, assignment_id)
+
+
 def _pay_unpaid_members(db, task, pay_free_task):
     """Pays every further participant of a finished free task their own
     rate x their hours (the task's own when they have none), once (their

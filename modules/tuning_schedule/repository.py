@@ -392,6 +392,25 @@ def list_task_days(db, task_id):
     ).fetchall()
 
 
+def task_last_day(db, task_id):
+    """The latest day a task stands on in the schedule (ISO date), or None
+    when it has no days."""
+    row = db.execute(
+        "SELECT MAX(work_date) AS day FROM tuning_schedule_task_days WHERE task_id = ?", (task_id,)
+    ).fetchone()
+    return row["day"] if row else None
+
+
+def assignment_last_day(db, assignment_id):
+    """The same for the schedule card of an order task (assignment)."""
+    row = db.execute(
+        "SELECT MAX(d.work_date) AS day FROM tuning_schedule_tasks t "
+        "JOIN tuning_schedule_task_days d ON d.task_id = t.id WHERE t.assignment_id = ?",
+        (assignment_id,),
+    ).fetchone()
+    return row["day"] if row else None
+
+
 def get_task(db, task_id):
     return db.execute(
         "SELECT * FROM tuning_schedule_tasks WHERE id = ?", (task_id,)
