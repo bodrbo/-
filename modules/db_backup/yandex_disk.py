@@ -35,7 +35,15 @@ class YandexDisk:
             import requests
             http = requests
         self.http = http
+        self.token = token
         self.headers = {"Authorization": "OAuth " + token}
+
+    def describe(self, error):
+        """The kind of error and its text (shortened, without the token)."""
+        text = str(error).replace(self.token, "***")
+        if len(text) > 200:
+            text = text[:200] + "…"
+        return "%s: %s" % (error.__class__.__name__, text) if text else error.__class__.__name__
 
     def _call(self, method, url, expected, **kwargs):
         try:
@@ -43,7 +51,7 @@ class YandexDisk:
                 url, headers=self.headers, timeout=kwargs.pop("timeout", REQUEST_TIMEOUT), **kwargs
             )
         except Exception as error:
-            raise DiskError("Яндекс.Диск недоступен (%s)" % error.__class__.__name__)
+            raise DiskError("Яндекс.Диск недоступен (%s)" % self.describe(error))
         if response.status_code in expected:
             return response
         raise DiskError(PROBLEMS.get(response.status_code, "Яндекс.Диск ответил ошибкой %s" % response.status_code))
@@ -66,9 +74,9 @@ class YandexDisk:
             with open(local_path, "rb") as handle:
                 response = self.http.put(target, data=handle, timeout=UPLOAD_TIMEOUT)
         except OSError as error:
-            raise DiskError("не удалось прочитать файл: %s" % error.__class__.__name__)
+            raise DiskError("не удалось прочитать файл: %s" % self.describe(error))
         except Exception as error:
-            raise DiskError("загрузка на Яндекс.Диск прервалась (%s)" % error.__class__.__name__)
+            raise DiskError("загрузка на Яндекс.Диск прервалась (%s)" % self.describe(error))
         if response.status_code not in (201, 202):
             raise DiskError(PROBLEMS.get(response.status_code, "загрузка не удалась (%s)" % response.status_code))
 

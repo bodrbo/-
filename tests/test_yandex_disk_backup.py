@@ -269,6 +269,8 @@ class OfflineSyncTests(DiskCase):
         self.assertTrue(result["ok"])
         self.assertFalse(result["offsite"]["ok"])
         self.assertNotIn(TOKEN, result["offsite"]["message"])
+        self.assertIn("ConnectionError", result["offsite"]["message"])   # the kind of failure is shown
+        self.assertIn("no network", result["offsite"]["message"])
         self.assertNotIn(TOKEN, open(os.path.join(self.dir, "offsite.json"), encoding="utf-8").read())
 
 
