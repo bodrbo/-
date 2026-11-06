@@ -653,6 +653,29 @@ class TuningScheduleStatusTests(_TuningScheduleFixture, unittest.TestCase):
         # without a shift there is no calendar and so no line
         self.assertNotIn('id="tuningNowLine"', self.client.get("/schedule/tuning?date=2030-01-05").get_data(as_text=True))
 
+    def test_two_tasks_of_one_person_at_the_same_time_stand_side_by_side(self):
+        self.place_free()
+        self.place_free()
+        page = self.page()
+        self.assertEqual(page.count("tuning-calendar-card status-pending is-parallel"), 2)
+        self.assertIn("* 0 / 2)", page)
+        self.assertIn("* 1 / 2)", page)
+        self.assertIn("width: calc((100% - 12px) / 2 - 3px)", page)
+
+    def test_three_at_once_show_only_the_start_time_on_the_narrow_cards(self):
+        for _ in range(3):
+            self.place_free()
+        page = self.page()
+        self.assertEqual(page.count("tuning-calendar-card status-pending is-parallel"), 3)
+        self.assertIn('<span class="tuning-calendar-card-time">09:00</span>', page)
+        self.assertNotIn('<span class="tuning-calendar-card-time">09:00–10:00</span>', page)
+
+    def test_a_single_task_keeps_the_full_width(self):
+        self.place_free()
+        page = self.page()
+        self.assertNotIn("is-parallel", page.split('<div class="tuning-calendar-columns"')[1])
+        self.assertNotIn("100% - 12px) * ", page)
+
     def test_dragging_does_not_start_from_the_status_picker(self):
         self.place_linked()
         self.assertIn("event.target.closest('select, option, button, a')", self.page())
@@ -2384,6 +2407,44 @@ class TuningScheduleBackgroundSaveTests(_TuningScheduleFixture, unittest.TestCas
             self.assertIn('class="alert task-form-error', form, form_id)
         self.assertIn("'X-Requested-With': 'XMLHttpRequest'", page)
         self.assertIn("function showTaskFormError", page)
+
+
+class ArrangeParallelTests(unittest.TestCase):
+    @staticmethod
+    def card(task_id, start, end):
+        return {"task_id": task_id, "_start_minutes": start * 60, "_end_minutes": end * 60}
+
+    def lanes(self, *cards):
+        from modules.tuning_schedule.services import arrange_parallel
+        arranged = arrange_parallel(list(cards))
+        return {c["task_id"]: (c["lane"], c["lane_count"]) for c in arranged}
+
+    def test_cards_that_do_not_overlap_stay_alone(self):
+        self.assertEqual(self.lanes(self.card(1, 9, 10), self.card(2, 10, 11), self.card(3, 12, 13)),
+                         {1: (0, 1), 2: (0, 1), 3: (0, 1)})
+
+    def test_overlapping_cards_take_lanes_and_share_the_count(self):
+        self.assertEqual(self.lanes(self.card(1, 9, 11), self.card(2, 10, 12)), {1: (0, 2), 2: (1, 2)})
+
+    def test_three_at_once_need_three_lanes(self):
+        self.assertEqual(self.lanes(self.card(1, 9, 10), self.card(2, 9, 10), self.card(3, 9, 10)),
+                         {1: (0, 3), 2: (1, 3), 3: (2, 3)})
+
+    def test_a_free_lane_is_reused_inside_a_group(self):
+        # the longest of two starting together goes first (lane 0); 3 overlaps only it, so it
+        # takes the lane that 1 has left, and the group has two lanes
+        self.assertEqual(self.lanes(self.card(1, 9, 10), self.card(2, 9, 12), self.card(3, 10, 11)),
+                         {2: (0, 2), 1: (1, 2), 3: (1, 2)})
+
+    def test_a_short_card_is_counted_at_its_drawn_height(self):
+        # 15 minutes long, drawn 30 minutes tall: the next one at +20 minutes would run into it
+        short = {"task_id": 1, "_start_minutes": 9 * 60, "_end_minutes": 9 * 60 + 15}
+        later = {"task_id": 2, "_start_minutes": 9 * 60 + 20, "_end_minutes": 10 * 60}
+        self.assertEqual(self.lanes(short, later), {1: (0, 2), 2: (1, 2)})
+
+    def test_groups_are_independent(self):
+        self.assertEqual(self.lanes(self.card(1, 9, 11), self.card(2, 10, 11), self.card(3, 13, 14)),
+                         {1: (0, 2), 2: (1, 2), 3: (0, 1)})
 
 
 if __name__ == "__main__":

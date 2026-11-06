@@ -12325,6 +12325,10 @@ button.partner-open-price-save svg {
 .tuning-calendar-card-head { display: block; flex: 0 1 auto; min-height: 0; overflow: hidden; line-height: 1.25; }
 .tuning-calendar-card-head .tuning-card-board { float: right; margin: 0 0 2px 4px; }
 .tuning-calendar-card-time { white-space: nowrap; margin-right: 5px; }
+/* tasks of one person at the same time stand side by side, each narrow */
+.tuning-calendar-card.is-parallel { padding: 5px 5px 5px 7px; border-left-width: 3px; }
+.tuning-calendar-card.is-parallel .tuning-calendar-card-time { display: block; margin-right: 0; font-size: 9px; }
+.tuning-calendar-card.is-parallel .tuning-calendar-card-head strong { font-size: 11px; }
 .tuning-calendar-card-head strong { display: inline; margin: 0; overflow: visible; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
 .tuning-card-bell { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: rgba(255,255,255,.22); color: #fff; font-size: 10px; line-height: 1; cursor: pointer; }
 .tuning-card-board { text-decoration: none; }

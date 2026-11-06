@@ -125,8 +125,8 @@
               <span class="tuning-calendar-hour-line" style="top: {{ mark.top_px }}px;"></span>
               {% endfor %}
               {% for card in cards_by_employee.get(employee.name, []) %}
-              <div class="tuning-calendar-card status-{{ card.status }}"
-                   style="top: {{ card.top_px }}px; height: {{ card.height_px }}px;"
+              <div class="tuning-calendar-card status-{{ card.status }}{{ ' is-parallel' if card.lane_count > 1 }}"
+                   style="top: {{ card.top_px }}px; height: {{ card.height_px }}px;{% if card.lane_count > 1 %} right: auto; left: calc(6px + (100% - 12px) * {{ card.lane }} / {{ card.lane_count }}); width: calc((100% - 12px) / {{ card.lane_count }} - 3px);{% endif %}"
                    title="{{ card.start_label }}–{{ card.end_label }} · {{ card.title }}"
                    data-move-url="{{ url_for('tuning_schedule.move_task_card', task_id=card.task_id, day_id=card.day_id) }}"
                    data-start-minutes="{{ card._start_minutes }}" data-duration-minutes="{{ card._end_minutes - card._start_minutes }}"
@@ -139,7 +139,7 @@
                      title="Открыть эту задачу на доске задач заказа №{{ card.order_id }}"
                      aria-label="Открыть задачу «{{ card.title }}» на доске задач">⇱</a>
                   {% endif %}
-                  <span class="tuning-calendar-card-time">{{ card.start_label }}–{{ card.end_label }}</span>
+                  <span class="tuning-calendar-card-time">{{ card.start_label }}{% if card.lane_count < 3 %}–{{ card.end_label }}{% endif %}</span>
                   <strong>{{ card.title }}</strong>
                 </div>
               </div>

@@ -433,6 +433,40 @@ def day_view(db, day):
     }
 
 
+def arrange_parallel(cards):
+    """Puts cards of one person that overlap in time side by side. Sets
+    card["lane"] (0-based) and card["lane_count"] (how many lanes the group of
+    overlapping cards needs, the same for the whole group), and returns the
+    cards ordered by start. A card is drawn at least MIN_CARD_MINUTES tall, so
+    that is how long it takes its lane."""
+    ordered = sorted(
+        cards, key=lambda card: (card["_start_minutes"], -card["_end_minutes"], card["task_id"])
+    )
+    group, group_end, lane_ends = [], None, []
+
+    def close_group():
+        for member in group:
+            member["lane_count"] = max(1, len(lane_ends))
+
+    for card in ordered:
+        start = card["_start_minutes"]
+        end = max(card["_end_minutes"], start + MIN_CARD_MINUTES)
+        if group and start >= group_end:   # nothing of the group is still running: a new group
+            close_group()
+            group, group_end, lane_ends = [], None, []
+        lane = next((index for index, lane_end in enumerate(lane_ends) if lane_end <= start), None)
+        if lane is None:
+            lane = len(lane_ends)
+            lane_ends.append(end)
+        else:
+            lane_ends[lane] = end
+        card["lane"] = lane
+        group.append(card)
+        group_end = end if group_end is None else max(group_end, end)
+    close_group()
+    return ordered
+
+
 def calendar_view(db, day, day_crew):
     """Pixel-positioned calendar cards for `day`, one column per employee
     in `day_crew` (the same list day_view already built — reused so the
@@ -508,6 +542,8 @@ def calendar_view(db, day, day_crew):
                 "is_admin": False, "members": [], "coworkers": [], "paid": False, "days": [],
             }
         cards_by_employee[task["employee_name"]].append(task)
+    for name in cards_by_employee:
+        cards_by_employee[name] = arrange_parallel(cards_by_employee[name])
 
     hour_marks = []
     for minute in range(earliest, latest + 1, 60):
