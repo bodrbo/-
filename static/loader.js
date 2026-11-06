@@ -273,6 +273,11 @@ initTableFilters();
 // holding .combo-option divs (each with data-value/data-label/data-search),
 // and optional [data-combo-empty]/[data-combo-more] status lines. A wrapper
 // with [data-combo-allow-custom] submits typed text when no option is picked.
+// [data-combo-recent="N"] makes the list useful before anything is typed: it
+// opens with the first N options (the page lists them newest first), the
+// hidden value fires "change" when it changes, a half-typed text that was
+// never picked is dropped on leaving the field, and the field refuses to
+// submit with such text. wrap._comboSet(value) picks an option by value.
 window.initSearchableComboboxes = function (root) {
   var wrappers = (root || document).querySelectorAll("[data-combo]");
   if (!wrappers.length) return;
@@ -289,9 +294,23 @@ window.initSearchableComboboxes = function (root) {
     var moreEl = wrap.querySelector("[data-combo-more]");
     var options = Array.prototype.slice.call(wrap.querySelectorAll(".combo-option"));
     var allowCustom = wrap.hasAttribute("data-combo-allow-custom");
+    var recentCount = parseInt(wrap.getAttribute("data-combo-recent"), 10) || 0;
     if (!input || !hidden || !dropdown || (!options.length && !allowCustom)) return;
 
     var timer = null;
+
+    function setHidden(value) {
+      if (hidden.value === value) return;
+      hidden.value = value;
+      if (recentCount) hidden.dispatchEvent(new Event("change", {bubbles: true}));
+    }
+
+    // typed text that is not a picked option must not pass for "no choice"
+    function syncValidity() {
+      if (!recentCount) return;
+      var unpicked = !hidden.value && (input.value.trim() !== "" || !wrap.hasAttribute("data-combo-optional"));
+      input.setCustomValidity(unpicked ? "Выберите вариант из списка" : "");
+    }
 
     function close() {
       dropdown.classList.add("hidden");
@@ -299,6 +318,22 @@ window.initSearchableComboboxes = function (root) {
 
     function render() {
       var q = input.value.trim().toLowerCase();
+      // a picked option is in the field: show the newest ones, not just itself
+      if (recentCount && q === (input.dataset.selectedLabel || "").toLowerCase()) q = "";
+      if (!q && recentCount) {
+        options.forEach(function (opt, index) {
+          opt.classList.toggle("hidden", index >= recentCount);
+          opt.style.order = "";
+        });
+        if (emptyEl) emptyEl.classList.add("hidden");
+        if (moreEl) {
+          moreEl.textContent = "Показаны последние " + Math.min(recentCount, options.length)
+            + " — чтобы найти другой, введите номер или имя клиента.";
+          moreEl.classList.toggle("hidden", options.length <= recentCount);
+        }
+        dropdown.classList.remove("hidden");
+        return;
+      }
       if (!q) {
         close();
         return;
@@ -340,15 +375,30 @@ window.initSearchableComboboxes = function (root) {
       // otherwise a half-changed search term could silently submit the old
       // product_id.
       if (input.value !== input.dataset.selectedLabel) {
-        hidden.value = allowCustom ? input.value.trim() : "";
+        if (allowCustom) hidden.value = input.value.trim();
+        else setHidden("");
       }
       input.classList.remove("combo-input-error");
+      syncValidity();
       clearTimeout(timer);
       timer = setTimeout(render, 120);
     });
     input.addEventListener("focus", function () {
-      if (input.value.trim()) render();
+      if (recentCount) input.select();
+      if (input.value.trim() || recentCount) render();
     });
+    if (recentCount) {
+      // keep the focus while an option is clicked, so leaving the field below does not fire first
+      dropdown.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      input.addEventListener("blur", function () {
+        if (!allowCustom && !hidden.value && input.value.trim()) {
+          input.value = "";
+          input.dataset.selectedLabel = "";
+        }
+        syncValidity();
+        close();
+      });
+    }
     input.addEventListener("keydown", function (e) {
       if (e.key === "Escape") close();
     });
@@ -356,12 +406,28 @@ window.initSearchableComboboxes = function (root) {
     options.forEach(function (opt) {
       opt.addEventListener("click", function () {
         var label = opt.getAttribute("data-label");
-        hidden.value = opt.getAttribute("data-value");
+        if (recentCount) setHidden(opt.getAttribute("data-value"));
+        else hidden.value = opt.getAttribute("data-value");
         input.value = label;
         input.dataset.selectedLabel = label;
+        syncValidity();
         close();
       });
     });
+
+    wrap._comboSet = function (value) {
+      value = value == null ? "" : String(value);
+      var label = "";
+      if (value) {
+        var found = options.filter(function (opt) { return opt.getAttribute("data-value") === value; })[0];
+        label = found ? found.getAttribute("data-label") : "№" + value;
+      }
+      setHidden(value);
+      input.value = label;
+      input.dataset.selectedLabel = label;
+      syncValidity();
+    };
+    syncValidity();
 
     document.addEventListener("click", function (e) {
       if (!wrap.contains(e.target)) close();

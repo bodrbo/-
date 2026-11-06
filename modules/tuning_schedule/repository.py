@@ -445,23 +445,16 @@ def set_task_entry(db, task_id, entry_id):
 
 
 def list_linkable_orders(db):
-    """Orders an admin could plausibly still assign work on, for the
-    schedule's "привязать к заказу" picker — same statuses the tuning
-    order board itself treats as active (not cancelled, not already
-    handed over)."""
+    """Every order, newest first, for the schedule's project picker — whatever
+    its status (a task can be tied to a finished or cancelled project too)."""
     return db.execute(
-        "SELECT id, client_name, equipment_type, boat_model, motor_model "
-        "FROM tuning_orders "
-        "WHERE status NOT IN ('cancelled', 'handed_over') "
-        "ORDER BY id DESC"
+        "SELECT id, client_name, equipment_type, boat_model, motor_model, status "
+        "FROM tuning_orders ORDER BY id DESC"
     ).fetchall()
 
 
 def get_linkable_order(db, order_id):
-    return db.execute(
-        "SELECT id FROM tuning_orders WHERE id = ? AND status NOT IN ('cancelled', 'handed_over')",
-        (order_id,),
-    ).fetchone()
+    return db.execute("SELECT id FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
 
 
 def get_order_item(db, order_id, item_id):

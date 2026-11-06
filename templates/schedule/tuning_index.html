@@ -1,3 +1,17 @@
+{# A project picker: type a number (or a client / model) and choose from the list; before anything is
+   typed it shows the newest projects, whatever their status. The options are copied in from the one
+   <template id="orderOptionsTemplate"> below (see the script), so the page carries the list once. #}
+{% macro order_picker(field_id, placeholder, on_change='') %}
+<div class="combo-field" data-order-combo data-combo-optional data-combo-recent="12"{% if on_change %} data-on-change="{{ on_change }}"{% endif %}>
+  <input type="text" class="combo-input" data-combo-input id="{{ field_id }}Search" placeholder="{{ placeholder }}"
+         autocomplete="off" role="combobox" aria-autocomplete="list" aria-label="Проект: поиск по номеру">
+  <input type="hidden" name="order_id" id="{{ field_id }}" data-combo-value value="">
+  <div class="combo-dropdown hidden" data-combo-dropdown>
+    <p class="combo-empty hidden" data-combo-empty>Проектов с таким номером или именем нет.</p>
+    <p class="combo-more hidden" data-combo-more></p>
+  </div>
+</div>
+{% endmacro %}
 <!doctype html>
 <html lang="ru">
 <head>
@@ -228,16 +242,8 @@
         </div>
 
         <div class="field" id="tuningScheduleOrderField" hidden>
-          <label for="task-order">Заказ</label>
-          <select id="task-order" name="order_id" onchange="loadTuningScheduleOrderItems(this.value)">
-            <option value="" disabled selected>Выберите заказ</option>
-            {% for order in linkable_orders %}
-            <option value="{{ order.id }}">
-              №{{ order.id }} — {{ order.client_name }}
-              ({{ order.motor_model if order.equipment_type == 'motor' else order.boat_model }})
-            </option>
-            {% endfor %}
-          </select>
+          <label for="task-orderSearch">Заказ</label>
+          {{ order_picker('task-order', 'Введите номер проекта', 'loadTuningScheduleOrderItems') }}
         </div>
         <div class="field" id="tuningScheduleOrderItemField" hidden>
           <label for="task-order-item">Работа в заказе</label>
@@ -450,14 +456,9 @@
       </div>
 
       <div class="quick-task-column">
-      <label class="quick-task-field"><span>Проект <small>необязательно</small></span>
-        <select name="order_id" id="quickTaskOrder" onchange="loadQuickTaskWorks(this.value)">
-          <option value="">Без проекта</option>
-          {% for order in linkable_orders %}
-          <option value="{{ order.id }}">№{{ order.id }} — {{ order.client_name }} ({{ order.motor_model if order.equipment_type == 'motor' else order.boat_model }})</option>
-          {% endfor %}
-        </select>
-      </label>
+      <div class="quick-task-field"><span>Проект <small>необязательно</small></span>
+        {{ order_picker('quickTaskOrder', 'Без проекта — введите номер, чтобы найти', 'loadQuickTaskWorks') }}
+      </div>
       <label class="quick-task-field" id="quickTaskWorkField" hidden><span>Работа внутри проекта <small>необязательно</small></span>
         <select name="order_item_id" id="quickTaskWork" onchange="updateQuickTaskTitle()">
           <option value="">Задача по проекту целиком</option>
@@ -508,14 +509,9 @@
             {% endfor %}
           </select>
         </label>
-        <label class="quick-task-field" id="taskEditorOrderField"><span>Проект <small>необязательно</small></span>
-          <select name="order_id" id="taskEditorOrder">
-            <option value="">Без проекта</option>
-            {% for order in linkable_orders %}
-            <option value="{{ order.id }}">№{{ order.id }} — {{ order.client_name }} ({{ order.motor_model if order.equipment_type == 'motor' else order.boat_model }})</option>
-            {% endfor %}
-          </select>
-        </label>
+        <div class="quick-task-field" id="taskEditorOrderField"><span>Проект <small>необязательно</small></span>
+          {{ order_picker('taskEditorOrder', 'Без проекта — введите номер, чтобы найти') }}
+        </div>
         <div class="quick-task-row task-editor-row2">
           <label class="quick-task-field" id="taskEditorRateField"><span>Ставка, ₽/ч</span>
             <input type="text" inputmode="decimal" name="rate" id="taskEditorRate">
@@ -581,8 +577,52 @@
 </div>
 {% endif %}{% endfor %}{% endfor %}
 
+<template id="orderOptionsTemplate">
+  {% for order in linkable_orders %}
+  {% set model = order.motor_model if order.equipment_type == 'motor' else order.boat_model %}
+  {% set status_label = order_status_labels.get(order.status, '') %}
+  <div class="combo-option" data-value="{{ order.id }}"
+       data-label="№{{ order.id }} — {{ order.client_name }}{{ ' (' ~ model ~ ')' if model }}"
+       data-search="{{ (order.id|string ~ ' №' ~ order.id ~ ' ' ~ (order.client_name or '') ~ ' ' ~ (model or '') ~ ' ' ~ status_label)|lower }}">
+    <span class="combo-option-name">№{{ order.id }} — {{ order.client_name }}{{ ' (' ~ model ~ ')' if model }}</span>
+    {% if status_label %}<span class="combo-option-sku">{{ status_label }}</span>{% endif %}
+  </div>
+  {% endfor %}
+</template>
+
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 <script>
+// The project pickers: fill each with the options of the shared template, then switch it on.
+function setOrderPicker(fieldId, value) {
+  var hidden = document.getElementById(fieldId);
+  var wrap = hidden && hidden.closest('[data-order-combo]');
+  if (!wrap) return;
+  if (wrap._comboSet) { wrap._comboSet(value); return; }
+  hidden.value = value || '';
+  wrap.querySelector('[data-combo-input]').value = value ? '№' + value : '';
+}
+
+function setOrderPickerDisabled(fieldId, disabled) {
+  var hidden = document.getElementById(fieldId);
+  var wrap = hidden && hidden.closest('[data-order-combo]');
+  if (!wrap) return;
+  hidden.disabled = disabled;   // a disabled field is not submitted; the server keeps the work's order
+  wrap.querySelector('[data-combo-input]').disabled = disabled;
+}
+
+(function () {
+  var source = document.getElementById('orderOptionsTemplate');
+  document.querySelectorAll('[data-order-combo]').forEach(function (wrap) {
+    var dropdown = wrap.querySelector('[data-combo-dropdown]');
+    if (source) dropdown.appendChild(source.content.cloneNode(true));
+    var hidden = wrap.querySelector('[data-combo-value]');
+    var handler = wrap.getAttribute('data-on-change');
+    if (handler) hidden.addEventListener('change', function () { window[handler](hidden.value); });
+    wrap.setAttribute('data-combo', '');
+    window.initSearchableComboboxes(wrap.parentNode);
+  });
+})();
+
 function openTaskReminder(taskId) {
   var modal = document.getElementById('taskReminderModal' + taskId);
   if (!modal) return;
@@ -915,7 +955,7 @@ function openQuickTask(employeeName, startMinutes) {
   document.getElementById('quickTaskStart').value = quickTaskTimeLabel(startMinutes);
   document.getElementById('quickTaskHours').value = '1';
   document.getElementById('quickTaskRate').value = '';
-  document.getElementById('quickTaskOrder').value = '';
+  setOrderPicker('quickTaskOrder', '');
   document.getElementById('quickTaskName').value = '';
   loadQuickTaskWorks('');
   clearExtraPeople('quickTaskExtraRows');
@@ -1074,12 +1114,8 @@ function openTaskEditor(card, event, fromButton) {
   reminderButton.textContent = '🔔 Напоминание в Telegram' + (task.reminder_count ? ' (' + task.reminder_count + ')' : '');
   var employee = document.getElementById('taskEditorEmployee');
   employee.value = task.employee_name;
-  var order = document.getElementById('taskEditorOrder');
-  if (task.order_id && !Array.prototype.some.call(order.options, function (o) { return o.value === String(task.order_id); })) {
-    order.add(new Option('№' + task.order_id, String(task.order_id)));
-  }
-  order.value = task.order_id ? String(task.order_id) : '';
-  order.disabled = task.is_linked;  // a disabled select is not submitted; the server keeps the work's order
+  setOrderPicker('taskEditorOrder', task.order_id ? String(task.order_id) : '');
+  setOrderPickerDisabled('taskEditorOrder', task.is_linked);
   document.getElementById('taskEditorOrderField').hidden = false;
   document.getElementById('taskEditorRate').value = task.rate ? String(task.rate) : '';
   document.getElementById('taskEditorStatus').value = task.status;
@@ -1190,8 +1226,11 @@ function updateTuningScheduleTaskKind() {
 
 function loadTuningScheduleOrderItems(orderId) {
   var select = document.getElementById('task-order-item');
+  if (!orderId) {
+    select.innerHTML = '<option value="" disabled selected>Сначала выберите заказ</option>';
+    return;
+  }
   select.innerHTML = '<option value="" disabled selected>Загрузка…</option>';
-  if (!orderId) return;
   fetch('/schedule/tuning/orders/' + orderId + '/items', {credentials: 'same-origin'})
     .then(function (response) { return response.json(); })
     .then(function (data) {

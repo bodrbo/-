@@ -1074,7 +1074,7 @@ class TuningScheduleQuickTaskTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertIsNotNone(project_id)
         self.assertEqual(entry["project_id"], project_id["id"])
 
-    def test_an_unknown_or_closed_project_is_refused(self):
+    def test_an_unknown_project_is_refused_but_a_closed_one_is_not(self):
         self.put_on_shift(self.EMPLOYEE_A)
         self.quick(order_id=999999)
         self.assertIsNone(self.task())
@@ -1084,13 +1084,37 @@ class TuningScheduleQuickTaskTests(_TuningScheduleFixture, unittest.TestCase):
             db.execute("UPDATE tuning_orders SET status = 'cancelled' WHERE id = ?", (self.order_id,))
             db.commit()
         try:
-            self.quick(order_id=self.order_id)
-            self.assertIsNone(self.task())
+            self.quick(order_id=self.order_id)       # any project may be picked, whatever its status
+            self.assertIsNotNone(self.task())
         finally:
             with application_module.app.app_context():
                 db = application_module.get_db()
                 db.execute("UPDATE tuning_orders SET status = 'in_progress' WHERE id = ?", (self.order_id,))
                 db.commit()
+
+    def test_the_project_picker_lists_projects_of_every_status_with_a_searchable_number(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            for status in ("cancelled", "handed_over", "done"):
+                db.execute(
+                    "INSERT INTO tuning_orders (client_name, equipment_type, boat_model, sale_channel, phone, "
+                    "discount_pct, subtotal, total, status, order_date, created_at, updated_at, source) "
+                    "VALUES (?, 'boat', 'Тест-лодка', 'direct', '+79990000000', 0, 0, 0, ?, '2026-09-01', "
+                    "'2026-09-01 10:00', '2026-09-01 10:00', 'manual')", (f"Клиент {status}", status))
+            db.commit()
+            ids = {row["status"]: row["id"] for row in db.execute(
+                "SELECT id, status FROM tuning_orders WHERE client_name LIKE 'Клиент %'").fetchall()}
+        self.put_on_shift(self.EMPLOYEE_A)
+        page = self.page()
+        options = page.split('<template id="orderOptionsTemplate">')[1].split("</template>")[0]
+        for status, order_id in ids.items():
+            self.assertIn(f'data-value="{order_id}"', options, status)
+        self.assertIn("Отменён", options)
+        self.assertIn("Выполнен, передан", options)
+        self.assertIn(f'data-search="{self.order_id} №{self.order_id} ', options)   # the number leads the search text
+        self.assertEqual(page.count('<div class="combo-field" data-order-combo'), 3)   # add form, quick window, task window
+        self.assertIn('data-combo-recent="12"', page)
+        self.assertNotIn('<select name="order_id"', page)
 
     def _drop_project(self):
         with application_module.app.app_context():

@@ -6328,6 +6328,7 @@ app.register_blueprint(
         revoke_order_assignment=lambda db, assignment_id: (
             _revoke_tuning_assignment(db, assignment_id)[:2]
         ),
+        order_status_labels={status["value"]: status["label"] for status in ORDER_STATUSES},
     )
 )
 
