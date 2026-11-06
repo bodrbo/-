@@ -88,7 +88,7 @@
     {% if day_crew %}
     <div class="tuning-calendar-board">
       <div class="tuning-calendar-board-scroll">
-        <div class="tuning-calendar-inner"
+        <div class="tuning-calendar-inner" data-day="{{ day.isoformat() }}"
              style="--tuning-crew-count: {{ day_crew|length }}; --tuning-calendar-height: {{ grid_height }}px;">
           <div class="tuning-calendar-corner"><span>Время</span></div>
           <div class="tuning-calendar-heads">
@@ -114,8 +114,10 @@
             {% for mark in hour_marks %}
             <span class="tuning-calendar-hour-label" style="top: {{ mark.top_px }}px;">{{ mark.label }}</span>
             {% endfor %}
+            <span class="tuning-calendar-now-label" id="tuningNowLabel" hidden></span>
           </div>
           <div class="tuning-calendar-columns" style="height: {{ grid_height }}px;">
+            <div class="tuning-calendar-now" id="tuningNowLine" aria-hidden="true" hidden></div>
             {% for employee in day_crew %}
             <div class="tuning-calendar-column" data-employee-id="{{ employee.id }}" data-employee-name="{{ employee.name }}"
                  title="Нажмите на свободное место, чтобы добавить задачу">
@@ -644,6 +646,33 @@ var TUNING_PX = {{ px_per_minute }};
 var TUNING_GRID_START = {{ grid_start_minutes }};
 var TUNING_GRID_MINUTES = {{ grid_minutes }};
 var TUNING_STEP = 15;
+
+// the line of the current time (today only, by the clock of this device)
+function updateTuningNowLine(scrollToIt) {
+  var inner = document.querySelector('.tuning-calendar-inner');
+  var line = document.getElementById('tuningNowLine');
+  var label = document.getElementById('tuningNowLabel');
+  if (!inner || !line || !label) return;
+  var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+  var now = new Date();
+  var today = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+  var minutes = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+  var shown = inner.dataset.day === today
+    && minutes >= TUNING_GRID_START && minutes <= TUNING_GRID_START + TUNING_GRID_MINUTES;
+  line.hidden = label.hidden = !shown;
+  if (!shown) return;
+  var top = (minutes - TUNING_GRID_START) * TUNING_PX;
+  line.style.top = label.style.top = top + 'px';
+  label.textContent = pad(now.getHours()) + ':' + pad(now.getMinutes());
+  var scroller = document.querySelector('.tuning-calendar-board-scroll');
+  if (scrollToIt && scroller && scroller.scrollHeight > scroller.clientHeight) {
+    // the heads row (64px) is above the grid; put the line a third of the way down
+    scroller.scrollTop = Math.max(0, top + 64 - scroller.clientHeight / 3);
+  }
+}
+updateTuningNowLine(true);
+setInterval(updateTuningNowLine, 30000);
+document.addEventListener('visibilitychange', function () { if (!document.hidden) updateTuningNowLine(); });
 
 function tuningTime(minutes) {
   var snapped = Math.round(minutes / TUNING_STEP) * TUNING_STEP;

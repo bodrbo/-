@@ -11896,6 +11896,7 @@ button.partner-open-price-save svg {
   transform: translateY(-50%);
 }
 .tuning-calendar-columns {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(var(--tuning-crew-count), minmax(190px, 1fr));
 }
@@ -11903,6 +11904,42 @@ button.partner-open-price-save svg {
   position: relative;
   border-right: 1px solid var(--hairline);
   background: linear-gradient(90deg, rgba(238,244,250,.18), rgba(255,255,255,0) 40%);
+}
+/* the current time: a line across the columns and its time on the axis */
+.tuning-calendar-now {
+  position: absolute;
+  z-index: 5;
+  right: 0;
+  left: 0;
+  height: 0;
+  border-top: 2px solid #e5484d;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.55);
+  pointer-events: none;
+}
+.tuning-calendar-now[hidden], .tuning-calendar-now-label[hidden] { display: none; }
+.tuning-calendar-now::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: -1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #e5484d;
+}
+.tuning-calendar-now-label {
+  position: absolute;
+  z-index: 2;
+  right: 4px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #e5484d;
+  color: #fff;
+  font-family: 'PT Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  transform: translateY(-50%);
 }
 .tuning-calendar-hour-line {
   position: absolute;

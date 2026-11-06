@@ -643,6 +643,16 @@ class TuningScheduleStatusTests(_TuningScheduleFixture, unittest.TestCase):
         # the status route is still there for the window / other callers
         self.assertEqual(self.set_status(task_id, "accepted").status_code, 200)
 
+    def test_the_calendar_has_a_current_time_line_for_the_browser_to_place(self):
+        self.place_linked()
+        page = self.page()
+        self.assertIn(f'class="tuning-calendar-inner" data-day="{self.DAY}"', page)
+        self.assertIn('id="tuningNowLine"', page)
+        self.assertIn('id="tuningNowLabel"', page)
+        self.assertIn("updateTuningNowLine(true)", page)
+        # without a shift there is no calendar and so no line
+        self.assertNotIn('id="tuningNowLine"', self.client.get("/schedule/tuning?date=2030-01-05").get_data(as_text=True))
+
     def test_dragging_does_not_start_from_the_status_picker(self):
         self.place_linked()
         self.assertIn("event.target.closest('select, option, button, a')", self.page())
