@@ -770,7 +770,7 @@ class TuningScheduleStatusTests(_TuningScheduleFixture, unittest.TestCase):
 
 class TuningSchedulePayoutDateTests(_TuningScheduleFixture, unittest.TestCase):
     """A task marked done in the schedule is paid on the day of the task, not
-    on the day it was marked; the recalculation page lines old payouts up."""
+    on the day it was marked."""
 
     DAY2 = "2026-10-14"
     place_linked = TuningScheduleStatusTests.place_linked
@@ -783,18 +783,6 @@ class TuningSchedulePayoutDateTests(_TuningScheduleFixture, unittest.TestCase):
             return [dict(r) for r in application_module.get_db().execute(
                 "SELECT id, work_date, amount FROM entries WHERE employee = ? ORDER BY id",
                 (employee or self.EMPLOYEE_A,)).fetchall()]
-
-    def run_recalc(self, apply=False, **query):
-        self.login_admin()
-        if apply:
-            return self.client.post("/schedule/tuning/payouts", data=query)
-        return self.client.get("/schedule/tuning/payouts", query_string=query)
-
-    def force_entry_date(self, entry_id, day):
-        with application_module.app.app_context():
-            db = application_module.get_db()
-            db.execute("UPDATE entries SET work_date = ? WHERE id = ?", (day, entry_id))
-            db.commit()
 
     def test_a_free_task_is_paid_on_its_own_day(self):
         task_id = self.place_free()
@@ -825,91 +813,6 @@ class TuningSchedulePayoutDateTests(_TuningScheduleFixture, unittest.TestCase):
         self.login_admin()
         self.client.post(f"/tuning/assignments/{self.assignments()[0]['id']}/status", data={"status": "done"})
         self.assertEqual([row["work_date"] for row in self.entry_rows()], [dt.date.today().isoformat()])
-
-    def test_the_recalculation_moves_old_payouts_to_the_day_of_the_task(self):
-        linked = self.place_linked()
-        self.set_status(linked, "done")
-        free = self.place_free(self.EMPLOYEE_B)
-        self.set_status(free, "done")
-        for employee in (self.EMPLOYEE_A, self.EMPLOYEE_B):
-            for row in self.entry_rows(employee):
-                self.force_entry_date(row["id"], "2026-11-05")
-        page = self.run_recalc().get_data(as_text=True)
-        self.assertEqual(page.count("Перенести дату"), 2)
-        self.assertEqual([row["work_date"] for row in self.entry_rows()], ["2026-11-05"])   # preview writes nothing
-        self.run_recalc(apply=True)
-        self.assertEqual([row["work_date"] for row in self.entry_rows()], [self.DAY])
-        self.assertEqual([row["work_date"] for row in self.entry_rows(self.EMPLOYEE_B)], [self.DAY])
-        self.assertIn("Все выплаты уже стоят", self.run_recalc().get_data(as_text=True))
-
-    def test_the_recalculation_creates_the_payouts_that_were_never_made(self):
-        task_id = self.place_free()
-        with application_module.app.app_context():
-            db = application_module.get_db()
-            db.execute("UPDATE tuning_schedule_tasks SET status = 'done' WHERE id = ?", (task_id,))
-            db.commit()
-        self.assertEqual(self.entry_rows(), [])
-        self.assertIn("Создать выплату", self.run_recalc().get_data(as_text=True))
-        self.run_recalc(apply=True)
-        self.assertEqual([(row["work_date"], row["amount"]) for row in self.entry_rows()], [(self.DAY, 100)])
-        self.run_recalc(apply=True)
-        self.assertEqual(len(self.entry_rows()), 1)   # re-running never pays twice
-
-    def test_the_recalculation_creates_missing_order_payouts(self):
-        linked = self.place_linked()
-        with application_module.app.app_context():
-            db = application_module.get_db()
-            db.execute("UPDATE tuning_item_assignments SET assignment_status = 'done' WHERE item_id = ?", (self.item_id,))
-            db.commit()
-        self.run_recalc(apply=True)
-        self.assertEqual([(row["work_date"], row["amount"]) for row in self.entry_rows()], [(self.DAY, 200)])
-
-    def test_a_payout_deleted_in_payroll_is_reported_and_not_recreated(self):
-        task_id = self.place_free()
-        self.set_status(task_id, "done")
-        with application_module.app.app_context():
-            db = application_module.get_db()
-            db.execute("DELETE FROM entries WHERE employee = ?", (self.EMPLOYEE_A,))
-            db.commit()
-        self.assertIn("удалена в «Зарплатах»", self.run_recalc().get_data(as_text=True))
-        self.run_recalc(apply=True)
-        self.assertEqual(self.entry_rows(), [])
-
-    def test_a_paid_week_is_left_alone_unless_asked(self):
-        task_id = self.place_free()
-        self.set_status(task_id, "done")
-        entry = self.entry_rows()[0]
-        self.force_entry_date(entry["id"], "2026-11-05")
-        with application_module.app.app_context():
-            db = application_module.get_db()
-            db.execute("INSERT INTO payments (employee, period_key, paid_at) VALUES (?, '2026-11-02', '2026-11-06 10:00')",
-                       (self.EMPLOYEE_A,))
-            db.commit()
-        try:
-            self.assertIn("неделя уже отмечена оплаченной", self.run_recalc().get_data(as_text=True))
-            self.run_recalc(apply=True)
-            self.assertEqual(self.entry_rows()[0]["work_date"], "2026-11-05")
-            self.run_recalc(apply=True, include_settled="1")
-            self.assertEqual(self.entry_rows()[0]["work_date"], self.DAY)
-        finally:
-            with application_module.app.app_context():
-                db = application_module.get_db()
-                db.execute("DELETE FROM payments WHERE employee = ? AND period_key = '2026-11-02'", (self.EMPLOYEE_A,))
-                db.commit()
-
-    def test_unfinished_tasks_are_not_touched(self):
-        self.place_free()
-        self.place_linked(self.EMPLOYEE_B)
-        self.assertIn("Все выплаты уже стоят", self.run_recalc().get_data(as_text=True))
-
-    def test_the_page_needs_an_administrator(self):
-        anonymous = application_module.app.test_client()
-        self.assertEqual(anonymous.get("/schedule/tuning/payouts").status_code, 302)
-        self.assertEqual(anonymous.post("/schedule/tuning/payouts").status_code, 302)
-
-    def test_the_schedule_links_to_the_page(self):
-        self.place_free()
-        self.assertIn('href="/schedule/tuning/payouts"', self.page())
 
 
 class TuningScheduleAdministratorTaskTests(_TuningScheduleFixture, unittest.TestCase):
