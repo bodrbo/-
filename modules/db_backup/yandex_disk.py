@@ -18,6 +18,7 @@ API = "https://cloud-api.yandex.net/v1/disk"
 ROOT = "app:/"
 REQUEST_TIMEOUT = 30
 UPLOAD_TIMEOUT = 600
+COMPARE_HOSTS = ("webdav.yandex.ru", "yandex.ru", "disk.yandex.net", "yandex.net", "google.com")
 
 PROBLEMS = {
     401: "токен Яндекс.Диска недействителен или истёк — выпустите новый и обновите YANDEX_DISK_TOKEN",
@@ -244,7 +245,22 @@ def diagnose(disk, resolver=None):
         return False
 
     def resolve(host):
-        return lambda: ", ".join(sorted({item[4][0] for item in resolver(host, 443)}))
+        def look():
+            try:
+                return "%s: %s" % (host, ", ".join(sorted({item[4][0] for item in resolver(host, 443)})))
+            except Exception as error:
+                raise DiskError("%s — %s" % (host, disk.describe(error)))
+        return look
+
+    def compare():
+        found = []
+        for host in COMPARE_HOSTS:
+            try:
+                resolver(host, 443)
+                found.append(host + " — находится")
+            except Exception:
+                found.append(host + " — не находится")
+        return "; ".join(found)
 
     holder = {}
 
@@ -281,7 +297,8 @@ def diagnose(disk, resolver=None):
         return results
     if not step("Получение адреса для загрузки", upload_address):
         return results
-    step("Адрес сервера загрузки находится", resolve(holder["host"]))
+    if not step("Адрес сервера загрузки находится", resolve(holder["host"])):
+        step("Для сравнения: другие адреса Яндекса", compare)
     step("Загрузка тестового файла", put_file)
     step("Удаление тестовой папки", cleanup)
     return results

@@ -319,6 +319,18 @@ class DiagnoseTests(DiskCase):
         steps = diagnose(YandexDisk(TOKEN, self.http), resolver=broken)
         self.assertFalse(steps[0]["ok"])
         self.assertIn("name resolution failed", steps[0]["detail"])
+        self.assertIn("cloud-api.yandex.net", steps[0]["detail"])   # which name could not be found
+
+    def test_unknown_upload_host_is_named_and_compared_with_other_hosts(self):
+        def resolver(host, port):
+            if host.startswith("upload."):
+                raise OSError("Name or service not known")
+            return [(0, 0, 0, "", ("203.0.113.5", port))]
+        steps = diagnose(YandexDisk(TOKEN, self.http), resolver=resolver)
+        failed = [step for step in steps if not step["ok"]]
+        self.assertEqual(len(failed), 1)
+        self.assertIn("upload.example", failed[0]["detail"])
+        self.assertIn("webdav.yandex.ru — находится", steps[-3]["detail"])
 
 
 if __name__ == "__main__":
