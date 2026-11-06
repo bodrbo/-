@@ -186,7 +186,8 @@ _DAY_TASK_SELECT = (
     "SELECT t.id AS task_id, t.assignment_id, d.id AS day_id, "
     "d.work_date, d.start_time, d.planned_hours, "
     "COALESCE(tia.employee_name, t.employee_name) AS employee_name, "
-    "COALESCE(ti.work_name, t.title) AS title, "
+    "COALESCE(NULLIF(t.title, ''), ti.work_name, '') AS title, "
+    "ti.work_name AS work_name, ti.id AS item_id, "
     "COALESCE(tia.rate, t.rate) AS rate, "
     "COALESCE(tia.assignment_status, t.status) AS status, "
     "COALESCE(tia.comment, t.comment) AS comment, "
@@ -323,6 +324,13 @@ def update_free_task(db, task_id, title, rate, comment, order_id):
         "WHERE id = ? AND assignment_id IS NULL",
         (title, rate, comment, order_id, task_id),
     )
+    db.commit()
+
+
+def set_task_title(db, task_id, title):
+    """The task's own name — for an order task it is separate from the work
+    it belongs to (tuning_order_items.work_name)."""
+    db.execute("UPDATE tuning_schedule_tasks SET title = ? WHERE id = ?", (title, task_id))
     db.commit()
 
 

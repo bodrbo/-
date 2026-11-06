@@ -171,9 +171,10 @@ def create_tuning_schedule_blueprint(
                 item = None
             if item is None:
                 return respond(False, "Работа не найдена в заказе.", day)
+            title = request.form.get("title", "")
             success, message, _task_id = services.create_linked_task(
                 db, item, employee_name, rate, comment, day_rows,
-                create_order_assignment,
+                create_order_assignment, title=title,
             )
             if success:
                 # more people on the same work: each gets their own order task
@@ -188,7 +189,7 @@ def create_tuning_schedule_blueprint(
                     extra_ok, extra_message, _extra_id = services.create_linked_task(
                         db, item, extra_name, extra_rate, comment,
                         services.scaled_day_rows(day_rows, own_hours),
-                        create_order_assignment,
+                        create_order_assignment, title=title,
                     )
                     if not extra_ok:
                         message += f" {extra_name}: {extra_message}"

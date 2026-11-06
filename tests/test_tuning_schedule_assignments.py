@@ -1044,12 +1044,43 @@ class TuningScheduleQuickTaskTests(_TuningScheduleFixture, unittest.TestCase):
         self.quick(order_id=self.order_id, item_id=self.item_id, title="не используется")
         task = self.task()
         self.assertIsNotNone(task["assignment_id"])
-        self.assertEqual(task["title"], "Полировка корпуса")  # the work names the task
+        self.assertEqual(task["title"], "не используется")   # the task keeps the name it was given...
+        (editor,) = [json.loads(html.unescape(raw)) for raw in re.findall(r"data-editor='([^']*)'", self.page())]
+        self.assertEqual((editor["title"], editor["work_name"]), ("не используется", "Полировка корпуса"))   # ...apart from its work
         assignments = [a for a in self.assignments() if a["employee_name"] == self.EMPLOYEE_A]
         self.assertEqual(len(assignments), 1)
         page = self.page()
         self.assertNotIn(f"№{self.order_id} · Salute 585 HT", page)
         self.assertIn(f'"order_id": {self.order_id}', html.unescape(page))
+
+    def test_the_same_work_can_have_several_tasks_each_with_its_own_name(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.quick(order_id=self.order_id, item_id=self.item_id, title="Подготовить поверхность", start="09:00", hours="1")
+        self.quick(order_id=self.order_id, item_id=self.item_id, title="Нанести состав", start="11:00", hours="1")
+        with application_module.app.app_context():
+            titles = sorted(row["title"] for row in application_module.get_db().execute(
+                "SELECT title FROM tuning_schedule_tasks WHERE employee_name = ?", (self.EMPLOYEE_A,)).fetchall())
+        self.assertEqual(titles, ["Нанести состав", "Подготовить поверхность"])
+        page = self.page()
+        self.assertIn("Подготовить поверхность", page)
+        self.assertIn("Нанести состав", page)
+        with application_module.app.app_context():
+            names = {row["work_name"] for row in application_module.get_db().execute(
+                "SELECT ti.work_name FROM tuning_item_assignments tia "
+                "JOIN tuning_order_items ti ON ti.id = tia.item_id").fetchall()}
+        self.assertEqual(names, {"Полировка корпуса"})   # both belong to the one work
+
+    def test_a_blank_title_falls_back_to_the_name_of_the_work(self):
+        self.put_on_shift(self.EMPLOYEE_A)
+        self.quick(order_id=self.order_id, item_id=self.item_id, title="   ")
+        self.assertEqual(self.task()["title"], "Полировка корпуса")
+
+    def test_the_title_field_is_always_there_and_required_whatever_the_work(self):
+        page = self.page()
+        self.assertNotIn("updateQuickTaskTitle", page)       # no more hiding the title when a work is chosen
+        self.assertIn('id="task-title" name="title"', page)
+        self.assertIn('maxlength="200" required>', page.split('id="task-title"')[1][:120])
+        self.assertIn("Работа, к которой относится задача", page)
 
     def test_a_project_level_task_is_paid_against_the_project(self):
         with application_module.app.app_context():
@@ -1357,9 +1388,16 @@ class TuningScheduleTaskEditorTests(_TuningScheduleFixture, unittest.TestCase):
                           assignment["assignment_status"], assignment["due_from"], assignment["due_to"]),
                          (250, 3, "новый", "in_progress", self.DAY, None))
         self.assertEqual(self.days(task["id"]), [(self.DAY, "12:00", 3.0)])
-        self.assertEqual(self.task()["title"], task["title"])  # the work's name is not editable here
+        self.assertEqual(self.task()["title"], "Что угодно")   # the task has its own name, apart from the work
         page = self.board()
         self.assertIn("новый", page)
+        with application_module.app.app_context():
+            work = application_module.get_db().execute(
+                "SELECT work_name FROM tuning_order_items WHERE id = ?", (assignment["item_id"],)).fetchone()
+        self.assertEqual(work["work_name"], "Полировка корпуса")   # and the work itself is untouched
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        (editor,) = [json.loads(html.unescape(raw)) for raw in re.findall(r"data-editor='([^']*)'", page)]
+        self.assertEqual((editor["title"], editor["work_name"]), ("Что угодно", "Полировка корпуса"))
 
     def test_an_order_task_over_several_days_sets_the_period(self):
         task = self.make_linked()

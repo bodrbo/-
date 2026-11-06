@@ -754,12 +754,16 @@ def create_free_task(db, employee_name, title, rate, comment, day_rows, order_id
     return True, "Задача добавлена в расписание." + _roster_note(employee_name, added_days), task_id
 
 
-def create_linked_task(db, item, employee_name, rate, comment, day_rows, create_order_assignment):
+def create_linked_task(db, item, employee_name, rate, comment, day_rows, create_order_assignment, title=""):
     """`create_order_assignment` is app.py's _create_tuning_item_assignment,
     injected so a task added here goes through the exact same
     tuning_item_assignments insert (+ notification + budget-overrun flag)
     as "Поручить задачу" on the order/board — one code path for both entry
-    points, not two that could drift apart."""
+    points, not two that could drift apart.
+
+    `title` is the task's own name; the work it belongs to is `item`. Left
+    empty, the work's name stands in (the order board does that)."""
+    title = _normalise_text(title, TASK_TITLE_MAX_LENGTH) or item["work_name"]
     errors = []
     employee_name = _normalise_text(employee_name, EMPLOYEE_NAME_MAX_LENGTH)
     comment = _normalise_text(comment, COMMENT_MAX_LENGTH)
@@ -779,7 +783,7 @@ def create_linked_task(db, item, employee_name, rate, comment, day_rows, create_
         db, item, employee_name, rate, total_hours, comment, **due
     )
     task_id = repository.create_task(
-        db, assignment_id, employee_name, item["work_name"], rate, comment, current_timestamp()
+        db, assignment_id, employee_name, title, rate, comment, current_timestamp()
     )
     for work_date, start_time, hours in clean_days:
         repository.add_task_day(db, task_id, work_date, start_time, hours)
@@ -950,6 +954,7 @@ def editor_payload(db, card):
         "is_linked": linked,
         "board_url": board_task_url(db, task["assignment_id"]) if linked else None,
         "title": card["title"],
+        "work_name": (card.get("work_name") or "") if linked else "",
         "employee_name": primary_name,
         "order_id": card["order_id"],
         "rate": primary_rate,
@@ -1001,6 +1006,10 @@ def update_task(db, task_id, form, hooks):
 
     title = task["title"]
     order_id = task["order_id"]
+    if linked:
+        # the task keeps its own name, apart from the work it belongs to; a
+        # blank one leaves the name as it was
+        title = _normalise_text(form.get("title"), TASK_TITLE_MAX_LENGTH) or title
     if not linked:
         title = _normalise_text(form.get("title"), TASK_TITLE_MAX_LENGTH)
         if not title:
@@ -1079,6 +1088,8 @@ def update_task(db, task_id, form, hooks):
         repository.set_assignment_due(
             db, task["assignment_id"], dates[0], dates[-1] if dates[-1] != dates[0] else None
         )
+        if title != task["title"]:
+            repository.set_task_title(db, task_id, title)
         if comment != (assignment["comment"] or ""):
             repository.set_linked_task_comment(db, task_id, task["assignment_id"], comment)
         if abs(rate - assignment["rate"]) > 1e-9 or abs(total_hours - assignment["norm_hours"]) > 1e-9:
@@ -1094,7 +1105,7 @@ def update_task(db, task_id, form, hooks):
             # one more person on the same work: their own order task over the same days
             ok, text, _new_id = create_linked_task(
                 db, item, name, extra_rate, comment, person_days(clean_days, extra_hours),
-                hooks["create_assignment"],
+                hooks["create_assignment"], title=title,
             )
             notes.append(f"{name} добавлен в задачу." if ok else text)
             if not ok:

@@ -238,7 +238,7 @@
       <div class="field-row-inner" style="margin-top:16px;">
         <div class="field" id="tuningScheduleFreeTitleField">
           <label for="task-title">Название задачи</label>
-          <input type="text" id="task-title" name="title" placeholder="Например: уборка цеха">
+          <input type="text" id="task-title" name="title" placeholder="Например: уборка цеха" maxlength="200" required>
         </div>
 
         <div class="field" id="tuningScheduleOrderField" hidden>
@@ -246,7 +246,7 @@
           {{ order_picker('task-order', 'Введите номер проекта', 'loadTuningScheduleOrderItems') }}
         </div>
         <div class="field" id="tuningScheduleOrderItemField" hidden>
-          <label for="task-order-item">Работа в заказе</label>
+          <label for="task-order-item">Работа, к которой относится задача</label>
           <select id="task-order-item" name="order_item_id">
             <option value="" disabled selected>Сначала выберите заказ</option>
           </select>
@@ -456,16 +456,16 @@
       </div>
 
       <div class="quick-task-column">
+      <label class="quick-task-field" id="quickTaskTitleField"><span>Название задачи</span>
+        <input type="text" name="title" id="quickTaskName" placeholder="Например: уборка цеха" maxlength="200" required>
+      </label>
       <div class="quick-task-field"><span>Проект <small>необязательно</small></span>
         {{ order_picker('quickTaskOrder', 'Без проекта — введите номер, чтобы найти', 'loadQuickTaskWorks') }}
       </div>
-      <label class="quick-task-field" id="quickTaskWorkField" hidden><span>Работа внутри проекта <small>необязательно</small></span>
-        <select name="order_item_id" id="quickTaskWork" onchange="updateQuickTaskTitle()">
+      <label class="quick-task-field" id="quickTaskWorkField" hidden><span>Работа, к которой относится задача <small>необязательно</small></span>
+        <select name="order_item_id" id="quickTaskWork">
           <option value="">Задача по проекту целиком</option>
         </select>
-      </label>
-      <label class="quick-task-field" id="quickTaskTitleField"><span>Название задачи</span>
-        <input type="text" name="title" id="quickTaskName" placeholder="Например: уборка цеха" maxlength="200" required>
       </label>
       </div>
 
@@ -982,21 +982,11 @@ function updateQuickTaskRate() {
   document.getElementById('quickTaskAdminNote').hidden = !isAdmin;
 }
 
-function updateQuickTaskTitle() {
-  // a work of the project names the task itself; otherwise the title is typed
-  var hasWork = !!document.getElementById('quickTaskWork').value;
-  var titleField = document.getElementById('quickTaskTitleField');
-  var input = document.getElementById('quickTaskName');
-  titleField.hidden = hasWork;
-  input.required = !hasWork;
-}
-
 function loadQuickTaskWorks(orderId) {
   var field = document.getElementById('quickTaskWorkField');
   var select = document.getElementById('quickTaskWork');
   select.innerHTML = '<option value="">Задача по проекту целиком</option>';
   field.hidden = !orderId;
-  updateQuickTaskTitle();
   if (!orderId) return;
   fetch('/schedule/tuning/orders/' + orderId + '/items', {credentials: 'same-origin'})
     .then(function (response) { return response.json(); })
@@ -1101,11 +1091,12 @@ function openTaskEditor(card, event, fromButton) {
     : (task.order_id ? 'Задача проекта №' + task.order_id : 'Задача без проекта');
   var name = document.getElementById('taskEditorName');
   name.value = task.title;
-  name.readOnly = task.is_linked;
-  name.required = !task.is_linked;
+  name.readOnly = false;   // an order task has its own name too, apart from its work
+  name.required = true;
   var note = document.getElementById('taskEditorLinkedNote');
   note.hidden = !task.is_linked;
-  note.textContent = 'Название и проект берутся из работы заказа. Ставка, часы и срок меняют начисление и доску задач.';
+  note.textContent = 'Работа в заказе: «' + (task.work_name || '—') + '» (не меняется). '
+    + 'Проект берётся из работы; ставка, часы и срок меняют начисление и доску задач.';
   var boardLink = document.getElementById('taskEditorBoardLink');
   boardLink.hidden = !task.board_url;
   boardLink.href = task.board_url || '#';
@@ -1217,10 +1208,9 @@ function updateTuningScheduleRate() {
 
 function updateTuningScheduleTaskKind() {
   var isOrder = document.querySelector('input[name="task_kind"]:checked').value === 'order';
-  document.getElementById('tuningScheduleFreeTitleField').hidden = isOrder;
+  // the task always has its own name; an order task also names the work it belongs to
   document.getElementById('tuningScheduleOrderField').hidden = !isOrder;
   document.getElementById('tuningScheduleOrderItemField').hidden = !isOrder;
-  document.getElementById('task-title').required = !isOrder;
   document.getElementById('task-order-item').required = isOrder;
 }
 
