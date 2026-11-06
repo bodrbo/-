@@ -140,12 +140,6 @@
                   <span class="tuning-calendar-card-time">{{ card.start_label }}–{{ card.end_label }}</span>
                   <strong>{{ card.title }}</strong>
                 </div>
-                {% if card.with_names %}
-                <span class="tuning-calendar-card-meta tuning-calendar-card-with">{{ 'с: ' ~ card.with_names|join(', ') }}</span>
-                {% endif %}
-                {% if card.order_id %}
-                <span class="tuning-calendar-card-meta">№{{ card.order_id }} · {{ card.equipment_label }}</span>
-                {% endif %}
               </div>
               {% endfor %}
             </div>

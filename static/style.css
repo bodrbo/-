@@ -11935,7 +11935,6 @@ button.partner-open-price-save svg {
 .tuning-calendar-card.status-rejected { background: var(--danger); }
 .tuning-calendar-card-time { font-family: 'PT Mono', monospace; font-size: 9.5px; font-weight: 700; opacity: .92; }
 .tuning-calendar-card strong { overflow: hidden; margin-top: 2px; font-size: 12px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
-.tuning-calendar-card-meta { overflow: hidden; margin-top: 2px; font-size: 10px; opacity: .9; text-overflow: ellipsis; white-space: nowrap; }
 /* Карта цеха — лента времени */
 .shop-timeline-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:12px}
 .shop-timeline-head h2{margin:0}
@@ -12293,7 +12292,6 @@ button.partner-open-price-save svg {
 .task-extra-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, .9fr) minmax(0, .7fr) 38px; gap: 6px; align-items: center; }
 .task-extra-row select, .task-extra-row input { min-width: 0; width: 100%; }
 .task-extra-row input[hidden] { display: none; }
-.tuning-calendar-card-with { font-style: italic; }
 .task-editor-row2 { grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); }
 .task-reminder-card { width: min(520px, 100%); max-height: none; margin: auto; }
 .task-reminder-body { padding: 16px 22px 22px; display: grid; gap: 10px; }

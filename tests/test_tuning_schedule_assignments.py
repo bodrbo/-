@@ -1,4 +1,6 @@
 import html
+import json
+import re
 import unittest
 from unittest import mock
 
@@ -986,8 +988,9 @@ class TuningScheduleQuickTaskTests(_TuningScheduleFixture, unittest.TestCase):
         task = self.task()
         self.assertEqual((task["assignment_id"], task["order_id"]), (None, self.order_id))
         page = self.page()
-        self.assertIn(f"№{self.order_id} · Salute 585 HT", page)
+        self.assertNotIn(f"№{self.order_id} · Salute 585 HT", page)   # the card does not repeat the project
         self.assertIn("Подготовка корпуса", page)
+        self.assertIn(f'"order_id": {self.order_id}', html.unescape(page))   # it is in the task window
 
     def test_a_task_can_be_tied_to_a_work_inside_a_project(self):
         self.put_on_shift(self.EMPLOYEE_A)
@@ -997,7 +1000,9 @@ class TuningScheduleQuickTaskTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertEqual(task["title"], "Полировка корпуса")  # the work names the task
         assignments = [a for a in self.assignments() if a["employee_name"] == self.EMPLOYEE_A]
         self.assertEqual(len(assignments), 1)
-        self.assertIn(f"№{self.order_id} · Salute 585 HT", self.page())
+        page = self.page()
+        self.assertNotIn(f"№{self.order_id} · Salute 585 HT", page)
+        self.assertIn(f'"order_id": {self.order_id}', html.unescape(page))
 
     def test_a_project_level_task_is_paid_against_the_project(self):
         with application_module.app.app_context():
@@ -1460,7 +1465,10 @@ class TuningScheduleSeveralPeopleTests(_TuningScheduleFixture, unittest.TestCase
                          sorted([(self.EMPLOYEE_A, 100, 0), (self.EMPLOYEE_B, 120, 1), (self.EMPLOYEE_C, 90, 1)]))
         page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
         self.assertEqual(page.count("tuning-calendar-card status-"), 3)
-        self.assertIn(f"с: {self.EMPLOYEE_B}, {self.EMPLOYEE_C}", page)
+        self.assertNotIn("с: ", page)   # the card does not list the others; the task window does
+        editors = [json.loads(html.unescape(raw)) for raw in re.findall(r"data-editor='([^']*)'", page)]
+        first = [e for e in editors if e["task_id"] == task["id"] and e["employee_name"] == self.EMPLOYEE_A][0]
+        self.assertEqual([m["name"] for m in first["members"]], [self.EMPLOYEE_B, self.EMPLOYEE_C])
 
     def test_a_single_person_task_is_unchanged(self):
         self.create()
