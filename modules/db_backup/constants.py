@@ -22,3 +22,15 @@ CHECK_EVERY_SECONDS = 600
 KEEP_RECENT = 14
 KEEP_WEEKS = 8
 KEEP_MONTHS = 6
+
+# copies on the owner's Яндекс.Диск (see yandex_disk.py)
+OFFSITE_FILE = "offsite.json"
+OFFSITE_RETRY_MINUTES = 60
+# the background run may spend this long sending files, a click on the page less
+OFFSITE_BUDGET_SECONDS = 240
+OFFSITE_MANUAL_BUDGET_SECONDS = 25
+# uploaded photos and documents that are sent to the Disk (folders of static/)
+PHOTO_FOLDERS = (
+    "boat_documents", "work_photos", "tuning_boats", "checklist_photos",
+    "supply_photos", "diplomas",
+)

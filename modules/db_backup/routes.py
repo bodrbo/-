@@ -8,6 +8,8 @@ from flask import (
 )
 
 from . import services
+from .constants import OFFSITE_MANUAL_BUDGET_SECONDS
+from .yandex_disk import read_offsite_status
 
 
 def _size_text(size):
@@ -16,7 +18,7 @@ def _size_text(size):
     return "%.1f МБ" % (size / 1048576.0)
 
 
-def create_blueprint(db_path, backup_dir, admin_only_no_demo_tenant, cron_secret):
+def create_blueprint(db_path, backup_dir, admin_only_no_demo_tenant, cron_secret, offsite=lambda: None):
     blueprint = Blueprint("db_backup", __name__)
 
     @blueprint.route("/settings/backups")
@@ -33,6 +35,8 @@ def create_blueprint(db_path, backup_dir, admin_only_no_demo_tenant, cron_secret
             backups=backups,
             status=status,
             stale=stale,
+            offsite_enabled=offsite() is not None,
+            offsite_status=read_offsite_status(backup_dir),
             backup_dir=backup_dir,
             active_page="settings",
             notice=session.pop("backup_notice", None),
@@ -42,13 +46,18 @@ def create_blueprint(db_path, backup_dir, admin_only_no_demo_tenant, cron_secret
     @blueprint.route("/settings/backups/run", methods=["POST"])
     @admin_only_no_demo_tenant
     def run_now():
-        result = services.run_backup(db_path, backup_dir, force=True)
+        result = services.run_backup(
+            db_path, backup_dir, force=True, offsite=offsite(), offsite_budget=OFFSITE_MANUAL_BUDGET_SECONDS
+        )
         if result is None:
             session["backup_error"] = "Копия уже создаётся — подождите минуту и обновите страницу."
-        elif result["ok"]:
-            session["backup_notice"] = "Копия создана: %s (%s)." % (result["name"], _size_text(result["size"]))
-        else:
+        elif not result["ok"]:
             session["backup_error"] = "Копию создать не удалось: %s." % result["message"]
+        else:
+            session["backup_notice"] = "Копия создана: %s (%s)." % (result["name"], _size_text(result["size"]))
+            sent = result["offsite"]
+            if sent is not None and not sent["ok"]:
+                session["backup_error"] = "На Яндекс.Диск отправить не удалось: %s." % sent["message"]
         return redirect(url_for("db_backup.index"))
 
     @blueprint.route("/settings/backups/<name>")
@@ -70,11 +79,14 @@ def create_blueprint(db_path, backup_dir, admin_only_no_demo_tenant, cron_secret
         secret = cron_secret()
         if not secret or request.args.get("token") != secret:
             return "forbidden", 403
-        result = services.run_backup(db_path, backup_dir, force=request.args.get("force") == "1")
+        result = services.run_backup(db_path, backup_dir, force=request.args.get("force") == "1", offsite=offsite())
         if result is None:
             return "ok: nothing to do", 200
         if not result["ok"]:
             return "error: %s" % result["message"], 500
-        return "ok: %s" % result["name"], 200
+        sent = result["offsite"]
+        if sent is not None and not sent["ok"]:
+            return "ok: %s; yandex disk error: %s" % (result["name"] or "no new copy", sent["message"]), 500
+        return "ok: %s" % (result["name"] or "no new copy"), 200
 
     return blueprint

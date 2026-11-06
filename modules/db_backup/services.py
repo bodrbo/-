@@ -19,8 +19,8 @@ import time
 
 from .constants import (
     BACKUP_PREFIX, BACKUP_SUFFIX, CHECK_EVERY_SECONDS, DUE_HOURS, KEEP_MONTHS,
-    KEEP_RECENT, KEEP_WEEKS, LOCK_FILE, NIGHT_HOURS, OVERDUE_HOURS,
-    RETRY_AFTER_FAILURE_MINUTES, STALE_LOCK_MINUTES, STATUS_FILE,
+    KEEP_RECENT, KEEP_WEEKS, LOCK_FILE, NIGHT_HOURS, OFFSITE_BUDGET_SECONDS,
+    OVERDUE_HOURS, RETRY_AFTER_FAILURE_MINUTES, STALE_LOCK_MINUTES, STATUS_FILE,
 )
 
 NAME_PATTERN = re.compile(
@@ -275,28 +275,37 @@ def _acquire_lock(backup_dir):
     return False
 
 
-def run_backup(db_path, backup_dir, now=None, force=False):
-    """One run: a copy, then retention. Without force it does nothing unless a
-    copy is due. Returns {'ok', 'message', 'name'} or None when nothing was done
-    (not due, or another run is in progress)."""
+def run_backup(db_path, backup_dir, now=None, force=False, offsite=None, offsite_budget=OFFSITE_BUDGET_SECONDS):
+    """One run: a copy and retention (when due), then sending to the Яндекс.Диск
+    (when `offsite` is given and something is waiting). Without force it does
+    nothing unless one of them is due. Returns {'ok', 'message', 'name',
+    'offsite'} or None when nothing was done (not due, or another run is in
+    progress)."""
     now = now or dt.datetime.now()
     os.makedirs(backup_dir, exist_ok=True)
-    if not force and not is_due(backup_dir, now):
+    copy_due = force or is_due(backup_dir, now)
+    if not copy_due and not (offsite is not None and offsite.due(backup_dir, now)):
         return None
     if not _acquire_lock(backup_dir):
         return None
     try:
-        try:
-            made = create_backup(db_path, backup_dir, now)
-        except BackupError as error:
-            _write_status(backup_dir, now, False, str(error))
-            return {"ok": False, "message": str(error), "name": ""}
-        removed = prune(backup_dir)
-        message = "копия сохранена"
-        if removed:
-            message += ", удалено старых: %s" % removed
-        _write_status(backup_dir, now, True, message, made["name"])
-        return {"ok": True, "message": message, "name": made["name"], "size": made["size"]}
+        result = {"ok": True, "message": "", "name": "", "offsite": None}
+        if copy_due:
+            try:
+                made = create_backup(db_path, backup_dir, now)
+            except BackupError as error:
+                _write_status(backup_dir, now, False, str(error))
+                return {"ok": False, "message": str(error), "name": "", "offsite": None}
+            removed = prune(backup_dir)
+            message = "копия сохранена"
+            if removed:
+                message += ", удалено старых: %s" % removed
+            _write_status(backup_dir, now, True, message, made["name"])
+            result.update(message=message, name=made["name"], size=made["size"])
+        # a copy just made is waiting to be sent too
+        if offsite is not None and (copy_due or offsite.due(backup_dir, now)):
+            result["offsite"] = offsite.sync(backup_dir, offsite_budget, now)
+        return result
     finally:
         _remove(os.path.join(backup_dir, LOCK_FILE))
 
@@ -307,7 +316,7 @@ _check_state = {"checked_at": 0.0, "thread": None}
 _check_guard = threading.Lock()
 
 
-def maybe_start_background(db_path, backup_dir):
+def maybe_start_background(db_path, backup_dir, offsite=None):
     """Cheap to call on every request: at most every CHECK_EVERY_SECONDS it
     looks at the schedule, and a due run goes to a daemon thread. Returns True
     when a run was started."""
@@ -320,18 +329,18 @@ def maybe_start_background(db_path, backup_dir):
         if running is not None and running.is_alive():
             return False
         try:
-            if not is_due(backup_dir):
+            if not is_due(backup_dir) and not (offsite is not None and offsite.due(backup_dir)):
                 return False
         except OSError:
             return False
-        worker = threading.Thread(target=_background_run, args=(db_path, backup_dir), daemon=True)
+        worker = threading.Thread(target=_background_run, args=(db_path, backup_dir, offsite), daemon=True)
         _check_state["thread"] = worker
         worker.start()
         return True
 
 
-def _background_run(db_path, backup_dir):
+def _background_run(db_path, backup_dir, offsite):
     try:
-        run_backup(db_path, backup_dir)
+        run_backup(db_path, backup_dir, offsite=offsite)
     except Exception:  # a backup problem must never reach a visitor
         pass

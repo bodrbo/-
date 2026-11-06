@@ -172,6 +172,7 @@ from modules.settings import (
     init_schema as init_settings_schema,
 )
 from modules.db_backup import (
+    configured_offsite as configured_backup_offsite,
     create_blueprint as create_db_backup_blueprint,
     default_backup_dir,
     maybe_start_background as start_due_db_backup,
@@ -322,6 +323,10 @@ DB_PATH = os.environ.get("WORKHOURS_DB_PATH") or os.path.join(
 # (the settings page and /internal/cron/backup keep working).
 BACKUP_DIR = os.environ.get("BACKUP_DIR") or default_backup_dir(DB_PATH)
 BACKUP_AUTO = os.environ.get("BACKUP_AUTO", "1").strip().lower() not in ("0", "false", "no")
+# With YANDEX_DISK_TOKEN (an OAuth token of an application that has access to
+# its own folder) the copies and the uploaded photos are also sent to that
+# Яндекс.Диск folder.
+BACKUP_OFFSITE = configured_backup_offsite(os.environ.get("YANDEX_DISK_TOKEN"), app.static_folder)
 # Bump when an additive schema migration is introduced. Demo sessions keep
 # their own SQLite files, so unlike the shared database they need an explicit
 # signal to run init_db() again after a deploy.
@@ -357,7 +362,7 @@ def _start_due_db_backup(response):
     # A day-old copy is made in the background by whichever request notices it
     # (so no cron entry is needed); see modules/db_backup.
     if BACKUP_AUTO and not app.config.get("TESTING"):
-        start_due_db_backup(DB_PATH, BACKUP_DIR)
+        start_due_db_backup(DB_PATH, BACKUP_DIR, BACKUP_OFFSITE)
     return response
 
 
@@ -6385,6 +6390,7 @@ app.register_blueprint(
         backup_dir=BACKUP_DIR,
         admin_only_no_demo_tenant=admin_only_no_demo_tenant,
         cron_secret=lambda: CRON_SECRET,
+        offsite=lambda: BACKUP_OFFSITE,
     )
 )
 
