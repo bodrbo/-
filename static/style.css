@@ -12267,9 +12267,11 @@ button.partner-open-price-save svg {
 .tuning-drag-preview { position: fixed; z-index: 1200; right: auto; margin: 0; pointer-events: none; opacity: .92; transform: scale(1.015); box-shadow: 0 18px 32px -16px rgba(9,30,40,.8); cursor: grabbing; }
 .tuning-calendar-column.is-drop-target { background-color: rgba(52,152,219,.08); box-shadow: inset 0 0 0 2px rgba(52,152,219,.55); }
 .tuning-is-dragging, .tuning-is-dragging * { cursor: grabbing !important; user-select: none !important; }
-.tuning-calendar-card-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.tuning-calendar-card-time { white-space: nowrap; flex: 0 0 auto; }
-.tuning-calendar-card-tools { display: flex; align-items: center; gap: 3px; margin-left: auto; min-width: 0; }
+/* the title starts on the line of the time and carries on below it */
+.tuning-calendar-card-head { display: block; flex: 0 1 auto; min-height: 0; overflow: hidden; line-height: 1.25; }
+.tuning-calendar-card-head .tuning-card-board { float: right; margin: 0 0 2px 4px; }
+.tuning-calendar-card-time { white-space: nowrap; margin-right: 5px; }
+.tuning-calendar-card-head strong { display: inline; margin: 0; overflow: visible; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
 .tuning-card-bell { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: rgba(255,255,255,.22); color: #fff; font-size: 10px; line-height: 1; cursor: pointer; }
 .tuning-card-board { text-decoration: none; }
 .task-editor-board-link { display: inline-flex; align-items: center; align-self: flex-start; min-height: 36px; padding: 0 14px; text-decoration: none; }

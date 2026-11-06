@@ -131,17 +131,15 @@
                    data-editor='{{ card.editor|tojson }}'
                    onpointerdown="startTuningDrag(event, this)" onclick="openTaskEditor(this, event)">
                 <div class="tuning-calendar-card-head">
-                  <span class="tuning-calendar-card-time">{{ card.start_label }}–{{ card.end_label }}</span>
-                  <div class="tuning-calendar-card-tools">
                   {% if card.board_url %}
                   <a class="tuning-card-bell tuning-card-board" href="{{ card.board_url }}"
                      onpointerdown="event.stopPropagation()" onclick="event.stopPropagation()"
                      title="Открыть эту задачу на доске задач заказа №{{ card.order_id }}"
                      aria-label="Открыть задачу «{{ card.title }}» на доске задач">⇱</a>
                   {% endif %}
-                  </div>
+                  <span class="tuning-calendar-card-time">{{ card.start_label }}–{{ card.end_label }}</span>
+                  <strong>{{ card.title }}</strong>
                 </div>
-                <strong>{{ card.title }}</strong>
                 {% if card.with_names %}
                 <span class="tuning-calendar-card-meta tuning-calendar-card-with">{{ 'с: ' ~ card.with_names|join(', ') }}</span>
                 {% endif %}
