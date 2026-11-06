@@ -2122,13 +2122,25 @@ class TuningTaskReminderTests(_TuningTaskFixture, unittest.TestCase):
         page = self.client.get(f"/tuning/{self.order_id}/board").get_data(as_text=True)
         self.assertIn("Напоминания (1)", page)
 
-    def test_the_schedule_shows_a_bell_and_a_form_on_administrator_cards_only(self):
+    def test_the_schedule_offers_reminders_in_the_task_window_of_administrator_cards_only(self):
         admin_task = self.free_task(self.EMPLOYEE_A, title="Тест-напоминание админа")
         plain_task = self.free_task(self.EMPLOYEE_B, title="Тест-напоминание обычное")
         self.login_admin()
         page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
-        self.assertIn(f"openTaskReminder({admin_task})", page)
-        self.assertNotIn(f"openTaskReminder({plain_task})", page)
+        import html
+        import json
+        import re
+        editors = {}
+        for raw in re.findall(r"data-editor='([^']*)'", page):
+            payload = json.loads(html.unescape(raw))
+            editors[payload["task_id"]] = payload
+        self.assertTrue(editors[admin_task]["can_remind"])
+        self.assertFalse(editors[plain_task]["can_remind"])
+        self.assertIn('id="taskEditorReminder"', page)
+        self.assertNotIn('class="tuning-card-bell has-reminders"', page)
+        self.assertNotIn(f'onclick="openTaskReminder({admin_task})"', page)   # no bell on the card itself
+        self.assertIn(f'id="taskReminderModal{admin_task}"', page)
+        self.assertNotIn(f'id="taskReminderModal{plain_task}"', page)
         self.assertIn(f'name="schedule_task_id" value="{admin_task}"', page)
         self.assertIn('name="return_to" value="schedule"', page)
 

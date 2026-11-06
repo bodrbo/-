@@ -133,27 +133,12 @@
                 <div class="tuning-calendar-card-head">
                   <span class="tuning-calendar-card-time">{{ card.start_label }}–{{ card.end_label }}</span>
                   <div class="tuning-calendar-card-tools">
-                  {% if card.can_remind %}
-                  <button type="button" class="tuning-card-bell{{ ' has-reminders' if card.reminders }}"
-                          onclick="openTaskReminder({{ card.task_id }})"
-                          title="Напоминание в Telegram{{ ' (' ~ card.reminders|length ~ ')' if card.reminders }}"
-                          aria-label="Напоминание в Telegram по задаче «{{ card.title }}»">🔔{% if card.reminders %}<small>{{ card.reminders|length }}</small>{% endif %}</button>
-                  {% endif %}
                   {% if card.board_url %}
                   <a class="tuning-card-bell tuning-card-board" href="{{ card.board_url }}"
                      onpointerdown="event.stopPropagation()" onclick="event.stopPropagation()"
                      title="Открыть эту задачу на доске задач заказа №{{ card.order_id }}"
                      aria-label="Открыть задачу «{{ card.title }}» на доске задач">⇱</a>
                   {% endif %}
-                  <button type="button" class="tuning-card-bell tuning-card-edit" onclick="openTaskEditor(this.closest('.tuning-calendar-card'), event, true)"
-                          title="Открыть задачу" aria-label="Открыть задачу «{{ card.title }}»">✎</button>
-                  <select class="tuning-card-status" aria-label="Статус задачи «{{ card.title }}»"
-                          data-status-url="{{ url_for('tuning_schedule.set_task_status', task_id=card.task_id) }}"
-                          data-current="{{ card.status }}" onchange="changeTuningCardStatus(this)">
-                    {% for s in assignment_statuses %}
-                    <option value="{{ s.value }}"{{ ' selected' if card.status == s.value }}>{{ s.label }}</option>
-                    {% endfor %}
-                  </select>
                   </div>
                 </div>
                 <strong>{{ card.title }}</strong>
@@ -520,6 +505,8 @@
         </label>
         <p class="hint" id="taskEditorLinkedNote" hidden></p>
         <a class="btn-secondary task-editor-board-link" id="taskEditorBoardLink" href="#" hidden>Открыть на доске задач ⇱</a>
+        <button type="button" class="btn-secondary task-editor-reminder" id="taskEditorReminder" hidden
+                onclick="openTaskReminderFromEditor()">🔔 Напоминание в Telegram</button>
         <label class="quick-task-field"><span>Сотрудник</span>
           <select name="employee_name" id="taskEditorEmployee" required onchange="syncTaskEditorRate()">
             {% for employee in editor_employees %}
@@ -612,14 +599,30 @@ function openTaskReminder(taskId) {
 function closeTaskReminder(taskId) {
   var modal = document.getElementById('taskReminderModal' + taskId);
   if (modal) modal.hidden = true;
-  document.body.classList.remove('schedule-modal-open');
+  keepModalLockWhileOpen();
+}
+
+// the reminder window opens over the task window; the page stays locked
+// while either of them is open
+function keepModalLockWhileOpen() {
+  var editor = document.getElementById('taskEditorModal');
+  if (!editor || editor.hidden) document.body.classList.remove('schedule-modal-open');
+}
+
+function openTaskReminderFromEditor() {
+  if (tuningEditorTask) openTaskReminder(tuningEditorTask.task_id);
 }
 
 document.addEventListener('keydown', function (event) {
   if (event.key !== 'Escape') return;
+  var closed = false;
   document.querySelectorAll('[data-task-reminder-modal]').forEach(function (modal) {
-    if (!modal.hidden) { modal.hidden = true; document.body.classList.remove('schedule-modal-open'); }
+    if (!modal.hidden) { modal.hidden = true; closed = true; }
   });
+  if (closed) {
+    keepModalLockWhileOpen();
+    event.stopImmediatePropagation();   // Esc closes the top window only, not the task window under it
+  }
 });
 
 function openTuningRosterModal() {
@@ -784,32 +787,6 @@ function cancelTuningDrag(event) {
   tuningDrag = null;
   detachTuningDrag(state, event);
   clearTuningDrag(state);
-}
-
-async function changeTuningCardStatus(select) {
-  var card = select.closest('.tuning-calendar-card');
-  var previous = select.dataset.current;
-  var status = select.value;
-  select.disabled = true;
-  try {
-    var response = await fetch(select.dataset.statusUrl, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
-      body: JSON.stringify({status: status}),
-    });
-    var payload = await response.json().catch(function () { return {}; });
-    if (!response.ok || !payload.ok) throw new Error(payload.message || 'Не удалось изменить статус.');
-    card.classList.remove('status-' + previous);
-    card.classList.add('status-' + status);
-    select.dataset.current = status;
-    showTuningNotice(payload.message || 'Статус обновлён.', true);
-  } catch (error) {
-    select.value = previous;
-    showTuningNotice(error.message || 'Не удалось изменить статус.', false);
-  } finally {
-    select.disabled = false;
-  }
 }
 
 function startTuningDrag(event, card) {
@@ -1051,6 +1028,9 @@ function openTaskEditor(card, event, fromButton) {
   var boardLink = document.getElementById('taskEditorBoardLink');
   boardLink.hidden = !task.board_url;
   boardLink.href = task.board_url || '#';
+  var reminderButton = document.getElementById('taskEditorReminder');
+  reminderButton.hidden = !task.can_remind || !document.getElementById('taskReminderModal' + task.task_id);
+  reminderButton.textContent = '🔔 Напоминание в Telegram' + (task.reminder_count ? ' (' + task.reminder_count + ')' : '');
   var employee = document.getElementById('taskEditorEmployee');
   employee.value = task.employee_name;
   var order = document.getElementById('taskEditorOrder');

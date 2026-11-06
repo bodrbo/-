@@ -12270,12 +12270,12 @@ button.partner-open-price-save svg {
 .tuning-calendar-card-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .tuning-calendar-card-time { white-space: nowrap; flex: 0 0 auto; }
 .tuning-calendar-card-tools { display: flex; align-items: center; gap: 3px; margin-left: auto; min-width: 0; }
-.tuning-card-status { max-width: 100%; min-width: 0; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: rgba(255,255,255,.22); color: #fff; font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; text-overflow: ellipsis; }
-.tuning-card-status:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
 .tuning-card-bell { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: rgba(255,255,255,.22); color: #fff; font-size: 10px; line-height: 1; cursor: pointer; }
 .tuning-card-board { text-decoration: none; }
 .task-editor-board-link { display: inline-flex; align-items: center; align-self: flex-start; min-height: 36px; padding: 0 14px; text-decoration: none; }
 .task-editor-board-link[hidden] { display: none; }
+.task-editor-reminder { align-self: flex-start; }
+.task-editor-reminder[hidden] { display: none; }
 .tuning-card-bell small { font-size: 9px; font-weight: 700; }
 .tuning-card-bell.has-reminders { background: rgba(255,255,255,.42); }
 .tuning-card-bell:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
@@ -12299,7 +12299,6 @@ button.partner-open-price-save svg {
 .task-reminder-body .board-task-reminder-form select,
 .task-reminder-body .board-task-reminder-form input,
 .task-reminder-body .board-task-reminder-form textarea { font-size: 14px; }
-.tuning-card-status option { color: #12202a; background: #fff; }
 .field-narrow[hidden] { display: none; }
 /* The tuning schedule uses the whole work area: no 1080px column, and the
    calendar grows to the height of the screen instead of 70vh. */

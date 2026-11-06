@@ -1,3 +1,4 @@
+import html
 import unittest
 from unittest import mock
 
@@ -620,16 +621,25 @@ class TuningScheduleStatusTests(_TuningScheduleFixture, unittest.TestCase):
     def page(self):
         return self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
 
-    def test_every_card_carries_a_status_picker_with_the_current_status_selected(self):
+    def test_a_card_shows_the_title_only_status_and_buttons_live_in_the_task_window(self):
         task_id = self.place_linked()
         page = self.page()
-        select = page.split('class="tuning-card-status"')[1].split("</select>")[0]
-        self.assertIn(f"/schedule/tuning/tasks/{task_id}/status", select)
+        cards = page.split('<div class="tuning-calendar-card ')[1:]
+        self.assertEqual(len(cards), 1)
+        body = cards[0]
+        body = body[:body.index('data-editor=')] + body[body.index('<strong>'):body.index('</strong>')]
+        # the colour still tells the status, but no picker, edit button or bell is drawn on the card
+        self.assertIn("status-pending", cards[0][:20])
+        for gone in ('tuning-card-status', 'tuning-card-edit', 'tuning-card-bell has-reminders', 'openTaskReminder(', '<select'):
+            self.assertNotIn(gone, body)
+        # the window of the task has the status
+        window = page.split('id="taskEditorModal"')[1].split('id="taskEditorDeleteForm"')[0]
+        self.assertIn('name="status" id="taskEditorStatus"', window)
         for label in ("Ожидает ответа", "Принята", "В работе", "Выполнена", "Отклонена"):
-            self.assertIn(label, select)
-        self.assertIn('<option value="pending" selected>', select)
-        self.assertIn("tuning-calendar-card status-pending", page)
-        self.assertIn("changeTuningCardStatus(this)", page)
+            self.assertIn(label, window)
+        self.assertNotIn("changeTuningCardStatus", page)
+        # the status route is still there for the window / other callers
+        self.assertEqual(self.set_status(task_id, "accepted").status_code, 200)
 
     def test_dragging_does_not_start_from_the_status_picker(self):
         self.place_linked()
@@ -654,7 +664,7 @@ class TuningScheduleStatusTests(_TuningScheduleFixture, unittest.TestCase):
             f"/tuning/assignments/{self.assignments()[0]['id']}/status", data={"status": "accepted"})
         page = self.page()
         self.assertIn("tuning-calendar-card status-accepted", page)
-        self.assertIn('<option value="accepted" selected>', page)
+        self.assertIn('"status": "accepted"', html.unescape(page))   # the task window opens with it
 
     def test_finishing_a_task_from_the_card_pays_it_out_once(self):
         task_id = self.place_linked()

@@ -497,6 +497,9 @@ def calendar_view(db, day, day_crew):
         )
         try:
             task["editor"] = editor_payload(db, task)
+            # the card has no bell any more: reminders are opened from the editor
+            task["editor"]["can_remind"] = task["can_remind"]
+            task["editor"]["reminder_count"] = len(task["reminders"])
         except Exception:  # one odd card must never take the whole schedule down
             task["editor"] = {
                 "task_id": task["task_id"], "is_linked": False, "title": task["title"],
