@@ -432,6 +432,15 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
         page = self.client.get("/schedule?date=2026-09-05").get_data(as_text=True)
         self.assertIn('<span class="schedule-card-meta">5 гостей</span>', page)
 
+    def test_the_calendar_has_a_current_time_line_for_the_browser_to_place(self):
+        self.login()
+        page = self.client.get("/schedule?date=2026-09-05").get_data(as_text=True)
+        self.assertIn('class="schedule-board-inner" data-day="2026-09-05"', page)
+        self.assertIn('id="scheduleNowLine"', page)
+        self.assertIn('id="scheduleNowLabel"', page)
+        self.assertIn("updateNowLine(scheduleNowConfig, true)", page)
+        self.assertNotIn("schedule-now-line", page)   # the old thin, once-per-load line is gone
+
     def test_city_excursion_is_created_without_boat(self):
         self.login()
         with application_module.app.app_context():

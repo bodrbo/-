@@ -138,7 +138,7 @@
   </div>
   <section class="schedule-board" aria-label="Расписание на {{ day_label }}">
     <div class="schedule-board-scroll" id="scheduleBoardScroll">
-      <div class="schedule-board-inner" data-crew-count="{{ visible_crew|length }}" style="--crew-count: {{ visible_crew|length }}; --schedule-mobile-crew-width: calc({{ (visible_crew|length * 100 / 3)|round(6) }}vw - {{ (visible_crew|length * 58 / 3)|round(6) }}px); --schedule-height: {{ grid_height }}px;">
+      <div class="schedule-board-inner" data-day="{{ day.isoformat() }}" data-crew-count="{{ visible_crew|length }}" style="--crew-count: {{ visible_crew|length }}; --schedule-mobile-crew-width: calc({{ (visible_crew|length * 100 / 3)|round(6) }}vw - {{ (visible_crew|length * 58 / 3)|round(6) }}px); --schedule-height: {{ grid_height }}px;">
         <div class="schedule-corner">
           <span>Время</span>
           <small>СПБ</small>
@@ -160,9 +160,11 @@
           {% for mark in hour_marks %}
           <span class="schedule-hour-label" style="top: {{ mark.top_px }}px">{{ mark.label }}</span>
           {% endfor %}
+          <span class="schedule-now-label" id="scheduleNowLabel" hidden></span>
         </div>
 
         <div class="schedule-columns" style="height: {{ grid_height }}px">
+          <div class="schedule-now" id="scheduleNowLine" aria-hidden="true" hidden><i></i></div>
           {% for employee in visible_crew %}
           <div class="schedule-column{{ ' is-unassigned' if employee.is_unassigned|default(false) }}" data-employee-id="{{ employee.id }}"
                data-employee-name="{{ employee.name }}" {% if can_manage %}tabindex="0"{% endif %} role="region"
@@ -180,7 +182,6 @@
             <span class="schedule-quarter-line" style="top: {{ mark.top_px + time_step_px * 3 }}px"></span>
             {% endif %}
             {% endfor %}
-            {% if now_line_px is not none %}<span class="schedule-now-line" style="top: {{ now_line_px }}px"><i></i></span>{% endif %}
 
             {% for card in cards_by_employee.get(employee.id, []) %}
             {% set card_tag = 'button' if can_manage or can_view_clients else 'article' %}
@@ -852,6 +853,52 @@
   const scheduleDayStart = {{ day_start_minutes }};
   const schedulePxPerMinute = {{ px_per_minute }};
   const scheduleTimeStepMinutes = {{ time_step_minutes }};
+
+  // the line of the current time (today only), by the clock of Saint Petersburg
+  // whatever the zone of this device
+  function scheduleClock() {
+    try {
+      var parts = {};
+      new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/Moscow', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+      }).formatToParts(new Date()).forEach(function (part) { parts[part.type] = part.value; });
+      return {day: parts.year + '-' + parts.month + '-' + parts.day, hours: +parts.hour, minutes: +parts.minute, seconds: +parts.second};
+    } catch (error) {
+      var now = new Date();
+      var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+      return {day: now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()),
+              hours: now.getHours(), minutes: now.getMinutes(), seconds: now.getSeconds()};
+    }
+  }
+  
+  function updateNowLine(config, scrollToIt) {
+    var inner = document.querySelector(config.inner);
+    var line = document.getElementById(config.line);
+    var label = document.getElementById(config.label);
+    if (!inner || !line || !label) return;
+    var clock = scheduleClock();
+    var minutes = clock.hours * 60 + clock.minutes + clock.seconds / 60;
+    var shown = inner.dataset.day === clock.day
+      && minutes >= config.start && minutes <= config.start + config.length;
+    line.hidden = label.hidden = !shown;
+    if (!shown) return;
+    var top = (minutes - config.start) * config.px;
+    line.style.top = label.style.top = top + 'px';
+    label.textContent = (clock.hours < 10 ? '0' : '') + clock.hours + ':' + (clock.minutes < 10 ? '0' : '') + clock.minutes;
+    var scroller = document.querySelector(config.scroller);
+    if (scrollToIt && scroller && scroller.scrollHeight > scroller.clientHeight) {
+      // a third of the way down the visible part
+      var offset = line.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      scroller.scrollTop = Math.max(0, offset - scroller.clientHeight / 3);
+    }
+  }
+
+  const scheduleNowConfig = {inner: '.schedule-board-inner', line: 'scheduleNowLine', label: 'scheduleNowLabel',
+    scroller: '#scheduleBoardScroll', start: scheduleDayStart, length: {{ grid_minutes }}, px: schedulePxPerMinute};
+  updateNowLine(scheduleNowConfig, true);
+  setInterval(function () { updateNowLine(scheduleNowConfig, false); }, 30000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) updateNowLine(scheduleNowConfig, false); });
   const scheduleCrewCount = {{ visible_crew|length }};
   const scheduleBaseUrl = {{ url_for('schedule.index')|tojson }};
   const scheduleCreateUrl = {{ url_for('schedule.create_item')|tojson }};

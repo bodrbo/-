@@ -5244,6 +5244,7 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
   transform: translateY(-50%);
 }
 .schedule-columns {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(var(--crew-count), minmax(250px, 1fr));
 }
@@ -5295,23 +5296,40 @@ button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); ou
 .schedule-hour-line { background: #d8e2ea; }
 .schedule-half-line { background: #edf2f6; }
 .schedule-quarter-line { background: rgba(237,242,246,.55); }
-.schedule-now-line {
+/* the current time: a line across the columns and its time on the axis */
+.schedule-now {
   position: absolute;
-  z-index: 4;
+  z-index: 5;
   right: 0;
   left: 0;
-  height: 1px;
-  background: #e4513b;
+  height: 0;
+  border-top: 2px solid #e5484d;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.55);
   pointer-events: none;
 }
-.schedule-now-line i {
+.schedule-now i {
   position: absolute;
-  top: -4px;
-  left: -4px;
-  width: 9px;
-  height: 9px;
+  top: -6px;
+  left: -1px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  background: #e4513b;
+  background: #e5484d;
+}
+.schedule-now[hidden], .schedule-now-label[hidden] { display: none; }
+.schedule-now-label {
+  position: absolute;
+  z-index: 2;
+  right: 4px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: #e5484d;
+  color: #fff;
+  font-family: 'PT Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  transform: translateY(-50%);
 }
 .schedule-card {
   position: absolute;

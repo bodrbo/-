@@ -647,29 +647,49 @@ var TUNING_GRID_START = {{ grid_start_minutes }};
 var TUNING_GRID_MINUTES = {{ grid_minutes }};
 var TUNING_STEP = 15;
 
-// the line of the current time (today only, by the clock of this device)
-function updateTuningNowLine(scrollToIt) {
-  var inner = document.querySelector('.tuning-calendar-inner');
-  var line = document.getElementById('tuningNowLine');
-  var label = document.getElementById('tuningNowLabel');
-  if (!inner || !line || !label) return;
-  var pad = function (n) { return (n < 10 ? '0' : '') + n; };
-  var now = new Date();
-  var today = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
-  var minutes = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
-  var shown = inner.dataset.day === today
-    && minutes >= TUNING_GRID_START && minutes <= TUNING_GRID_START + TUNING_GRID_MINUTES;
-  line.hidden = label.hidden = !shown;
-  if (!shown) return;
-  var top = (minutes - TUNING_GRID_START) * TUNING_PX;
-  line.style.top = label.style.top = top + 'px';
-  label.textContent = pad(now.getHours()) + ':' + pad(now.getMinutes());
-  var scroller = document.querySelector('.tuning-calendar-board-scroll');
-  if (scrollToIt && scroller && scroller.scrollHeight > scroller.clientHeight) {
-    // the heads row (64px) is above the grid; put the line a third of the way down
-    scroller.scrollTop = Math.max(0, top + 64 - scroller.clientHeight / 3);
+// the line of the current time (today only), by the clock of Saint Petersburg
+// whatever the zone of this device
+function scheduleClock() {
+  try {
+    var parts = {};
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/Moscow', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).formatToParts(new Date()).forEach(function (part) { parts[part.type] = part.value; });
+    return {day: parts.year + '-' + parts.month + '-' + parts.day, hours: +parts.hour, minutes: +parts.minute, seconds: +parts.second};
+  } catch (error) {
+    var now = new Date();
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    return {day: now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()),
+            hours: now.getHours(), minutes: now.getMinutes(), seconds: now.getSeconds()};
   }
 }
+
+function updateNowLine(config, scrollToIt) {
+  var inner = document.querySelector(config.inner);
+  var line = document.getElementById(config.line);
+  var label = document.getElementById(config.label);
+  if (!inner || !line || !label) return;
+  var clock = scheduleClock();
+  var minutes = clock.hours * 60 + clock.minutes + clock.seconds / 60;
+  var shown = inner.dataset.day === clock.day
+    && minutes >= config.start && minutes <= config.start + config.length;
+  line.hidden = label.hidden = !shown;
+  if (!shown) return;
+  var top = (minutes - config.start) * config.px;
+  line.style.top = label.style.top = top + 'px';
+  label.textContent = (clock.hours < 10 ? '0' : '') + clock.hours + ':' + (clock.minutes < 10 ? '0' : '') + clock.minutes;
+  var scroller = document.querySelector(config.scroller);
+  if (scrollToIt && scroller && scroller.scrollHeight > scroller.clientHeight) {
+    // a third of the way down the visible part
+    var offset = line.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    scroller.scrollTop = Math.max(0, offset - scroller.clientHeight / 3);
+  }
+}
+
+var TUNING_NOW = {inner: '.tuning-calendar-inner', line: 'tuningNowLine', label: 'tuningNowLabel',
+  scroller: '.tuning-calendar-board-scroll', start: TUNING_GRID_START, length: TUNING_GRID_MINUTES, px: TUNING_PX};
+function updateTuningNowLine(scrollToIt) { updateNowLine(TUNING_NOW, scrollToIt === true); }
 updateTuningNowLine(true);
 setInterval(updateTuningNowLine, 30000);
 document.addEventListener('visibilitychange', function () { if (!document.hidden) updateTuningNowLine(); });

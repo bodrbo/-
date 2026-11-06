@@ -1935,13 +1935,6 @@ def day_view(
             "top_px": round((minute - earliest) * px_per_minute, 2),
         })
 
-    now = dt.datetime.now()
-    now_line_px = None
-    if day == now.date():
-        now_minutes = now.hour * 60 + now.minute
-        if earliest <= now_minutes <= latest:
-            now_line_px = round((now_minutes - earliest) * px_per_minute, 2)
-
     return {
         "crew": crew,
         "day_crew": day_crew,
@@ -1957,9 +1950,9 @@ def day_view(
         ),
         "hour_marks": hour_marks,
         "grid_height": round(total_minutes * px_per_minute, 2),
+        "grid_minutes": total_minutes,
         "day_start_minutes": earliest,
         "px_per_minute": px_per_minute,
         "time_step_minutes": TIME_STEP_MINUTES,
         "time_step_px": round(TIME_STEP_MINUTES * px_per_minute, 2),
-        "now_line_px": now_line_px,
     }
