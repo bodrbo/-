@@ -838,8 +838,9 @@ def move_task_card(db, task_id, day_id, raw_start, raw_target_employee_id, reass
     optionally in another employee's column. Returns (ok, message, card)
     where card = {start, end, employee_name} on success.
 
-    The card must fit before midnight and not overlap another card of any
-    participant that day; the target must be on that day's roster.
+    The card must fit before midnight; the target must be on that day's roster.
+    It may overlap another card of the same person — such cards stand side
+    by side (see arrange_parallel).
     Changing the employee moves the whole task, so it is refused for a
     multi-day task and for a finished one; for an order task it goes through
     `reassign_order_assignment(db, assignment_id, employee_name)` (the same
@@ -884,20 +885,6 @@ def move_task_card(db, task_id, day_id, raw_start, raw_target_employee_id, reass
         target_name = names[target_id]
         if target_name != current_name and (target_name == primary_name or target_name in members):
             return False, f"{target_name} уже участвует в этой задаче.", None
-
-    participants = {primary_name} | members
-    participants.discard(current_name)
-    participants.add(target_name)
-    hours_of = dict(own_hours)
-    hours_of[target_name] = own_hours.get(current_name, row["planned_hours"])
-    for other in repository.list_day_tasks(db, day_iso):
-        if other["employee_name"] not in participants or other["task_id"] == task_id:
-            continue
-        other_start = _minutes(other["start_time"]) or 0
-        other_end = other_start + round(other["planned_hours"] * 60)
-        person_end = start_minutes + round(hours_of.get(other["employee_name"], row["planned_hours"]) * 60)
-        if start_minutes < other_end and other_start < person_end:
-            return False, f"{other['employee_name']}: это время занято задачей «{other['title']}».", None
 
     message = "Задача перенесена."
     if target_name != current_name:
@@ -1058,7 +1045,8 @@ def update_task(db, task_id, form, hooks):
             shares[name] = {d: h for d, _s, h in person_days(clean_days, extra_hours)}
         for work_date, start_time, _hours in clean_days:
             start = _minutes(start_time)
-            # every participant must be on the shift and free at that time
+            # every participant must be on the shift (a time already taken by
+            # another task of theirs is no obstacle: such cards stand in parallel)
             for person, per_day in shares.items():
                 end = start + round(per_day[work_date] * 60)
                 if end > 24 * 60:
@@ -1068,13 +1056,6 @@ def update_task(db, task_id, form, hooks):
                         and repository.get_day_crew_shift_by_name(db, work_date, person) is None:
                     errors.append(f"{person} не стоит в смене на {_ru_day(work_date)}.")
                     continue
-                for other in repository.list_other_day_tasks(db, work_date, task_id):
-                    if other["employee_name"] != person:
-                        continue
-                    other_start = _minutes(other["start_time"]) or 0
-                    if start < other_start + round(other["planned_hours"] * 60) and other_start < end:
-                        errors.append(f"{person}: {_ru_day(work_date)} это время занято задачей «{other['title']}».")
-                        break
     if errors:
         return False, " ".join(errors)
 

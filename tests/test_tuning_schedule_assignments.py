@@ -495,7 +495,7 @@ class TuningScheduleDragTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertIn(f'data-employee-id="{self.employee_id(self.EMPLOYEE_A)}"', page)
         self.assertIn("var TUNING_GRID_START = ", page)
 
-    def test_a_card_cannot_overlap_another_card_of_the_same_person(self):
+    def test_a_card_may_be_dropped_on_the_time_of_another_card_of_the_same_person(self):
         task_id, day_id = self.place(self.EMPLOYEE_A, hours=2)       # 09:00-11:00
         with application_module.app.app_context():
             db = application_module.get_db()
@@ -508,11 +508,11 @@ class TuningScheduleDragTests(_TuningScheduleFixture, unittest.TestCase):
         self.client.post(f"/tuning/{self.order_id}/item/{second_item}/assign", data=MultiDict([
             ("employee_name[]", self.EMPLOYEE_A), ("rate[]", "100"), ("norm_hours[]", "1"),
             ("comment", ""), ("due_from", self.DAY), ("due_to", "")]))              # 11:00-12:00
-        response = self.move(task_id, day_id, "10:30")
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("это время занято", response.get_json()["message"])
-        self.assertEqual(self.cards(self.EMPLOYEE_A)[0]["start_time"], "09:00")
-        self.assertEqual(self.move(task_id, day_id, "12:00").status_code, 200)       # right after is fine
+        response = self.move(task_id, day_id, "10:30")       # runs into the 11:00-12:00 card: they stand in parallel
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            sorted(c["start_time"] for c in self.cards(self.EMPLOYEE_A)), ["10:30", "11:00"])
+        self.assertEqual(self.move(task_id, day_id, "12:00").status_code, 200)       # and right after is fine too
 
     def test_bad_times_are_rejected(self):
         task_id, day_id = self.place(self.EMPLOYEE_A, hours=2)
@@ -669,6 +669,20 @@ class TuningScheduleStatusTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertEqual(page.count("tuning-calendar-card status-pending is-parallel"), 3)
         self.assertIn('<span class="tuning-calendar-card-time">09:00</span>', page)
         self.assertNotIn('<span class="tuning-calendar-card-time">09:00–10:00</span>', page)
+
+    def test_parallel_tasks_can_each_be_marked_done_and_are_paid(self):
+        first = self.place_free()
+        self.client.post("/schedule/tuning/tasks", data=MultiDict([
+            ("employee_name", self.EMPLOYEE_A), ("rate", "100"), ("comment", ""), ("title", "Параллельная"),
+            ("return_date", self.DAY), ("work_date[]", self.DAY), ("start_time[]", "09:00"),
+            ("planned_hours[]", "1")]))
+        second = [c for c in self.cards(self.EMPLOYEE_A) if c["task_id"] != first][0]["task_id"]
+        self.assertEqual(self.set_status(first, "done").status_code, 200)
+        self.assertEqual(self.set_status(second, "done").status_code, 200)
+        with application_module.app.app_context():
+            count = application_module.get_db().execute(
+                "SELECT COUNT(*) FROM entries WHERE employee = ?", (self.EMPLOYEE_A,)).fetchone()[0]
+        self.assertEqual(count, 2)
 
     def test_a_single_task_keeps_the_full_width(self):
         self.place_free()
@@ -1232,14 +1246,23 @@ class TuningScheduleTaskEditorTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertEqual(self.days(task["id"]), before)
         self.assertEqual(self.task()["title"], "Уборка цеха")
 
-    def test_overlap_with_another_task_of_the_employee_is_refused(self):
+    def test_overlap_with_another_task_of_the_employee_is_allowed(self):
         first = self.make_free(title="Первая", start="10:00", hours="2")
         second = self.make_free(title="Вторая", start="13:00", hours="1")
         self.save(second["id"], title="Вторая", days=[(self.DAY, "11:00", "1")])
-        self.assertEqual(self.notice()["type"], "error")
-        self.assertIn("занято задачей «Первая»", self.notice()["message"])
-        self.assertEqual(self.days(second["id"]), [(self.DAY, "13:00", 1.0)])
+        self.assertNotEqual(self.notice()["type"], "error")
+        self.assertEqual(self.days(second["id"]), [(self.DAY, "11:00", 1.0)])      # parallel to the first one
         self.assertEqual(self.days(first["id"]), [(self.DAY, "10:00", 2.0)])
+
+    def test_a_task_that_runs_parallel_to_another_can_be_saved_as_done(self):
+        first = self.make_free(title="Первая", start="10:00", hours="2")
+        second = self.make_free(title="Вторая", start="10:00", hours="1")
+        self.save(second["id"], title="Вторая", status="done", days=[(self.DAY, "10:00", "1")])
+        self.assertNotEqual(self.notice()["type"], "error")
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT status FROM tuning_schedule_tasks WHERE id = ?", (second["id"],)).fetchone()
+        self.assertEqual(row["status"], "done")
 
     def test_the_task_does_not_clash_with_itself(self):
         task = self.make_free(start="10:00", hours="2")
@@ -1639,7 +1662,7 @@ class TuningScheduleSeveralPeopleTests(_TuningScheduleFixture, unittest.TestCase
                          [(self.EMPLOYEE_B, 150.0, 2.0)])
         self.assertIn("extra_hours[]", page)
 
-    def test_moving_a_card_respects_a_longer_personal_share(self):
+    def test_moving_a_card_respects_a_longer_personal_share_before_midnight(self):
         self.login_admin()
         self.client.post("/schedule/tuning/tasks", data=MultiDict([
             ("employee_name", self.EMPLOYEE_A), ("rate", "100"), ("comment", ""), ("title", "Длинный участник"),
@@ -1649,11 +1672,9 @@ class TuningScheduleSeveralPeopleTests(_TuningScheduleFixture, unittest.TestCase
         ]))
         self.create(title="Позже у второго", employee=self.EMPLOYEE_B, start="13:00", hours="1")
         task = self.task("Длинный участник")
-        # at 11:00 the first person is done at 12:00 but the second works till 14:00 — clashes with 13:00
-        response = self.move(task, "11:00")
-        self.assertEqual(response.status_code, 400)
-        self.assertIn(self.EMPLOYEE_B, response.get_json()["message"])
-        self.assertEqual(self.move(task, "09:00").status_code, 200)   # 09:00–12:00 is free
+        # at 11:00 the second person works till 14:00, over their 13:00 task — they stand in parallel
+        self.assertEqual(self.move(task, "11:00").status_code, 200)
+        self.assertEqual(self.move(task, "09:00").status_code, 200)
         late = self.move(task, "22:00")                                # 3 h from 22:00 passes midnight
         self.assertEqual(late.status_code, 400)
 
@@ -1684,14 +1705,13 @@ class TuningScheduleSeveralPeopleTests(_TuningScheduleFixture, unittest.TestCase
         self.save(task["id"], extras=[])
         self.assertEqual(self.members(task["id"]), [])
 
-    def test_a_person_busy_at_that_time_cannot_be_added(self):
+    def test_a_person_busy_at_that_time_can_still_be_added(self):
         self.create(title="Занятая", employee=self.EMPLOYEE_B, start="10:00", hours="3")
         self.create()
         task = self.task()
         self.save(task["id"], extras=[(self.EMPLOYEE_B, 100)])
-        self.assertEqual(self.notice()["type"], "error")
-        self.assertIn(f"{self.EMPLOYEE_B}: 12/10/2026 это время занято", self.notice()["message"])
-        self.assertEqual(self.members(task["id"]), [])
+        self.assertNotEqual(self.notice()["type"], "error")      # their cards stand in parallel
+        self.assertEqual([m["employee_name"] for m in self.members(task["id"])], [self.EMPLOYEE_B])
 
     def test_a_person_off_the_shift_cannot_be_added(self):
         with application_module.app.app_context():
@@ -1727,11 +1747,10 @@ class TuningScheduleSeveralPeopleTests(_TuningScheduleFixture, unittest.TestCase
         payloads = [json.loads(html_module.unescape(m)) for m in re.findall(r"data-editor='([^']*)'", page)]
         mine = next(p for p in payloads if p["employee_name"] == self.EMPLOYEE_A)
         self.assertEqual(mine["coworkers"], [self.EMPLOYEE_B])
-        # B already has a card at that very time (a task of its own on the same work) — the time clash
+        # B already has a card at that very time (a task of its own on the same work): that is no obstacle
         self.save(task, employee=self.EMPLOYEE_A, extras=[(self.EMPLOYEE_B, 100)], title="x")
-        self.assertEqual(self.notice()["type"], "error")
-        self.assertIn(f"{self.EMPLOYEE_B}: 12/10/2026 это время занято", self.notice()["message"])
-        self.assertNotIn("уже назначен", self.notice()["message"])
+        self.assertNotIn("это время занято", self.notice()["message"] or "")
+        self.assertNotIn("уже назначен", self.notice()["message"] or "")
 
     def test_a_person_with_another_task_on_the_same_work_can_still_be_added(self):
         """The reported bug: 'уже назначен на эту работу' although the person is free at that time."""
@@ -1854,13 +1873,11 @@ class TuningScheduleSeveralPeopleTests(_TuningScheduleFixture, unittest.TestCase
         starts = {r["employee_name"]: r["start_time"] for r in self.day_rows() if r["task_id"] == task["id"]}
         self.assertEqual(starts, {self.EMPLOYEE_A: "13:00", self.EMPLOYEE_B: "13:00"})
 
-    def test_moving_is_refused_when_a_participant_is_busy_then(self):
+    def test_moving_is_allowed_when_a_participant_is_busy_then(self):
         self.create(title="Занятая", employee=self.EMPLOYEE_B, start="13:00", hours="1")
         self.create(extras=[(self.EMPLOYEE_B, 120)])
         task = self.task()
-        response = self.move(task, "13:30")
-        self.assertEqual(response.status_code, 400)
-        self.assertIn(self.EMPLOYEE_B, response.get_json()["message"])
+        self.assertEqual(self.move(task, "13:30").status_code, 200)   # parallel to their other card
 
     def test_dragging_a_members_card_to_another_column_replaces_that_person(self):
         self.create(extras=[(self.EMPLOYEE_B, 120)])

@@ -368,11 +368,6 @@ def delete_task_reminders(db, task_id):
     db.execute("DELETE FROM tuning_task_reminders WHERE schedule_task_id = ?", (task_id,))
 
 
-def list_other_day_tasks(db, day, task_id):
-    """Placements on `day` that belong to other tasks than task_id."""
-    return [row for row in list_day_tasks(db, day) if row["task_id"] != task_id]
-
-
 def set_free_task_employee(db, task_id, employee_name):
     db.execute(
         "UPDATE tuning_schedule_tasks SET employee_name = ? WHERE id = ? AND assignment_id IS NULL",
