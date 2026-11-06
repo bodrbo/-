@@ -171,6 +171,11 @@ from modules.settings import (
     create_blueprint as create_settings_blueprint,
     init_schema as init_settings_schema,
 )
+from modules.db_backup import (
+    create_blueprint as create_db_backup_blueprint,
+    default_backup_dir,
+    maybe_start_background as start_due_db_backup,
+)
 from modules.settings import repository as settings_repository
 from modules.ai_assistant import (
     create_blueprint as create_ai_assistant_blueprint,
@@ -312,6 +317,11 @@ def _keep_logged_in_sessions():
 DB_PATH = os.environ.get("WORKHOURS_DB_PATH") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "workhours.db"
 )
+# Daily copies of the database (modules/db_backup): the folder defaults to
+# "backups" next to the database; BACKUP_AUTO=0 turns the automatic start off
+# (the settings page and /internal/cron/backup keep working).
+BACKUP_DIR = os.environ.get("BACKUP_DIR") or default_backup_dir(DB_PATH)
+BACKUP_AUTO = os.environ.get("BACKUP_AUTO", "1").strip().lower() not in ("0", "false", "no")
 # Bump when an additive schema migration is introduced. Demo sessions keep
 # their own SQLite files, so unlike the shared database they need an explicit
 # signal to run init_db() again after a deploy.
@@ -340,6 +350,15 @@ _openai_responses_client = OpenAIResponsesClient(
     api_key_provider=lambda: os.environ.get("OPENAI_API_KEY", ""),
     timeout_provider=lambda: OPENAI_AGENT_TIMEOUT,
 )
+
+
+@app.after_request
+def _start_due_db_backup(response):
+    # A day-old copy is made in the background by whichever request notices it
+    # (so no cron entry is needed); see modules/db_backup.
+    if BACKUP_AUTO and not app.config.get("TESTING"):
+        start_due_db_backup(DB_PATH, BACKUP_DIR)
+    return response
 
 
 @app.after_request
@@ -6358,6 +6377,14 @@ app.register_blueprint(
     create_settings_blueprint(
         get_db=get_db,
         admin_login_required=admin_login_required,
+    )
+)
+app.register_blueprint(
+    create_db_backup_blueprint(
+        db_path=DB_PATH,
+        backup_dir=BACKUP_DIR,
+        admin_only_no_demo_tenant=admin_only_no_demo_tenant,
+        cron_secret=lambda: CRON_SECRET,
     )
 )
 

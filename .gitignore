@@ -6,3 +6,4 @@ workhours.db
 .DS_Store
 output/
 .secret_key
+backups/

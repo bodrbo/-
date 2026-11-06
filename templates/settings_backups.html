@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Резервные копии — Бодрый Боцман</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+</head>
+<body>
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100"><g fill="var(--brass)"><path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/><path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/><path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/></g><circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/></svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="topbar-top-row">
+      <div class="brand">{% include '_topbar_brand.html' %}</div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 5.5h14M3 10h14M3 14.5h14"/></svg>
+      </button>
+    </div>
+    {% include '_admin_main_nav.html' %}
+    <div class="title-block">
+      <span class="kicker">Настройки системы</span>
+      <h1>Резервные копии</h1>
+    </div>
+    <div class="topbar-actions">
+      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout"><button type="submit">Выйти</button></form>
+    </div>
+  </div>
+</header>
+
+<main class="wrap software-requests-page">
+  <nav class="sub-tabs software-settings-tabs" aria-label="Разделы настроек">
+    <a href="{{ url_for('settings.index') }}">Общие настройки</a>
+    <a href="{{ url_for('software_requests.index') }}">Заявки на доработку софта</a>
+    <a href="{{ url_for('db_backup.index') }}" class="active">Резервные копии</a>
+  </nav>
+
+  {% if notice %}<p class="alert success">{{ notice }}</p>{% endif %}
+  {% if error %}<p class="alert">{{ error }}</p>{% endif %}
+  {% if status and not status.ok %}
+  <p class="alert" role="alert">Последняя попытка ({{ status.at }}) не удалась: {{ status.message }}.</p>
+  {% elif stale %}
+  <p class="alert" role="alert">Свежей копии нет: {% if backups %}последняя сделана {{ backups[0].when }}{% else %}копий ещё не создавалось{% endif %}. Нажмите «Создать копию сейчас».</p>
+  {% endif %}
+
+  <section class="panel backup-panel">
+    <h2>Автоматические копии базы данных</h2>
+    <p class="hint">Раз в сутки (ночью) система сама сохраняет проверенную копию базы данных. Хранятся последние 14 копий, по одной за каждую из последних 8 недель и по одной за каждый из последних 6 месяцев — остальные удаляются.</p>
+    <form action="{{ url_for('db_backup.run_now') }}" method="post">
+      <button type="submit" class="btn-primary">Создать копию сейчас</button>
+    </form>
+  </section>
+
+  <section class="panel backup-panel">
+    <h2>Сохранённые копии</h2>
+    {% if backups %}
+    <div class="table-scroll">
+      <table class="records backup-table">
+        <thead><tr><th>Дата и время</th><th>Размер</th><th><span class="sr-only">Скачать</span></th></tr></thead>
+        <tbody>
+          {% for item in backups %}
+          <tr>
+            <td>{{ item.when }}</td>
+            <td class="muted">{{ item.size_text }}</td>
+            <td class="row-actions"><a class="btn-secondary" href="{{ url_for('db_backup.download', name=item.name) }}">Скачать</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="hint">Копий пока нет.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel backup-panel">
+    <h2>Копия вне сервера</h2>
+    <p class="hint">Копии лежат на том же сервере, что и сайт, — если сервер потеряется, пропадут и они. Регулярно забирайте их к себе: скачайте файл отсюда или запускайте на своём компьютере <code>scripts/pull_backups.sh</code> (он забирает и копии базы, и фото с документами). Файл копии — это сжатая база данных SQLite (gzip): внутри персональные данные клиентов и сотрудников, храните его в закрытом месте.</p>
+    <p class="hint">Папка с копиями на сервере: <code>{{ backup_dir }}</code></p>
+  </section>
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+  const navToggle = document.getElementById('navToggle');
+  const mainNav = document.getElementById('mainNav');
+  if (navToggle && mainNav) {
+    navToggle.addEventListener('click', () => {
+      const open = mainNav.classList.toggle('open');
+      navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+  }
+</script>
+</body>
+</html>

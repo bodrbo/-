@@ -40,6 +40,7 @@
     <a href="{{ url_for('settings.index') }}" class="active">Общие настройки</a>
     {% if not is_demo_tenant %}
     <a href="{{ url_for('software_requests.index') }}">Заявки на доработку софта</a>
+    <a href="{{ url_for('db_backup.index') }}">Резервные копии</a>
     {% endif %}
   </nav>
 
