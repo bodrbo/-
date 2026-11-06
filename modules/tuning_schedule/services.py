@@ -736,7 +736,7 @@ def create_free_task(db, employee_name, title, rate, comment, day_rows, order_id
         errors.append("Укажите название задачи.")
     rate = _clean_rate(db, employee_name, rate, errors)
     if order_id is not None and repository.get_linkable_order(db, order_id) is None:
-        errors.append("Проект не найден.")
+        errors.append("Проект не найден или отменён.")
     clean_days = _clean_task_days(day_rows, errors)
     members = clean_extra_participants(db, extras, employee_name, errors, clean_days)
     if errors:
@@ -1014,7 +1014,7 @@ def update_task(db, task_id, form, hooks):
                 errors.append("Проект не найден.")
             else:
                 if order_id != task["order_id"] and repository.get_linkable_order(db, order_id) is None:
-                    errors.append("Проект не найден.")
+                    errors.append("Проект не найден или отменён.")
     rate = _clean_rate(db, employee_name, form.get("rate"), errors)
     day_rows = [
         row for row in zip(

@@ -445,16 +445,19 @@ def set_task_entry(db, task_id, entry_id):
 
 
 def list_linkable_orders(db):
-    """Every order, newest first, for the schedule's project picker — whatever
-    its status (a task can be tied to a finished or cancelled project too)."""
+    """Every order but the cancelled ones, newest first, for the schedule's
+    project picker — whatever its other status (a task can be tied to a
+    finished or handed-over project too)."""
     return db.execute(
         "SELECT id, client_name, equipment_type, boat_model, motor_model, status "
-        "FROM tuning_orders ORDER BY id DESC"
+        "FROM tuning_orders WHERE status != 'cancelled' ORDER BY id DESC"
     ).fetchall()
 
 
 def get_linkable_order(db, order_id):
-    return db.execute("SELECT id FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
+    return db.execute(
+        "SELECT id FROM tuning_orders WHERE id = ? AND status != 'cancelled'", (order_id,)
+    ).fetchone()
 
 
 def get_order_item(db, order_id, item_id):

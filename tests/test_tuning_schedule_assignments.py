@@ -1074,7 +1074,7 @@ class TuningScheduleQuickTaskTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertIsNotNone(project_id)
         self.assertEqual(entry["project_id"], project_id["id"])
 
-    def test_an_unknown_project_is_refused_but_a_closed_one_is_not(self):
+    def test_an_unknown_or_cancelled_project_is_refused_but_a_finished_one_is_not(self):
         self.put_on_shift(self.EMPLOYEE_A)
         self.quick(order_id=999999)
         self.assertIsNone(self.task())
@@ -1084,15 +1084,21 @@ class TuningScheduleQuickTaskTests(_TuningScheduleFixture, unittest.TestCase):
             db.execute("UPDATE tuning_orders SET status = 'cancelled' WHERE id = ?", (self.order_id,))
             db.commit()
         try:
-            self.quick(order_id=self.order_id)       # any project may be picked, whatever its status
-            self.assertIsNotNone(self.task())
+            self.quick(order_id=self.order_id)
+            self.assertIsNone(self.task())            # a cancelled project cannot be picked
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                db.execute("UPDATE tuning_orders SET status = 'handed_over' WHERE id = ?", (self.order_id,))
+                db.commit()
+            self.quick(order_id=self.order_id)
+            self.assertIsNotNone(self.task())         # a finished and handed-over one can
         finally:
             with application_module.app.app_context():
                 db = application_module.get_db()
                 db.execute("UPDATE tuning_orders SET status = 'in_progress' WHERE id = ?", (self.order_id,))
                 db.commit()
 
-    def test_the_project_picker_lists_projects_of_every_status_with_a_searchable_number(self):
+    def test_the_project_picker_lists_projects_of_every_status_but_cancelled_with_a_searchable_number(self):
         with application_module.app.app_context():
             db = application_module.get_db()
             for status in ("cancelled", "handed_over", "done"):
@@ -1108,8 +1114,11 @@ class TuningScheduleQuickTaskTests(_TuningScheduleFixture, unittest.TestCase):
         page = self.page()
         options = page.split('<template id="orderOptionsTemplate">')[1].split("</template>")[0]
         for status, order_id in ids.items():
-            self.assertIn(f'data-value="{order_id}"', options, status)
-        self.assertIn("Отменён", options)
+            if status == "cancelled":
+                self.assertNotIn(f'data-value="{order_id}"', options)
+            else:
+                self.assertIn(f'data-value="{order_id}"', options, status)
+        self.assertNotIn("Отменён", options)
         self.assertIn("Выполнен, передан", options)
         self.assertIn(f'data-search="{self.order_id} №{self.order_id} ', options)   # the number leads the search text
         self.assertEqual(page.count('<div class="combo-field" data-order-combo'), 3)   # add form, quick window, task window
