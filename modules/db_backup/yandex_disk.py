@@ -9,6 +9,7 @@ import datetime as dt
 import json
 import os
 import socket
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -19,6 +20,7 @@ API = "https://cloud-api.yandex.net/v1/disk"
 ROOT = "app:/"
 REQUEST_TIMEOUT = 30
 UPLOAD_TIMEOUT = 600
+DNS_OVER_HTTPS = ("https://1.1.1.1/dns-query", "https://8.8.8.8/resolve")
 COMPARE_HOSTS = ("webdav.yandex.ru", "yandex.ru", "disk.yandex.net", "yandex.net", "google.com")
 
 PROBLEMS = {
@@ -32,13 +34,36 @@ class DiskError(Exception):
     pass
 
 
+# Some hosts cannot look up the personal upload servers of the Disk
+# (uploaderNNN.disk.yandex.net) with their own DNS. A name found another way is
+# pinned here; connections still use the name for the certificate check.
+_pinned = {}
+_pin_guard = threading.Lock()
+
+
+def _pin_host(host, address):
+    with _pin_guard:
+        _pinned[host] = address
+        if getattr(socket.getaddrinfo, "_pins_hosts", False):
+            return
+        real = socket.getaddrinfo
+
+        def getaddrinfo(name, *args, **kwargs):
+            return real(_pinned.get(name, name), *args, **kwargs)
+
+        getaddrinfo._pins_hosts = True
+        socket.getaddrinfo = getaddrinfo
+
+
 class YandexDisk:
-    def __init__(self, token, http=None):
+    def __init__(self, token, http=None, resolver=None):
         if http is None:
             import requests
             http = requests
         self.http = http
         self.token = token
+        self.resolver = resolver or (lambda host, port: socket.getaddrinfo(host, port))
+        self.used_other_dns = False
         self.headers = {"Authorization": "OAuth " + token}
 
     def describe(self, error):
@@ -73,15 +98,67 @@ class YandexDisk:
         ).json().get("href")
         if not target:
             raise DiskError("Яндекс.Диск не дал адрес для загрузки")
-        try:
-            with open(local_path, "rb") as handle:
-                response = self.http.put(target, data=handle, timeout=UPLOAD_TIMEOUT)
-        except OSError as error:
-            raise DiskError("не удалось прочитать файл: %s" % self.describe(error))
-        except Exception as error:
-            raise DiskError("загрузка на Яндекс.Диск прервалась (%s)" % self.describe(error))
+        response = self._send(target, path=local_path)
         if response.status_code not in (201, 202):
             raise DiskError(PROBLEMS.get(response.status_code, "загрузка не удалась (%s)" % response.status_code))
+
+    def _send(self, href, path=None, payload=None):
+        """PUT to the upload address. When the host cannot find that address by
+        name, it is looked up over HTTPS instead and the request is repeated."""
+        handle = None
+        if path is not None:
+            try:
+                handle = open(path, "rb")
+            except OSError as error:
+                raise DiskError("не удалось прочитать файл: %s" % self.describe(error))
+        try:
+            data = handle if handle is not None else payload
+            try:
+                return self.http.put(href, data=data, timeout=UPLOAD_TIMEOUT)
+            except Exception as error:
+                if not self._pin_unresolvable(urlsplit(href).hostname or ""):
+                    raise DiskError("загрузка на Яндекс.Диск прервалась (%s)" % self.describe(error))
+            if handle is not None:
+                handle.seek(0)
+            try:
+                return self.http.put(href, data=data, timeout=UPLOAD_TIMEOUT)
+            except Exception as error:
+                raise DiskError("загрузка на Яндекс.Диск прервалась (%s)" % self.describe(error))
+        finally:
+            if handle is not None:
+                handle.close()
+
+    def _pin_unresolvable(self, host):
+        """True when `host` was not found by the system but an address was
+        found over HTTPS and pinned."""
+        if not host:
+            return False
+        try:
+            self.resolver(host, 443)
+            return False
+        except OSError:
+            pass
+        address = self.lookup_over_https(host)
+        if not address:
+            return False
+        _pin_host(host, address)
+        self.used_other_dns = True
+        return True
+
+    def lookup_over_https(self, host):
+        for server in DNS_OVER_HTTPS:
+            try:
+                response = self.http.get(
+                    server, params={"name": host, "type": "A"}, headers={"accept": "application/dns-json"}, timeout=10
+                )
+                if response.status_code != 200:
+                    continue
+                for answer in response.json().get("Answer") or []:
+                    if answer.get("type") == 1 and answer.get("data"):
+                        return answer["data"]
+            except Exception:
+                continue
+        return None
 
     def list_names(self, folder):
         response = self._call(
@@ -279,13 +356,14 @@ def diagnose(disk, resolver=None):
         return "сервер загрузки %s" % holder["host"]
 
     def put_file():
-        try:
-            response = disk.http.put(holder["href"], data=b"hello", timeout=60)
-        except Exception as error:
-            raise DiskError(disk.describe(error))
+        disk.used_other_dns = False
+        response = disk._send(holder["href"], payload=b"hello")
         if response.status_code not in (201, 202):
             raise DiskError("ответ %s" % response.status_code)
-        return "ответ %s" % response.status_code
+        detail = "ответ %s" % response.status_code
+        if disk.used_other_dns:
+            detail += " (адрес сервера загрузки найден через DNS-over-HTTPS)"
+        return detail
 
     def cleanup():
         return "ответ %s" % disk._call(

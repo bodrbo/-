@@ -1,6 +1,7 @@
 import datetime as dt
 import os
 import shutil
+import socket
 import sqlite3
 import tempfile
 import unittest
@@ -283,6 +284,69 @@ class OffsiteSyncTests(DiskCase):
         response = application_module.app.test_client().post("/settings/backups/diagnose")
         self.assertEqual(self.http.calls, [])
         self.assertNotEqual(response.status_code, 200)
+
+
+class UnknownUploadHostTests(DiskCase):
+    """The host cannot look up uploaderNNN.disk.yandex.net by itself."""
+
+    def make(self, answer):
+        class Http(FakeHttp):
+            puts = 0
+            def put(inner, url, **kwargs):
+                if url.startswith("https://upload.example/"):
+                    inner.puts += 1
+                    if inner.puts == 1:
+                        raise ConnectionError("Name or service not known")
+                return super().put(url, **kwargs)
+            def get(inner, url, **kwargs):
+                if "dns-query" in url or url.endswith("/resolve"):
+                    inner.dns_asked = kwargs["params"]["name"]
+                    return FakeResponse(200, {"Answer": answer})
+                return super().get(url, **kwargs)
+        http = Http()
+        def resolver(host, port):
+            raise OSError("Name or service not known")
+        pinned = {}
+        original = yandex_disk._pin_host
+        yandex_disk._pin_host = lambda host, address: pinned.update({host: address})
+        self.addCleanup(setattr, yandex_disk, "_pin_host", original)
+        return http, YandexDisk(TOKEN, http, resolver), pinned
+
+    def test_uploads_after_finding_the_address_over_https(self):
+        http, disk, pinned = self.make([{"type": 5, "data": "alias."}, {"type": 1, "data": "203.0.113.9"}])
+        path = self.photo("work_photos", "a.jpg", b"jpeg-bytes")
+        disk.upload(path, "static/work_photos/a.jpg")
+        self.assertEqual(pinned, {"upload.example": "203.0.113.9"})
+        self.assertEqual(http.files["app:/static/work_photos/a.jpg"], b"jpeg-bytes")   # the whole file, not empty
+        self.assertTrue(disk.used_other_dns)
+
+    def test_without_an_answer_the_original_error_is_reported(self):
+        http, disk, pinned = self.make([])
+        path = self.photo("work_photos", "a.jpg")
+        with self.assertRaises(DiskError) as caught:
+            disk.upload(path, "static/work_photos/a.jpg")
+        self.assertIn("ConnectionError", str(caught.exception))
+        self.assertEqual(pinned, {})
+
+    def test_a_name_that_resolves_is_never_pinned(self):
+        http, disk, pinned = self.make([{"type": 1, "data": "203.0.113.9"}])
+        disk.resolver = lambda host, port: [(0, 0, 0, "", ("203.0.113.5", port))]
+        with self.assertRaises(DiskError):
+            disk.upload(self.photo("work_photos", "a.jpg"), "static/work_photos/a.jpg")
+        self.assertEqual(pinned, {})
+
+    def test_a_pinned_name_is_looked_up_at_its_address_and_others_are_untouched(self):
+        seen = []
+        original = socket.getaddrinfo
+        socket.getaddrinfo = lambda name, *args, **kwargs: seen.append(name) or []
+        def restore():
+            socket.getaddrinfo = original
+            yandex_disk._pinned.clear()
+        self.addCleanup(restore)
+        yandex_disk._pin_host("uploader1.example.net", "203.0.113.9")
+        socket.getaddrinfo("uploader1.example.net", 443)
+        socket.getaddrinfo("cloud-api.yandex.net", 443)
+        self.assertEqual(seen, ["203.0.113.9", "cloud-api.yandex.net"])
 
 
 class OfflineSyncTests(DiskCase):
