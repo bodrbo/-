@@ -10,6 +10,7 @@ import json
 import os
 import socket
 import time
+from urllib.parse import urlsplit
 
 from . import services
 from .constants import OFFSITE_FILE, OFFSITE_RETRY_MINUTES, PHOTO_FOLDERS
@@ -274,7 +275,7 @@ def diagnose(disk, resolver=None):
         holder["href"] = response.json().get("href")
         if not holder["href"]:
             raise DiskError("Яндекс.Диск не дал адрес для загрузки")
-        holder["host"] = holder["href"].split("/")[2]
+        holder["host"] = urlsplit(holder["href"]).hostname or ""   # without the :443
         return "сервер загрузки %s" % holder["host"]
 
     def put_file():

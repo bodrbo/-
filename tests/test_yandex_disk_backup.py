@@ -313,6 +313,19 @@ class DiagnoseTests(DiskCase):
         self.assertIn("ConnectionError", steps[1]["detail"])
         self.assertNotIn(TOKEN, repr(steps))
 
+    def test_the_upload_host_is_looked_up_without_its_port(self):
+        class WithPort(FakeHttp):
+            def get(self, url, **kwargs):
+                if url.endswith("/resources/upload"):
+                    return FakeResponse(200, {"href": "https://uploader1.example.net:443/x"})
+                return super().get(url, **kwargs)
+        looked_up = []
+        def resolver(host, port):
+            looked_up.append(host)
+            return [(0, 0, 0, "", ("203.0.113.5", port))]
+        diagnose(YandexDisk(TOKEN, WithPort()), resolver=resolver)
+        self.assertIn("uploader1.example.net", looked_up)
+
     def test_dns_failure_is_one_failed_step(self):
         def broken(host, port):
             raise OSError("name resolution failed")
