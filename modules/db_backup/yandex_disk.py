@@ -8,6 +8,7 @@ YANDEX_DISK_TOKEN environment variable and never shown or logged.
 import datetime as dt
 import json
 import os
+import socket
 import time
 
 from . import services
@@ -223,6 +224,69 @@ def _prune_remote(disk, backup_dir, state):
     return removed
 
 
+def diagnose(disk, resolver=None):
+    """A connection check made from the web process itself, step by step (the
+    server that serves the site is not always the one you reach over SSH).
+    Uploads a 5-byte file to <app folder>/_diagnostic/ and deletes it again.
+    Returns [{'ok', 'title', 'detail'}]."""
+    resolver = resolver or socket.getaddrinfo
+    results = []
+
+    def step(title, action):
+        try:
+            detail = action() or ""
+            results.append({"ok": True, "title": title, "detail": detail})
+            return True
+        except DiskError as error:
+            results.append({"ok": False, "title": title, "detail": str(error)})
+        except Exception as error:
+            results.append({"ok": False, "title": title, "detail": disk.describe(error)})
+        return False
+
+    def resolve(host):
+        return lambda: ", ".join(sorted({item[4][0] for item in resolver(host, 443)}))
+
+    holder = {}
+
+    def info():
+        return "ответ %s" % disk._call("get", API, (200,)).status_code
+
+    def upload_address():
+        params = {"path": ROOT + "_diagnostic/test.txt", "overwrite": "true"}
+        disk._make_folders("_diagnostic/test.txt")
+        response = disk._call("get", API + "/resources/upload", (200,), params=params)
+        holder["href"] = response.json().get("href")
+        if not holder["href"]:
+            raise DiskError("Яндекс.Диск не дал адрес для загрузки")
+        holder["host"] = holder["href"].split("/")[2]
+        return "сервер загрузки %s" % holder["host"]
+
+    def put_file():
+        try:
+            response = disk.http.put(holder["href"], data=b"hello", timeout=60)
+        except Exception as error:
+            raise DiskError(disk.describe(error))
+        if response.status_code not in (201, 202):
+            raise DiskError("ответ %s" % response.status_code)
+        return "ответ %s" % response.status_code
+
+    def cleanup():
+        return "ответ %s" % disk._call(
+            "delete", API + "/resources", (202, 204, 404),
+            params={"path": ROOT + "_diagnostic", "permanently": "true"},
+        ).status_code
+
+    step("Адрес cloud-api.yandex.net находится", resolve("cloud-api.yandex.net"))
+    if not step("Запрос к API Диска с вашим токеном", info):
+        return results
+    if not step("Получение адреса для загрузки", upload_address):
+        return results
+    step("Адрес сервера загрузки находится", resolve(holder["host"]))
+    step("Загрузка тестового файла", put_file)
+    step("Удаление тестовой папки", cleanup)
+    return results
+
+
 class Offsite:
     """What services.run_backup needs: is something waiting, and send it."""
 
@@ -235,6 +299,9 @@ class Offsite:
 
     def sync(self, backup_dir, budget_seconds, now=None):
         return sync(self.disk, backup_dir, self.static_dir, budget_seconds, now)
+
+    def diagnose(self):
+        return diagnose(self.disk)
 
 
 def configured_offsite(token, static_dir, http=None):

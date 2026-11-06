@@ -41,6 +41,7 @@ def create_blueprint(db_path, backup_dir, admin_only_no_demo_tenant, cron_secret
             active_page="settings",
             notice=session.pop("backup_notice", None),
             error=session.pop("backup_error", None),
+            diagnosis=session.pop("backup_diagnosis", None),
         )
 
     @blueprint.route("/settings/backups/run", methods=["POST"])
@@ -58,6 +59,16 @@ def create_blueprint(db_path, backup_dir, admin_only_no_demo_tenant, cron_secret
             sent = result["offsite"]
             if sent is not None and not sent["ok"]:
                 session["backup_error"] = "На Яндекс.Диск отправить не удалось: %s." % sent["message"]
+        return redirect(url_for("db_backup.index"))
+
+    @blueprint.route("/settings/backups/diagnose", methods=["POST"])
+    @admin_only_no_demo_tenant
+    def diagnose_disk():
+        connected = offsite()
+        if connected is None:
+            session["backup_error"] = "Яндекс.Диск не подключён: нет YANDEX_DISK_TOKEN."
+        else:
+            session["backup_diagnosis"] = connected.diagnose()
         return redirect(url_for("db_backup.index"))
 
     @blueprint.route("/settings/backups/<name>")

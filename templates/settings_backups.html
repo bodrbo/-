@@ -93,6 +93,16 @@
     {% else %}
     <p class="hint">Отправка ещё не выполнялась — она начнётся при ближайшей копии или после нажатия «Создать копию сейчас».</p>
     {% endif %}
+    <form action="{{ url_for('db_backup.diagnose_disk') }}" method="post">
+      <button type="submit" class="btn-secondary">Проверить связь с Яндекс.Диском</button>
+    </form>
+    {% if diagnosis %}
+    <ul class="backup-diagnosis">
+      {% for step in diagnosis %}
+      <li>{{ '✅' if step.ok else '❌' }} {{ step.title }}{% if step.detail %} — {{ step.detail }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
     {% else %}
     <p class="hint">Копии лежат на том же сервере, что и сайт, — если сервер потеряется, пропадут и они. Чтобы они автоматически уходили на ваш Яндекс.Диск, добавьте в файл <code>.env</code> на сервере строку <code>YANDEX_DISK_TOKEN=…</code> (токен приложения с доступом к папке приложения на Диске; инструкция — в README, раздел «Резервное копирование») и перезапустите сайт.</p>
     {% endif %}

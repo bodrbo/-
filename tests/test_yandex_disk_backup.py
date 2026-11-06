@@ -7,7 +7,7 @@ import unittest
 
 from modules.db_backup import services
 from modules.db_backup import yandex_disk
-from modules.db_backup.yandex_disk import DiskError, YandexDisk, configured_offsite
+from modules.db_backup.yandex_disk import DiskError, YandexDisk, configured_offsite, diagnose
 from support import application_module
 
 TOKEN = "secret-oauth-token"
@@ -39,7 +39,8 @@ class FakeHttp:
         if self.fail_with:
             return FakeResponse(self.fail_with)
         if url.startswith("https://upload.example/"):
-            self.files[url[len("https://upload.example/"):]] = kwargs["data"].read()
+            data = kwargs["data"]
+            self.files[url[len("https://upload.example/"):]] = data if isinstance(data, bytes) else data.read()
             return FakeResponse(201)
         path = kwargs["params"]["path"]
         if path in self.folders:
@@ -51,6 +52,8 @@ class FakeHttp:
         self._record("get", url, kwargs)
         if self.fail_with:
             return FakeResponse(self.fail_with)
+        if "params" not in kwargs:   # the disk itself: is the token accepted
+            return FakeResponse(200, {})
         params = kwargs["params"]
         if url.endswith("/resources/upload"):
             return FakeResponse(200, {"href": "https://upload.example/" + params["path"]})
@@ -65,7 +68,10 @@ class FakeHttp:
         self._record("delete", url, kwargs)
         if self.fail_with:
             return FakeResponse(self.fail_with)
-        self.files.pop(kwargs["params"]["path"], None)
+        path = kwargs["params"]["path"]
+        self.files.pop(path, None)
+        for name in [n for n in self.files if n.startswith(path.rstrip("/") + "/")]:   # a folder goes with its files
+            del self.files[name]
         return FakeResponse(204)
 
 
@@ -261,6 +267,23 @@ class OffsiteSyncTests(DiskCase):
         self.assertEqual(response.status_code, 500)
         self.assertIn("yandex disk error", response.get_data(as_text=True))
 
+    def test_the_check_button_shows_every_step_on_the_page(self):
+        self.use_offsite(self.offsite)
+        resolver = lambda host, port: [(0, 0, 0, "", ("203.0.113.5", port))]
+        original = yandex_disk.socket.getaddrinfo
+        yandex_disk.socket.getaddrinfo = resolver
+        self.addCleanup(setattr, yandex_disk.socket, "getaddrinfo", original)
+        page = self.admin_client().post("/settings/backups/diagnose", follow_redirects=True).get_data(as_text=True)
+        self.assertIn("Загрузка тестового файла", page)
+        self.assertNotIn("❌", page)
+        self.assertNotIn(TOKEN, page)
+
+    def test_the_check_is_not_available_to_anonymous_visitors(self):
+        self.use_offsite(self.offsite)
+        response = application_module.app.test_client().post("/settings/backups/diagnose")
+        self.assertEqual(self.http.calls, [])
+        self.assertNotEqual(response.status_code, 200)
+
 
 class OfflineSyncTests(DiskCase):
     def test_no_network_is_a_reported_failure_not_a_crash(self):
@@ -272,6 +295,30 @@ class OfflineSyncTests(DiskCase):
         self.assertIn("ConnectionError", result["offsite"]["message"])   # the kind of failure is shown
         self.assertIn("no network", result["offsite"]["message"])
         self.assertNotIn(TOKEN, open(os.path.join(self.dir, "offsite.json"), encoding="utf-8").read())
+
+
+class DiagnoseTests(DiskCase):
+    def resolver(self, host, port):
+        return [(0, 0, 0, "", ("203.0.113.5", port))]
+
+    def test_every_step_passes_and_the_test_folder_is_removed(self):
+        steps = diagnose(self.offsite.disk, resolver=self.resolver)
+        self.assertEqual(len(steps), 6)
+        self.assertTrue(all(step["ok"] for step in steps), steps)
+        self.assertEqual(self.http.files, {})
+
+    def test_reports_where_it_broke_and_stops_without_the_token(self):
+        steps = diagnose(YandexDisk(TOKEN, OfflineHttp()), resolver=self.resolver)
+        self.assertEqual([step["ok"] for step in steps], [True, False])
+        self.assertIn("ConnectionError", steps[1]["detail"])
+        self.assertNotIn(TOKEN, repr(steps))
+
+    def test_dns_failure_is_one_failed_step(self):
+        def broken(host, port):
+            raise OSError("name resolution failed")
+        steps = diagnose(YandexDisk(TOKEN, self.http), resolver=broken)
+        self.assertFalse(steps[0]["ok"])
+        self.assertIn("name resolution failed", steps[0]["detail"])
 
 
 if __name__ == "__main__":
