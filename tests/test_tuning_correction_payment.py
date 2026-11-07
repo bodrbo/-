@@ -139,12 +139,28 @@ class TuningCorrectionPaymentTests(unittest.TestCase):
         self.assertEqual(self.payments()[0]["no_receipt"], 0)
         self.assertEqual(post.call_count, 1)
 
-    def test_a_correction_without_a_receipt_is_a_plain_payment_today(self):
-        _, post = self.pay(fiscalize_shown="1", is_correction="1", payment_date="2026-08-15")
+    def test_a_payment_without_a_receipt_can_carry_an_old_date(self):
+        _, post = self.pay(fiscalize_shown="1", payment_date="2026-08-15")
         (payment,) = self.payments()
         self.assertEqual((payment["is_correction"], payment["no_receipt"]), (0, 1))
-        self.assertEqual(payment["paid_at"][:10], dt.date.today().isoformat())
+        self.assertEqual(payment["paid_at"][:10], "2026-08-15")
         self.assertEqual(post.call_count, 0)
+
+    def test_a_correction_flag_without_a_receipt_is_ignored_but_the_date_is_kept(self):
+        _, post = self.pay(fiscalize_shown="1", is_correction="1", payment_date="2026-08-15")
+        (payment,) = self.payments()
+        self.assertEqual((payment["is_correction"], payment["no_receipt"], payment["paid_at"][:10]), (0, 1, "2026-08-15"))
+        self.assertEqual(post.call_count, 0)
+
+    def test_a_payment_without_a_receipt_and_without_a_date_is_today(self):
+        self.pay(fiscalize_shown="1", payment_date="")
+        self.assertEqual(self.payments()[0]["paid_at"][:10], dt.date.today().isoformat())
+
+    def test_a_future_or_broken_date_is_refused_for_a_payment_without_a_receipt(self):
+        tomorrow = (dt.date.today() + dt.timedelta(days=1)).isoformat()
+        for bad in (tomorrow, "вчера"):
+            self.pay(fiscalize_shown="1", payment_date=bad)
+        self.assertEqual(self.payments(), [])
 
     def test_retrying_never_punches_a_receipt_for_a_payment_recorded_without_one(self):
         self.pay(fiscalize_shown="1")

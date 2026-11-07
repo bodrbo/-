@@ -699,7 +699,7 @@
       </div>
     </form>
     {% if modulkassa_configured %}
-    <p class="hint">Способ оплаты нужен, чтобы автоматически пробить кассовый чек через МодульКассу. Если снять галочку «Пробить чек», платёж только запишется — без чека. «Чек коррекции» — для платежа, который уже был принят, но чек по нему не пробили: платёж запишется указанной датой, а чек уйдёт как чек коррекции.</p>
+    <p class="hint">Способ оплаты нужен, чтобы автоматически пробить кассовый чек через МодульКассу. Если снять галочку «Пробить чек», платёж только запишется — без чека, и можно указать его дату (старые платежи). «Чек коррекции» — для платежа, который уже был принят, но чек по нему не пробили: платёж запишется указанной датой, а чек уйдёт как чек коррекции.</p>
     {% endif %}
     <script>
       (function () {
@@ -714,9 +714,12 @@
             if (!punch.checked) box.checked = false;
             box.disabled = !punch.checked;
           }
-          field.hidden = !box.checked;
+          // the date is typed for a correction receipt and for an old payment
+          // recorded without a receipt (then it is optional: empty = today)
+          var manual = punch && !punch.checked;
+          field.hidden = !(box.checked || manual);
           date.required = box.checked;
-          if (!box.checked) date.value = '';
+          if (field.hidden) date.value = '';
         }
         box.addEventListener('change', sync);
         if (punch) punch.addEventListener('change', sync);

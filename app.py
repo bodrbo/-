@@ -13764,6 +13764,14 @@ def add_tuning_payment(order_id):
         # The money was taken on that day, so the ledger (and project income)
         # records it there, not on the day of the correction.
         paid_at = f"{correction_date} 12:00"
+    elif not punch_receipt and request.form.get("payment_date", "").strip():
+        # An old payment entered without a receipt: the date is typed by hand.
+        manual_date = _parse_correction_payment_date(request.form.get("payment_date"))
+        if manual_date is None:
+            session["tuning_payment_error"] = "Дата платежа указана неверно — она не может быть позже сегодняшней."
+            return redirect(url_for("edit_tuning_order", order_id=order_id) + "#payments")
+        if manual_date != dt.date.today().isoformat():
+            paid_at = f"{manual_date} 12:00"
     if amount is not None and amount > 0:
         cur = db.execute(
             "INSERT INTO tuning_payments "
