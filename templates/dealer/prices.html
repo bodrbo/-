@@ -4,12 +4,12 @@
 {% block content %}
 <section class="panel">
   <h2>Цены лодок и моторов</h2>
-  <p class="hint">Лодки и моторы берутся из каталогов тюнинг-центра. Цена здесь подставляется в новый заказ, а в самом заказе её можно изменить. Пустое поле — цена не задана.</p>
+  <p class="hint">В прайс-листе — модели, которые есть в заказах дилерского центра (кроме отменённых), и те, что добавлены сюда вручную. Цена подставляется в новый заказ, а в самом заказе её можно изменить. Пустое поле — цена не задана.</p>
   {% if positions %}
   <form method="post" action="{{ url_for('dealer.prices') }}">
     <div class="table-scroll">
       <table class="records">
-        <thead><tr><th>Тип</th><th>Название</th><th>Марка</th><th>Цена, ₽</th></tr></thead>
+        <thead><tr><th>Тип</th><th>Название</th><th>Марка</th><th>Цена, ₽</th><th></th></tr></thead>
         <tbody>
           {% for p in positions %}
           <tr>
@@ -19,6 +19,14 @@
             <td>
               <input type="hidden" name="profile_id[]" value="{{ p.id }}">
               <input type="text" inputmode="decimal" name="price[]" value="{{ ('%g'|format(p.price)) if p.price is not none else '' }}" placeholder="не задана" style="width:140px;">
+            </td>
+            <td class="row-actions">
+              {% if p.in_orders %}
+              <span class="hint">в заказах</span>
+              {% else %}
+              <button type="submit" class="btn-secondary" formaction="{{ url_for('dealer.remove_price', profile_id=p.id) }}"
+                      formnovalidate onclick="return confirm('Убрать «{{ p.model_name|replace("'", "") }}» из прайс-листа?');">Убрать</button>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -32,9 +40,82 @@
   {% else %}
   <div class="empty-state">
     {% include '_empty_state_logo.html' %}
-    <div class="t">Каталоги пусты</div>
-    <div class="s">Добавьте лодки и моторы в «Каталог лодок» и «Каталог моторов».</div>
+    <div class="t">Прайс-лист пуст</div>
+    <div class="s">Добавьте первую модель ниже или создайте заказ дилерского центра.</div>
   </div>
   {% endif %}
 </section>
+
+<section class="panel">
+  <h2>Добавить модель в прайс-лист</h2>
+  <form method="post" action="{{ url_for('dealer.add_price') }}" class="entry-form" id="priceAddForm">
+    <div class="field field-narrow">
+      <label for="price_mode">Модель</label>
+      <select id="price_mode" name="mode">
+        <option value="catalog">Выбрать из общего каталога</option>
+        <option value="new">Создать новую</option>
+      </select>
+    </div>
+
+    <div class="field" data-mode="catalog">
+      <label for="price_catalog_search">Модель из каталога</label>
+      <div class="combo-field" data-combo>
+        <input type="text" id="price_catalog_search" class="combo-input" data-combo-input
+               placeholder="Начните вводить название…" autocomplete="off"
+               role="combobox" aria-autocomplete="list">
+        <input type="hidden" name="profile_id" data-combo-value>
+        <div class="combo-dropdown hidden" data-combo-dropdown>
+          <p class="combo-empty hidden" data-combo-empty>{% if addable %}Модель не найдена. Выберите «Создать новую».{% else %}Все модели каталога уже в прайс-листе.{% endif %}</p>
+          {% for p in addable %}
+          <div class="combo-option" data-value="{{ p.id }}" data-label="{{ p.model_name }}"
+               data-search="{{ (p.model_name ~ ' ' ~ (p.brand or ''))|lower }}">
+            <span class="combo-option-name">{{ p.model_name }}</span>
+            <span class="combo-option-sku">{{ item_kinds.get(p.equipment_type, p.equipment_type) }}{% if p.brand %} · {{ p.brand }}{% endif %}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="field field-narrow" data-mode="new" hidden>
+      <label for="price_kind">Что это</label>
+      <select id="price_kind" name="kind">
+        {% for value, label in item_kinds.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field" data-mode="new" hidden>
+      <label for="price_model_name">Название модели</label>
+      <input type="text" id="price_model_name" name="model_name" maxlength="200">
+    </div>
+    <div class="field field-narrow" data-mode="new" hidden>
+      <label for="price_brand">Марка</label>
+      <input type="text" id="price_brand" name="brand" maxlength="100">
+    </div>
+
+    <div class="field field-narrow">
+      <label for="price_value">Цена, ₽</label>
+      <input type="text" inputmode="decimal" id="price_value" name="price" required>
+    </div>
+    <div class="field field-submit"><button type="submit">Добавить в прайс-лист</button></div>
+  </form>
+  <p class="hint">Новая модель попадёт и в общий каталог лодок или моторов; если такая там уже есть, возьмётся готовая.</p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var form = document.getElementById('priceAddForm');
+    if (!form) return;
+    var mode = document.getElementById('price_mode');
+    function sync() {
+      form.querySelectorAll('[data-mode]').forEach(function (field) {
+        field.hidden = field.getAttribute('data-mode') !== mode.value;
+      });
+      document.getElementById('price_model_name').required = mode.value === 'new';
+    }
+    mode.addEventListener('change', sync);
+    sync();
+  })();
+</script>
 {% endblock %}

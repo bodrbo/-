@@ -48,6 +48,7 @@ class DealerCenterTests(unittest.TestCase):
             db.execute("DELETE FROM dealer_orders WHERE id = ?", (row["id"],))
         for row in db.execute("SELECT id FROM tuning_boat_profiles WHERE model_key LIKE 'dealer-test-%'").fetchall():
             db.execute("DELETE FROM dealer_prices WHERE profile_id = ?", (row["id"],))
+            db.execute("DELETE FROM dealer_price_list WHERE profile_id = ?", (row["id"],))
             db.execute("DELETE FROM tuning_boat_profiles WHERE id = ?", (row["id"],))
         for row in db.execute("SELECT id FROM clients WHERE client_name = ?", (CLIENT,)).fetchall():
             db.execute("DELETE FROM client_segments WHERE client_id = ?", (row["id"],))
@@ -309,7 +310,105 @@ class DealerCenterTests(unittest.TestCase):
 
     # ---- the price list
 
+    def put_on_price_list(self, *profile_ids):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            for profile_id in profile_ids:
+                db.execute("INSERT OR IGNORE INTO dealer_price_list (profile_id, added_at) VALUES (?, '2026-10-01 10:00')",
+                           (profile_id,))
+            db.commit()
+
+    def price_rows(self):
+        """Names standing in the price list table (not in the catalog picker)."""
+        page = self.client.get("/dealer/prices").get_data(as_text=True)
+        table = page.split("<tbody>")[1].split("</tbody>")[0] if "<tbody>" in page else ""
+        return table
+
+    def test_the_price_list_shows_only_models_in_orders_and_added_by_hand(self):
+        self.assertNotIn(BOAT, self.price_rows())      # in the catalog, but nowhere used
+        self.create()                                   # an order with the boat
+        self.assertIn(BOAT, self.price_rows())
+        self.assertNotIn(MOTOR, self.price_rows())
+        self.put_on_price_list(self.motor_id)
+        self.assertIn(MOTOR, self.price_rows())
+
+    def test_a_cancelled_orders_model_does_not_keep_a_place(self):
+        self.create()
+        self.assertIn(BOAT, self.price_rows())
+        self.client.post(f"/dealer/orders/{self.order()['id']}/status", data={"status": "cancelled"})
+        self.assertNotIn(BOAT, self.price_rows())
+
+    def test_a_model_is_added_from_the_catalog_with_its_price(self):
+        response = self.client.post("/dealer/prices/add", data={
+            "mode": "catalog", "profile_id": str(self.motor_id), "price": "250 000,5"})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.notice()["type"], "success")
+        self.assertIn(MOTOR, self.price_rows())
+        with application_module.app.app_context():
+            price = application_module.get_db().execute(
+                "SELECT price FROM dealer_prices WHERE profile_id = ?", (self.motor_id,)).fetchone()[0]
+        self.assertEqual(price, 250000.5)
+        # taken from the picker once it is in the list
+        picker = self.client.get("/dealer/prices").get_data(as_text=True).split('id="price_catalog_search"')[1]
+        self.assertNotIn(f'data-value="{self.motor_id}"', picker)
+        self.assertIn(f'data-value="{self.boat_id}"', picker)
+
+    def test_a_new_model_is_created_in_the_common_catalog_and_listed(self):
+        name = "Дилерская новинка Тест"
+        try:
+            self.client.post("/dealer/prices/add", data={
+                "mode": "new", "kind": "boat", "model_name": f"  {name} ", "brand": "Тестмарка", "price": "990000"})
+            self.assertEqual(self.notice()["type"], "success")
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                profile = db.execute("SELECT * FROM tuning_boat_profiles WHERE model_name = ?", (name,)).fetchone()
+                self.assertIsNotNone(profile)
+                self.assertEqual((profile["equipment_type"], profile["brand"]), ("boat", "Тестмарка"))
+                self.assertEqual(db.execute("SELECT price FROM dealer_prices WHERE profile_id = ?", (profile["id"],)).fetchone()[0], 990000)
+            self.assertIn(name, self.price_rows())
+            # the same name again takes the catalog entry instead of a second one
+            self.client.post("/dealer/prices/add", data={"mode": "new", "kind": "boat", "model_name": name, "price": "1000000"})
+            with application_module.app.app_context():
+                count = application_module.get_db().execute(
+                    "SELECT COUNT(*) FROM tuning_boat_profiles WHERE model_name = ?", (name,)).fetchone()[0]
+            self.assertEqual(count, 1)
+        finally:
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                for row in db.execute("SELECT id FROM tuning_boat_profiles WHERE model_name = ?", (name,)).fetchall():
+                    db.execute("DELETE FROM dealer_prices WHERE profile_id = ?", (row["id"],))
+                    db.execute("DELETE FROM dealer_price_list WHERE profile_id = ?", (row["id"],))
+                    db.execute("DELETE FROM tuning_boat_profiles WHERE id = ?", (row["id"],))
+                db.commit()
+
+    def test_adding_to_the_price_list_is_validated(self):
+        for data in (
+            {"mode": "catalog", "profile_id": str(self.boat_id), "price": ""},
+            {"mode": "catalog", "profile_id": str(self.boat_id), "price": "-5"},
+            {"mode": "catalog", "profile_id": "999999", "price": "10"},
+            {"mode": "catalog", "profile_id": "", "price": "10"},
+            {"mode": "new", "kind": "plane", "model_name": "X", "price": "10"},
+            {"mode": "new", "kind": "boat", "model_name": "  ", "price": "10"},
+            {"mode": "new", "kind": "boat", "model_name": "Я" * 300, "price": "10"},
+            {"mode": "", "price": "10"},
+        ):
+            self.client.post("/dealer/prices/add", data=data)
+            self.assertEqual(self.notice()["type"], "error", data)
+        self.assertNotIn(BOAT, self.price_rows())
+
+    def test_a_hand_added_model_can_be_removed_but_one_in_orders_cannot(self):
+        self.put_on_price_list(self.boat_id, self.motor_id)
+        self.create()    # the boat stands in an order now
+        self.client.post(f"/dealer/prices/{self.motor_id}/remove")
+        self.assertEqual(self.notice()["type"], "success")
+        self.assertNotIn(MOTOR, self.price_rows())
+        self.client.post(f"/dealer/prices/{self.boat_id}/remove")
+        self.assertEqual(self.notice()["type"], "error")
+        self.assertIn(BOAT, self.price_rows())
+
     def test_prices_are_saved_cleared_and_validated(self):
+        self.put_on_price_list(self.boat_id, self.motor_id)
+
         def save(boat, motor):
             return self.client.post("/dealer/prices", data={
                 "profile_id[]": [str(self.boat_id), str(self.motor_id)], "price[]": [boat, motor]})
@@ -326,7 +425,7 @@ class DealerCenterTests(unittest.TestCase):
         save("abc", "1")
         self.assertEqual(self.notice()["type"], "error")
         page = self.client.get("/dealer/prices").get_data(as_text=True)
-        self.assertIn(BOAT, page)
+        self.assertIn(BOAT, self.price_rows())
         self.assertIn('value="250000"', page)
 
 

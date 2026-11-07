@@ -67,3 +67,13 @@ def init_schema(conn):
         )
         """
     )
+    # Positions the price list shows on top of those that stand in orders:
+    # the ones added to it by hand (the price itself is in dealer_prices).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dealer_price_list (
+            profile_id INTEGER PRIMARY KEY,
+            added_at TEXT NOT NULL
+        )
+        """
+    )

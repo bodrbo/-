@@ -228,6 +228,64 @@ def delete_order(db, order_id):
     return True, "Заказ удалён."
 
 
+def add_to_price_list(db, form, known_profiles, create_profile):
+    """A model with its price joins the price list: picked from the common
+    catalog (mode "catalog", profile_id) or created (mode "new": kind, name,
+    brand). `known_profiles`: {profile id: equipment type} of the catalog;
+    create_profile(db, kind, name, brand) -> (error, profile_id, created)
+    finds or creates the catalog entry (injected from app.py).
+    Returns (error, message)."""
+    price = _number(form.get("price"))
+    if price is None or price < 0:
+        return "Укажите цену — число, не меньше нуля.", None
+    price = round(price, 2)
+    mode = str(form.get("mode", "")).strip()
+    message = "Модель добавлена в прайс-лист."
+    if mode == "catalog":
+        raw_id = str(form.get("profile_id", "")).strip()
+        if not raw_id.isdigit() or int(raw_id) not in known_profiles:
+            return "Выберите модель из каталога.", None
+        profile_id = int(raw_id)
+    elif mode == "new":
+        kind = str(form.get("kind", "")).strip()
+        if kind not in ITEM_KINDS:
+            return "Выберите, что это: лодка или мотор.", None
+        name = " ".join(str(form.get("model_name", "")).split())
+        if not name:
+            return "Укажите название модели.", None
+        error, profile_id, created = create_profile(
+            db, kind, name, " ".join(str(form.get("brand", "")).split())
+        )
+        if error:
+            return error, None
+        message = (
+            "Новая модель создана в общем каталоге и добавлена в прайс-лист." if created
+            else "Такая модель уже есть в общем каталоге — добавлена из него."
+        )
+    else:
+        return "Выберите: модель из каталога или новая.", None
+    if repository.in_price_list(db, profile_id):
+        message = "Модель уже была в прайс-листе — цена обновлена."
+    stamp = now_text()
+    repository.add_to_price_list(db, profile_id, stamp)
+    repository.set_price(db, profile_id, price, stamp)
+    db.commit()
+    return None, message
+
+
+def remove_from_price_list(db, profile_id):
+    """A model added by hand leaves the list; one that stands in an order
+    cannot. Returns (ok, message)."""
+    position = next((row for row in repository.price_list_positions(db) if row["id"] == profile_id), None)
+    if position is None:
+        return False, "Этой модели нет в прайс-листе."
+    if position["in_orders"]:
+        return False, "Модель есть в заказах дилерского центра — пока они не отменены, из прайс-листа её не убрать."
+    repository.remove_from_price_list(db, profile_id)
+    db.commit()
+    return True, f"«{position['model_name']}» убрана из прайс-листа."
+
+
 def save_prices(db, raw_prices, known_profiles):
     """raw_prices: [(profile_id_text, price_text)]; blank clears the price.
     Returns (error, saved_count)."""

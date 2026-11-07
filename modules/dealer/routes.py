@@ -9,12 +9,14 @@ from .constants import DEALER_STATUSES, ITEM_KINDS, PAYMENT_TYPES, STATUS_LABELS
 
 
 def create_dealer_blueprint(get_db, access_required, client_choices, resolve_client,
-                            events_panel=None, forget_events=None):
+                            events_panel=None, forget_events=None, create_profile=None):
     """client_choices(db) -> clients for the picker; resolve_client(db,
     client_id, client_name, phone) -> client id (finds or creates the client
     in the shared client base) — both injected from app.py. events_panel(db,
     order_id) -> the «События» panel data of an order, forget_events(db,
-    order_id) drops them with a deleted order (both optional)."""
+    order_id) drops them with a deleted order (both optional).
+    create_profile(db, kind, name, brand) -> (error, profile_id, created)
+    finds or creates a model of the common catalog."""
     blueprint = Blueprint("dealer", __name__)
 
     def catalog_maps(db):
@@ -196,16 +198,35 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
     @access_required
     def prices():
         db = get_db()
-        positions, known = catalog_maps(db)
+        catalog, known = catalog_maps(db)
         if request.method == "POST":
             error, saved = services.save_prices(
                 db, list(zip(request.form.getlist("profile_id[]"), request.form.getlist("price[]"))), known
             )
             notice("error" if error else "success", error or "Прайс-лист сохранён.")
             return redirect(url_for("dealer.prices"))
+        positions = repository.price_list_positions(db)
+        listed = {row["id"] for row in positions}
         return render_template(
             "dealer/prices.html", active_page="dealer", sub_page="prices",
             positions=positions, item_kinds=ITEM_KINDS, notice=session.pop("dealer_notice", None),
+            addable=[row for row in catalog if row["id"] not in listed],
         )
+
+    @blueprint.route("/dealer/prices/add", methods=["POST"])
+    @access_required
+    def add_price():
+        db = get_db()
+        _, known = catalog_maps(db)
+        error, message = services.add_to_price_list(db, request.form, known, create_profile)
+        notice("error" if error else "success", error or message)
+        return redirect(url_for("dealer.prices"))
+
+    @blueprint.route("/dealer/prices/<int:profile_id>/remove", methods=["POST"])
+    @access_required
+    def remove_price(profile_id):
+        ok, message = services.remove_from_price_list(get_db(), profile_id)
+        notice("success" if ok else "error", message)
+        return redirect(url_for("dealer.prices"))
 
     return blueprint

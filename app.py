@@ -6377,6 +6377,7 @@ app.register_blueprint(
         resolve_client=lambda db, client_id, client_name, phone: _get_or_create_client(
             db, phone, client_name, "", client_id=client_id
         ),
+        create_profile=lambda db, kind, name, brand: _dealer_catalog_profile(db, kind, name, brand),
         events_panel=lambda db, order_id: _order_events_panel(db, "dealer", order_id),
         forget_events=lambda db, order_id: forget_order_events(
             db, "dealer", order_id, lambda task_id: _delete_visit_schedule_task(db, task_id)
@@ -6390,6 +6391,29 @@ app.register_blueprint(
 # (см. modules/order_events). Визит с принимающим лицом становится его
 # задачей в расписании тюнинга.
 # =======================================================================
+def _dealer_catalog_profile(db, kind, name, brand):
+    """A boat / motor model of the common catalog for the dealer price list:
+    the existing entry of that name, else a new one. -> (error, id, created)."""
+    if len(name) > TUNING_BOAT_MODEL_NAME_LIMIT:
+        return f"Название модели не должно превышать {TUNING_BOAT_MODEL_NAME_LIMIT} символов.", None, False
+    if len(brand) > 100:
+        return "Марка слишком длинная.", None, False
+    key = _tuning_equipment_profile_key(kind, name)
+    if not key:
+        return "Укажите название модели.", None, False
+    existing = _tuning_equipment_profile_id(db, kind, name)
+    if existing is not None:
+        return None, existing, False
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    cur = db.execute(
+        "INSERT INTO tuning_boat_profiles "
+        "(model_key, model_name, equipment_type, specifications, created_at, updated_at, brand) "
+        "VALUES (?, ?, ?, '', ?, ?, ?)",
+        (key, name, kind, now, now, brand or None),
+    )
+    return None, cur.lastrowid, True
+
+
 def _order_events_panel(db, order_kind, order_id):
     hosts = [employee["name"] for employee in tuning_schedule_repository.list_tuning_crew_employees(db)]
     return order_events_panel_context(db, order_kind, order_id, hosts)
