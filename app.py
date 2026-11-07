@@ -156,6 +156,13 @@ from modules.dealer import (
     create_dealer_blueprint,
     init_schema as init_dealer_schema,
 )
+from modules.order_events import (
+    add_new_request as add_order_new_request_event,
+    create_order_events_blueprint,
+    forget_order_events,
+    init_schema as init_order_events_schema,
+    panel_context as order_events_panel_context,
+)
 from modules.weather import constants as weather_constants
 from modules.weather import schema as weather_schema
 from modules.weather import services as weather_services
@@ -2377,6 +2384,7 @@ def init_db(db_path=None, include_bootstrap_data=True):
     init_tuning_schedule_schema(conn)
     init_payroll_rates_schema(conn)
     init_dealer_schema(conn)
+    init_order_events_schema(conn)
 
     conn.execute(
         """
@@ -6369,6 +6377,67 @@ app.register_blueprint(
         resolve_client=lambda db, client_id, client_name, phone: _get_or_create_client(
             db, phone, client_name, "", client_id=client_id
         ),
+        events_panel=lambda db, order_id: _order_events_panel(db, "dealer", order_id),
+        forget_events=lambda db, order_id: forget_order_events(
+            db, "dealer", order_id, lambda task_id: _delete_visit_schedule_task(db, task_id)
+        ),
+    )
+)
+
+
+# =======================================================================
+# События заказа (тюнинг и дилерский центр): новая заявка, диалог, визит
+# (см. modules/order_events). Визит с принимающим лицом становится его
+# задачей в расписании тюнинга.
+# =======================================================================
+def _order_events_panel(db, order_kind, order_id):
+    hosts = [employee["name"] for employee in tuning_schedule_repository.list_tuning_crew_employees(db)]
+    return order_events_panel_context(db, order_kind, order_id, hosts)
+
+
+def _order_event_context(db, order_kind, order_id):
+    """Who the order is for and what to call it, or None for no such order."""
+    if order_kind == "tuning":
+        order = db.execute(
+            "SELECT id, client_name, status FROM tuning_orders WHERE id = ?", (order_id,)
+        ).fetchone()
+        if order is None:
+            return None
+        return {
+            "client": order["client_name"], "label": f"Заказ №{order['id']}",
+            "tuning_order_id": order["id"] if order["status"] != "cancelled" else None,
+        }
+    order = db.execute("SELECT id, client_name FROM dealer_orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None:
+        return None
+    return {"client": order["client_name"], "label": f"Дилерский центр, заказ №{order['id']}", "tuning_order_id": None}
+
+
+def _order_event_url(order_kind, order_id):
+    if order_kind == "dealer":
+        return url_for("dealer.order", order_id=order_id)
+    return url_for("edit_tuning_order", order_id=order_id)
+
+
+def _create_visit_schedule_task(db, host, title, comment, day, start, hours, tuning_order_id):
+    """A visit handed to `host`: an unpaid task of theirs in the tuning schedule."""
+    return tuning_schedule_services.create_free_task(
+        db, host, title, "", comment, [(day, start, str(hours))], order_id=tuning_order_id, unpaid=True,
+    )
+
+
+def _delete_visit_schedule_task(db, task_id):
+    return tuning_schedule_services.delete_task(db, task_id, lambda *_args: (False, "Задача привязана к заказу."))
+
+
+app.register_blueprint(
+    create_order_events_blueprint(
+        get_db=get_db,
+        access_required=admin_only_no_demo_tenant,
+        order_context=_order_event_context,
+        order_url=_order_event_url,
+        make_visit_task=_create_visit_schedule_task,
+        delete_task=_delete_visit_schedule_task,
     )
 )
 
@@ -11839,12 +11908,7 @@ def tuning_site_lead_webhook():
         note_lines.append(
             "Время отправки: " + (data["submitted_at"] or now)
         )
-        db.execute(
-            "INSERT INTO tuning_order_notes "
-            "(order_id, author_admin_id, text, created_at) "
-            "VALUES (?, NULL, ?, ?)",
-            (order_id, "\n".join(note_lines), now),
-        )
+        add_order_new_request_event(db, "tuning", order_id, "\n".join(note_lines), now)
         db.commit()
     except sqlite3.Error:
         db.rollback()
@@ -11960,10 +12024,7 @@ def tilda_webhook():
     note_text = "Заявка с сайта (форма обратной связи, Тильда)."
     if raw_lines:
         note_text += "\n" + "\n".join(raw_lines)
-    db.execute(
-        "INSERT INTO tuning_order_notes (order_id, author_admin_id, text, created_at) VALUES (?, NULL, ?, ?)",
-        (order_id, note_text, now),
-    )
+    add_order_new_request_event(db, "tuning", order_id, note_text, now)
     db.commit()
     _log_tilda_webhook(db, True, f"created order #{order_id}")
     return "ok", 200
@@ -12137,6 +12198,7 @@ def edit_tuning_order(order_id):
             goods_error=session.pop("tuning_goods_error", None),
             goods_notice=session.pop("tuning_goods_notice", None),
             notes=notes, reminder_recipients=reminder_recipients,
+            events_panel=_order_events_panel(db, "tuning", order_id),
             boat_profile_id=boat_profile_id,
             fleet_boat_index=fleet_boat_index,
             motor_profile_id=motor_profile_id,
@@ -12286,6 +12348,8 @@ def _delete_tuning_order_records(db, order_ids):
     parameters = [(order_id,) for order_id in order_ids]
     db.executemany("DELETE FROM trips WHERE tuning_order_id = ?", parameters)
     db.executemany("DELETE FROM partner_commissions WHERE order_id = ?", parameters)
+    for order_id in order_ids:
+        forget_order_events(db, "tuning", order_id, lambda task_id: _delete_visit_schedule_task(db, task_id))
     tickets_dir = os.path.join(app.static_folder, "tuning_ship_tickets")
     placeholders = ",".join("?" for _order_id in order_ids)
     for ticket in db.execute(

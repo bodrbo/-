@@ -882,6 +882,8 @@
     </div>
   </details>
 
+  {% if events_panel %}{% include '_order_events_panel.html' %}{% endif %}
+
   <details class="panel collapsible-panel" id="notes">
     <summary>
       <span>Заметки{% if notes %} ({{ notes|length }}){% endif %}</span>

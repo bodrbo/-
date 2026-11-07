@@ -27,6 +27,7 @@ class TuningSiteIntegrationTests(unittest.TestCase):
             for table in (
                 "tuning_order_note_reminders",
                 "tuning_order_notes",
+                "order_events",
                 "tuning_order_products",
                 "tuning_order_items",
                 "tuning_payments",
@@ -213,8 +214,11 @@ class TuningSiteIntegrationTests(unittest.TestCase):
                 "SELECT * FROM projects WHERE tuning_order_id = ?", (order["id"],)
             ).fetchone()
             note = db.execute(
-                "SELECT * FROM tuning_order_notes WHERE order_id = ?", (order["id"],)
+                "SELECT * FROM order_events WHERE order_kind = 'tuning' AND order_id = ?", (order["id"],)
             ).fetchone()
+            notes_count = db.execute(
+                "SELECT COUNT(*) FROM tuning_order_notes WHERE order_id = ?", (order["id"],)
+            ).fetchone()[0]
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(body, {"ok": True, "order_id": order["id"]})
@@ -233,6 +237,8 @@ class TuningSiteIntegrationTests(unittest.TestCase):
         self.assertEqual(client["boat_model"], order["boat_model"])
         self.assertEqual(client["acquisition_channel"], "bodrbo_tuning")
         self.assertEqual(project["name"], f"Заказ №{order['id']}")
+        # the client's message is an event «Новая заявка», not a note any more
+        self.assertEqual((note["kind"], notes_count), ("new_request", 0))
         self.assertIsNone(note["author_admin_id"])
         self.assertIn(self.payload()["message"], note["text"])
         self.assertIn(self.payload()["source_url"], note["text"])
@@ -254,7 +260,7 @@ class TuningSiteIntegrationTests(unittest.TestCase):
             db = application_module.get_db()
             counts = {
                 table: db.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"]
-                for table in ("clients", "tuning_orders", "projects", "tuning_order_notes")
+                for table in ("clients", "tuning_orders", "projects", "order_events")
             }
             order = db.execute("SELECT * FROM tuning_orders").fetchone()
 
@@ -268,7 +274,7 @@ class TuningSiteIntegrationTests(unittest.TestCase):
             "clients": 1,
             "tuning_orders": 1,
             "projects": 1,
-            "tuning_order_notes": 1,
+            "order_events": 1,
         })
         self.assertEqual(order["client_name"], "Иван Петров")
 
@@ -337,13 +343,21 @@ class TuningSiteIntegrationTests(unittest.TestCase):
         )
 
         with application_module.app.app_context():
-            order = application_module.get_db().execute(
-                "SELECT * FROM tuning_orders WHERE source = 'tilda'"
-            ).fetchone()
+            db = application_module.get_db()
+            order = db.execute("SELECT * FROM tuning_orders WHERE source = 'tilda'").fetchone()
+            events = db.execute(
+                "SELECT * FROM order_events WHERE order_kind = 'tuning' AND order_id = ?", (order["id"],)
+            ).fetchall()
+            notes = db.execute(
+                "SELECT COUNT(*) FROM tuning_order_notes WHERE order_id = ?", (order["id"],)
+            ).fetchone()[0]
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_data(as_text=True), "ok")
         self.assertEqual(order["source_ref"], "tilda-unchanged-1")
+        # the form's message is an event «Новая заявка», not a note
+        self.assertEqual((len(events), events[0]["kind"], notes), (1, "new_request", 0))
+        self.assertIn("Заявка с сайта", events[0]["text"])
 
     def test_empty_boat_catalog_is_available_from_tuning_navigation(self):
         anonymous = self.client.get("/tuning/boats")

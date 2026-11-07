@@ -1,0 +1,98 @@
+{# «События» заказа: новая заявка, диалог, визит. Нужен events_panel (modules/order_events). #}
+{% set ev = events_panel %}
+<details class="panel collapsible-panel" id="events" {% if ev.error or ev.notice %}open{% endif %}>
+  <summary>
+    <span>События{% if ev.events %} ({{ ev.events|length }}){% endif %}</span>
+    <span class="chev" aria-hidden="true"></span>
+  </summary>
+  <div class="collapsible-body">
+    {% if ev.notice %}<p class="alert success">{{ ev.notice }}</p>{% endif %}
+    {% if ev.error %}<div class="alert" role="alert">{{ ev.error }}</div>{% endif %}
+
+    {% if ev.events %}
+    {% for event in ev.events %}
+    <div class="note-card order-event order-event-{{ event.kind }}">
+      <div class="note-meta">
+        <span class="status-badge {{ 'status-defect-new' if event.kind == 'new_request' else ('status-pending' if event.upcoming else 'status-defect-resolved') }}">{{ event.kind_label }}</span>
+        <span class="term">{{ event.event_date|ru_date }}{% if event.event_time %}, {{ event.event_time }}{% if event.end_time %}–{{ event.end_time }}{% endif %}{% endif %}</span>
+        {% if event.upcoming %}<span class="muted">предстоит</span>{% endif %}
+        <span class="muted">{{ event.author_name or ('с сайта' if event.kind == 'new_request' else '') }}</span>
+        <span class="row-actions" style="margin-left:auto;">
+          <form action="{{ url_for('order_events.delete', event_id=event.id) }}" method="post"
+                onsubmit="return confirm('Удалить это событие{% if event.schedule_task_id %} и задачу в расписании{% endif %}?');">
+            <button type="submit" class="icon-btn danger" title="Удалить событие">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l10 10M15 5L5 15"/></svg>
+            </button>
+          </form>
+        </span>
+      </div>
+      {% if event.kind == 'visit' and event.host_employee %}
+      <p class="muted" style="margin:4px 0;">Принимает: {{ event.host_employee }}{% if event.task_exists %} · <a href="{{ url_for('tuning_schedule.index', date=event.event_date) }}">задача в расписании</a>{% endif %}</p>
+      {% endif %}
+      {% if event.text %}<p class="note-text">{{ event.text }}</p>{% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="hint">Событий пока нет.</p>
+    {% endif %}
+
+    <form action="{{ url_for('order_events.add', order_kind=ev.order_kind, order_id=ev.order_id) }}" method="post"
+          class="entry-form" id="eventForm" style="margin-top:14px;">
+      <div class="field field-narrow">
+        <label for="event_kind">Тип события</label>
+        <select id="event_kind" name="kind" required>
+          {% for type in ev.types %}<option value="{{ type.value }}">{{ type.label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field field-narrow">
+        <label for="event_date" id="eventDateLabel">Дата диалога</label>
+        <input type="date" id="event_date" name="event_date" value="{{ ev.today }}" required>
+      </div>
+      <div class="field field-narrow" data-visit-only hidden>
+        <label for="event_time">Время</label>
+        <input type="time" id="event_time" name="event_time">
+      </div>
+      <div class="field field-narrow" data-visit-only hidden>
+        <label for="event_duration">Продолжительность</label>
+        <select id="event_duration" name="duration_minutes">
+          {% for minutes, label in ev.durations %}<option value="{{ minutes }}" {% if minutes == ev.default_duration %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field field-narrow" data-visit-only hidden>
+        <label for="event_host">Принимает</label>
+        <select id="event_host" name="host_employee">
+          <option value="">— не назначен —</option>
+          {% for name in ev.hosts %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field field-wide">
+        <label for="event_text" id="eventTextLabel">Что обсудили</label>
+        <textarea id="event_text" name="text" rows="3" maxlength="4000"></textarea>
+      </div>
+      <div class="field field-submit">
+        <button type="submit">Добавить событие</button>
+      </div>
+    </form>
+    <p class="hint">Если выбрать принимающего, ему в расписании тюнинга появится задача на время визита (без оплаты). Новые заявки с сайта попадают сюда сами.</p>
+    <script>
+      (function () {
+        var form = document.getElementById('eventForm');
+        if (!form) return;
+        var kind = document.getElementById('event_kind');
+        var visitOnly = form.querySelectorAll('[data-visit-only]');
+        var time = document.getElementById('event_time');
+        var text = document.getElementById('event_text');
+        function sync() {
+          var visit = kind.value === 'visit';
+          visitOnly.forEach(function (field) { field.hidden = !visit; });
+          time.required = visit;
+          text.required = !visit;
+          document.getElementById('eventDateLabel').textContent = visit ? 'Дата визита' : 'Дата диалога';
+          document.getElementById('eventTextLabel').textContent = visit ? 'Комментарий к визиту' : 'Что обсудили';
+        }
+        kind.addEventListener('change', sync);
+        sync();
+      })();
+    </script>
+  </div>
+</details>

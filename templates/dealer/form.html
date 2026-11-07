@@ -166,6 +166,8 @@
   {% endif %}
 </section>
 
+{% if events_panel %}{% include '_order_events_panel.html' %}{% endif %}
+
 <section class="panel">
   <form action="{{ url_for('dealer.delete_order', order_id=order.id) }}" method="post"
         onsubmit="return confirm('Удалить заказ №{{ order.id }}? Это нельзя отменить.');">

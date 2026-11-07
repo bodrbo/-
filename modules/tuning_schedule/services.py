@@ -575,10 +575,14 @@ def calendar_view(db, day, day_crew):
     }
 
 
-def _clean_rate(db, employee_name, raw_rate, errors):
+def _clean_rate(db, employee_name, raw_rate, errors, allow_zero=False):
     """The hourly rate of a task. Administrators are salaried: no rate is
-    asked for (whatever was submitted is ignored) and their tasks carry 0."""
+    asked for (whatever was submitted is ignored) and their tasks carry 0.
+    `allow_zero`: an unpaid task (a visit of a client) may stay without a
+    rate when none is given."""
     if repository.is_administrator(db, employee_name):
+        return 0.0
+    if allow_zero and not str(raw_rate or "").strip():
         return 0.0
     try:
         rate = float(str(raw_rate or "").strip().replace(",", "."))
@@ -589,12 +593,13 @@ def _clean_rate(db, employee_name, raw_rate, errors):
     return rate
 
 
-def _ensure_on_roster(db, employee_name, clean_days):
+def _ensure_on_roster(db, employee_name, clean_days, everyone=False):
     """An administrator isn't required to be on the shift schedule; when a
     task is put on a day they are not on, they are added to that day's
     roster (default hours, widened to cover the task). Anyone else is left
-    alone. Returns the dates the person was added for."""
-    if not repository.is_administrator(db, employee_name):
+    alone, unless `everyone` (a visit handed to someone by name). Returns
+    the dates the person was added for."""
+    if not everyone and not repository.is_administrator(db, employee_name):
         return []
     employee_id = repository.get_employee_id_by_name(db, employee_name)
     if employee_id is None:
@@ -733,10 +738,13 @@ def _pay_unpaid_members(db, task, pay_free_task):
             repository.set_member_entry(db, member["id"], entry_id)
 
 
-def create_free_task(db, employee_name, title, rate, comment, day_rows, order_id=None, extras=()):
+def create_free_task(db, employee_name, title, rate, comment, day_rows, order_id=None, extras=(),
+                     unpaid=False):
     """A task that is not tied to a work item. With `order_id` it still
     belongs to that project (tuning order) and is shown with it. `extras`
-    are raw (name, rate) rows of further participants of the same task."""
+    are raw (name, rate) rows of further participants of the same task.
+    `unpaid`: a task without a rate (a client's visit) — the person is put
+    on the day's roster if they are not on it."""
     errors = []
     employee_name = _normalise_text(employee_name, EMPLOYEE_NAME_MAX_LENGTH)
     title = _normalise_text(title, TASK_TITLE_MAX_LENGTH)
@@ -746,14 +754,14 @@ def create_free_task(db, employee_name, title, rate, comment, day_rows, order_id
         errors.append("Выберите сотрудника из списка тюнингмэнов.")
     if not title:
         errors.append("Укажите название задачи.")
-    rate = _clean_rate(db, employee_name, rate, errors)
+    rate = _clean_rate(db, employee_name, rate, errors, allow_zero=unpaid)
     if order_id is not None and repository.get_linkable_order(db, order_id) is None:
         errors.append("Проект не найден или отменён.")
     clean_days = _clean_task_days(day_rows, errors)
     members = clean_extra_participants(db, extras, employee_name, errors, clean_days)
     if errors:
         return False, " ".join(errors), None
-    added_days = _ensure_on_roster(db, employee_name, clean_days)
+    added_days = _ensure_on_roster(db, employee_name, clean_days, everyone=unpaid)
     task_id = repository.create_task(
         db, None, employee_name, title, rate, comment, current_timestamp(), order_id
     )
@@ -1036,7 +1044,7 @@ def update_task(db, task_id, form, hooks):
             else:
                 if order_id != task["order_id"] and repository.get_linkable_order(db, order_id) is None:
                     errors.append("Проект не найден или отменён.")
-    rate = _clean_rate(db, employee_name, form.get("rate"), errors)
+    rate = _clean_rate(db, employee_name, form.get("rate"), errors, allow_zero=not linked and not task["rate"])
     day_rows = [
         row for row in zip(
             form.getlist("work_date[]"), form.getlist("start_time[]"), form.getlist("planned_hours[]")

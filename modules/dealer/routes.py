@@ -8,10 +8,13 @@ from . import repository, services
 from .constants import DEALER_STATUSES, ITEM_KINDS, PAYMENT_TYPES, STATUS_LABELS
 
 
-def create_dealer_blueprint(get_db, access_required, client_choices, resolve_client):
+def create_dealer_blueprint(get_db, access_required, client_choices, resolve_client,
+                            events_panel=None, forget_events=None):
     """client_choices(db) -> clients for the picker; resolve_client(db,
     client_id, client_name, phone) -> client id (finds or creates the client
-    in the shared client base) — both injected from app.py."""
+    in the shared client base) — both injected from app.py. events_panel(db,
+    order_id) -> the «События» panel data of an order, forget_events(db,
+    order_id) drops them with a deleted order (both optional)."""
     blueprint = Blueprint("dealer", __name__)
 
     def catalog_maps(db):
@@ -89,6 +92,7 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
             payments=payments, paid=paid,
             remaining=max(0.0, round((order["total"] - paid), 2)) if order is not None else None,
             payment_types=PAYMENT_TYPES, today=dt.date.today().isoformat(),
+            events_panel=events_panel(db, order["id"]) if order is not None and events_panel else None,
             notice=session.pop("dealer_notice", None),
         )
 
@@ -176,9 +180,13 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
     @blueprint.route("/dealer/orders/<int:order_id>/delete", methods=["POST"])
     @access_required
     def delete_order(order_id):
-        ok, message = services.delete_order(get_db(), order_id)
+        db = get_db()
+        ok, message = services.delete_order(db, order_id)
         notice("success" if ok else "error", message)
         if ok:
+            if forget_events:
+                forget_events(db, order_id)
+                db.commit()
             return redirect(url_for("dealer.orders"))
         return redirect(url_for("dealer.order", order_id=order_id))
 
