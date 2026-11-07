@@ -54,18 +54,20 @@
 }
 
 :root {
-  /* Palette rethought to match bodrbo.ru: cool blue accent + light
-     blue-gray/white surfaces instead of the old brass/parchment warm
-     scheme. Variable names kept as-is (--brass etc.) since they're used
-     in ~40 places across this file and templates — only the values
-     changed, so nothing downstream needed touching. */
-  --ink: #0f2a35;
-  --ink-soft: #294c56;
-  --parchment: #eef2f8;
+  /* Bodry Boatswain brand system. Legacy variable names are retained so
+     every existing module adopts the new identity without duplicating
+     colour rules in individual templates. */
+  --ink: #082c3b;
+  --ink-soft: #305563;
+  --parchment: #f2f7f8;
   --paper: #ffffff;
-  --paper-alt: #eef4fa;
-  --brass: #3498db;
-  --brass-strong: #2e86c1;
+  --paper-alt: #f2f7f8;
+  --brass: #01748e;
+  --brass-strong: #007b88;
+  --navy: #003454;
+  --navy-deep: #00263f;
+  --teal-bright: #0097a7;
+  --orange: #ff6700;
   --on-accent: #ffffff;
   /* --brass-strong used as text ON A DARK CARD (not on light panels,
      that's most of the ~100 other --brass-strong uses and stays fine
@@ -77,10 +79,10 @@
   --danger: #b3402c;
   --success: #2f6b4f;
   --warning: #a8631a;
-  --muted: #62707f;
-  --hairline: #d7e3ee;
-  --hairline-soft: #e4edf5;
-  --shadow: 0 1px 2px rgba(15, 42, 53, .07), 0 10px 28px -16px rgba(15, 42, 53, .28);
+  --muted: #70858c;
+  --hairline: #cfdde1;
+  --hairline-soft: #e3ecef;
+  --shadow: 0 1px 2px rgba(0, 38, 63, .06), 0 14px 34px -24px rgba(0, 38, 63, .38);
 }
 
 * { box-sizing: border-box; }
@@ -100,7 +102,11 @@
 body {
   margin: 0;
   font-family: 'Open Sans', -apple-system, sans-serif;
-  background: var(--parchment);
+  background-color: var(--parchment);
+  background-image:
+    linear-gradient(rgba(0, 52, 84, .025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 52, 84, .025) 1px, transparent 1px);
+  background-size: 40px 40px;
   color: var(--ink);
   line-height: 1.5;
 }
@@ -2093,9 +2099,23 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
 .tabular { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
 
 .topbar {
-  background: var(--brass);
+  position: relative;
+  background:
+    linear-gradient(90deg, rgba(1, 116, 142, .22), transparent 34%),
+    var(--navy-deep);
   color: #ffffff;
   padding: 24px 20px 22px;
+  border-bottom: 1px solid rgba(1, 116, 142, .55);
+  box-shadow: 0 10px 28px -24px rgba(0, 38, 63, .9);
+}
+.topbar::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--orange) 0 86px, var(--teal-bright) 86px 172px, transparent 172px);
+  content: "";
 }
 .topbar-inner {
   max-width: 1080px;
@@ -2109,11 +2129,12 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
 
 .topbar-top-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .brand { display: flex; align-items: center; }
-.brand-logo { display: block; height: 52px; width: auto; }
+.brand a { display: inline-flex; align-items: center; text-decoration: none; }
+.brand-logo { display: block; height: 58px; width: auto; max-width: min(360px, 52vw); object-fit: contain; }
 /* The client cabinet is the one page a person can land on with zero prior
    context (a bare link, no login) — give the brand a bit more presence
    there than in the internal admin/investor/team screens. */
-.brand-logo-large { height: 68px; }
+.brand-logo-large { height: 76px; }
 /* Demo tenants without an uploaded logo (see _topbar_brand.html) fall
    back to their company name as plain text in the same brand slot. */
 .brand-logo-text { font-size: 20px; font-weight: 700; color: var(--brass-strong); }
@@ -2128,7 +2149,7 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
   width: 38px;
   height: 38px;
   flex-shrink: 0;
-  border-radius: 8px;
+  border-radius: 5px;
   border: 1px solid rgba(255, 255, 255, 0.4);
   background: transparent;
   color: #ffffff;
@@ -2148,7 +2169,7 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
   background: transparent;
   color: #ffffff;
   border: 1px solid rgba(255, 255, 255, 0.45);
-  border-radius: 8px;
+  border-radius: 5px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -2166,7 +2187,7 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
   background: transparent;
   color: #ffffff;
   border: 1px solid rgba(255, 255, 255, 0.45);
-  border-radius: 8px;
+  border-radius: 5px;
   cursor: pointer;
 }
 .push-toggle svg { width: 18px; height: 18px; }
@@ -2234,8 +2255,8 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
   font-size: 13px;
   font-weight: 700;
   padding: 9px 18px;
-  border-radius: 999px;
-  border: 1.5px solid var(--hairline);
+  border-radius: 5px;
+  border: 1px solid var(--hairline);
   background: var(--paper);
   color: var(--ink-soft);
   text-decoration: none;
@@ -2246,6 +2267,7 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
   background: var(--brass);
   border-color: var(--brass);
   color: #ffffff;
+  box-shadow: inset 3px 0 0 var(--orange);
 }
 .sub-tabs.sub-tabs-nested {
   margin-top: -8px;
@@ -3851,7 +3873,7 @@ body.modal-open { overflow: hidden; }
 .panel {
   background: var(--paper);
   border: 1px solid var(--hairline);
-  border-radius: 10px;
+  border-radius: 6px;
   padding: 22px 24px;
   margin-bottom: 22px;
   box-shadow: var(--shadow);
@@ -3896,7 +3918,7 @@ input[type="password"], input[type="search"], select, textarea {
   font-size: 14px;
   padding: 10px 12px;
   border: 1px solid var(--hairline);
-  border-radius: 7px;
+  border-radius: 5px;
   background: var(--paper-alt);
   color: var(--ink);
   box-sizing: border-box;
@@ -4854,15 +4876,15 @@ button[type="submit"] {
   font-size: 14px;
   font-weight: 700;
   padding: 11px 24px;
-  background: var(--brass);
+  background: var(--orange);
   color: var(--on-accent);
   border: none;
-  border-radius: 8px;
+  border-radius: 5px;
   cursor: pointer;
   transition: background 0.15s ease;
 }
-button[type="submit"]:hover { background: var(--brass-strong); }
-button[type="submit"]:focus-visible { outline: 2px solid var(--brass-strong); outline-offset: 2px; }
+button[type="submit"]:hover { background: #df5900; }
+button[type="submit"]:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
 
 /* ------------------------------------------------------------------
    Internal trip schedule — a nautical operations board
@@ -10839,10 +10861,13 @@ button.captain-command-alert:hover {
     display: flex;
     width: var(--admin-sidebar-width);
     flex-direction: column;
-    color: #dbe8ef;
+    color: #dcecef;
     background:
-      linear-gradient(180deg, rgba(52, 152, 219, .11), transparent 150px),
-      #0f2a35;
+      linear-gradient(rgba(1, 116, 142, .12) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(1, 116, 142, .12) 1px, transparent 1px),
+      linear-gradient(180deg, rgba(1, 116, 142, .2), transparent 180px),
+      var(--navy-deep);
+    background-size: 32px 32px, 32px 32px, auto, auto;
     border-right: 1px solid rgba(255, 255, 255, .09);
     box-shadow: 10px 0 28px -24px rgba(4, 23, 33, .9);
     transition: width .2s ease;
@@ -10857,7 +10882,7 @@ button.captain-command-alert:hover {
   }
   body.has-admin-sidebar .desktop-sidebar-heading {
     overflow: hidden;
-    color: #9db2bd;
+    color: #8fb2bc;
     font-family: 'PT Mono', monospace;
     font-size: 10px;
     font-weight: 700;
@@ -10874,19 +10899,19 @@ button.captain-command-alert:hover {
     height: 34px;
     flex: none;
     padding: 0;
-    color: #b9cad3;
+    color: #b9d0d6;
     background: rgba(255, 255, 255, .06);
     border: 1px solid rgba(255, 255, 255, .13);
-    border-radius: 9px;
+    border-radius: 5px;
     cursor: pointer;
     transition: color .15s ease, background-color .15s ease, transform .2s ease;
   }
   body.has-admin-sidebar .desktop-sidebar-toggle:hover {
     color: #fff;
-    background: rgba(52, 152, 219, .2);
+    background: rgba(1, 116, 142, .32);
   }
   body.has-admin-sidebar .desktop-sidebar-toggle:focus-visible {
-    outline: 2px solid #62b5e8;
+    outline: 2px solid var(--teal-bright);
     outline-offset: 2px;
   }
   body.has-admin-sidebar .desktop-sidebar-toggle svg { width: 18px; height: 18px; }
@@ -10918,10 +10943,10 @@ button.captain-command-alert:hover {
     gap: 12px;
     padding: 9px 11px;
     margin: 0;
-    color: #b9cad3;
+    color: #b9d0d6;
     background: transparent;
     border: 0;
-    border-radius: 9px;
+    border-radius: 5px;
     font-size: 12px;
     text-align: left;
     transition: color .15s ease, background-color .15s ease;
@@ -10957,9 +10982,9 @@ button.captain-command-alert:hover {
   body.has-admin-sidebar .desktop-sidebar .main-nav a:hover .nav-icon { transform: none; }
   body.has-admin-sidebar .desktop-sidebar .main-nav a.active {
     color: #fff;
-    background: rgba(52, 152, 219, .18);
+    background: rgba(1, 116, 142, .34);
   }
-  body.has-admin-sidebar .desktop-sidebar .main-nav a.active::before { background: #62b5e8; }
+  body.has-admin-sidebar .desktop-sidebar .main-nav a.active::before { background: var(--orange); }
 
   body.has-admin-sidebar .topbar:not(.schedule-topbar) { padding: 14px 20px; }
   body.has-admin-sidebar .topbar-inner {
@@ -10967,7 +10992,7 @@ button.captain-command-alert:hover {
     flex-wrap: nowrap;
   }
   body.has-admin-sidebar .topbar-top-row { flex: none; }
-  body.has-admin-sidebar .brand-logo { height: 44px; }
+  body.has-admin-sidebar .brand-logo { height: 50px; }
   body.has-admin-sidebar .title-block {
     min-width: 0;
     flex: 1;
