@@ -2809,6 +2809,10 @@ def init_db(db_path=None, include_bootstrap_data=True):
         # fiscal receipt, so its receipt goes to ModulKassa as a correction
         # receipt (SALE_CORRECTION) instead of an ordinary SALE.
         conn.execute("ALTER TABLE tuning_payments ADD COLUMN is_correction INTEGER NOT NULL DEFAULT 0")
+    if "no_receipt" not in tuning_payment_cols:
+        # 1 = the admin recorded the payment without punching a receipt
+        # ("Пробить чек" left unchecked), so it is not a "receipt not sent".
+        conn.execute("ALTER TABLE tuning_payments ADD COLUMN no_receipt INTEGER NOT NULL DEFAULT 0")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS modulkassa_receipts (
@@ -13746,7 +13750,11 @@ def add_tuning_payment(order_id):
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     paid_at = now
     correction_date = None
-    if request.form.get("is_correction"):
+    # "Пробить чек": unchecked = the payment is only recorded. A form that
+    # doesn't carry the checkbox at all (an old page still open in a tab)
+    # keeps the previous behaviour and punches the receipt.
+    punch_receipt = bool(request.form.get("fiscalize")) or "fiscalize_shown" not in request.form
+    if punch_receipt and request.form.get("is_correction"):
         correction_date = _parse_correction_payment_date(request.form.get("payment_date"))
         if correction_date is None:
             session["tuning_payment_error"] = (
@@ -13759,13 +13767,13 @@ def add_tuning_payment(order_id):
     if amount is not None and amount > 0:
         cur = db.execute(
             "INSERT INTO tuning_payments "
-            "(order_id, amount, paid_at, created_at, project_id, payment_type, is_correction) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(order_id, amount, paid_at, created_at, project_id, payment_type, is_correction, no_receipt) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (order_id, amount, paid_at, now, _project_id_for_tuning_order(db, order_id),
-             payment_type, 1 if correction_date else 0),
+             payment_type, 1 if correction_date else 0, 0 if punch_receipt else 1),
         )
         db.commit()
-        if payment_type:
+        if payment_type and punch_receipt:
             _modulkassa_fiscalize_payment(
                 db, order, cur.lastrowid, amount, payment_type, correction_date=correction_date
             )
@@ -13822,7 +13830,7 @@ def retry_modulkassa_receipt(order_id, payment_id):
     payment = db.execute(
         "SELECT * FROM tuning_payments WHERE id = ? AND order_id = ?", (payment_id, order_id)
     ).fetchone()
-    if order is not None and payment is not None and payment["payment_type"]:
+    if order is not None and payment is not None and payment["payment_type"] and not payment["no_receipt"]:
         _modulkassa_fiscalize_payment(
             db, order, payment_id, payment["amount"], payment["payment_type"],
             correction_date=payment["paid_at"][:10] if payment["is_correction"] else None,

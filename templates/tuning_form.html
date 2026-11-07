@@ -678,6 +678,13 @@
         </select>
       </div>
       <div class="field field-checkbox">
+        <input type="hidden" name="fiscalize_shown" value="1">
+        <label class="checkbox-inline" for="fiscalize">
+          <input type="checkbox" id="fiscalize" name="fiscalize" value="1" checked>
+          Пробить чек
+        </label>
+      </div>
+      <div class="field field-checkbox">
         <label class="checkbox-inline" for="is_correction">
           <input type="checkbox" id="is_correction" name="is_correction" value="1">
           Чек коррекции
@@ -692,20 +699,27 @@
       </div>
     </form>
     {% if modulkassa_configured %}
-    <p class="hint">Способ оплаты нужен, чтобы автоматически пробить кассовый чек через МодульКассу. «Чек коррекции» — для платежа, который уже был принят, но чек по нему не пробили: платёж запишется указанной датой, а чек уйдёт как чек коррекции.</p>
+    <p class="hint">Способ оплаты нужен, чтобы автоматически пробить кассовый чек через МодульКассу. Если снять галочку «Пробить чек», платёж только запишется — без чека. «Чек коррекции» — для платежа, который уже был принят, но чек по нему не пробили: платёж запишется указанной датой, а чек уйдёт как чек коррекции.</p>
     {% endif %}
     <script>
       (function () {
         var box = document.getElementById('is_correction');
+        var punch = document.getElementById('fiscalize');
         var field = document.getElementById('paymentDateField');
         var date = document.getElementById('payment_date');
         if (!box || !field || !date) return;
         function sync() {
+          // a correction receipt only exists together with a receipt
+          if (punch) {
+            if (!punch.checked) box.checked = false;
+            box.disabled = !punch.checked;
+          }
           field.hidden = !box.checked;
           date.required = box.checked;
           if (!box.checked) date.value = '';
         }
         box.addEventListener('change', sync);
+        if (punch) punch.addEventListener('change', sync);
         sync();
       })();
     </script>
@@ -730,6 +744,8 @@
               </span>
               {% elif p.online_receipt_pending %}
               <span class="status-badge status-pending">Чек формируется</span>
+              {% elif p.no_receipt %}
+              <span class="hint">без чека</span>
               {% elif p.payment_type %}
               <span class="hint">не отправлен</span>
               {% else %}

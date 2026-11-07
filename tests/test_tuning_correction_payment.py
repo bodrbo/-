@@ -115,6 +115,49 @@ class TuningCorrectionPaymentTests(unittest.TestCase):
         self.assertEqual(body["moneyPositions"], [{"paymentType": "CARD", "sum": 5000.0}])
         self.assertTrue(post.call_args.args[0].endswith("/v2/doc"))
 
+    def test_without_the_receipt_checkbox_the_payment_is_only_recorded(self):
+        response, post = self.pay(fiscalize_shown="1")
+        self.assertEqual(response.status_code, 302)
+        (payment,) = self.payments()
+        self.assertEqual((payment["amount"], payment["payment_type"], payment["no_receipt"]), (5000, "CARD", 1))
+        self.assertEqual(post.call_count, 0)
+        with application_module.app.app_context():
+            count = application_module.get_db().execute(
+                "SELECT COUNT(*) FROM modulkassa_receipts WHERE payment_id = ?", (payment["id"],)).fetchone()[0]
+        self.assertEqual(count, 0)
+        page = self.client.get(f"/tuning/edit/{self.order_id}").get_data(as_text=True)
+        self.assertIn("без чека", page)
+
+    def test_a_ticked_receipt_checkbox_punches_the_receipt(self):
+        _, post = self.pay(fiscalize_shown="1", fiscalize="1")
+        (payment,) = self.payments()
+        self.assertEqual(payment["no_receipt"], 0)
+        self.assertEqual(post.call_args.kwargs["json"]["docType"], "SALE")
+
+    def test_a_form_without_the_checkbox_keeps_punching_the_receipt(self):
+        _, post = self.pay()
+        self.assertEqual(self.payments()[0]["no_receipt"], 0)
+        self.assertEqual(post.call_count, 1)
+
+    def test_a_correction_without_a_receipt_is_a_plain_payment_today(self):
+        _, post = self.pay(fiscalize_shown="1", is_correction="1", payment_date="2026-08-15")
+        (payment,) = self.payments()
+        self.assertEqual((payment["is_correction"], payment["no_receipt"]), (0, 1))
+        self.assertEqual(payment["paid_at"][:10], dt.date.today().isoformat())
+        self.assertEqual(post.call_count, 0)
+
+    def test_retrying_never_punches_a_receipt_for_a_payment_recorded_without_one(self):
+        self.pay(fiscalize_shown="1")
+        (payment,) = self.payments()
+        with mock.patch.object(application_module.requests, "post", return_value=_FakeResponse()) as post:
+            self.client.post(f"/tuning/{self.order_id}/pay/{payment['id']}/receipt/retry")
+        self.assertEqual(post.call_count, 0)
+
+    def test_the_form_offers_the_receipt_checkbox_checked_by_default(self):
+        page = self.client.get(f"/tuning/edit/{self.order_id}").get_data(as_text=True)
+        self.assertIn('id="fiscalize" name="fiscalize" value="1" checked', page)
+        self.assertIn('name="fiscalize_shown"', page)
+
     def test_an_ordinary_payment_is_still_an_ordinary_sale(self):
         _, post = self.pay()
         (payment,) = self.payments()
