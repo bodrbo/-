@@ -14911,6 +14911,42 @@ def _partner_logo_url(partner_profile):
     return url_for("static", filename=f"partner_logos/{filename}")
 
 
+def _client_dealer_orders(db, client_id, with_payments):
+    """Dealer-center orders (boats and motors) of one client for the cabinet.
+
+    The client sees what he bought and how much is left to pay; the payment
+    rows themselves are only loaded for the administrative view.
+    """
+    from modules.dealer import repository as dealer_repository
+    from modules.dealer.constants import ITEM_KINDS, PAYMENT_TYPES, STATUS_LABELS
+
+    result = []
+    rows = db.execute(
+        "SELECT * FROM dealer_orders WHERE client_id = ? "
+        "ORDER BY order_date DESC, id DESC",
+        (client_id,),
+    ).fetchall()
+    for row in rows:
+        order = dict(row)
+        order["status_label"] = STATUS_LABELS.get(order["status"], order["status"])
+        order["items"] = [
+            dict(item, kind_label=ITEM_KINDS.get(item["kind"], ""))
+            for item in dealer_repository.list_items(db, order["id"])
+        ]
+        order["paid_amount"] = dealer_repository.paid_amount(db, order["id"])
+        order["remaining"] = max(0.0, order["total"] - order["paid_amount"])
+        order["discount_amount"] = max(0.0, order["subtotal"] - order["total"])
+        order["payments"] = (
+            [
+                dict(p, type_label=PAYMENT_TYPES.get(p["payment_type"], ""))
+                for p in dealer_repository.list_payments(db, order["id"])
+            ]
+            if with_payments else []
+        )
+        result.append(order)
+    return result
+
+
 def _render_client_dashboard(
     db,
     client,
@@ -15093,6 +15129,17 @@ def _render_client_dashboard(
             remaining_total += remaining
 
     grand_total = sum(o["total"] for o in counted_orders)
+    orders_count = len(counted_orders)
+    dealer_orders = []
+    if not is_tuning_partner and client_section != EXCURSION_SEGMENT:
+        dealer_orders = _client_dealer_orders(db, client["id"], is_admin_view)
+        # Like the tuning ones, a cancelled dealer order is listed but not counted.
+        for dealer_order in dealer_orders:
+            if dealer_order["status"] != "cancelled":
+                orders_count += 1
+                grand_total += dealer_order["total"]
+                paid_total += dealer_order["paid_amount"]
+                remaining_total += dealer_order["remaining"]
     partner_request_view = "outgoing"
     partner_request_counts = {"incoming": 0, "outgoing": 0}
     visible_orders = orders
@@ -15135,7 +15182,8 @@ def _render_client_dashboard(
         "client_dashboard.html", client=client, orders=orders,
         partner_income=partner_income,
         visible_orders=visible_orders, grand_total=grand_total,
-        orders_count=len(counted_orders),
+        dealer_orders=dealer_orders,
+        orders_count=orders_count,
         paid_total=paid_total, remaining_total=remaining_total,
         primary_equipment=(
             tuning_equipment_label(orders[0])

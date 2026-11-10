@@ -313,6 +313,7 @@
   </details>
   {% endif %}
 
+  {% if visible_orders or not dealer_orders or is_tuning_partner %}
   <section class="client-orders" id="orders">
     <div class="partner-orders-heading">
       <h2>{{ ('Входящие заявки' if partner_request_view == 'incoming' else 'Исходящие заявки') if is_tuning_partner else 'Ваши заказы' }}</h2>
@@ -609,7 +610,7 @@
       </details>
       {% endfor %}
     </div>
-    {% else %}
+    {% elif not dealer_orders %}
     <div class="empty-state">
       {% include '_empty_state_logo.html' %}
       <div class="t">{{ ('Входящих заявок пока нет' if partner_request_view == 'incoming' else 'Исходящих заявок пока нет') if is_tuning_partner else 'Заказов пока нет' }}</div>
@@ -617,6 +618,76 @@
     </div>
     {% endif %}
   </section>
+  {% endif %}
+
+  {% if dealer_orders %}
+  <section class="client-orders client-dealer-orders" id="dealer-orders">
+    <div class="partner-orders-heading"><h2>Лодки и моторы</h2></div>
+    <div class="order-card-list">
+      {% for d in dealer_orders %}
+      <details class="panel order-card" id="dealer-order-{{ d.id }}">
+        <summary>
+          <span class="oc-num">№Д{{ d.id }}</span>
+          <span class="oc-date">{{ d.order_date|ru_date }}</span>
+          {% if d.deadline_date %}<span class="oc-date">Срок: {{ d.deadline_date|ru_date }}</span>{% endif %}
+          <span class="oc-boat">{{ d["items"]|map(attribute='name')|join(', ') or '—' }}</span>
+          <span class="status-badge status-dealer-{{ d.status }}">{{ d.status_label }}</span>
+          <span class="oc-total">{{ d.total|money }} ₽</span>
+          {% if d.status == 'cancelled' %}
+          {% elif d.remaining <= 0 and d.total > 0 %}
+          <span class="oc-status paid">Оплачено</span>
+          {% else %}
+          <span class="oc-status">К доплате {{ d.remaining|money }} ₽</span>
+          {% endif %}
+          <span class="chev" aria-hidden="true"></span>
+        </summary>
+        <div class="order-card-body">
+          <div class="order-card-amount-breakdown" aria-label="Состав суммы заказа">
+            <div><span>Общая сумма</span><strong>{{ d.total|money }} ₽</strong></div>
+            <div><span>Оплачено</span><strong>{{ d.paid_amount|money }} ₽</strong></div>
+            {% if d.discount_amount > 0 %}
+            <div><span>Скидка</span><strong class="work-discount-total">−{{ d.discount_amount|money }} ₽</strong></div>
+            {% endif %}
+          </div>
+          <h3>Состав заказа</h3>
+          <div class="table-scroll">
+            <table class="records">
+              <thead><tr><th>Позиция</th><th>Тип</th><th>Серийный номер</th><th>Кол-во</th><th>Цена, ₽</th></tr></thead>
+              <tbody>
+                {% for item in d["items"] %}
+                <tr>
+                  <td>{{ item.name }}</td>
+                  <td>{{ item.kind_label }}</td>
+                  <td>{{ item.serial_number or '—' }}</td>
+                  <td>{{ item.quantity }}</td>
+                  <td class="amount">{{ item.price|money }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if is_admin_view %}
+          {% if d.payments %}
+          <h3>Платежи</h3>
+          <div class="table-scroll">
+            <table class="records">
+              <thead><tr><th>Дата</th><th>Способ</th><th>Сумма, ₽</th></tr></thead>
+              <tbody>
+                {% for p in d.payments %}
+                <tr><td>{{ p.paid_at[:10]|ru_date }}</td><td>{{ p.type_label or '—' }}</td><td class="amount">{{ p.amount|money }}</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+          <a href="{{ url_for('dealer.order', order_id=d.id) }}" class="term" style="display:inline-block; margin-top:10px;">Открыть заказ в дилерском центре →</a>
+          {% endif %}
+        </div>
+      </details>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
   {% endif %}
 
   <div id="product-modal" class="photo-modal hidden" onclick="if (event.target === this) closeProductCard();">
