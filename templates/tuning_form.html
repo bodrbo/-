@@ -631,11 +631,11 @@
     <p class="hint">Товары из каталога пока не добавлены.</p>
     {% endif %}
     <form action="{{ url_for('add_tuning_order_product', order_id=edit_order.id) }}" method="post"
-          class="entry-form" style="margin-top:14px;">
-      <div class="field combo-field" data-combo>
+          class="entry-form goods-add-form" style="margin-top:14px;">
+      <div class="field combo-field goods-add-product" data-combo>
         <label for="product_search">Товар из каталога</label>
         <input type="text" id="product_search" class="combo-input" data-combo-input
-               placeholder="Начните вводить название или артикул…" autocomplete="off">
+               placeholder="Название или артикул…" autocomplete="off">
         <input type="hidden" name="product_id" data-combo-value>
         <div class="combo-dropdown hidden" data-combo-dropdown>
           <div class="combo-empty hidden" data-combo-empty>
@@ -655,11 +655,11 @@
           <p class="combo-more hidden" data-combo-more></p>
         </div>
       </div>
-      <div class="field field-narrow">
+      <div class="field field-narrow goods-add-qty">
         <label for="product_quantity">Количество</label>
         <input type="text" inputmode="decimal" id="product_quantity" name="quantity" required>
       </div>
-      <div class="field">
+      <div class="field goods-add-warehouse">
         <label for="product_warehouse">Склад списания</label>
         <select id="product_warehouse" name="warehouse_id">
           <option value="">Не списывать</option>
@@ -669,15 +669,15 @@
         </select>
         <span class="field-context">Необязательно. Спишется, когда статус заказа станет «В работе»</span>
       </div>
-      <div class="field field-narrow">
+      <div class="field field-narrow goods-add-price">
         <label for="product_unit_price">Цена, ₽</label>
         <input type="text" inputmode="decimal" id="product_unit_price" name="unit_price" placeholder="Из каталога">
         <span class="field-context">Можно изменить — только для этого заказа</span>
       </div>
-      <div class="field field-narrow">
+      <div class="field field-narrow goods-add-discount">
         <label for="product_discount_value">Скидка</label>
-        <div style="display:flex;gap:6px;">
-          <input type="text" inputmode="decimal" id="product_discount_value" name="discount_value" placeholder="0" style="min-width:0;">
+        <div class="goods-add-discount-row">
+          <input type="text" inputmode="decimal" id="product_discount_value" name="discount_value" placeholder="0">
           <select name="discount_type" aria-label="Вид скидки">
             <option value="percent">%</option>
             <option value="amount">₽ за ед.</option>
@@ -686,6 +686,7 @@
         <span class="field-context">Необязательно</span>
       </div>
       <div class="field field-submit">
+        <label aria-hidden="true">&nbsp;</label>
         <button type="submit">Добавить товар</button>
       </div>
     </form>
