@@ -156,6 +156,11 @@ from modules.dealer import (
     create_dealer_blueprint,
     init_schema as init_dealer_schema,
 )
+from modules.client_equipment import (
+    cabinet_context as client_equipment_context,
+    create_client_equipment_blueprint,
+    init_schema as init_client_equipment_schema,
+)
 from modules.order_events import (
     add_new_request as add_order_new_request_event,
     create_order_events_blueprint,
@@ -2385,6 +2390,7 @@ def init_db(db_path=None, include_bootstrap_data=True):
     init_payroll_rates_schema(conn)
     init_dealer_schema(conn)
     init_order_events_schema(conn)
+    init_client_equipment_schema(conn)
 
     conn.execute(
         """
@@ -6534,6 +6540,20 @@ app.register_blueprint(
         order_url=_order_event_url,
         make_visit_task=_create_visit_schedule_task,
         delete_task=_delete_visit_schedule_task,
+    )
+)
+
+
+app.register_blueprint(
+    create_client_equipment_blueprint(
+        get_db=get_db,
+        access_required=admin_only_no_demo_tenant,
+        client_exists=lambda db, client_id: db.execute(
+            "SELECT 1 FROM clients WHERE id = ?", (client_id,)
+        ).fetchone() is not None,
+        back_url=lambda client_id: url_for(
+            "admin_client_dashboard", client_id=client_id, section=TUNING_SEGMENT
+        ),
     )
 )
 
@@ -14911,6 +14931,12 @@ def _partner_logo_url(partner_profile):
     return url_for("static", filename=f"partner_logos/{filename}")
 
 
+def _client_equipment_summary(items):
+    """The cabinet's «Техника» card: the first position and how many more."""
+    label = items[0]["name"]
+    return f"{label} и ещё {len(items) - 1}" if len(items) > 1 else label
+
+
 def _client_dealer_orders(db, client_id, with_payments):
     """Dealer-center orders (boats and motors) of one client for the cabinet.
 
@@ -15140,6 +15166,9 @@ def _render_client_dashboard(
                 grand_total += dealer_order["total"]
                 paid_total += dealer_order["paid_amount"]
                 remaining_total += dealer_order["remaining"]
+    equipment = None
+    if not is_tuning_partner and client_section != EXCURSION_SEGMENT:
+        equipment = client_equipment_context(db, client["id"], is_admin_view)
     partner_request_view = "outgoing"
     partner_request_counts = {"incoming": 0, "outgoing": 0}
     visible_orders = orders
@@ -15183,10 +15212,15 @@ def _render_client_dashboard(
         partner_income=partner_income,
         visible_orders=visible_orders, grand_total=grand_total,
         dealer_orders=dealer_orders,
+        equipment=equipment,
+        equipment_notice=session.pop("client_equipment_notice", None),
+        equipment_error=session.pop("client_equipment_error", None),
         orders_count=orders_count,
         paid_total=paid_total, remaining_total=remaining_total,
         primary_equipment=(
-            tuning_equipment_label(orders[0])
+            _client_equipment_summary(equipment["items"])
+            if equipment and equipment["items"]
+            else tuning_equipment_label(orders[0])
             if orders else (client["boat_model"] or "—")
         ),
         work_photos_by_item=work_photos_by_item, cost_units=SUPPLY_COST_UNITS,

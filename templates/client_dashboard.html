@@ -313,6 +313,63 @@
   </details>
   {% endif %}
 
+  {% if equipment is not none and (equipment['items'] or is_admin_view) %}
+  <section class="client-orders client-equipment" id="equipment">
+    <div class="partner-orders-heading"><h2>Техника клиента</h2></div>
+    {% if equipment_error %}<div class="alert" role="alert">{{ equipment_error }}</div>{% endif %}
+    {% if equipment_notice %}<div class="alert success" role="status">{{ equipment_notice }}</div>{% endif %}
+    {% if equipment['items'] %}
+    <div class="client-equipment-list">
+      {% for e in equipment['items'] %}
+      <article class="panel client-equipment-card">
+        {% if is_admin_view %}
+        <form method="post" class="client-equipment-form"
+              action="{{ url_for('client_equipment.update', client_id=client.id, item_id=e.id) }}">
+          <select name="kind" aria-label="Тип техники" onchange="this.form.elements['name'].setAttribute('list', 'equipment-catalog-' + this.value)">
+            {% for value, label in equipment['kinds'].items() %}<option value="{{ value }}" {{ 'selected' if e.kind == value }}>{{ label }}</option>{% endfor %}
+          </select>
+          <input type="text" name="name" value="{{ e.name }}" required maxlength="120" list="equipment-catalog-{{ e.kind }}" placeholder="Модель" aria-label="Модель">
+          <input type="text" name="serial_number" value="{{ e.serial_number }}" maxlength="60" placeholder="Серийный / бортовой номер" aria-label="Серийный номер">
+          <input type="text" name="year" value="{{ e.year or '' }}" inputmode="numeric" maxlength="4" placeholder="Год" aria-label="Год выпуска">
+          <input type="text" name="note" value="{{ e.note }}" maxlength="300" placeholder="Заметка" aria-label="Заметка">
+          <button type="submit" class="btn-secondary">Сохранить</button>
+          <button type="submit" class="btn-secondary danger" formaction="{{ url_for('client_equipment.delete', client_id=client.id, item_id=e.id) }}"
+                  onclick="return confirm('Удалить эту технику из карточки клиента?');">Удалить</button>
+        </form>
+        {% else %}
+        <span class="status-badge client-equipment-kind">{{ e.kind_label }}</span>
+        <strong class="client-equipment-name">{{ e.name }}</strong>
+        <dl class="client-equipment-facts">
+          {% if e.serial_number %}<div><dt>Номер</dt><dd>{{ e.serial_number }}</dd></div>{% endif %}
+          {% if e.year %}<div><dt>Год</dt><dd>{{ e.year }}</dd></div>{% endif %}
+          {% if e.note %}<div><dt>Заметка</dt><dd>{{ e.note }}</dd></div>{% endif %}
+        </dl>
+        {% endif %}
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="hint">Техника ещё не добавлена.</p>
+    {% endif %}
+    {% if is_admin_view %}
+    <form method="post" class="panel client-equipment-form client-equipment-add"
+          action="{{ url_for('client_equipment.add', client_id=client.id) }}">
+      <select name="kind" aria-label="Тип техники" onchange="this.form.elements['name'].setAttribute('list', 'equipment-catalog-' + this.value)">
+        {% for value, label in equipment['kinds'].items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+      </select>
+      <input type="text" name="name" required maxlength="120" list="equipment-catalog-boat" placeholder="Модель" aria-label="Модель">
+      <input type="text" name="serial_number" maxlength="60" placeholder="Серийный / бортовой номер" aria-label="Серийный номер">
+      <input type="text" name="year" inputmode="numeric" maxlength="4" placeholder="Год" aria-label="Год выпуска">
+      <input type="text" name="note" maxlength="300" placeholder="Заметка" aria-label="Заметка">
+      <button type="submit" class="btn-primary">Добавить технику</button>
+    </form>
+    {% for kind, names in equipment['catalog'].items() %}
+    <datalist id="equipment-catalog-{{ kind }}">{% for n in names %}<option value="{{ n }}">{% endfor %}</datalist>
+    {% endfor %}
+    {% endif %}
+  </section>
+  {% endif %}
+
   {% if visible_orders or not dealer_orders or is_tuning_partner %}
   <section class="client-orders" id="orders">
     <div class="partner-orders-heading">
