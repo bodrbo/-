@@ -3,7 +3,7 @@ import unittest
 from support import application_module
 
 
-class TuningGoodsPriceTests(unittest.TestCase):
+class _GoodsFixture:
     MARK = "goods-price-test"
 
     def setUp(self):
@@ -74,6 +74,7 @@ class TuningGoodsPriceTests(unittest.TestCase):
                 "SELECT sale_price FROM supply_products WHERE id = ?", (self.product_id,)
             ).fetchone()["sale_price"]
 
+class TuningGoodsPriceTests(_GoodsFixture, unittest.TestCase):
     def test_default_price_comes_from_catalog(self):
         self.add(self.order_id)
         lines, total = self.lines(self.order_id)
@@ -128,6 +129,109 @@ class TuningGoodsPriceTests(unittest.TestCase):
         page = self.client.get(f"/tuning/edit/{self.order_id}").get_data(as_text=True)
         self.assertIn('name="unit_price"', page)
         self.assertIn("goods-price-input", page)
+
+
+class TuningGoodsDiscountTests(_GoodsFixture, unittest.TestCase):
+    """A discount on one goods line: a percent, or rubles off one unit. The
+    line's unit_price is what the client pays, so every sum stays right."""
+
+    def discount(self, order_id, line_id, value, kind="percent"):
+        return self.client.post(
+            f"/tuning/{order_id}/products/{line_id}/discount",
+            data={"discount_value": value, "discount_type": kind})
+
+    def line(self, order_id=None):
+        return self.lines(order_id or self.order_id)[0][0]
+
+    def test_a_percent_discount_is_set_on_adding(self):
+        self.add(self.order_id, discount_value="10", discount_type="percent")
+        lines, total = self.lines(self.order_id)
+        self.assertEqual((lines[0]["list_price"], lines[0]["unit_price"], lines[0]["discount_value"]), (500, 450, 10))
+        self.assertEqual(total, 900)
+
+    def test_an_amount_discount_is_taken_off_each_unit(self):
+        self.add(self.order_id, discount_value="50", discount_type="amount")
+        lines, total = self.lines(self.order_id)
+        self.assertEqual((lines[0]["list_price"], lines[0]["unit_price"]), (500, 450))
+        self.assertEqual(total, 900)
+
+    def test_a_discount_is_set_changed_and_cleared_on_an_existing_line(self):
+        self.add(self.order_id)
+        line = self.line()
+        self.discount(self.order_id, line["id"], "20")
+        lines, total = self.lines(self.order_id)
+        self.assertEqual((lines[0]["unit_price"], lines[0]["list_price"], total), (400, 500, 800))
+        self.discount(self.order_id, line["id"], "100", "amount")      # replaces, from the original price
+        lines, total = self.lines(self.order_id)
+        self.assertEqual((lines[0]["unit_price"], lines[0]["list_price"], lines[0]["discount_type"], total),
+                         (400, 500, "amount", 800))
+        self.discount(self.order_id, line["id"], "")                    # cleared
+        lines, total = self.lines(self.order_id)
+        self.assertEqual((lines[0]["unit_price"], lines[0]["list_price"], total), (500, None, 1000))
+
+    def test_editing_the_price_keeps_the_discount(self):
+        self.add(self.order_id, discount_value="10")
+        line = self.line()
+        self.client.post(f"/tuning/{self.order_id}/products/{line['id']}/price", data={"unit_price": "1000"})
+        lines, total = self.lines(self.order_id)
+        self.assertEqual((lines[0]["list_price"], lines[0]["unit_price"], total), (1000, 900, 1800))
+        page = self.client.get(f"/tuning/edit/{self.order_id}").get_data(as_text=True)
+        self.assertIn('name="unit_price" value="1000.0"', page)     # the field shows the price before the discount
+
+    def test_the_order_discount_applies_on_top_of_the_line_discount(self):
+        self.add(self.order_id, discount_value="10")
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("UPDATE tuning_orders SET discount_type = 'percent', discount_value = 10 WHERE id = ?", (self.order_id,))
+            db.commit()
+            application_module._recompute_order_totals(db, self.order_id)
+        self.assertEqual(self.lines(self.order_id)[1], 810)           # 900 less 10%
+
+    def test_bad_discounts_are_refused_and_change_nothing(self):
+        self.add(self.order_id)
+        line = self.line()
+        for value, kind in (("abc", "percent"), ("-5", "percent"), ("101", "percent"), ("501", "amount")):
+            self.discount(self.order_id, line["id"], value, kind)
+            self.assertIn("Скидка", self.client.get(f"/tuning/edit/{self.order_id}").get_data(as_text=True))
+            lines, total = self.lines(self.order_id)
+            self.assertEqual((lines[0]["unit_price"], lines[0]["list_price"], total), (500, None, 1000), value)
+        self.add(self.order_id, discount_value="200", discount_type="percent")
+        self.assertEqual(len(self.lines(self.order_id)[0]), 1)
+
+    def test_a_discount_cannot_be_set_on_another_orders_line(self):
+        self.add(self.order_id)
+        self.add(self.other_order_id)
+        line = self.line(self.other_order_id)
+        self.discount(self.order_id, line["id"], "50")
+        self.assertEqual(self.line(self.other_order_id)["unit_price"], 500)
+
+    def test_the_catalog_price_is_untouched_and_a_copy_keeps_the_discount(self):
+        self.add(self.order_id, discount_value="10")
+        self.assertEqual(self.catalog_price(), 500)
+        self.client.post(f"/tuning/{self.order_id}/copy")
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            copy = db.execute(
+                "SELECT p.* FROM tuning_order_products p JOIN tuning_orders o ON o.id = p.order_id "
+                "WHERE o.id != ? AND o.id != ? AND p.product_id = ?",
+                (self.order_id, self.other_order_id, self.product_id)).fetchone()
+            copy_order = copy["order_id"] if copy else None
+        try:
+            self.assertEqual((copy["list_price"], copy["unit_price"]), (500, 450))
+        finally:
+            if copy_order:
+                with application_module.app.app_context():
+                    db = application_module.get_db()
+                    db.execute("DELETE FROM tuning_order_products WHERE order_id = ?", (copy_order,))
+                    application_module._delete_tuning_order_records(db, [copy_order])
+                    db.commit()
+
+    def test_the_order_page_shows_the_discount_form_and_the_old_price(self):
+        self.add(self.order_id, discount_value="10")
+        page = self.client.get(f"/tuning/edit/{self.order_id}").get_data(as_text=True)
+        self.assertIn('name="discount_value"', page)
+        self.assertIn("₽ за ед.", page)
+        self.assertIn("work-price-was", page)
 
 
 if __name__ == "__main__":

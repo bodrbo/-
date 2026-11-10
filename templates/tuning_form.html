@@ -546,7 +546,7 @@
     <p class="hint">Порядок товаров меняется перетаскиванием за значок слева. <span class="sort-status" id="goods-sort-status" role="status" aria-live="polite"></span></p>
     <div class="table-scroll">
       <table class="records">
-        <thead><tr><th class="drag-cell"></th><th>Товар</th><th>Кол-во</th><th>Цена, ₽</th><th>Сумма, ₽</th><th></th></tr></thead>
+        <thead><tr><th class="drag-cell"></th><th>Товар</th><th>Кол-во</th><th>Цена, ₽</th><th>Скидка</th><th>Сумма, ₽</th><th></th></tr></thead>
         <tbody id="goods-rows" data-reorder-url="{{ url_for('reorder_tuning_order_products', order_id=edit_order.id) }}">
           {% for g in goods %}
           <tr data-row-id="{{ g.id }}">
@@ -582,7 +582,7 @@
             <td class="amount">
               <form action="{{ url_for('set_tuning_order_product_price', order_id=edit_order.id, row_id=g.id) }}"
                     method="post" class="goods-price-form">
-                <input type="text" inputmode="decimal" name="unit_price" value="{{ g.unit_price|float|round(2) }}"
+                <input type="text" inputmode="decimal" name="unit_price" value="{{ (g.list_price if g.list_price is not none else g.unit_price)|float|round(2) }}"
                        class="goods-price-input" aria-label="Цена, ₽" title="Цена действует только в этом заказе"
                        required>
                 <button type="submit" class="icon-btn approve" title="Сохранить цену">
@@ -592,7 +592,26 @@
                 </button>
               </form>
             </td>
-            <td class="amount">{{ (g.quantity * g.unit_price)|money }}</td>
+            <td class="amount">
+              <form action="{{ url_for('set_tuning_order_product_discount', order_id=edit_order.id, row_id=g.id) }}"
+                    method="post" class="goods-price-form">
+                <input type="text" inputmode="decimal" name="discount_value" class="goods-price-input"
+                       value="{{ ('%g' % (g.discount_value|round(2))) if g.list_price is not none and g.discount_value > 0 else '' }}"
+                       placeholder="0" aria-label="Скидка на товар" title="Скидка на этот товар, только в этом заказе">
+                <select name="discount_type" aria-label="Вид скидки">
+                  <option value="percent" {{ 'selected' if g.discount_type != 'amount' }}>%</option>
+                  <option value="amount" {{ 'selected' if g.discount_type == 'amount' }}>₽ за ед.</option>
+                </select>
+                <button type="submit" class="icon-btn approve" title="Сохранить скидку">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 10.5l4 4 8-9"/>
+                  </svg>
+                </button>
+              </form>
+            </td>
+            <td class="amount">
+              {% if g.list_price is not none and g.discount_value > 0 %}<s class="work-price-was">{{ (g.quantity * g.list_price)|money }}</s> {% endif %}{{ (g.quantity * g.unit_price)|money }}
+            </td>
             <td class="row-actions">
               <form action="{{ url_for('remove_tuning_order_product', order_id=edit_order.id, row_id=g.id) }}" method="post"
                     onsubmit="return confirm('Убрать этот товар из заказа?');">
@@ -654,6 +673,17 @@
         <label for="product_unit_price">Цена, ₽</label>
         <input type="text" inputmode="decimal" id="product_unit_price" name="unit_price" placeholder="Из каталога">
         <span class="field-context">Можно изменить — только для этого заказа</span>
+      </div>
+      <div class="field field-narrow">
+        <label for="product_discount_value">Скидка</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" inputmode="decimal" id="product_discount_value" name="discount_value" placeholder="0" style="min-width:0;">
+          <select name="discount_type" aria-label="Вид скидки">
+            <option value="percent">%</option>
+            <option value="amount">₽ за ед.</option>
+          </select>
+        </div>
+        <span class="field-context">Необязательно</span>
       </div>
       <div class="field field-submit">
         <button type="submit">Добавить товар</button>

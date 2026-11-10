@@ -2858,6 +2858,19 @@ def init_db(db_path=None, include_bootstrap_data=True):
         # off from it while the order is "В работе" (see
         # _sync_order_goods_writeoff). NULL = no automatic write-off.
         conn.execute("ALTER TABLE tuning_order_products ADD COLUMN warehouse_id INTEGER")
+    if "list_price" not in order_product_cols:
+        # A discount on one goods line, the same way as on a work: unit_price
+        # stays what the client pays for one unit (every sum in the app adds
+        # up quantity * unit_price), list_price is the unit price before the
+        # discount (NULL = no discount), discount_type/discount_value
+        # remember how it was entered (a percent, or rubles per unit).
+        conn.execute("ALTER TABLE tuning_order_products ADD COLUMN list_price REAL")
+        conn.execute(
+            "ALTER TABLE tuning_order_products ADD COLUMN discount_type TEXT NOT NULL DEFAULT 'percent'"
+        )
+        conn.execute(
+            "ALTER TABLE tuning_order_products ADD COLUMN discount_value REAL NOT NULL DEFAULT 0"
+        )
     if "position" not in order_product_cols:
         # Same drag-and-drop order for the goods of an order.
         conn.execute(
@@ -11720,9 +11733,9 @@ def copy_tuning_order(order_id):
     db.execute(
         "INSERT INTO tuning_order_products "
         "(order_id, product_id, product_name, quantity, unit_price, "
-        "cost_price, unit, created_at, position) "
+        "cost_price, unit, created_at, position, list_price, discount_type, discount_value) "
         "SELECT ?, product_id, product_name, quantity, unit_price, "
-        "cost_price, unit, ?, position FROM tuning_order_products "
+        "cost_price, unit, ?, position, list_price, discount_type, discount_value FROM tuning_order_products "
         "WHERE order_id = ? ORDER BY position, id",
         (copied_order_id, now, order_id),
     )
@@ -14465,6 +14478,20 @@ def add_tuning_order_product(order_id):
             session["tuning_goods_error"] = "Цена должна быть числом не меньше нуля."
             return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
 
+    # Optional discount on this line (a percent, or rubles per unit).
+    list_price = None
+    discount_type, discount_value = "percent", 0.0
+    if unit_price is not None:
+        error, discount_type, discount_value = _parse_goods_discount(
+            request.form.get("discount_value"), request.form.get("discount_type"), unit_price
+        )
+        if error:
+            session["tuning_goods_error"] = error
+            return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
+        if discount_value > 0:
+            list_price = unit_price
+            unit_price = _goods_net_price(unit_price, discount_type, discount_value)
+
     # Optional write-off warehouse. Without one the goods are never written
     # off; with one, stock is written off once the order is "В работе".
     warehouse_raw = request.form.get("warehouse_id", "").strip()
@@ -14483,10 +14510,11 @@ def add_tuning_order_product(order_id):
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
         db.execute(
             "INSERT INTO tuning_order_products (order_id, product_id, product_name, quantity, "
-            "unit_price, cost_price, unit, created_at, warehouse_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "unit_price, cost_price, unit, created_at, warehouse_id, list_price, discount_type, discount_value) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (order_id, product_id, product["name"], quantity,
-             unit_price, product["cost_price"], product["cost_unit"], now, warehouse_id),
+             unit_price, product["cost_price"], product["cost_unit"], now, warehouse_id,
+             list_price, discount_type, discount_value),
         )
         db.commit()
         # Totals sync also books the write-off if the order is already in work.
@@ -14594,7 +14622,8 @@ def set_tuning_order_product_price(order_id, row_id):
     price, so the catalog and other orders are unaffected."""
     db = get_db()
     row = db.execute(
-        "SELECT id FROM tuning_order_products WHERE id = ? AND order_id = ?", (row_id, order_id)
+        "SELECT id, list_price, discount_type, discount_value FROM tuning_order_products "
+        "WHERE id = ? AND order_id = ?", (row_id, order_id)
     ).fetchone()
     if row is None:
         return redirect(url_for("edit_tuning_order", order_id=order_id))
@@ -14606,12 +14635,88 @@ def set_tuning_order_product_price(order_id, row_id):
     except ValueError:
         session["tuning_goods_error"] = "Цена должна быть числом не меньше нуля."
         return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
+    # the price typed is the one before the line's discount; the discount,
+    # if there is one, is applied to it again
+    list_price = None
+    if row["list_price"] is not None and row["discount_value"] > 0:
+        if row["discount_type"] == "amount" and row["discount_value"] > unit_price + 1e-9:
+            session["tuning_goods_error"] = "Цена меньше скидки на этот товар — сначала измените скидку."
+            return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
+        list_price = unit_price
+        unit_price = _goods_net_price(unit_price, row["discount_type"], row["discount_value"])
     db.execute(
-        "UPDATE tuning_order_products SET unit_price = ? WHERE id = ?", (unit_price, row_id)
+        "UPDATE tuning_order_products SET unit_price = ?, list_price = ? WHERE id = ?",
+        (unit_price, list_price, row_id),
     )
     db.commit()
     _recompute_order_totals(db, order_id)
     session["tuning_goods_notice"] = "Цена товара в заказе обновлена."
+    return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
+
+
+def _parse_goods_discount(raw_value, raw_type, price):
+    """A goods line's discount as typed -> (error, type, value). Empty or zero
+    means no discount. A percent is 0-100; rubles are taken off one unit."""
+    discount_type = (raw_type or "").strip()
+    if discount_type not in ("percent", "amount"):
+        discount_type = "percent"
+    text = (raw_value or "").strip().replace(",", ".").replace(" ", "")
+    if not text:
+        return None, discount_type, 0.0
+    try:
+        value = float(text)
+    except ValueError:
+        return "Скидка должна быть числом.", discount_type, 0.0
+    if value != value or value < 0:
+        return "Скидка не может быть отрицательной.", discount_type, 0.0
+    if discount_type == "percent" and value > 100:
+        return "Скидка в процентах не может быть больше 100.", discount_type, 0.0
+    if discount_type == "amount" and value > price + 1e-9:
+        return "Скидка не может быть больше цены товара.", discount_type, 0.0
+    return None, discount_type, value
+
+
+def _goods_net_price(price, discount_type, discount_value):
+    """The price of one unit after its discount."""
+    taken = price * discount_value / 100 if discount_type == "percent" else discount_value
+    return round(max(0.0, price - taken), 2)
+
+
+@app.route("/tuning/<int:order_id>/products/<int:row_id>/discount", methods=["POST"])
+@admin_login_required
+def set_tuning_order_product_discount(order_id, row_id):
+    """Sets or clears the discount of one goods line (this order only). The
+    line's price before the discount is kept; empty or 0 removes the discount."""
+    db = get_db()
+    row = db.execute(
+        "SELECT id, unit_price, list_price FROM tuning_order_products WHERE id = ? AND order_id = ?",
+        (row_id, order_id),
+    ).fetchone()
+    if row is None:
+        return redirect(url_for("edit_tuning_order", order_id=order_id))
+    base = row["list_price"] if row["list_price"] is not None else row["unit_price"]
+    error, discount_type, discount_value = _parse_goods_discount(
+        request.form.get("discount_value"), request.form.get("discount_type"), base
+    )
+    if error:
+        session["tuning_goods_error"] = error
+        return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
+    if discount_value > 0:
+        db.execute(
+            "UPDATE tuning_order_products SET unit_price = ?, list_price = ?, discount_type = ?, "
+            "discount_value = ? WHERE id = ?",
+            (_goods_net_price(base, discount_type, discount_value), base, discount_type, discount_value, row_id),
+        )
+        session["tuning_goods_notice"] = "Скидка на товар сохранена."
+    else:
+        db.execute(
+            "UPDATE tuning_order_products SET unit_price = ?, list_price = NULL, discount_type = 'percent', "
+            "discount_value = 0 WHERE id = ?",
+            (base, row_id),
+        )
+        session["tuning_goods_notice"] = "Скидка на товар снята."
+    db.commit()
+    _recompute_order_totals(db, order_id)
     return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
 
 
@@ -14911,7 +15016,7 @@ def _render_client_dashboard(
             "WHERE order_id = ? ORDER BY position, id",
             (o["id"],),
         ).fetchall()
-        goods_columns = "id, product_id, product_name, quantity, unit_price, unit"
+        goods_columns = "id, product_id, product_name, quantity, unit_price, unit, list_price, discount_type, discount_value"
         if is_admin_view:
             goods_columns += ", cost_price"
         goods_items = db.execute(

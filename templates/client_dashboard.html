@@ -482,7 +482,7 @@
                           onclick="openProductCard(this)" title="Открыть карточку товара">{{ g.product_name }}</button>{% else %}{{ g.product_name }}{% endif %}</td>
                   <td class="amount">{{ g.quantity|float|round(2) }} {{ cost_units|selectattr('value', 'equalto', g.unit)|map(attribute='label')|first }}</td>
                   {% if is_admin_view %}<td class="amount client-admin-cost">{{ g.cost_price|money }}</td>{% endif %}
-                  <td class="amount">{{ g.unit_price|money }}</td>
+                  <td class="amount">{% if g.list_price is not none and g.discount_value > 0 %}<s class="work-price-was">{{ g.list_price|money }}</s> {% endif %}{{ g.unit_price|money }}{% if g.list_price is not none and g.discount_value > 0 %} <span class="work-discount-badge" title="Скидка на этот товар">−{{ ('%g' % (g.discount_value|round(2)))|replace('.', ',') }}{{ '%' if g.discount_type == 'percent' else ' ₽' }}</span>{% endif %}</td>
                   <td class="amount">{{ (g.quantity * g.unit_price)|money }}</td>
                 </tr>
                 {% endfor %}
