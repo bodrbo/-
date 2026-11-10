@@ -87,6 +87,31 @@ class ClientEquipmentTests(unittest.TestCase):
         staff = self.http.get(f"/admin/clients/{self.client_id}/cabinet?section=tuning").get_data(as_text=True)
         self.assertIn("Добавить технику", staff)
 
+    def test_an_archived_item_is_marked_in_the_cabinet_and_leaves_the_summary(self):
+        self.add(name="Старая лодка", status="archive")
+        self.add(name="Новая лодка")
+        items = self.items()
+        self.assertEqual([i["status"] for i in items], ["archive", "active"])
+        public = application_module.app.test_client().get(f"/client/{self.TOKEN}").get_data(as_text=True)
+        self.assertIn("client-equipment-card is-archive", public)
+        self.assertIn("client-equipment-archive-mark", public)
+        self.assertEqual(public.count("client-equipment-archive-mark\">архив"), 1)
+        self.assertNotIn("Новая лодка и ещё", public)
+        self.assertIn('<span class="v" style="font-size:20px;">Новая лодка</span>', public)
+        self.assertLess(public.index("Новая лодка"), public.index("Старая лодка"))
+
+    def test_the_status_is_set_by_staff_only_and_defaults_to_active(self):
+        self.add(status="bogus")
+        item_id = self.items()[0]["id"]
+        self.assertEqual(self.items()[0]["status"], "active")
+        self.http.post(f"/admin/clients/{self.client_id}/equipment/{item_id}/update",
+                       data={"kind": "boat", "name": "Finnmaster T8", "status": "archive"})
+        self.assertEqual(self.items()[0]["status"], "archive")
+        staff = self.http.get(f"/admin/clients/{self.client_id}/cabinet?section=tuning").get_data(as_text=True)
+        self.assertIn('name="status"', staff)
+        public = application_module.app.test_client().get(f"/client/{self.TOKEN}").get_data(as_text=True)
+        self.assertNotIn('name="status"', public)
+
     def test_the_public_cabinet_hides_an_empty_block_but_staff_see_the_form(self):
         public = application_module.app.test_client().get(f"/client/{self.TOKEN}").get_data(as_text=True)
         self.assertNotIn("Техника клиента", public)

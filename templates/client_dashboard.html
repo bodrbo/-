@@ -321,7 +321,7 @@
     {% if equipment['items'] %}
     <div class="client-equipment-list">
       {% for e in equipment['items'] %}
-      <article class="panel client-equipment-card">
+      <article class="panel client-equipment-card{{ ' is-archive' if e.status == 'archive' }}">
         {% if is_admin_view %}
         <form method="post" class="client-equipment-form"
               action="{{ url_for('client_equipment.update', client_id=client.id, item_id=e.id) }}">
@@ -332,11 +332,15 @@
           <input type="text" name="serial_number" value="{{ e.serial_number }}" maxlength="60" placeholder="Серийный / бортовой номер" aria-label="Серийный номер">
           <input type="text" name="year" value="{{ e.year or '' }}" inputmode="numeric" maxlength="4" placeholder="Год" aria-label="Год выпуска">
           <input type="text" name="note" value="{{ e.note }}" maxlength="300" placeholder="Заметка" aria-label="Заметка">
+          <select name="status" aria-label="Статус техники">
+            {% for value, label in equipment['statuses'].items() %}<option value="{{ value }}" {{ 'selected' if e.status == value }}>{{ label }}</option>{% endfor %}
+          </select>
           <button type="submit" class="btn-secondary">Сохранить</button>
           <button type="submit" class="btn-secondary danger" formaction="{{ url_for('client_equipment.delete', client_id=client.id, item_id=e.id) }}"
                   onclick="return confirm('Удалить эту технику из карточки клиента?');">Удалить</button>
         </form>
         {% else %}
+        {% if e.status == 'archive' %}<span class="client-equipment-archive-mark">архив</span>{% endif %}
         <span class="status-badge client-equipment-kind">{{ e.kind_label }}</span>
         <strong class="client-equipment-name">{{ e.name }}</strong>
         <dl class="client-equipment-facts">
@@ -361,6 +365,9 @@
       <input type="text" name="serial_number" maxlength="60" placeholder="Серийный / бортовой номер" aria-label="Серийный номер">
       <input type="text" name="year" inputmode="numeric" maxlength="4" placeholder="Год" aria-label="Год выпуска">
       <input type="text" name="note" maxlength="300" placeholder="Заметка" aria-label="Заметка">
+      <select name="status" aria-label="Статус техники">
+        {% for value, label in equipment['statuses'].items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+      </select>
       <button type="submit" class="btn-primary">Добавить технику</button>
     </form>
     {% for kind, names in equipment['catalog'].items() %}

@@ -15218,8 +15218,8 @@ def _render_client_dashboard(
         orders_count=orders_count,
         paid_total=paid_total, remaining_total=remaining_total,
         primary_equipment=(
-            _client_equipment_summary(equipment["items"])
-            if equipment and equipment["items"]
+            _client_equipment_summary(equipment["active"])
+            if equipment and equipment["active"]
             else tuning_equipment_label(orders[0])
             if orders else (client["boat_model"] or "—")
         ),

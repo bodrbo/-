@@ -3,7 +3,7 @@
 import datetime as dt
 
 from . import repository
-from .constants import DEFAULT_KIND, KINDS, NAME_MAX, NOTE_MAX, SERIAL_MAX
+from .constants import DEFAULT_KIND, DEFAULT_STATUS, KINDS, NAME_MAX, NOTE_MAX, SERIAL_MAX, STATUSES
 
 
 def parse_form(form):
@@ -14,6 +14,9 @@ def parse_form(form):
     kind = form.get("kind") or DEFAULT_KIND
     if kind not in KINDS:
         kind = DEFAULT_KIND
+    status = form.get("status") or DEFAULT_STATUS
+    if status not in STATUSES:
+        status = DEFAULT_STATUS
     year_raw = (form.get("year") or "").strip()
     year = None
     if year_raw:
@@ -26,6 +29,7 @@ def parse_form(form):
         "serial_number": " ".join((form.get("serial_number") or "").split())[:SERIAL_MAX],
         "year": year,
         "note": (form.get("note") or "").strip()[:NOTE_MAX],
+        "status": status,
     }, None
 
 
@@ -62,5 +66,7 @@ def cabinet_context(db, client_id, with_catalog):
     return {
         "items": items,
         "kinds": KINDS,
+        "statuses": STATUSES,
+        "active": [row for row in items if row["status"] != "archive"],
         "catalog": repository.catalog_names(db) if with_catalog else {},
     }

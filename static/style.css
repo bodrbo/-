@@ -12499,12 +12499,15 @@ button.partner-open-price-save svg {
 .client-cabinet .client-equipment-facts dt { font-size: 12px; color: var(--muted); }
 .client-cabinet .client-equipment-facts dd { margin: 0; }
 .client-cabinet .client-equipment-list:has(.client-equipment-form) { grid-template-columns: 1fr; }
-.client-cabinet .client-equipment-form { display: grid; grid-template-columns: 120px minmax(160px, 1.4fr) minmax(140px, 1fr) 90px minmax(140px, 1.2fr) 112px 92px; gap: 8px; align-items: center; width: 100%; }
+.client-cabinet .client-equipment-form { display: grid; grid-template-columns: 120px minmax(160px, 1.4fr) minmax(140px, 1fr) 90px minmax(140px, 1.2fr) 120px 112px 92px; gap: 8px; align-items: center; width: 100%; }
 .client-cabinet .client-equipment-form input,
 .client-cabinet .client-equipment-form select,
 .client-cabinet .client-equipment-form button { box-sizing: border-box; width: 100%; height: 40px; margin: 0; }
 .client-cabinet .client-equipment-add { padding: 14px 16px; margin-bottom: 0; }
 .client-cabinet .client-equipment-add button { grid-column: span 2; }
+.client-cabinet .client-equipment-card { position: relative; }
+.client-cabinet .client-equipment-card.is-archive { background-image: repeating-linear-gradient(135deg, transparent 0, transparent 7px, rgba(98, 112, 127, 0.10) 7px, rgba(98, 112, 127, 0.10) 8px); color: var(--muted); }
+.client-cabinet .client-equipment-archive-mark { position: absolute; top: 10px; right: 12px; padding: 1px 8px; border: 1px solid var(--hairline-soft); border-radius: 999px; background: var(--surface, #fff); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 @media (max-width: 900px) {
   .client-cabinet .client-equipment-form, .client-cabinet .client-equipment-add { grid-template-columns: 1fr 1fr; }
 }

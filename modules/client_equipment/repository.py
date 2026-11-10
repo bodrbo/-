@@ -3,7 +3,8 @@
 
 def list_for_client(db, client_id):
     return db.execute(
-        "SELECT * FROM client_equipment WHERE client_id = ? ORDER BY id", (client_id,)
+        "SELECT * FROM client_equipment WHERE client_id = ? "
+        "ORDER BY status = 'archive', id", (client_id,)
     ).fetchall()
 
 
@@ -13,16 +14,18 @@ def get(db, item_id):
 
 def add(db, client_id, data, created_at):
     return db.execute(
-        "INSERT INTO client_equipment (client_id, kind, name, serial_number, year, note, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (client_id, data["kind"], data["name"], data["serial_number"], data["year"], data["note"], created_at),
+        "INSERT INTO client_equipment (client_id, kind, name, serial_number, year, note, status, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (client_id, data["kind"], data["name"], data["serial_number"], data["year"], data["note"],
+         data["status"], created_at),
     ).lastrowid
 
 
 def update(db, item_id, data):
     db.execute(
-        "UPDATE client_equipment SET kind = ?, name = ?, serial_number = ?, year = ?, note = ? WHERE id = ?",
-        (data["kind"], data["name"], data["serial_number"], data["year"], data["note"], item_id),
+        "UPDATE client_equipment SET kind = ?, name = ?, serial_number = ?, year = ?, note = ?, status = ? "
+        "WHERE id = ?",
+        (data["kind"], data["name"], data["serial_number"], data["year"], data["note"], data["status"], item_id),
     )
 
 
