@@ -266,6 +266,9 @@
               {% elif o.equipment_type == 'motor' and o.motor_serial_number %}
               <span class="equipment-number">Серийный №: {{ o.motor_serial_number }}</span>
               {% endif %}
+              {% if o.dealer_order_id %}
+              <span class="equipment-motor"><a href="{{ url_for('dealer.order', order_id=o.dealer_order_id) }}">Куплена у Бодрого Боцмана</a></span>
+              {% endif %}
             </td>
             <td class="muted">{{ o.phone }}</td>
             <td class="amount tuning-order-amount-breakdown">

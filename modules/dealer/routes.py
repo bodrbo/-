@@ -9,14 +9,18 @@ from .constants import DEALER_STATUSES, ITEM_KINDS, PAYMENT_TYPES, STATUS_LABELS
 
 
 def create_dealer_blueprint(get_db, access_required, client_choices, resolve_client,
-                            events_panel=None, forget_events=None, create_profile=None):
+                            events_panel=None, forget_events=None, create_profile=None,
+                            create_tuning_order=None, tuning_order_url=None):
     """client_choices(db) -> clients for the picker; resolve_client(db,
     client_id, client_name, phone) -> client id (finds or creates the client
     in the shared client base) — both injected from app.py. events_panel(db,
     order_id) -> the «События» panel data of an order, forget_events(db,
     order_id) drops them with a deleted order (both optional).
     create_profile(db, kind, name, brand) -> (error, profile_id, created)
-    finds or creates a model of the common catalog."""
+    finds or creates a model of the common catalog. create_tuning_order(db,
+    order, items, admin_id) -> id of a tuning-center order made for the
+    equipment of the order (None when there is none), tuning_order_url(id)
+    -> its page."""
     blueprint = Blueprint("dealer", __name__)
 
     def catalog_maps(db):
@@ -95,6 +99,13 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
             remaining=max(0.0, round((order["total"] - paid), 2)) if order is not None else None,
             payment_types=PAYMENT_TYPES, today=dt.date.today().isoformat(),
             events_panel=events_panel(db, order["id"]) if order is not None and events_panel else None,
+            tuning_orders=[
+                {**dict(row), "url": tuning_order_url(row["id"])}
+                for row in repository.list_tuning_orders(db, order["id"])
+            ] if order is not None and tuning_order_url else [],
+            can_make_tuning_order=order is not None and bool(create_tuning_order) and any(
+                item["kind"] in ITEM_KINDS for item in repository.list_items(db, order["id"])
+            ),
             notice=session.pop("dealer_notice", None),
         )
 
@@ -191,6 +202,21 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
                 db.commit()
             return redirect(url_for("dealer.orders"))
         return redirect(url_for("dealer.order", order_id=order_id))
+
+    @blueprint.route("/dealer/orders/<int:order_id>/tuning", methods=["POST"])
+    @access_required
+    def make_tuning_order(order_id):
+        db = get_db()
+        row = repository.get_order(db, order_id)
+        if row is None or create_tuning_order is None:
+            return redirect(url_for("dealer.orders"))
+        tuning_order_id = create_tuning_order(
+            db, dict(row), [dict(i) for i in repository.list_items(db, order_id)], session.get("admin_id")
+        )
+        if tuning_order_id is None:
+            notice("error", "В заказе нет лодки или мотора — заказ на тюнинг не создан.")
+            return redirect(url_for("dealer.order", order_id=order_id))
+        return redirect(tuning_order_url(tuning_order_id))
 
     # ---- price list
 

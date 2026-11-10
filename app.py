@@ -3601,6 +3601,10 @@ def init_db(db_path=None, include_bootstrap_data=True):
     tuning_cols = [row[1] for row in conn.execute("PRAGMA table_info(tuning_orders)").fetchall()]
     if "client_id" not in tuning_cols:
         conn.execute("ALTER TABLE tuning_orders ADD COLUMN client_id INTEGER")
+    if "dealer_order_id" not in tuning_cols:
+        # The order of the dealer center the equipment was bought on: such an
+        # order is marked «Куплена у Бодрого Боцмана» in the tuning center.
+        conn.execute("ALTER TABLE tuning_orders ADD COLUMN dealer_order_id INTEGER")
     partner_id_added = "partner_id" not in tuning_cols
     if partner_id_added:
         conn.execute("ALTER TABLE tuning_orders ADD COLUMN partner_id INTEGER")
@@ -6378,6 +6382,10 @@ app.register_blueprint(
             db, phone, client_name, "", client_id=client_id
         ),
         create_profile=lambda db, kind, name, brand: _dealer_catalog_profile(db, kind, name, brand),
+        create_tuning_order=lambda db, order, items, admin_id: _create_tuning_order_from_dealer(
+            db, order, items, admin_id
+        ),
+        tuning_order_url=lambda tuning_order_id: url_for("edit_tuning_order", order_id=tuning_order_id),
         events_panel=lambda db, order_id: _order_events_panel(db, "dealer", order_id),
         forget_events=lambda db, order_id: forget_order_events(
             db, "dealer", order_id, lambda task_id: _delete_visit_schedule_task(db, task_id)
@@ -6391,6 +6399,57 @@ app.register_blueprint(
 # (см. modules/order_events). Визит с принимающим лицом становится его
 # задачей в расписании тюнинга.
 # =======================================================================
+def _create_tuning_order_from_dealer(db, dealer_order, items, admin_id):
+    """A tuning order for the equipment sold in a dealer-center order: the
+    first boat of the order with all its motors, or — when there is no boat —
+    the first motor. The client and phone come from the dealer order; the
+    order is marked as bought from us. Returns the new order's id, or None
+    when the order has no boat or motor."""
+    boats = [item for item in items if item["kind"] == "boat"]
+    motors = [item for item in items if item["kind"] == "motor"]
+    if not boats and not motors:
+        return None
+    equipment_type = "boat" if boats else "motor"
+    boat_model = boats[0]["name"] if boats else ""
+    motor_rows = [
+        {"motor_model": motor["name"], "motor_serial_number": motor["serial_number"] or ""} for motor in motors
+    ]
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    client_id = _get_or_create_client(
+        db, dealer_order["phone"], dealer_order["client_name"], boat_model, dealer_order["client_id"]
+    )
+    cur = db.execute(
+        "INSERT INTO tuning_orders (client_id, client_name, equipment_type, boat_model, "
+        "boat_registration_number, motor_model, motor_serial_number, sale_channel, phone, "
+        "discount_pct, discount_type, discount_value, subtotal, total, status, order_date, "
+        "created_at, updated_at, dealer_order_id) "
+        "VALUES (?, ?, ?, ?, '', ?, ?, 'direct', ?, 0, 'percent', 0, 0, 0, ?, ?, ?, ?, ?)",
+        (client_id, dealer_order["client_name"], equipment_type, boat_model,
+         "" if equipment_type == "boat" else motor_rows[0]["motor_model"],
+         "" if equipment_type == "boat" else motor_rows[0]["motor_serial_number"],
+         dealer_order["phone"] or "", DEFAULT_ORDER_STATUS, now[:10], now, now, dealer_order["id"]),
+    )
+    order_id = cur.lastrowid
+    _replace_tuning_order_motors(db, order_id, equipment_type, motor_rows, now)
+    db.execute(
+        "INSERT INTO projects (name, tuning_order_id, created_at) VALUES (?, ?, ?)",
+        (f"Заказ №{order_id}", order_id, now),
+    )
+    lines = [f"Создан из заказа дилерского центра №{dealer_order['id']} — техника куплена у Бодрого Боцмана."]
+    for item in boats + motors:
+        if item["serial_number"]:
+            lines.append(f"{'Лодка' if item['kind'] == 'boat' else 'Мотор'} {item['name']}: серийный № {item['serial_number']}")
+    db.execute(
+        "INSERT INTO tuning_order_notes (order_id, author_admin_id, text, created_at) VALUES (?, ?, ?, ?)",
+        (order_id, admin_id, "\n".join(lines), now),
+    )
+    _sync_tuning_boat_profiles(db)
+    db.commit()
+    _sync_order_accounting(db, order_id)
+    db.commit()
+    return order_id
+
+
 def _dealer_catalog_profile(db, kind, name, brand):
     """A boat / motor model of the common catalog for the dealer price list:
     the existing entry of that name, else a new one. -> (error, id, created)."""
@@ -11636,6 +11695,11 @@ def copy_tuning_order(order_id):
         ),
     )
     copied_order_id = cursor.lastrowid
+    # the equipment is still the one bought from us
+    db.execute(
+        "UPDATE tuning_orders SET dealer_order_id = ? WHERE id = ?",
+        (source_order["dealer_order_id"], copied_order_id),
+    )
     db.execute(
         "INSERT INTO tuning_order_motors "
         "(order_id, motor_model, motor_serial_number, position, created_at) "

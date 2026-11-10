@@ -50,6 +50,13 @@ def remove_from_price_list(db, profile_id):
     db.execute("DELETE FROM dealer_prices WHERE profile_id = ?", (profile_id,))
 
 
+def list_tuning_orders(db, order_id):
+    """Tuning-center orders made from this dealer order."""
+    return db.execute(
+        "SELECT id, status, order_date FROM tuning_orders WHERE dealer_order_id = ? ORDER BY id", (order_id,)
+    ).fetchall()
+
+
 def get_order(db, order_id):
     return db.execute("SELECT * FROM dealer_orders WHERE id = ?", (order_id,)).fetchone()
 

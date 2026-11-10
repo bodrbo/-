@@ -308,6 +308,92 @@ class DealerCenterTests(unittest.TestCase):
         self.assertNotIn(f"№{live}", by_status)
         self.assertEqual(self.client.get("/dealer/orders?status=junk").status_code, 200)
 
+    # ---- a tuning order from a dealer order
+
+    def tuning_orders_of(self, dealer_order_id):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            return [dict(r) for r in db.execute(
+                "SELECT * FROM tuning_orders WHERE dealer_order_id = ? ORDER BY id", (dealer_order_id,)).fetchall()]
+
+    def drop_tuning_orders(self, dealer_order_id):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            ids = [r["id"] for r in db.execute(
+                "SELECT id FROM tuning_orders WHERE dealer_order_id = ?", (dealer_order_id,)).fetchall()]
+            for order_id in ids:
+                db.execute("DELETE FROM tuning_order_notes WHERE order_id = ?", (order_id,))
+                db.execute("DELETE FROM projects WHERE tuning_order_id = ?", (order_id,))
+            if ids:
+                application_module._delete_tuning_order_records(db, ids)
+            db.commit()
+
+    def test_a_tuning_order_is_made_from_the_dealer_order_with_the_equipment_and_the_client(self):
+        self.create(items=[
+            ("boat", self.boat_id, BOAT, "HIN-77", "1", "1500000"),
+            ("motor", self.motor_id, MOTOR, "SN-5", "1", "250000"),
+        ])
+        dealer_id = self.order()["id"]
+        self.addCleanup(self.drop_tuning_orders, dealer_id)
+        page = self.client.get(f"/dealer/orders/{dealer_id}").get_data(as_text=True)
+        self.assertIn("Создать заказ на тюнинг", page)
+        response = self.client.post(f"/dealer/orders/{dealer_id}/tuning")
+        (tuning,) = self.tuning_orders_of(dealer_id)
+        self.assertTrue(response.headers["Location"].endswith(f"/tuning/edit/{tuning['id']}"))
+        self.assertEqual((tuning["equipment_type"], tuning["boat_model"], tuning["client_name"], tuning["phone"]),
+                         ("boat", BOAT, CLIENT, "+79990001122"))
+        self.assertEqual(tuning["status"], "estimate")
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            motors = [(r["motor_model"], r["motor_serial_number"]) for r in db.execute(
+                "SELECT * FROM tuning_order_motors WHERE order_id = ?", (tuning["id"],)).fetchall()]
+            note = db.execute("SELECT text FROM tuning_order_notes WHERE order_id = ?", (tuning["id"],)).fetchone()[0]
+            project = db.execute("SELECT 1 FROM projects WHERE tuning_order_id = ?", (tuning["id"],)).fetchone()
+        self.assertEqual(motors, [(MOTOR, "SN-5")])
+        self.assertIn("HIN-77", note)
+        self.assertIsNotNone(project)
+        # the dealer order lists it, the tuning center marks it
+        page = self.client.get(f"/dealer/orders/{dealer_id}").get_data(as_text=True)
+        self.assertIn(f"№{tuning['id']}", page.split('id="tuning"')[1])
+        for url in ("/tuning", f"/tuning/edit/{tuning['id']}"):
+            html_page = self.client.get(url).get_data(as_text=True)
+            self.assertIn("Куплена у Бодрого Боцмана", html_page, url)
+
+    def test_a_motor_only_order_makes_a_motor_tuning_order(self):
+        self.create(items=[("motor", self.motor_id, MOTOR, "SN-9", "1", "250000")])
+        dealer_id = self.order()["id"]
+        self.addCleanup(self.drop_tuning_orders, dealer_id)
+        self.client.post(f"/dealer/orders/{dealer_id}/tuning")
+        (tuning,) = self.tuning_orders_of(dealer_id)
+        self.assertEqual((tuning["equipment_type"], tuning["motor_model"], tuning["motor_serial_number"]),
+                         ("motor", MOTOR, "SN-9"))
+
+    def test_an_ordinary_tuning_order_has_no_such_mark(self):
+        page = self.client.get("/tuning").get_data(as_text=True)
+        self.assertNotIn("Куплена у Бодрого Боцмана", page)
+
+    def test_a_copy_of_such_an_order_keeps_the_mark(self):
+        self.create()
+        dealer_id = self.order()["id"]
+        self.addCleanup(self.drop_tuning_orders, dealer_id)
+        self.client.post(f"/dealer/orders/{dealer_id}/tuning")
+        (tuning,) = self.tuning_orders_of(dealer_id)
+        self.client.post(f"/tuning/{tuning['id']}/copy")
+        self.assertEqual(len(self.tuning_orders_of(dealer_id)), 2)
+
+    def test_the_button_is_missing_without_equipment_and_a_forced_request_creates_nothing(self):
+        self.create()
+        dealer_id = self.order()["id"]
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM dealer_order_items WHERE order_id = ?", (dealer_id,))
+            db.commit()
+        page = self.client.get(f"/dealer/orders/{dealer_id}").get_data(as_text=True)
+        self.assertNotIn("Создать заказ на тюнинг", page)
+        self.client.post(f"/dealer/orders/{dealer_id}/tuning")
+        self.assertEqual(self.tuning_orders_of(dealer_id), [])
+        self.assertEqual(self.notice()["type"], "error")
+
     # ---- the price list
 
     def put_on_price_list(self, *profile_ids):

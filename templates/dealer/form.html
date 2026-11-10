@@ -166,6 +166,21 @@
   {% endif %}
 </section>
 
+<section class="panel" id="tuning">
+  <h2>Заказ на тюнинг</h2>
+  {% if tuning_orders %}
+  <p>Уже создано: {% for t in tuning_orders %}<a href="{{ t.url }}" class="term">№{{ t.id }}</a>{{ ', ' if not loop.last }}{% endfor %}</p>
+  {% endif %}
+  {% if can_make_tuning_order %}
+  <form action="{{ url_for('dealer.make_tuning_order', order_id=order.id) }}" method="post">
+    <button type="submit" class="btn-secondary">Создать заказ на тюнинг</button>
+    <span class="hint">Откроется в тюнинг-центре: клиент и техника из этого заказа, пометка «Куплена у Бодрого Боцмана». Берётся первая лодка со всеми моторами заказа, а если лодки нет — первый мотор.</span>
+  </form>
+  {% else %}
+  <p class="hint">Добавьте в заказ лодку или мотор и сохраните его — тогда отсюда можно создать заказ на тюнинг.</p>
+  {% endif %}
+</section>
+
 {% if events_panel %}{% include '_order_events_panel.html' %}{% endif %}
 
 <section class="panel">

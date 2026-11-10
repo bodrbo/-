@@ -270,6 +270,9 @@
         {%- if edit_order.equipment_type == 'boat' and edit_order.boat_registration_number %} · Бортовой № {{ edit_order.boat_registration_number }}{% endif -%}
         {%- if edit_order.equipment_type == 'motor' and edit_order.motor_serial_number %} · Серийный № {{ edit_order.motor_serial_number }}{% endif -%}
       </span>
+      {% if edit_order.dealer_order_id %}
+      <span class="d"><a href="{{ url_for('dealer.order', order_id=edit_order.dealer_order_id) }}">Куплена у Бодрого Боцмана</a></span>
+      {% endif %}
       {% if edit_order.equipment_type == 'boat' and boat_motors_prefill %}
       <span class="d">
         {{ 'Мотор' if boat_motors_prefill|length == 1 else 'Моторы' }}:
