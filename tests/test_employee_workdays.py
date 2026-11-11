@@ -121,9 +121,9 @@ class EmployeeWorkdaysTests(unittest.TestCase):
 
     def test_an_administrator_is_offered_in_the_roster_pickers_of_both_schedules(self):
         tuning = self.client.get("/schedule/tuning?date=2031-03-10").get_data(as_text=True)
-        self.assertIn("Рабочий Админ · Администратор", tuning)
+        self.assertIn("Рабочий Админ<small>Администратор</small>", tuning)
         excursion = self.client.get("/schedule?date=2031-03-10").get_data(as_text=True)
-        self.assertIn("Рабочий Админ · Администратор", excursion)
+        self.assertIn("Рабочий Админ<small>Администратор</small>", excursion)
 
     def test_an_employee_without_the_right_position_is_refused(self):
         self.post("Рабочий Менеджер", schedule="tuning")

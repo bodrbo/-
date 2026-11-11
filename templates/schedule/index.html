@@ -680,17 +680,40 @@
       {% if available_crew %}
       <form method="post" action="{{ url_for('schedule.add_crew_member') }}" class="schedule-roster-add">
         <input type="hidden" name="work_date" value="{{ day.isoformat() }}">
-        <label class="field">
-          <span>Добавить сотрудника</span>
-          <select name="employee_id" id="scheduleRosterEmployee" required>
-            <option value="" disabled selected>Выберите капитана или гида</option>
+        <fieldset class="field roster-pick">
+          <legend>Добавить сотрудников · капитаны и гиды</legend>
+          <label class="roster-pick-all"><input type="checkbox" data-roster-all id="scheduleRosterEmployee"> Выбрать всех</label>
+          <div class="roster-pick-list">
             {% for employee in available_crew %}
-            <option value="{{ employee.id }}">{{ employee.name }} · {{ employee.position_label }}</option>
+            <label class="roster-pick-item"><input type="checkbox" name="employee_ids" value="{{ employee.id }}"><span>{{ employee.name }}<small>{{ employee.position_label }}</small></span></label>
             {% endfor %}
-          </select>
-        </label>
+          </div>
+        </fieldset>
         <button type="submit">Добавить</button>
       </form>
+      <script>
+      (function () {
+        document.querySelectorAll('.roster-pick').forEach(function (box) {
+          var form = box.closest('form');
+          var all = box.querySelector('[data-roster-all]');
+          var items = Array.prototype.slice.call(box.querySelectorAll('input[name="employee_ids"]'));
+          var submit = form.querySelector('button[type="submit"]');
+          function refresh() {
+            var checked = items.filter(function (item) { return item.checked; }).length;
+            all.checked = checked > 0 && checked === items.length;
+            all.indeterminate = checked > 0 && checked < items.length;
+            submit.disabled = checked === 0;
+            submit.textContent = checked > 1 ? 'Добавить (' + checked + ')' : 'Добавить';
+          }
+          all.addEventListener('change', function () {
+            items.forEach(function (item) { item.checked = all.checked; });
+            refresh();
+          });
+          items.forEach(function (item) { item.addEventListener('change', refresh); });
+          refresh();
+        });
+      }());
+      </script>
       {% elif crew %}
       <div class="schedule-roster-complete">Все сотрудники экипажа уже добавлены.</div>
       {% else %}

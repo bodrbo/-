@@ -97,12 +97,8 @@ def create_tuning_schedule_blueprint(
     @manage_required
     def add_crew_member():
         day = services.parse_day(request.form.get("work_date"))
-        try:
-            employee_id = int(request.form.get("employee_id", ""))
-        except (TypeError, ValueError):
-            employee_id = 0
-        success, message = services.add_day_crew_member(
-            get_db(), day, employee_id,
+        success, message = services.add_day_crew_members(
+            get_db(), day, services.parse_employee_ids(request.form),
             request.form.get("shift_start"), request.form.get("shift_end"),
         )
         set_notice(message, success)

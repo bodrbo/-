@@ -180,12 +180,9 @@ def create_schedule_blueprint(
     @manage_required
     def add_crew_member():
         day = services.parse_day(request.form.get("work_date"))
-        try:
-            employee_id = int(request.form.get("employee_id", ""))
-        except (TypeError, ValueError):
-            employee_id = 0
-        success, message = services.add_day_crew_member(
-            get_db(), day, employee_id, apply_minimum_shift=apply_minimum_shift
+        success, message = services.add_day_crew_members(
+            get_db(), day, services.parse_employee_ids(request.form),
+            apply_minimum_shift=apply_minimum_shift,
         )
         set_notice(message, success)
         return redirect_to_day(day.isoformat())

@@ -231,6 +231,32 @@ class ScheduleModuleIntegrationTests(unittest.TestCase):
             ).fetchone()["count"]
         self.assertEqual(after_add, 1)
 
+    def test_several_crew_members_are_added_to_the_day_at_once(self):
+        self.login()
+        for employee_id in (self.daniil_id, self.platon_id):
+            self.client.post(f"/schedule/crew/{employee_id}/remove", data={"work_date": "2026-09-05"})
+        response = self.client.post(
+            "/schedule/crew",
+            data={"work_date": "2026-09-05", "employee_ids": [str(self.daniil_id), str(self.platon_id)]},
+        )
+        self.assertEqual(response.status_code, 302)
+        with application_module.app.app_context():
+            rows = application_module.get_db().execute(
+                "SELECT employee_id FROM schedule_day_crew WHERE work_date = '2026-09-05'"
+            ).fetchall()
+        self.assertEqual({r["employee_id"] for r in rows}, {self.daniil_id, self.platon_id})
+        with self.client.session_transaction() as session:
+            self.assertIn("Добавлено сотрудников: 2", session["schedule_notice"]["message"])
+
+    def test_a_crew_add_with_nobody_ticked_and_a_stranger_are_reported(self):
+        self.login()
+        self.client.post("/schedule/crew", data={"work_date": "2026-09-05"})
+        with self.client.session_transaction() as session:
+            self.assertIn("хотя бы одного", session["schedule_notice"]["message"])
+        self.client.post("/schedule/crew", data={"work_date": "2026-09-05", "employee_ids": ["99999999", str(self.daniil_id)]})
+        with self.client.session_transaction() as session:
+            self.assertIn("1 из 2", session["schedule_notice"]["message"])
+
     def test_employee_with_trip_cannot_be_removed_from_day_schedule(self):
         self.login()
         self.create_booking()

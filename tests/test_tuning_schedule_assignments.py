@@ -374,6 +374,30 @@ class TuningScheduleAssignmentTests(_TuningScheduleFixture, unittest.TestCase):
         page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
         self.assertIn('name="shift_start" value="08:30"', page)  # editable in the roster window
 
+    def test_several_tuners_are_added_to_the_shift_at_once_with_the_same_hours(self):
+        self.login_admin()
+        ids = [str(self.employee_id(self.EMPLOYEE_A)), str(self.employee_id(self.EMPLOYEE_B))]
+        response = self.client.post("/schedule/tuning/crew", data={
+            "work_date": self.DAY, "employee_ids": ids,
+            "shift_start": "10:00", "shift_end": "19:00",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.crew_hours(self.EMPLOYEE_A), ("10:00", "19:00"))
+        self.assertEqual(self.crew_hours(self.EMPLOYEE_B), ("10:00", "19:00"))
+        with self.client.session_transaction() as session:
+            self.assertIn("Добавлено сотрудников: 2", session["schedule_notice"]["message"])
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        self.assertIn('data-roster-all', page)
+
+    def test_adding_nobody_to_the_shift_changes_nothing_and_says_so(self):
+        self.login_admin()
+        self.client.post("/schedule/tuning/crew", data={
+            "work_date": self.DAY, "shift_start": "10:00", "shift_end": "19:00",
+        })
+        self.assertIsNone(self.crew_hours(self.EMPLOYEE_A))
+        with self.client.session_transaction() as session:
+            self.assertEqual(session["schedule_notice"]["type"], "error")
+
     def test_the_schedule_page_uses_the_full_width_of_the_work_area(self):
         page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
         self.assertIn('<main class="wrap tuning-schedule-wide">', page)

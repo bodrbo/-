@@ -386,15 +386,15 @@
       {% if available_crew %}
       <form method="post" action="{{ url_for('tuning_schedule.add_crew_member') }}" class="schedule-roster-add tuning-roster-add">
         <input type="hidden" name="work_date" value="{{ day.isoformat() }}">
-        <label class="field">
-          <span>Добавить сотрудника</span>
-          <select name="employee_id" id="tuningRosterEmployee" required>
-            <option value="" disabled selected>Выберите тюнингмэна</option>
+        <fieldset class="field roster-pick">
+          <legend>Добавить сотрудников · тюнингмэны</legend>
+          <label class="roster-pick-all"><input type="checkbox" data-roster-all id="tuningRosterEmployee"> Выбрать всех</label>
+          <div class="roster-pick-list">
             {% for employee in available_crew %}
-            <option value="{{ employee.id }}">{{ employee.name }} · {{ employee.position_label }}</option>
+            <label class="roster-pick-item"><input type="checkbox" name="employee_ids" value="{{ employee.id }}"><span>{{ employee.name }}<small>{{ employee.position_label }}</small></span></label>
             {% endfor %}
-          </select>
-        </label>
+          </div>
+        </fieldset>
         <label class="field">
           <span>Смена с</span>
           <input type="time" name="shift_start" value="09:00" required>
@@ -405,6 +405,29 @@
         </label>
         <button type="submit">Добавить</button>
       </form>
+      <script>
+      (function () {
+        document.querySelectorAll('.roster-pick').forEach(function (box) {
+          var form = box.closest('form');
+          var all = box.querySelector('[data-roster-all]');
+          var items = Array.prototype.slice.call(box.querySelectorAll('input[name="employee_ids"]'));
+          var submit = form.querySelector('button[type="submit"]');
+          function refresh() {
+            var checked = items.filter(function (item) { return item.checked; }).length;
+            all.checked = checked > 0 && checked === items.length;
+            all.indeterminate = checked > 0 && checked < items.length;
+            submit.disabled = checked === 0;
+            submit.textContent = checked > 1 ? 'Добавить (' + checked + ')' : 'Добавить';
+          }
+          all.addEventListener('change', function () {
+            items.forEach(function (item) { item.checked = all.checked; });
+            refresh();
+          });
+          items.forEach(function (item) { item.addEventListener('change', refresh); });
+          refresh();
+        });
+      }());
+      </script>
       {% elif crew %}
       <div class="schedule-roster-complete">Все тюнингмэны уже добавлены.</div>
       {% else %}

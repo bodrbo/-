@@ -3,7 +3,13 @@
 import datetime as dt
 import math
 
-from modules.schedule.services import current_timestamp, day_label, parse_day  # noqa: F401 (re-exported)
+from modules.schedule.services import (  # noqa: F401 (re-exported)
+    combine_crew_results,
+    current_timestamp,
+    day_label,
+    parse_day,
+    parse_employee_ids,
+)
 
 from . import repository
 from .constants import (
@@ -130,6 +136,14 @@ def add_day_crew_member(db, day, employee_id, raw_start=None, raw_end=None):
         return True, f"{eligible[employee_id]['name']} уже добавлен в расписание."
     return True, (
         f"{eligible[employee_id]['name']} добавлен в расписание: смена {hours[0]}–{hours[1]}."
+    )
+
+
+def add_day_crew_members(db, day, employee_ids, raw_start=None, raw_end=None):
+    """Put several tuners on the day's roster with the same shift hours."""
+    return combine_crew_results(
+        db, employee_ids,
+        lambda employee_id: add_day_crew_member(db, day, employee_id, raw_start, raw_end),
     )
 
 

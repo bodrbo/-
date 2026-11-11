@@ -1623,6 +1623,47 @@ def add_day_crew_member(db, day, employee_id, apply_minimum_shift=None, today=No
     return True, message
 
 
+def parse_employee_ids(form):
+    """Ids from the checkboxes (employee_ids) and the old single select (employee_id)."""
+    ids = []
+    for raw in form.getlist("employee_ids") + form.getlist("employee_id"):
+        try:
+            ids.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+    return ids
+
+
+def add_day_crew_members(db, day, employee_ids, apply_minimum_shift=None, today=None):
+    """Put several employees on the day's roster at once -> (ok, message)."""
+    return combine_crew_results(
+        db, employee_ids,
+        lambda employee_id: add_day_crew_member(db, day, employee_id, apply_minimum_shift, today),
+    )
+
+
+def combine_crew_results(db, employee_ids, add_one):
+    """Run add_one(employee_id) -> (ok, message) for each id (duplicates and
+    junk dropped) and fold the answers into one message; ok when at least one
+    of them went through."""
+    ids = []
+    for employee_id in employee_ids:
+        if employee_id and employee_id not in ids:
+            ids.append(employee_id)
+    if not ids:
+        return False, "Отметьте хотя бы одного сотрудника."
+    if len(ids) == 1:
+        return add_one(ids[0])
+    results = [add_one(employee_id) for employee_id in ids]
+    done = sum(1 for ok, _message in results if ok)
+    if done == len(results):
+        return True, f"Добавлено сотрудников: {len(results)}."
+    problems = " ".join(message for ok, message in results if not ok)
+    if done:
+        return True, f"Добавлено сотрудников: {done} из {len(results)}. {problems}"
+    return False, problems
+
+
 def remove_day_crew_member(db, day, employee_id, apply_minimum_shift=None, today=None):
     eligible = {
         employee["id"]: employee for employee in repository.list_crew_employees(db)
