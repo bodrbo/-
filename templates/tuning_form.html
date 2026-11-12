@@ -555,12 +555,15 @@
             </td>
             <td>
               {{ g.product_name }}
+              {% if not g.product_id %}
+              <div class="hint" style="margin:2px 0 0 0;">Только в этом заказе, в каталоге склада нет</div>
+              {% endif %}
               {% if g.writeoff_warehouse_name %}
               <div class="hint" style="margin:2px 0 0 0;">Списано со склада «{{ g.writeoff_warehouse_name }}»</div>
               {% elif g.chosen_warehouse_name %}
               <div class="hint" style="margin:2px 0 0 0;">Склад списания «{{ g.chosen_warehouse_name }}» — спишется, когда заказ будет «В работе»</div>
               {% endif %}
-              {% if goods_warehouses %}
+              {% if goods_warehouses and g.product_id %}
               {% set current_warehouse = g.writeoff_warehouse_id or g.warehouse_id %}
               <form action="{{ url_for('set_tuning_order_product_warehouse', order_id=edit_order.id, row_id=g.id) }}"
                     method="post" class="goods-warehouse-form">
@@ -640,7 +643,7 @@
         <div class="combo-dropdown hidden" data-combo-dropdown>
           <div class="combo-empty hidden" data-combo-empty>
             <p>Ничего не найдено.</p>
-            <button type="button" class="btn-add" onclick="openCreateProductModal()">+ Создать товар в каталоге</button>
+            <button type="button" class="btn-add" onclick="openCreateProductModal()">+ Создать товар</button>
           </div>
           {% for p in catalog_products %}
           <div class="combo-option" data-value="{{ p.id }}"
@@ -1493,8 +1496,9 @@
       </button>
       <form id="create-product-form" method="post" class="assign-modal-card"
             action="{{ url_for('create_tuning_order_product', order_id=edit_order.id) }}">
-        <h3>Новый товар в каталоге</h3>
-        <p class="hint">Товар сразу попадёт в общий каталог склада и добавится в этот заказ.</p>
+        <h3>Новый товар</h3>
+        <input type="hidden" name="catalog_shown" value="1">
+        <p class="hint" id="create-product-hint">Товар сразу попадёт в общий каталог склада и добавится в этот заказ.</p>
         <div class="field">
           <label for="create-product-name">Название</label>
           <input type="text" id="create-product-name" name="name" required>
@@ -1527,6 +1531,11 @@
             <input type="text" inputmode="decimal" id="create-product-quantity" name="quantity" required>
           </div>
         </div>
+        <label class="goods-catalog-check">
+          <input type="checkbox" name="to_catalog" value="1" id="create-product-to-catalog" checked
+                 onchange="updateCreateProductHint()">
+          Добавить в каталог склада
+        </label>
         <button type="submit" class="btn-primary">Создать и добавить в заказ</button>
       </form>
     </div>
@@ -1662,7 +1671,18 @@ function openCreateProductModal() {
   document.getElementById('create-product-cost-price').value = '';
   document.getElementById('create-product-sale-price').value = '';
   document.getElementById('create-product-quantity').value = (quantity && quantity.value.trim()) || '1';
+  document.getElementById('create-product-to-catalog').checked = true;
+  updateCreateProductHint();
   modal.classList.remove('hidden');
+}
+
+function updateCreateProductHint() {
+  var box = document.getElementById('create-product-to-catalog');
+  var hint = document.getElementById('create-product-hint');
+  if (!box || !hint) return;
+  hint.textContent = box.checked
+    ? 'Товар сразу попадёт в общий каталог склада и добавится в этот заказ.'
+    : 'Товар добавится только в этот заказ, в каталоге склада его не будет.';
 }
 
 function closeCreateProductModal() {

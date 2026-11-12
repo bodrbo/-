@@ -234,5 +234,83 @@ class TuningGoodsDiscountTests(_GoodsFixture, unittest.TestCase):
         self.assertIn("work-price-was", page)
 
 
+class TuningGoodsCreateTests(_GoodsFixture, unittest.TestCase):
+    """The modal that creates a product inside an order has a box deciding
+    whether the product also goes into the catalog."""
+
+    def create(self, **extra):
+        data = {"name": f"{self.MARK} новый", "cost_price": "100", "cost_unit": "piece",
+                "sale_price": "300", "quantity": "2", **extra}
+        return self.client.post(f"/tuning/{self.order_id}/products/create", data=data)
+
+    def catalog_count(self):
+        with application_module.app.app_context():
+            return application_module.get_db().execute(
+                "SELECT COUNT(*) FROM supply_products WHERE name = ?", (f"{self.MARK} новый",)
+            ).fetchone()[0]
+
+    def test_with_the_box_the_product_goes_into_the_catalog_too(self):
+        self.create(catalog_shown="1", to_catalog="1")
+        self.assertEqual(self.catalog_count(), 1)
+        lines, total = self.lines(self.order_id)
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0]["product_id"])
+        self.assertEqual(total, 600)
+
+    def test_without_the_box_it_lives_in_the_order_only(self):
+        self.create(catalog_shown="1")
+        self.assertEqual(self.catalog_count(), 0)
+        lines, total = self.lines(self.order_id)
+        self.assertEqual(len(lines), 1)
+        self.assertEqual((lines[0]["product_id"], lines[0]["unit_price"], lines[0]["quantity"]), (0, 300, 2))
+        self.assertEqual(total, 600)
+
+    def test_a_form_without_the_field_keeps_the_old_behaviour(self):
+        self.create()
+        self.assertEqual(self.catalog_count(), 1)
+
+    def test_a_product_outside_the_catalog_has_no_warehouse_and_no_writeoff(self):
+        self.create(catalog_shown="1")
+        line_id = self.lines(self.order_id)[0][0]["id"]
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            warehouse_id = db.execute(
+                "INSERT INTO supply_warehouses (name, created_at) VALUES (?, '2026-09-01 10:00')",
+                (f"{self.MARK} склад",),
+            ).lastrowid
+            db.commit()
+
+        def drop_warehouse():
+            with application_module.app.app_context():
+                db = application_module.get_db()
+                db.execute("DELETE FROM supply_warehouses WHERE id = ?", (warehouse_id,))
+                db.commit()
+        self.addCleanup(drop_warehouse)
+        self.client.post(f"/tuning/{self.order_id}/products/{line_id}/warehouse", data={"warehouse_id": str(warehouse_id)})
+        self.assertIsNone(self.lines(self.order_id)[0][0]["warehouse_id"])
+        page = self.client.get(f"/tuning/edit/{self.order_id}").get_data(as_text=True)
+        self.assertIn("Только в этом заказе, в каталоге склада нет", page)
+        self.assertIn('id="create-product-to-catalog"', page)
+        # the order still goes "В работе" without trying to write anything off
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("UPDATE tuning_order_products SET warehouse_id = ? WHERE id = ?", (warehouse_id, line_id))
+            db.commit()
+        self.client.post(f"/tuning/{self.order_id}/status", data={"status": "in_progress", "next": "/tuning"})
+        with application_module.app.app_context():
+            written = application_module.get_db().execute(
+                "SELECT COUNT(*) FROM supply_writeoffs WHERE tuning_order_product_id = ?", (line_id,)
+            ).fetchone()[0]
+        self.assertEqual(written, 0)
+
+    def test_the_priced_line_still_takes_a_discount(self):
+        self.create(catalog_shown="1")
+        line_id = self.lines(self.order_id)[0][0]["id"]
+        self.client.post(f"/tuning/{self.order_id}/products/{line_id}/discount",
+                         data={"discount_value": "10", "discount_type": "percent"})
+        line = self.lines(self.order_id)[0][0]
+        self.assertEqual((line["list_price"], line["unit_price"]), (300, 270))
+
+
 if __name__ == "__main__":
     unittest.main()

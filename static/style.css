@@ -12428,6 +12428,8 @@ button.partner-open-price-save svg {
 /* --- Товары заказа: одинаковые размеры и один уровень полей --- */
 /* форма добавления: поля стоят по верхней линии (подписи на одном уровне),
    у всех полей и списков одна высота; пояснения под полем не сдвигают ряд */
+.goods-catalog-check { display: flex; align-items: center; gap: 8px; margin: 4px 0 14px; font-weight: 600; cursor: pointer; }
+.goods-catalog-check input { width: 18px; height: 18px; margin: 0; }
 .goods-add-form { align-items: flex-start; gap: 12px; }
 .goods-add-form .field { flex: 0 0 auto; }
 .goods-add-form .goods-add-product { flex: 1 1 140px; min-width: 140px; }

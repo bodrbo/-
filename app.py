@@ -7247,7 +7247,8 @@ def _sync_order_goods_writeoff(db, order_id):
     if order is None:
         return
     lines = db.execute(
-        "SELECT * FROM tuning_order_products WHERE order_id = ? AND warehouse_id IS NOT NULL",
+        "SELECT * FROM tuning_order_products WHERE order_id = ? AND warehouse_id IS NOT NULL "
+        "AND product_id != 0",
         (order_id,),
     ).fetchall()
     problems = []
@@ -14614,14 +14615,20 @@ def create_tuning_order_product(order_id):
         return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    cur = db.execute(
-        "INSERT INTO supply_products (name, sku, description, supplier, photo_filename, "
-        "cost_price, cost_unit, sale_price, min_stock, category_id, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (name, sku or None, None, None, None, cost_price, cost_unit, sale_price, None, None, now),
-    )
-    product_id = cur.lastrowid
-    db.commit()
+    # "Добавить в каталог": without the box the goods line lives in this order
+    # only (product_id 0 = no catalog row). A form that doesn't send the box
+    # at all (the field is absent) keeps the old behaviour: into the catalog.
+    to_catalog = request.form.get("catalog_shown") is None or bool(request.form.get("to_catalog"))
+    product_id = 0
+    if to_catalog:
+        cur = db.execute(
+            "INSERT INTO supply_products (name, sku, description, supplier, photo_filename, "
+            "cost_price, cost_unit, sale_price, min_stock, category_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (name, sku or None, None, None, None, cost_price, cost_unit, sale_price, None, None, now),
+        )
+        product_id = cur.lastrowid
+        db.commit()
 
     cur = db.execute(
         "INSERT INTO tuning_order_products (order_id, product_id, product_name, quantity, "
@@ -14630,7 +14637,10 @@ def create_tuning_order_product(order_id):
     )
     db.commit()
     _recompute_order_totals(db, order_id)
-    session["tuning_goods_notice"] = f"Товар «{name}» создан в каталоге и добавлен в заказ."
+    session["tuning_goods_notice"] = (
+        f"Товар «{name}» создан в каталоге и добавлен в заказ."
+        if to_catalog else f"Товар «{name}» добавлен в заказ (в каталог не вносился)."
+    )
     return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
 
 
@@ -14755,6 +14765,9 @@ def set_tuning_order_product_warehouse(order_id, row_id):
     back = url_for("edit_tuning_order", order_id=order_id) + "#goods"
     if line is None:
         return redirect(url_for("edit_tuning_order", order_id=order_id))
+    if not line["product_id"]:
+        session["tuning_goods_error"] = "Товара нет в каталоге — списывать со склада нечего."
+        return redirect(back)
     raw = request.form.get("warehouse_id", "").strip()
     new_id = None
     if raw:
