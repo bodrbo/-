@@ -8818,6 +8818,173 @@ def _build_handover_act_pdf(order, items, goods=()):
     return buf.getvalue()
 
 
+def _build_estimate_pdf(order, items, goods=()):
+    """«Расчёт заказа»: the list of works and goods with their prices, the
+    discount and what is to be paid, and a place for both signatures. Unlike
+    the acts it is made before the work, so it lists every work of the order
+    that isn't removed, whatever its status."""
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        HRFlowable, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+    )
+
+    _register_act_fonts()
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=20 * mm, rightMargin=20 * mm, topMargin=18 * mm, bottomMargin=18 * mm,
+    )
+
+    style_company = ParagraphStyle("company", fontName="OpenSans-Bold", fontSize=10.5, leading=14)
+    style_address = ParagraphStyle("address", fontName="OpenSans-Bold", fontSize=10.5, leading=14,
+                                    spaceBefore=2, spaceAfter=16)
+    style_title = ParagraphStyle("title", fontName="OpenSans-Bold", fontSize=22, leading=26,
+                                  alignment=TA_CENTER, spaceAfter=6)
+    style_subtitle = ParagraphStyle("subtitle", fontName="OpenSans-Bold", fontSize=14, leading=18,
+                                     alignment=TA_CENTER, spaceAfter=22)
+    style_client = ParagraphStyle("client", fontName="OpenSans", fontSize=10.5, leading=14)
+    style_cell = ParagraphStyle("cell", fontName="OpenSans", fontSize=9.5, leading=12.5)
+    style_bold = ParagraphStyle("bold", fontName="OpenSans-Bold", fontSize=10.5, leading=15,
+                                 spaceAfter=4)
+    style_section = ParagraphStyle("section", fontName="OpenSans-Bold", fontSize=11.5, leading=15,
+                                    spaceBefore=4, spaceAfter=8)
+
+    try:
+        order_date = dt.date.fromisoformat(_order_business_date(order)).strftime("%d.%m.%Y")
+    except ValueError:
+        order_date = _order_business_date(order)
+
+    flow = []
+    logo_w = 130
+    logo_flowable = _scaled_logo_flowable(_document_logo_path(), logo_w, logo_w * 230 / 836)
+    if logo_flowable is not None:
+        flow.append(logo_flowable)
+    flow.append(Spacer(1, 12))
+    doc_company_name, doc_company_address = _document_company_identity()
+    flow.append(Paragraph(f"<u>{doc_company_name}</u>", style_company))
+    if doc_company_address:
+        flow.append(Paragraph(doc_company_address, style_address))
+    flow.append(Paragraph("Расчёт заказа", style_title))
+    flow.append(Paragraph(f"По заказу № {order['id']} от {order_date}", style_subtitle))
+    flow.append(Paragraph(
+        f"Заказчик {order['client_name']} ({tuning_equipment_label(order)})",
+        style_client,
+    ))
+    flow.append(HRFlowable(width="100%", thickness=0.6, color=colors.black,
+                            spaceBefore=2, spaceAfter=18))
+
+    table_style = TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), "OpenSans"),
+        ("FONTNAME", (0, 0), (-1, 0), "OpenSans-Bold"),
+        ("FONTNAME", (0, -1), (-1, -1), "OpenSans-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+        ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+        ("ALIGN", (2, 0), (-1, 0), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ])
+
+    total_sum = 0.0
+    work_widths = [12 * mm, 76 * mm, 24 * mm, 18 * mm, 18 * mm, 22 * mm]
+    if items:
+        if goods:
+            flow.append(Paragraph("Работы", style_section))
+        work_widths, table_data, total_sum = _act_work_table_rows(items, style_cell, mm)
+        tbl = Table(table_data, colWidths=work_widths, repeatRows=1)
+        tbl.setStyle(table_style)
+        flow.append(tbl)
+
+    if goods:
+        if items:
+            flow.append(Spacer(1, 18))
+        flow.append(Paragraph("Товары", style_section))
+        goods_data = [["№", "Наименование товара", "Цена", "Кол-во", "Ед. изм.", "Сумма"]]
+        goods_sum = 0.0
+        goods_qty = 0.0
+        for i, g in enumerate(goods, start=1):
+            line_sum = g["quantity"] * g["unit_price"]
+            unit_label = next((u["label"] for u in SUPPLY_COST_UNITS if u["value"] == g["unit"]), g["unit"])
+            goods_data.append([
+                str(i), Paragraph(g["product_name"], style_cell),
+                f"{g['unit_price']:.2f}".replace(".", ","),
+                f"{g['quantity']:g}", unit_label, f"{line_sum:.2f}".replace(".", ","),
+            ])
+            goods_sum += line_sum
+            goods_qty += g["quantity"]
+        goods_data.append(["", "", "", f"{goods_qty:g}", "Итого:", f"{goods_sum:.2f}".replace(".", ",")])
+        goods_tbl = Table(goods_data, colWidths=[12 * mm, 76 * mm, 24 * mm, 18 * mm, 18 * mm, 22 * mm],
+                          repeatRows=1)
+        goods_tbl.setStyle(table_style)
+        flow.append(goods_tbl)
+        total_sum += goods_sum
+
+    if not items and not goods:
+        flow.append(Paragraph("В заказе пока нет работ и товаров.", style_client))
+
+    summary_tbl, payable = _act_order_discount_summary(order, total_sum, goods, work_widths, mm)
+    if summary_tbl is not None:
+        flow.append(summary_tbl)
+        total_sum = payable
+
+    closing = [
+        Spacer(1, 22),
+        Paragraph(f"Итого к оплате: {_rubles_to_words(total_sum)}", style_bold),
+        Spacer(1, 40),
+    ]
+    sig_table = Table(
+        [["Заказчик " + "_" * 28, "Исполнитель" + "_" * 24]],
+        colWidths=[85 * mm, 85 * mm],
+    )
+    sig_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), "OpenSans-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 10.5),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    # the sum and the signatures never part onto different pages
+    flow.append(KeepTogether(closing + [sig_table]))
+
+    doc.build(flow)
+    return buf.getvalue()
+
+
+@app.route("/tuning/<int:order_id>/estimate.pdf")
+@admin_login_required
+def tuning_order_estimate_pdf(order_id):
+    db = get_db()
+    order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None:
+        return redirect(url_for("tuning_index"))
+    order = dict(order)
+    order["motors"] = _tuning_order_motors(db, order_id)
+    items = db.execute(
+        "SELECT * FROM tuning_order_items WHERE order_id = ? AND status != 'removed' ORDER BY position, id",
+        (order_id,),
+    ).fetchall()
+    goods = db.execute(
+        "SELECT * FROM tuning_order_products WHERE order_id = ? ORDER BY position, id", (order_id,)
+    ).fetchall()
+    try:
+        pdf_bytes = _build_estimate_pdf(order, items, goods)
+    except ImportError:
+        return (
+            "Формирование PDF временно недоступно: на сервере не установлена "
+            "библиотека reportlab. Установите зависимости из requirements.txt "
+            "и перезапустите приложение.",
+            503,
+        )
+    response = app.response_class(pdf_bytes, mimetype="application/pdf")
+    response.headers["Content-Disposition"] = f'inline; filename="Raschet-{order_id}.pdf"'
+    return response
+
+
 CONTRACT_TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "contract_template.docx")
 
 
