@@ -52,7 +52,7 @@
   <div class="table-scroll">
     <table class="records" id="dealer-orders-table">
       <thead>
-        <tr><th>№</th><th>Дата</th><th>Клиент</th><th>{{ 'Товары' if is_goods else 'Позиции' }}</th><th>Статус</th><th>Сумма</th><th>Оплачено</th><th>Остаток</th></tr>
+        <tr><th>№</th><th>Дата</th><th>Клиент</th>{% if not is_goods %}<th>Позиции</th>{% endif %}<th>Статус</th><th>Сумма</th><th>Оплачено</th><th>Остаток</th></tr>
       </thead>
       <tbody>
         {% for o in orders %}
@@ -60,7 +60,7 @@
           <td><a href="{{ url_for('dealer.order', order_id=o.id) }}">№{{ o.id }}</a></td>
           <td class="muted">{{ o.order_date|ru_date }}</td>
           <td class="term">{{ o.client_name }}{% if o.phone %}<span class="muted dealer-phone">{{ o.phone }}</span>{% endif %}</td>
-          <td class="muted">{{ o.items_text }}</td>
+          {% if not is_goods %}<td class="muted">{{ o.items_text }}</td>{% endif %}
           <td>{{ status_picker(url_for('dealer.update_status', order_id=o.id), o.status, statuses, prefix='status-dealer-', next_url=request.full_path.rstrip('?'), aria='Статус заказа №' ~ o.id) }}</td>
           <td class="amount">{{ o.total|money }}</td>
           <td class="amount">{{ o.paid|money }}</td>

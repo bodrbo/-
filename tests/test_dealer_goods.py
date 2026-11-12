@@ -208,11 +208,20 @@ class DealerGoodsTests(unittest.TestCase):
 
     # ---- the two kinds of orders do not mix
 
+    def test_the_goods_list_has_no_goods_column_but_still_finds_orders_by_a_good(self):
+        self.create()
+        page = self.client.get("/dealer/goods").get_data(as_text=True)
+        self.assertNotIn("<th>Товары</th>", page)
+        self.assertNotIn("<th>Позиции</th>", page)
+        self.assertEqual(page.count("<th>"), 7)          # №, дата, клиент, статус, сумма, оплачено, остаток
+        found = self.client.get(f"/dealer/goods?q={ROPE}").get_data(as_text=True)
+        self.assertIn(CLIENT, found)
+        self.assertNotIn(f"{ROPE} ×3", found)            # the goods themselves are not listed
+
     def test_each_list_shows_only_its_own_orders(self):
         self.create()
         goods_page = self.client.get(f"/dealer/goods?q={CLIENT}").get_data(as_text=True)
         self.assertIn(CLIENT, goods_page)
-        self.assertIn(ROPE, goods_page)
         equipment_page = self.client.get(f"/dealer/orders?q={CLIENT}").get_data(as_text=True)
         self.assertNotIn(ROPE, equipment_page)
         self.assertNotIn(ROPE, self.client.get("/dealer/orders?status=new_request").get_data(as_text=True))
