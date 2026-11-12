@@ -6720,6 +6720,7 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   border-radius: 9px;
   background: var(--paper-alt);
 }
+.tuning-bulk-form[hidden] { display: none; }
 .tuning-bulk-count {
   align-self: center;
   min-width: 92px;
