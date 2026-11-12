@@ -2,6 +2,7 @@ import json
 import re
 import sqlite3
 import unittest
+from unittest import mock
 
 from werkzeug.datastructures import MultiDict
 
@@ -12,6 +13,8 @@ ROPE = "Товарный Трос Тест"
 FILM = "Товарная Плёнка Тест"
 ROPE_SKU = "GOODS-TEST-ROPE"
 FILM_SKU = "GOODS-TEST-FILM"
+STORE = "Склад Отгрузки Тест"
+STORE_2 = "Склад Запасной Тест"
 
 
 class DealerGoodsTests(unittest.TestCase):
@@ -29,6 +32,8 @@ class DealerGoodsTests(unittest.TestCase):
             self.cleanup(db)
             self.rope_id = self.add_product(db, ROPE, ROPE_SKU, "piece", 1200)
             self.film_id = self.add_product(db, FILM, FILM_SKU, "sqm", 800)
+            self.store_id = self.add_warehouse(db, STORE, {self.rope_id: 10, self.film_id: 5})
+            self.store_2_id = self.add_warehouse(db, STORE_2, {self.rope_id: 1})
             db.commit()
         self.addCleanup(self.cleanup_now)
 
@@ -36,6 +41,33 @@ class DealerGoodsTests(unittest.TestCase):
         return db.execute(
             "INSERT INTO supply_products (name, sku, cost_price, cost_unit, sale_price, created_at) "
             "VALUES (?, ?, 500, ?, ?, '2026-10-01 10:00')", (name, sku, unit, sale_price)).lastrowid
+
+    def add_warehouse(self, db, name, stock):
+        warehouse_id = db.execute(
+            "INSERT INTO supply_warehouses (name, created_at) VALUES (?, '2026-10-01 10:00')", (name,)).lastrowid
+        for product_id, quantity in stock.items():
+            db.execute("INSERT INTO supply_stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)",
+                       (product_id, warehouse_id, quantity))
+        return warehouse_id
+
+    def stock(self, product_id, warehouse_id):
+        with application_module.app.app_context():
+            row = application_module.get_db().execute(
+                "SELECT quantity FROM supply_stock WHERE product_id = ? AND warehouse_id = ?",
+                (product_id, warehouse_id)).fetchone()
+            return row["quantity"] if row else None
+
+    def writeoffs(self, order_id):
+        with application_module.app.app_context():
+            return [dict(r) for r in application_module.get_db().execute(
+                "SELECT * FROM supply_writeoffs WHERE dealer_order_id = ? ORDER BY id", (order_id,)).fetchall()]
+
+    def set_status(self, order_id, status, **extra):
+        return self.client.post(f"/dealer/orders/{order_id}/status", data={"status": status, **extra})
+
+    def notice(self):
+        with self.client.session_transaction() as session:
+            return session.get("dealer_notice") or {}
 
     def cleanup_now(self):
         with application_module.app.app_context():
@@ -45,7 +77,10 @@ class DealerGoodsTests(unittest.TestCase):
         for row in db.execute("SELECT id FROM dealer_orders WHERE client_name = ?", (CLIENT,)).fetchall():
             db.execute("DELETE FROM dealer_order_items WHERE order_id = ?", (row["id"],))
             db.execute("DELETE FROM dealer_payments WHERE order_id = ?", (row["id"],))
+            db.execute("DELETE FROM supply_writeoffs WHERE dealer_order_id = ?", (row["id"],))
             db.execute("DELETE FROM dealer_orders WHERE id = ?", (row["id"],))
+        db.execute("DELETE FROM supply_stock WHERE product_id IN (SELECT id FROM supply_products WHERE sku LIKE 'GOODS-TEST-%')")
+        db.execute("DELETE FROM supply_warehouses WHERE name IN (?, ?)", (STORE, STORE_2))
         db.execute("DELETE FROM supply_products WHERE sku LIKE 'GOODS-TEST-%'")
         for row in db.execute("SELECT id FROM clients WHERE client_name = ?", (CLIENT,)).fetchall():
             db.execute("DELETE FROM client_segments WHERE client_id = ?", (row["id"],))
@@ -198,12 +233,12 @@ class DealerGoodsTests(unittest.TestCase):
     def test_status_and_payments_work_as_in_the_other_orders(self):
         self.create()
         order_id = self.order()["id"]
-        self.client.post(f"/dealer/orders/{order_id}/status", data={"status": "ready"})
+        self.set_status(order_id, "paid")
         self.client.post(f"/dealer/orders/{order_id}/payments",
                          data={"amount": "1000", "payment_type": "CASH", "paid_date": ""})
-        self.assertEqual(self.order()["status"], "ready")
+        self.assertEqual(self.order()["status"], "paid")
         page = self.client.get(f"/dealer/goods").get_data(as_text=True)
-        self.assertIn("Готов к выдаче", page)
+        self.assertIn("Подтвержден и оплачен", page)
         response = self.client.post(f"/dealer/orders/{order_id}/delete")
         self.assertEqual(response.headers["Location"], f"/dealer/orders/{order_id}")   # a paid order stays
 
@@ -214,6 +249,188 @@ class DealerGoodsTests(unittest.TestCase):
         self.assertEqual(response.headers["Location"], "/dealer/goods")
         self.assertIsNone(self.order())
         self.assertEqual(self.items(order_id), [])
+
+    # ---- the statuses of goods orders and the shipment
+
+    def test_goods_orders_have_their_own_statuses(self):
+        self.create()
+        order_id = self.order()["id"]
+        goods_page = self.client.get("/dealer/goods").get_data(as_text=True)
+        for label in ("Новая заявка", "Подтвержден и оплачен", "Отгружен", "Завершен"):
+            self.assertIn(label, goods_page)
+        self.assertNotIn("Коммерческое предложение", goods_page)
+        self.assertNotIn("Подтвержден и оплачен", self.client.get("/dealer/orders").get_data(as_text=True))
+        self.set_status(order_id, "ready")                      # a status of the other group
+        self.assertEqual(self.order()["status"], "new_request")
+        self.assertEqual(self.notice()["type"], "error")
+
+    def test_the_other_group_cannot_use_goods_statuses(self):
+        # an equipment order refuses «Отгружен»
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            equipment_id = db.execute(
+                "INSERT INTO dealer_orders (client_name, status, order_date, created_at, updated_at) "
+                "VALUES (?, 'new_request', '2026-10-10', '2026-10-10 10:00', '2026-10-10 10:00')", (CLIENT,)).lastrowid
+            db.commit()
+        self.set_status(equipment_id, "shipped", warehouse_id=self.store_id)
+        self.assertEqual(self.order()["status"], "new_request")
+        self.assertEqual(self.notice()["type"], "error")
+
+    def test_shipping_needs_a_warehouse(self):
+        self.create()
+        order_id = self.order()["id"]
+        self.set_status(order_id, "shipped")
+        self.assertEqual(self.order()["status"], "new_request")
+        self.assertIn("склад", self.notice()["message"])
+        self.assertEqual(self.writeoffs(order_id), [])
+
+    def test_shipping_writes_the_goods_off_the_chosen_warehouse(self):
+        self.create(items=[
+            (self.rope_id, ROPE, "piece", "3", "1200"),
+            (self.rope_id, ROPE, "piece", "2", "1200"),              # the same product twice
+            (self.film_id, FILM, "sqm", "2,5", "800"),
+            ("", "Ручной товар", "piece", "9", "100"),                # typed by hand: nothing to write off
+        ])
+        order_id = self.order()["id"]
+        with mock.patch.object(application_module, "_maybe_create_low_stock_request") as low_stock:
+            self.set_status(order_id, "shipped", warehouse_id=self.store_id)
+        self.assertEqual(self.order()["status"], "shipped")
+        self.assertEqual(self.order()["ship_warehouse_id"], self.store_id)
+        self.assertIn("Списано", self.notice()["message"])
+        self.assertEqual(self.stock(self.rope_id, self.store_id), 5)
+        self.assertEqual(self.stock(self.film_id, self.store_id), 2.5)
+        self.assertEqual(self.stock(self.rope_id, self.store_2_id), 1)       # the other warehouse is untouched
+        rows = {w["product_id"]: w for w in self.writeoffs(order_id)}
+        self.assertEqual(set(rows), {self.rope_id, self.film_id})
+        self.assertEqual((rows[self.rope_id]["quantity"], rows[self.rope_id]["warehouse_id"]), (5, self.store_id))
+        self.assertEqual(rows[self.rope_id]["amount"], 2500)                  # 5 × cost price 500
+        self.assertEqual(rows[self.rope_id]["reason"], "Продано в заказе")
+        self.assertIn(str(order_id), rows[self.rope_id]["note"])
+        self.assertEqual(sorted(call.args[1] for call in low_stock.call_args_list),
+                         sorted([self.rope_id, self.film_id]))
+
+    def test_a_warehouse_that_lacks_goods_refuses_the_whole_shipment(self):
+        self.create(items=[
+            (self.film_id, FILM, "sqm", "1", "800"),
+            (self.rope_id, ROPE, "piece", "3", "1200"),
+        ])
+        order_id = self.order()["id"]
+        self.set_status(order_id, "shipped", warehouse_id=self.store_2_id)   # one rope, no film
+        self.assertEqual(self.order()["status"], "new_request")
+        message = self.notice()["message"]
+        self.assertIn(STORE_2, message)
+        self.assertIn(ROPE, message)
+        self.assertIn(FILM, message)
+        self.assertEqual(self.stock(self.rope_id, self.store_2_id), 1)
+        self.assertEqual(self.writeoffs(order_id), [])
+
+    def test_going_back_returns_the_goods_to_the_warehouse(self):
+        self.create(items=[(self.rope_id, ROPE, "piece", "4", "1200")])
+        order_id = self.order()["id"]
+        self.set_status(order_id, "shipped", warehouse_id=self.store_id)
+        self.assertEqual(self.stock(self.rope_id, self.store_id), 6)
+        self.set_status(order_id, "paid")
+        self.assertEqual(self.stock(self.rope_id, self.store_id), 10)
+        self.assertEqual(self.writeoffs(order_id), [])
+        self.assertIsNone(self.order()["ship_warehouse_id"])
+        # shipped again, then cancelled
+        self.set_status(order_id, "shipped", warehouse_id=self.store_id)
+        self.set_status(order_id, "cancelled")
+        self.assertEqual(self.stock(self.rope_id, self.store_id), 10)
+
+    def test_completing_keeps_the_write_off_and_needs_the_shipment_first(self):
+        self.create(items=[(self.rope_id, ROPE, "piece", "4", "1200")])
+        order_id = self.order()["id"]
+        self.set_status(order_id, "completed")
+        self.assertEqual(self.order()["status"], "new_request")
+        self.assertIn("Отгружен", self.notice()["message"])
+        self.set_status(order_id, "shipped", warehouse_id=self.store_id)
+        self.set_status(order_id, "completed")
+        order = self.order()
+        self.assertEqual(order["status"], "completed")
+        self.assertTrue(order["completed_at"])
+        self.assertEqual(self.stock(self.rope_id, self.store_id), 6)
+        self.set_status(order_id, "shipped", warehouse_id=self.store_2_id)    # already out: no second write-off
+        self.assertEqual(self.stock(self.rope_id, self.store_id), 6)
+        self.assertEqual(self.stock(self.rope_id, self.store_2_id), 1)
+        self.assertIsNone(self.order()["completed_at"])
+        self.set_status(order_id, "new_request")
+        self.assertEqual(self.stock(self.rope_id, self.store_id), 10)
+
+    def test_an_order_of_hand_typed_goods_ships_without_a_warehouse(self):
+        self.create(items=[("", "Ручной товар", "piece", "2", "100")])
+        order_id = self.order()["id"]
+        self.set_status(order_id, "shipped")
+        self.assertEqual(self.order()["status"], "shipped")
+        self.assertEqual(self.writeoffs(order_id), [])
+
+    def test_editing_a_shipped_order_recalculates_the_write_off(self):
+        self.create(items=[(self.rope_id, ROPE, "piece", "4", "1200")])
+        order_id = self.order()["id"]
+        self.set_status(order_id, "shipped", warehouse_id=self.store_id)
+        response = self.client.post(f"/dealer/orders/{order_id}", data=self.form(
+            items=[(self.rope_id, ROPE, "piece", "7", "1200"), (self.film_id, FILM, "sqm", "1", "800")]))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.stock(self.rope_id, self.store_id), 3)
+        self.assertEqual(self.stock(self.film_id, self.store_id), 4)
+        self.assertEqual({w["product_id"]: w["quantity"] for w in self.writeoffs(order_id)},
+                         {self.rope_id: 7, self.film_id: 1})
+        # more than the warehouse holds: nothing changes
+        response = self.client.post(f"/dealer/orders/{order_id}", data=self.form(
+            items=[(self.rope_id, ROPE, "piece", "11", "1200")]))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(STORE, response.get_data(as_text=True))
+        self.assertEqual(self.stock(self.rope_id, self.store_id), 3)
+        self.assertEqual(self.stock(self.film_id, self.store_id), 4)
+        self.assertEqual([i["quantity"] for i in self.items(order_id)], [7, 1])
+        self.assertEqual(self.order()["total"], 9200)
+
+    def test_deleting_a_shipped_order_returns_its_goods(self):
+        self.create(items=[(self.rope_id, ROPE, "piece", "4", "1200")])
+        order_id = self.order()["id"]
+        self.set_status(order_id, "shipped", warehouse_id=self.store_id)
+        self.client.post(f"/dealer/orders/{order_id}/delete")
+        self.assertIsNone(self.order())
+        self.assertEqual(self.stock(self.rope_id, self.store_id), 10)
+        self.assertEqual(self.writeoffs(order_id), [])
+
+    def test_the_dialog_gets_the_warehouses_with_what_each_lacks(self):
+        self.create(items=[
+            (self.rope_id, ROPE, "piece", "3", "1200"),
+            ("", "Ручной товар", "piece", "1", "100"),
+        ])
+        order_id = self.order()["id"]
+        info = self.client.get(f"/dealer/orders/{order_id}/shipping").get_json()
+        self.assertEqual([(l["name"], l["quantity"]) for l in info["lines"]], [(ROPE, 3)])
+        warehouses = {w["name"]: w for w in info["warehouses"]}
+        self.assertEqual(warehouses[STORE]["missing"], [])
+        self.assertEqual(warehouses[STORE_2]["missing"], [{"name": ROPE, "need": 3, "have": 1}])
+        self.assertIsNone(info["shipped_from"])
+        self.set_status(order_id, "shipped", warehouse_id=self.store_id)
+        info = self.client.get(f"/dealer/orders/{order_id}/shipping").get_json()
+        self.assertEqual(info["shipped_from"], STORE)
+        self.assertEqual(info["warehouses"], [])
+        self.assertEqual(self.client.get("/dealer/orders/999999/shipping").status_code, 404)
+
+    def test_the_dialog_is_on_the_goods_pages_only(self):
+        self.create()
+        order_id = self.order()["id"]
+        for url in ("/dealer/goods", f"/dealer/orders/{order_id}"):
+            page = self.client.get(url).get_data(as_text=True)
+            self.assertIn('id="shipModal"', page, url)
+            self.assertIn("status-picker:choose", page, url)
+        self.assertNotIn('id="shipModal"', self.client.get("/dealer/orders").get_data(as_text=True))
+        self.assertIn("status-picker:choose", self.client.get("/static/status-picker.js").get_data(as_text=True))
+
+    def test_a_click_on_the_status_does_not_open_the_order_row(self):
+        self.create()
+        page = self.client.get("/dealer/goods").get_data(as_text=True)
+        self.assertIn("event.target.closest('[data-status-picker-form]", page)
+
+    def test_the_shipping_route_needs_a_login(self):
+        self.create()
+        anonymous = application_module.app.test_client()
+        self.assertEqual(anonymous.get(f"/dealer/orders/{self.order()['id']}/shipping").status_code, 302)
 
     # ---- the client cabinet
 
@@ -252,6 +469,20 @@ class DealerGoodsTests(unittest.TestCase):
         init_schema(conn)           # idempotent
         self.assertEqual(conn.execute("SELECT order_type FROM dealer_orders").fetchone()[0], "equipment")
         self.assertEqual(conn.execute("SELECT product_id, unit FROM dealer_order_items").fetchone(), (None, "piece"))
+
+    def test_goods_orders_made_before_their_statuses_move_to_the_nearest_new_one(self):
+        from modules.dealer.schema import init_schema
+        conn = sqlite3.connect(":memory:")
+        init_schema(conn)
+        for number, (kind, status) in enumerate([
+            ("goods", "estimate"), ("goods", "approved"), ("goods", "ready"), ("goods", "handed_over"),
+            ("goods", "new_request"), ("equipment", "approved"),
+        ], start=1):
+            conn.execute("INSERT INTO dealer_orders (id, client_name, order_type, status, order_date, created_at, "
+                         "updated_at) VALUES (?, 'x', ?, ?, '2026-10-10', 'n', 'n')", (number, kind, status))
+        init_schema(conn)
+        self.assertEqual([r[0] for r in conn.execute("SELECT status FROM dealer_orders ORDER BY id")],
+                         ["new_request", "paid", "paid", "completed", "new_request", "approved"])
 
 
 if __name__ == "__main__":

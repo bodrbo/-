@@ -3463,6 +3463,11 @@ def init_db(db_path=None, include_bootstrap_data=True):
     # that row can find and reverse its write-off.
     if "tuning_order_product_id" not in supply_writeoff_cols:
         conn.execute("ALTER TABLE supply_writeoffs ADD COLUMN tuning_order_product_id INTEGER")
+    # The goods order of the Дилерский центр → «Морские товары» that shipped
+    # this product (see modules/dealer/shipping): going back from "Отгружен"
+    # finds and reverses it.
+    if "dealer_order_id" not in supply_writeoff_cols:
+        conn.execute("ALTER TABLE supply_writeoffs ADD COLUMN dealer_order_id INTEGER")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS supply_requests (
@@ -6400,6 +6405,7 @@ app.register_blueprint(
         resolve_client=lambda db, client_id, client_name, phone: _get_or_create_client(
             db, phone, client_name, "", client_id=client_id
         ),
+        low_stock_check=lambda db, product_id: _maybe_create_low_stock_request(db, product_id),
         create_profile=lambda db, kind, name, brand: _dealer_catalog_profile(db, kind, name, brand),
         create_tuning_order=lambda db, order, items, admin_id: _create_tuning_order_from_dealer(
             db, order, items, admin_id

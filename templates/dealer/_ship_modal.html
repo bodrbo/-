@@ -1,0 +1,116 @@
+{# The «Отгружен» dialog of the goods orders: asks for the warehouse the goods
+   leave from. The status picker lets the page take a choice over
+   (static/status-picker.js, event status-picker:choose); the dialog then posts
+   the status itself, so the page reloads with the result. #}
+<div class="modal-overlay hidden" id="shipModal" role="dialog" aria-modal="true" aria-labelledby="shipModalTitle">
+  <form method="post" class="modal-box dealer-ship-box" id="shipForm">
+    <h3 id="shipModalTitle">Отгрузка заказа</h3>
+    <input type="hidden" name="status" value="shipped">
+    <input type="hidden" name="next" id="shipNext" value="">
+    <p id="shipState" class="hint">Загружаем склады…</p>
+    <ul class="dealer-ship-lines" id="shipLines"></ul>
+    <div class="field" id="shipWarehouseField" hidden>
+      <label for="shipWarehouse">Склад отгрузки</label>
+      <select name="warehouse_id" id="shipWarehouse"></select>
+      <p class="dealer-ship-problem" id="shipProblem" hidden></p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="shipCancel">Отмена</button>
+      <button type="submit" id="shipConfirm" disabled>Отгрузить и списать</button>
+    </div>
+  </form>
+</div>
+<script>
+(function () {
+  var modal = document.getElementById('shipModal');
+  var form = document.getElementById('shipForm');
+  var state = document.getElementById('shipState');
+  var lines = document.getElementById('shipLines');
+  var field = document.getElementById('shipWarehouseField');
+  var select = document.getElementById('shipWarehouse');
+  var problem = document.getElementById('shipProblem');
+  var confirmButton = document.getElementById('shipConfirm');
+  var token = 0;
+
+  function close() { modal.classList.add('hidden'); document.body.classList.remove('modal-open'); }
+  function num(value) { return String(Math.round(value * 1000) / 1000).replace('.', ','); }
+
+  function refreshChoice() {
+    var option = select.options[select.selectedIndex];
+    var missing = option ? option.getAttribute('data-missing') : '';
+    problem.hidden = !missing;
+    problem.textContent = missing ? 'Не хватает: ' + missing : '';
+    confirmButton.disabled = !option || !!missing;
+  }
+  select.addEventListener('change', refreshChoice);
+
+  function fill(info) {
+    lines.innerHTML = '';
+    (info.lines || []).forEach(function (line) {
+      var item = document.createElement('li');
+      item.textContent = line.name + ' — ' + num(line.quantity);
+      lines.appendChild(item);
+    });
+    if (info.shipped_from) {
+      state.textContent = 'Товар уже списан со склада «' + info.shipped_from + '». Статус изменится без нового списания.';
+      confirmButton.textContent = 'Отметить отгруженным';
+      confirmButton.disabled = false;
+    } else if (!(info.lines || []).length) {
+      state.textContent = 'В заказе нет товаров из каталога склада — списывать нечего. Склад указывать не нужно.';
+      confirmButton.textContent = 'Отметить отгруженным';
+      confirmButton.disabled = false;
+    } else if (!(info.warehouses || []).length) {
+      state.textContent = 'Складов нет — сначала заведите склад в разделе «Снабжение».';
+    } else {
+      state.textContent = 'Выберите склад, с которого уходит товар. С него спишутся позиции:';
+      confirmButton.textContent = 'Отгрузить и списать';
+      select.innerHTML = '';
+      info.warehouses.forEach(function (warehouse) {
+        var option = document.createElement('option');
+        option.value = warehouse.id;
+        var missing = (warehouse.missing || []).map(function (m) {
+          return m.name + ' (нужно ' + num(m.need) + ', есть ' + num(m.have) + ')';
+        }).join('; ');
+        option.textContent = warehouse.name + (missing ? ' — не хватает' : ' — хватает');
+        if (missing) { option.setAttribute('data-missing', missing); }
+        select.appendChild(option);
+      });
+      var enough = Array.prototype.filter.call(select.options, function (o) { return !o.getAttribute('data-missing'); })[0];
+      if (enough) { select.value = enough.value; }
+      field.hidden = false;
+      refreshChoice();
+    }
+  }
+
+  function open(statusForm) {
+    var action = statusForm.getAttribute('action');
+    var next = statusForm.querySelector('[name="next"]');
+    form.setAttribute('action', action);
+    document.getElementById('shipNext').value = next ? next.value : '';
+    state.textContent = 'Загружаем склады…';
+    lines.innerHTML = '';
+    field.hidden = true;
+    problem.hidden = true;
+    confirmButton.disabled = true;
+    confirmButton.textContent = 'Отгрузить и списать';
+    modal.classList.remove('hidden');
+    document.body.classList.add('modal-open');
+    var mine = ++token;
+    fetch(action.replace(/\/status$/, '/shipping'), { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+      .then(function (response) { if (!response.ok) { throw new Error(response.status); } return response.json(); })
+      .then(function (info) { if (mine === token) { fill(info); } })
+      .catch(function () { if (mine === token) { state.textContent = 'Не удалось загрузить склады. Закройте окно и попробуйте ещё раз.'; } });
+  }
+
+  document.addEventListener('status-picker:choose', function (event) {
+    if (event.detail.value !== 'shipped') { return; }
+    event.preventDefault();
+    open(event.detail.form);
+  });
+  document.getElementById('shipCancel').addEventListener('click', close);
+  modal.addEventListener('click', function (event) { if (event.target === modal) { close(); } });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && !modal.classList.contains('hidden')) { close(); }
+  });
+})();
+</script>

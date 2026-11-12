@@ -2,11 +2,16 @@
 
 import datetime as dt
 
-from . import repository
+from . import repository, shipping
 from .constants import (
-    DEFAULT_GOODS_UNIT, DEFAULT_STATUS, DISCOUNT_TYPES, GOODS_KIND, GOODS_UNITS, ITEM_KINDS,
-    ORDER_TYPE_EQUIPMENT, ORDER_TYPE_GOODS, PAYMENT_TYPES, STATUS_LABELS,
+    DEFAULT_GOODS_UNIT, DEFAULT_STATUS, DISCOUNT_TYPES, FINAL_STATUS, GOODS_KIND, GOODS_RELEASE_STATUSES,
+    GOODS_UNITS, ITEM_KINDS, ORDER_TYPE_EQUIPMENT, ORDER_TYPE_GOODS, PAYMENT_TYPES, SHIPPED_STATUS,
+    STATUS_LABELS, STATUSES_BY_TYPE,
 )
+
+
+class ShipmentError(ValueError):
+    """The stock cannot cover the order lines being saved."""
 
 
 def now_text():
@@ -193,9 +198,17 @@ def parse_order_form(form, known_profiles, order_type=ORDER_TYPE_EQUIPMENT, know
     }
 
 
-def save_order(db, order_id, data, client_id):
-    """Inserts or updates the order and replaces its lines. Returns the id."""
+def save_order(db, order_id, data, client_id, actor=None, after_writeoff=None):
+    """Inserts or updates the order and replaces its lines. Returns the id.
+    A shipped goods order keeps its write-off in step with the lines: the old
+    one is returned and the new lines are written off the same warehouse; if
+    that cannot be covered nothing is saved and ShipmentError is raised."""
     stamp = now_text()
+    shipped_from = None
+    if order_id is not None:
+        existing = repository.get_order(db, order_id)
+        if existing is not None and shipping.writeoffs(db, order_id):
+            shipped_from = existing["ship_warehouse_id"]
     if order_id is None:
         order_id = db.execute(
             "INSERT INTO dealer_orders (client_id, client_name, phone, status, order_date, deadline_date, "
@@ -222,21 +235,66 @@ def save_order(db, order_id, data, client_id):
             (order_id, item["kind"], item["profile_id"], item["product_id"], item["unit"], item["name"],
              item["serial_number"], item["quantity"], item["price"], position),
         )
+    written = []
+    if shipped_from is not None:
+        shipping.release(db, order_id)
+        lines = shipping.stock_lines(db, order_id)
+        place = shipping.warehouse(db, shipped_from)
+        missing = shipping.shortages(db, lines, shipped_from) if place is not None else []
+        if place is None or missing:
+            db.rollback()
+            raise ShipmentError(
+                (shipping.shortage_text(place["name"], missing) if place is not None
+                 else "Склад отгрузки удалён.")
+                + " Заказ уже отгружен — списание пересчитывается по новым позициям; измените позиции или "
+                "верните заказ на предыдущий статус."
+            )
+        db.execute("UPDATE dealer_orders SET ship_warehouse_id = ? WHERE id = ?", (shipped_from, order_id))
+        written = shipping.write_off(db, {"id": order_id}, lines, shipped_from, actor, stamp)
     db.commit()
+    if after_writeoff:
+        for product_id in written:
+            after_writeoff(db, product_id)
     return order_id
 
 
-def set_status(db, order_id, status):
-    """(ok, message). completed_at is stamped on the way to "Передан клиенту"
-    and cleared when the order goes back."""
-    if status not in STATUS_LABELS:
-        return False, "Неизвестный статус."
+def set_status(db, order_id, status, warehouse_id=None, actor=None, after_writeoff=None):
+    """(ok, message). completed_at is stamped on the way to the final status
+    ("Передан клиенту" / "Завершен") and cleared when the order goes back.
+
+    Goods orders move stock: "Отгружен" writes the catalog goods off the
+    warehouse given (all of them or nothing — a warehouse that lacks
+    something refuses), a status before it (or "Отменён") returns them, and
+    "Завершен" needs the shipment first."""
     order = repository.get_order(db, order_id)
     if order is None:
         return False, "Заказ не найден."
+    order_type = order["order_type"] or ORDER_TYPE_EQUIPMENT
+    if status not in {item["value"] for item in STATUSES_BY_TYPE.get(order_type, ())}:
+        return False, "Неизвестный статус."
     stamp = now_text()
+    note = ""
+    written = []
+    if order_type == ORDER_TYPE_GOODS:
+        has_writeoff = bool(shipping.writeoffs(db, order_id))
+        lines = shipping.stock_lines(db, order_id)
+        if status == SHIPPED_STATUS and not has_writeoff and lines:
+            place = shipping.warehouse(db, warehouse_id)
+            if place is None:
+                return False, "Укажите склад отгрузки — с него спишется товар."
+            missing = shipping.shortages(db, lines, place["id"])
+            if missing:
+                return False, shipping.shortage_text(place["name"], missing)
+            written = shipping.write_off(db, order, lines, place["id"], actor, stamp)
+            db.execute("UPDATE dealer_orders SET ship_warehouse_id = ? WHERE id = ?", (place["id"], order_id))
+            note = f" Списано со склада «{place['name']}»: {len(lines)} поз."
+        elif status == FINAL_STATUS[ORDER_TYPE_GOODS] and not has_writeoff and lines:
+            return False, "Сначала отгрузите заказ: поставьте статус «Отгружен» и укажите склад."
+        elif status in GOODS_RELEASE_STATUSES and has_writeoff:
+            shipping.release(db, order_id)
+            note = " Товар возвращён на склад."
     completed = order["completed_at"]
-    if status == "handed_over":
+    if status == FINAL_STATUS[order_type]:
         completed = completed or stamp
     else:
         completed = None
@@ -245,7 +303,10 @@ def set_status(db, order_id, status):
         (status, completed, stamp, order_id),
     )
     db.commit()
-    return True, f"Статус: «{STATUS_LABELS[status]}»."
+    if after_writeoff:
+        for product_id in written:
+            after_writeoff(db, product_id)
+    return True, f"Статус: «{STATUS_LABELS[status]}».{note}"
 
 
 def add_payment(db, order_id, raw_amount, payment_type, raw_date, note):
@@ -284,6 +345,7 @@ def delete_order(db, order_id):
         return False, "Заказ не найден."
     if repository.paid_amount(db, order_id):
         return False, "По заказу есть платежи — удалить его нельзя, переведите в статус «Отменён»."
+    shipping.release(db, order_id)       # an order shipped and never paid gives its goods back
     db.execute("DELETE FROM dealer_order_items WHERE order_id = ?", (order_id,))
     db.execute("DELETE FROM dealer_orders WHERE id = ?", (order_id,))
     db.commit()

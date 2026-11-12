@@ -2,18 +2,18 @@
 
 import datetime as dt
 
-from flask import Blueprint, redirect, render_template, request, session, url_for
+from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
-from . import repository, services
+from . import repository, services, shipping
 from .constants import (
-    DEALER_STATUSES, GOODS_UNITS, ITEM_KINDS, ORDER_TYPE_EQUIPMENT, ORDER_TYPE_GOODS, PAYMENT_TYPES,
-    STATUS_LABELS,
+    GOODS_UNITS, ITEM_KINDS, ORDER_TYPE_EQUIPMENT, ORDER_TYPE_GOODS, PAYMENT_TYPES,
+    STATUS_LABELS, STATUSES_BY_TYPE,
 )
 
 
 def create_dealer_blueprint(get_db, access_required, client_choices, resolve_client,
                             events_panel=None, forget_events=None, create_profile=None,
-                            create_tuning_order=None, tuning_order_url=None):
+                            create_tuning_order=None, tuning_order_url=None, low_stock_check=None):
     """client_choices(db) -> clients for the picker; resolve_client(db,
     client_id, client_name, phone) -> client id (finds or creates the client
     in the shared client base) — both injected from app.py. events_panel(db,
@@ -23,7 +23,9 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
     finds or creates a model of the common catalog. create_tuning_order(db,
     order, items, admin_id) -> id of a tuning-center order made for the
     equipment of the order (None when there is none), tuning_order_url(id)
-    -> its page."""
+    -> its page. low_stock_check(db, product_id) is called after a product
+    was written off the warehouse by a shipment (raises the supply request when
+    the stock runs low; optional)."""
     blueprint = Blueprint("dealer", __name__)
 
     def catalog_maps(db):
@@ -63,7 +65,7 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
     def render_list(db, order_type):
         query = request.args.get("q", "").strip()[:120]
         status = request.args.get("status", "").strip()
-        if status not in STATUS_LABELS:
+        if status not in {item["value"] for item in STATUSES_BY_TYPE[order_type]}:
             status = ""
         rows = db.execute(
             "SELECT o.*, COALESCE((SELECT SUM(amount) FROM dealer_payments WHERE order_id = o.id), 0) AS paid, "
@@ -91,7 +93,7 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
         return render_template(
             "dealer/orders.html", active_page="dealer",
             sub_page="goods" if order_type == ORDER_TYPE_GOODS else "orders", order_type=order_type,
-            orders=shown, statuses=DEALER_STATUSES, selected_status=status, search_query=query,
+            orders=shown, statuses=STATUSES_BY_TYPE[order_type], selected_status=status, search_query=query,
             total_sum=sum(o["total"] for o in counted),
             paid_sum=sum(o["paid"] for o in counted),
             remaining_sum=sum(o["remaining"] for o in counted),
@@ -125,7 +127,7 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
                 for p in positions
             ],
             item_kinds=ITEM_KINDS, client_choices=client_choices(db),
-            statuses=DEALER_STATUSES, status_label=STATUS_LABELS.get(order["status"]) if order else None,
+            statuses=STATUSES_BY_TYPE[order_type], status_label=STATUS_LABELS.get(order["status"]) if order else None,
             payments=payments, paid=paid,
             remaining=max(0.0, round((order["total"] - paid), 2)) if order is not None else None,
             payment_types=PAYMENT_TYPES, today=dt.date.today().isoformat(),
@@ -167,7 +169,12 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
         if error:
             return error, None
         client_id = resolve_client(db, data["client_id"], data["client_name"], data["phone"])
-        return None, services.save_order(db, order_id, data, client_id)
+        try:
+            return None, services.save_order(
+                db, order_id, data, client_id, actor=session.get("admin_name"), after_writeoff=low_stock_check
+            )
+        except services.ShipmentError as problem:
+            return str(problem), None
 
     def create_order(order_type):
         db = get_db()
@@ -209,12 +216,35 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
     @blueprint.route("/dealer/orders/<int:order_id>/status", methods=["POST"])
     @access_required
     def update_status(order_id):
-        ok, message = services.set_status(get_db(), order_id, request.form.get("status", ""))
+        ok, message = services.set_status(
+            get_db(), order_id, request.form.get("status", ""),
+            warehouse_id=request.form.get("warehouse_id", type=int),
+            actor=session.get("admin_name"), after_writeoff=low_stock_check,
+        )
         notice("success" if ok else "error", message)
         target = request.form.get("next", "").strip()
         if target.startswith("/") and not target.startswith("//") and "\\" not in target and len(target) <= 600:
             return redirect(target)
         return redirect(url_for("dealer.order", order_id=order_id))
+
+    @blueprint.route("/dealer/orders/<int:order_id>/shipping")
+    @access_required
+    def shipping_options(order_id):
+        """What the «Отгружен» dialog needs: the warehouses with what each lacks
+        for the order, or the warehouse the order already went out from."""
+        db = get_db()
+        order = repository.get_order(db, order_id)
+        if order is None or order["order_type"] != ORDER_TYPE_GOODS:
+            return jsonify({"error": "Заказ не найден."}), 404
+        lines = shipping.stock_lines(db, order_id)
+        done = shipping.writeoffs(db, order_id)
+        place = shipping.warehouse(db, order["ship_warehouse_id"]) if done else None
+        return jsonify({
+            "order_id": order_id,
+            "lines": [{"name": line["name"], "quantity": line["quantity"]} for line in lines],
+            "shipped_from": place["name"] if place is not None else ("—" if done else None),
+            "warehouses": shipping.warehouse_options(db, order_id) if lines and not done else [],
+        })
 
     @blueprint.route("/dealer/orders/<int:order_id>/payments", methods=["POST"])
     @access_required

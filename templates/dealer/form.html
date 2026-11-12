@@ -201,6 +201,7 @@
 
 {% block scripts %}
 {% if is_goods %}
+{% if order %}{% include 'dealer/_ship_modal.html' %}{% endif %}
 {% include 'dealer/_goods_script.html' %}
 {% else %}
 <script id="dealerCatalogData" type="application/json">{{ catalog|tojson }}</script>

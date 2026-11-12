@@ -47,6 +47,16 @@ def init_schema(conn):
     order_cols = {row[1] for row in conn.execute("PRAGMA table_info(dealer_orders)").fetchall()}
     if "order_type" not in order_cols:
         conn.execute("ALTER TABLE dealer_orders ADD COLUMN order_type TEXT NOT NULL DEFAULT 'equipment'")
+    if "ship_warehouse_id" not in order_cols:
+        # The warehouse a goods order was shipped from (NULL = not shipped).
+        conn.execute("ALTER TABLE dealer_orders ADD COLUMN ship_warehouse_id INTEGER")
+    # Goods orders got their own statuses; the few made before that move to
+    # the nearest new one (idempotent: nothing is left to move the next time).
+    from .constants import GOODS_LEGACY_STATUSES
+    for old, new in GOODS_LEGACY_STATUSES.items():
+        conn.execute(
+            "UPDATE dealer_orders SET status = ? WHERE order_type = 'goods' AND status = ?", (new, old)
+        )
     item_cols = {row[1] for row in conn.execute("PRAGMA table_info(dealer_order_items)").fetchall()}
     if "product_id" not in item_cols:
         conn.execute("ALTER TABLE dealer_order_items ADD COLUMN product_id INTEGER")

@@ -56,7 +56,7 @@
       </thead>
       <tbody>
         {% for o in orders %}
-        <tr class="row-clickable{{ ' dealer-cancelled' if o.status == 'cancelled' }}" onclick="window.location.href='{{ url_for('dealer.order', order_id=o.id) }}'">
+        <tr class="row-clickable{{ ' dealer-cancelled' if o.status == 'cancelled' }}" onclick="if (!event.target.closest('[data-status-picker-form], a, button')) window.location.href='{{ url_for('dealer.order', order_id=o.id) }}'">
           <td><a href="{{ url_for('dealer.order', order_id=o.id) }}">№{{ o.id }}</a></td>
           <td class="muted">{{ o.order_date|ru_date }}</td>
           <td class="term">{{ o.client_name }}{% if o.phone %}<span class="muted dealer-phone">{{ o.phone }}</span>{% endif %}</td>
@@ -79,4 +79,5 @@
   {% endif %}
   <p class="hint">Отменённые заказы остаются в списке, но в итоговые суммы не входят.</p>
 </section>
+{% if is_goods %}{% include 'dealer/_ship_modal.html' %}{% endif %}
 {% endblock %}

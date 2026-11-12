@@ -119,6 +119,12 @@
     var previous = { value: input.value, label: label ? label.textContent : "" };
     close();
     if (value === previous.value) { return; }
+    // a page may take the choice over (a dialog asking for more first):
+    // it cancels this event and later saves the status itself
+    var gate = new CustomEvent("status-picker:choose", {
+      bubbles: true, cancelable: true, detail: { value: value, form: form, picker: picker }
+    });
+    if (!form.dispatchEvent(gate)) { return; }
     // show the new status at once
     show(picker, value, option.textContent.replace(/\s+/g, " ").trim());
     if (window.LiveSave && !form.closest(".tuning-board-page")) {
