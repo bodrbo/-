@@ -77,6 +77,41 @@ class TuningEstimatePdfTests(_GoodsFixture, unittest.TestCase):
         self.assertIn("Заказчик ____", text)
         self.assertIn("Исполнитель____", text)
 
+    def test_a_total_of_a_million_and_more_builds_and_is_spoken_in_words(self):
+        words = application_module._rubles_to_words
+        self.assertEqual(words(1000000), "Один миллион рублей 00 копеек")
+        self.assertEqual(words(2350000.5), "Два миллиона триста пятьдесят тысяч рублей 50 копеек")
+        self.assertEqual(words(11000000), "Одиннадцать миллионов рублей 00 копеек")
+        self.assertEqual(words(1500000000), "Один миллиард пятьсот миллионов рублей 00 копеек")
+        self.assertEqual(words(-5), "Ноль рублей 00 копеек")
+        items = [{"work_name": "Лодка целиком", "price": 3400000.0, "price_pending": 0, "status": "pending"}]
+        pdf = self.build(dict(self.ORDER), items, [])
+        self.assertTrue(pdf.startswith(b"%PDF-"))
+        if shutil.which("pdftotext"):
+            self.assertIn("Три миллиона четыреста тысяч рублей", pdf_text(pdf))
+
+    def test_markup_characters_in_names_do_not_break_the_document(self):
+        items = [{"work_name": "Болт <20 мм & гайка", "price": 100.0, "price_pending": 0, "status": "pending"}]
+        goods = [{"product_name": "Лента <b>жирная", "unit_price": 10.0, "quantity": 1.0, "unit": "piece"}]
+        pdf = self.build(dict(self.ORDER, client_name="ИП <Иванов> & Ко"), items, goods)
+        self.assertTrue(pdf.startswith(b"%PDF-"))
+        if shutil.which("pdftotext"):
+            text = pdf_text(pdf)
+            self.assertIn("Лента <b>жирная", text)
+            self.assertIn("ИП <Иванов> & Ко", text)
+
+    def test_an_unexpected_error_is_logged_and_answered_in_words(self):
+        self.add(self.order_id)
+        original = application_module._build_estimate_pdf
+        application_module._build_estimate_pdf = lambda *args: 1 / 0
+        try:
+            with self.assertLogs(application_module.app.logger, level="ERROR"):
+                response = self.client.get(f"/tuning/{self.order_id}/estimate.pdf")
+        finally:
+            application_module._build_estimate_pdf = original
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("Не удалось сформировать документ", response.get_data(as_text=True))
+
     def test_an_empty_order_still_builds(self):
         pdf = self.build(dict(self.ORDER), [], [])
         self.assertTrue(pdf.startswith(b"%PDF-"))

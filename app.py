@@ -8022,18 +8022,30 @@ def _three_digits_ru(n, feminine=False):
 
 
 def _rubles_to_words(amount):
-    """1234.5 -> 'Одна тысяча двести тридцать четыре рубля 50 копеек'."""
-    amount = round(float(amount), 2)
+    """1234.5 -> 'Одна тысяча двести тридцать четыре рубля 50 копеек'.
+    Works up to the billions; a negative amount is spoken as zero."""
+    amount = max(0.0, round(float(amount), 2))
     rub = int(amount)
     kop = int(round((amount - rub) * 100))
+    if kop == 100:  # float noise such as 2.9999999 rounded to 3.00
+        rub, kop = rub + 1, 0
 
-    thousands, rest = divmod(rub, 1000)
+    if rub >= 10 ** 12:  # beyond the billions the words are no use, say it in figures
+        return f"{rub} {_plural_ru(rub, ('рубль', 'рубля', 'рублей'))} {kop:02d} {_plural_ru(kop, ('копейка', 'копейки', 'копеек'))}"
+
     words = []
-    if thousands:
-        words += _three_digits_ru(thousands, feminine=True)
-        words.append(_plural_ru(thousands, ("тысяча", "тысячи", "тысяч")))
-    if rest or not words:
-        words += _three_digits_ru(rest, feminine=False)
+    remaining = rub
+    for divider, forms, feminine in (
+        (10 ** 9, ("миллиард", "миллиарда", "миллиардов"), False),
+        (10 ** 6, ("миллион", "миллиона", "миллионов"), False),
+        (10 ** 3, ("тысяча", "тысячи", "тысяч"), True),
+    ):
+        group, remaining = divmod(remaining, divider)
+        if group:
+            words += _three_digits_ru(group, feminine=feminine)
+            words.append(_plural_ru(group, forms))
+    if remaining or not words:
+        words += _three_digits_ru(remaining, feminine=False)
     if not words:
         words.append("ноль")
     words.append(_plural_ru(rub, ("рубль", "рубля", "рублей")))
@@ -8441,11 +8453,11 @@ def _act_work_table_rows(items, style_cell, mm):
                 if discount > 0 else ""
             )
             rows.append([
-                str(number), Paragraph(item["work_name"], style_cell),
+                str(number), Paragraph(_pdf_text(item["work_name"]), style_cell),
                 list_str, discount_cell, "1", "шт", net,
             ])
         else:
-            rows.append([str(number), Paragraph(item["work_name"], style_cell), net, "1", "шт", net])
+            rows.append([str(number), Paragraph(_pdf_text(item["work_name"]), style_cell), net, "1", "шт", net])
         if not pending:
             total_sum += item["price"]
     count = f"{len(items):.2f}".replace(".", ",")
@@ -8818,6 +8830,14 @@ def _build_handover_act_pdf(order, items, goods=()):
     return buf.getvalue()
 
 
+def _pdf_text(value):
+    """A name for a reportlab Paragraph: its own text, not markup — a stray
+    '<' or '&' in a work or product name must not break the whole document."""
+    from xml.sax.saxutils import escape
+
+    return escape(str(value if value is not None else ""))
+
+
 def _build_estimate_pdf(order, items, goods=()):
     """«Расчёт заказа»: the list of works and goods with their prices, the
     discount and what is to be paid, and a place for both signatures. Unlike
@@ -8871,7 +8891,7 @@ def _build_estimate_pdf(order, items, goods=()):
     flow.append(Paragraph("Расчёт заказа", style_title))
     flow.append(Paragraph(f"По заказу № {order['id']} от {order_date}", style_subtitle))
     flow.append(Paragraph(
-        f"Заказчик {order['client_name']} ({tuning_equipment_label(order)})",
+        f"Заказчик {_pdf_text(order['client_name'])} ({_pdf_text(tuning_equipment_label(order))})",
         style_client,
     ))
     flow.append(HRFlowable(width="100%", thickness=0.6, color=colors.black,
@@ -8912,7 +8932,7 @@ def _build_estimate_pdf(order, items, goods=()):
             line_sum = g["quantity"] * g["unit_price"]
             unit_label = next((u["label"] for u in SUPPLY_COST_UNITS if u["value"] == g["unit"]), g["unit"])
             goods_data.append([
-                str(i), Paragraph(g["product_name"], style_cell),
+                str(i), Paragraph(_pdf_text(g["product_name"]), style_cell),
                 f"{g['unit_price']:.2f}".replace(".", ","),
                 f"{g['quantity']:g}", unit_label, f"{line_sum:.2f}".replace(".", ","),
             ])
@@ -8980,6 +9000,9 @@ def tuning_order_estimate_pdf(order_id):
             "и перезапустите приложение.",
             503,
         )
+    except Exception:
+        app.logger.exception("Расчёт заказа №%s: не удалось собрать PDF", order_id)
+        return "Не удалось сформировать документ. Подробности записаны в журнал ошибок.", 500
     response = app.response_class(pdf_bytes, mimetype="application/pdf")
     response.headers["Content-Disposition"] = f'inline; filename="Raschet-{order_id}.pdf"'
     return response
