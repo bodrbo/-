@@ -198,6 +198,18 @@ def parse_order_form(form, known_profiles, order_type=ORDER_TYPE_EQUIPMENT, know
     }
 
 
+def insert_items(db, order_id, items):
+    """Adds the lines (dicts of kind, profile_id, product_id, unit, name,
+    serial_number, quantity, price) to the order, in that order."""
+    for position, item in enumerate(items):
+        db.execute(
+            "INSERT INTO dealer_order_items (order_id, kind, profile_id, product_id, unit, name, serial_number, "
+            "quantity, price, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (order_id, item["kind"], item["profile_id"], item["product_id"], item["unit"], item["name"],
+             item["serial_number"], item["quantity"], item["price"], position),
+        )
+
+
 def save_order(db, order_id, data, client_id, actor=None, after_writeoff=None):
     """Inserts or updates the order and replaces its lines. Returns the id.
     A shipped goods order keeps its write-off in step with the lines: the old
@@ -228,13 +240,7 @@ def save_order(db, order_id, data, client_id, actor=None, after_writeoff=None):
              data["comment"], stamp, order_id),
         )
         db.execute("DELETE FROM dealer_order_items WHERE order_id = ?", (order_id,))
-    for position, item in enumerate(data["items"]):
-        db.execute(
-            "INSERT INTO dealer_order_items (order_id, kind, profile_id, product_id, unit, name, serial_number, "
-            "quantity, price, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (order_id, item["kind"], item["profile_id"], item["product_id"], item["unit"], item["name"],
-             item["serial_number"], item["quantity"], item["price"], position),
-        )
+    insert_items(db, order_id, data["items"])
     written = []
     if shipped_from is not None:
         shipping.release(db, order_id)

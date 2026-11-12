@@ -186,6 +186,16 @@
       </label>
       <button type="submit" name="action" value="status"
               id="tuning-bulk-status-submit" disabled>Изменить статус</button>
+      <label for="tuning-bulk-target" class="tuning-bulk-convert-label">
+        <span>Перенести заказ в дилерский центр</span>
+        <select name="bulk_target" id="tuning-bulk-target">
+          <option value="" selected>Выберите раздел…</option>
+          <option value="goods">Морские товары</option>
+          <option value="equipment">Лодки и моторы</option>
+        </select>
+      </label>
+      <button type="submit" name="action" value="convert"
+              id="tuning-bulk-convert" disabled>Перенести</button>
       <button type="submit" name="action" value="delete"
               class="tuning-bulk-delete" id="tuning-bulk-delete" disabled>
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
@@ -762,6 +772,8 @@
   var status = document.getElementById('tuning-bulk-status');
   var statusSubmit = document.getElementById('tuning-bulk-status-submit');
   var deleteSubmit = document.getElementById('tuning-bulk-delete');
+  var target = document.getElementById('tuning-bulk-target');
+  var convertSubmit = document.getElementById('tuning-bulk-convert');
 
   function selectedCount() {
     return checks.filter(function (checkbox) { return checkbox.checked; }).length;
@@ -774,6 +786,7 @@
     selectAll.indeterminate = selected > 0 && selected < checks.length;
     statusSubmit.disabled = selected === 0 || !status.value;
     deleteSubmit.disabled = selected === 0;
+    convertSubmit.disabled = selected === 0 || !target.value;
   }
 
   selectAll.addEventListener('change', function () {
@@ -784,6 +797,7 @@
     checkbox.addEventListener('change', refreshState);
   });
   status.addEventListener('change', refreshState);
+  target.addEventListener('change', refreshState);
   form.addEventListener('submit', function (event) {
     var selected = selectedCount();
     var submitter = event.submitter || document.activeElement;
@@ -793,6 +807,14 @@
     }
     if (submitter.value === 'delete') {
       if (!window.confirm('Удалить выбранные заказы без возможности восстановления: ' + selected + '?')) {
+        event.preventDefault();
+      }
+      return;
+    }
+    if (submitter.value === 'convert') {
+      var where = target.options[target.selectedIndex].text;
+      if (!target.value || !window.confirm('Перенести выбранные заказы (' + selected + ') в «' + where + '»? ' +
+          'Перенести можно только заказы без работ. Тюнинг-заказы будут удалены, вместо них появятся заказы дилерского центра.')) {
         event.preventDefault();
       }
       return;

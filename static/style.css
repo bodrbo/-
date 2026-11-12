@@ -6752,6 +6752,9 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   color: #fff;
 }
 .tuning-bulk-delete svg { width: 15px; height: 15px; }
+@media (min-width: 681px) {
+  .tuning-bulk-form .tuning-bulk-convert-label { grid-column: 2; }
+}
 .tuning-select-cell {
   width: 24px;
   text-align: center !important;

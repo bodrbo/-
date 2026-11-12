@@ -12771,6 +12771,48 @@ def _tuning_bulk_return_url():
     return url_for("tuning_index", **query) + "#tuning-orders"
 
 
+def _bulk_convert_tuning_orders(db, order_ids, target, return_url):
+    """Moves the selected tuning orders (they must have no works) to the dealer
+    center: «Морские товары» or «Лодки и моторы». All or nothing: one order
+    that cannot be moved refuses the whole selection."""
+    from modules.dealer import from_tuning
+
+    orders = [from_tuning.get_order(db, order_id) for order_id in order_ids]
+    problems = [
+        found for found in (
+            from_tuning.problem(db, order, target, _tuning_equipment_profile_id) for order in orders
+        ) if found
+    ]
+    if problems:
+        shown = problems[:5]
+        if len(problems) > len(shown):
+            shown.append(f"…и ещё {len(problems) - len(shown)}.")
+        session["tuning_bulk_error"] = " ".join(shown) + " Ничего не перенесено."
+        return redirect(return_url)
+    try:
+        moved = [
+            (order["id"], from_tuning.convert(db, order, target, _tuning_equipment_profile_id,
+                                              _delete_tuning_order_records))
+            for order in orders
+        ]
+        db.commit()
+    except Exception:
+        db.rollback()
+        app.logger.exception("Перенос тюнинг-заказов в дилерский центр не удался: %s", order_ids)
+        session["tuning_bulk_error"] = (
+            "Не удалось перенести заказы, ничего не изменено. Подробности записаны в журнал ошибок."
+        )
+        return redirect(return_url)
+    shown = ", ".join(f"№{old} → №{new}" for old, new in moved[:10])
+    if len(moved) > 10:
+        shown += f" и ещё {len(moved) - 10}"
+    session["tuning_bulk_notice"] = (
+        f"Перенесено в «{from_tuning.TARGETS[target]}»: {len(moved)} "
+        f"{_plural_ru(len(moved), ('заказ', 'заказа', 'заказов'))} ({shown}). Новые номера — в дилерском центре."
+    )
+    return redirect(return_url)
+
+
 @app.route("/tuning/bulk", methods=["POST"])
 @admin_login_required
 def bulk_edit_tuning_orders():
@@ -12822,12 +12864,20 @@ def bulk_edit_tuning_orders():
     if action == "status":
         if new_status not in {item["value"] for item in ORDER_STATUSES}:
             errors.append("Выберите новый статус заказа.")
+    elif action == "convert":
+        from modules.dealer.from_tuning import TARGETS as dealer_targets
+        convert_target = request.form.get("bulk_target", "").strip()
+        if convert_target not in dealer_targets:
+            errors.append("Выберите, куда перенести заказы.")
     elif action != "delete":
         errors.append("Выберите массовое действие.")
 
     if errors:
         session["tuning_bulk_error"] = " ".join(errors)
         return redirect(return_url)
+
+    if action == "convert":
+        return _bulk_convert_tuning_orders(db, order_ids, convert_target, return_url)
 
     if action == "status":
         # Same completed_at rules as the single-order status route, applied
