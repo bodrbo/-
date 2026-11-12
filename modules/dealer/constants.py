@@ -56,6 +56,10 @@ DEFAULT_GOODS_UNIT = "piece"
 
 PAYMENT_TYPES = {"CASH": "Наличные", "CARD": "Безналичный"}
 
+# Statuses of a ModulKassa document that mean the fiscal receipt exists
+# (the same set as in the tuning center).
+RECEIPT_SUCCESS_STATUSES = frozenset(("printed", "wait_for_callback", "completed"))
+
 DISCOUNT_TYPES = ("percent", "amount")
 
 STATUSES_BY_TYPE = {ORDER_TYPE_EQUIPMENT: DEALER_STATUSES, ORDER_TYPE_GOODS: GOODS_STATUSES}

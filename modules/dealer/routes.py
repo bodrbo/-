@@ -13,7 +13,8 @@ from .constants import (
 
 def create_dealer_blueprint(get_db, access_required, client_choices, resolve_client,
                             events_panel=None, forget_events=None, create_profile=None,
-                            create_tuning_order=None, tuning_order_url=None, low_stock_check=None):
+                            create_tuning_order=None, tuning_order_url=None, low_stock_check=None,
+                            receipts=None):
     """client_choices(db) -> clients for the picker; resolve_client(db,
     client_id, client_name, phone) -> client id (finds or creates the client
     in the shared client base) — both injected from app.py. events_panel(db,
@@ -25,7 +26,10 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
     equipment of the order (None when there is none), tuning_order_url(id)
     -> its page. low_stock_check(db, product_id) is called after a product
     was written off the warehouse by a shipment (raises the supply request when
-    the stock runs low; optional)."""
+    the stock runs low; optional). receipts: the cash desk (ModulKassa) —
+    .configured(), .fiscalize(db, order, payment_id, amount, payment_type,
+    correction_date), .check(db, receipt_row) and .pdf_response(db, order_id,
+    payment_id) -> a Flask response or (text, status); None = no receipts."""
     blueprint = Blueprint("dealer", __name__)
 
     def catalog_maps(db):
@@ -108,7 +112,7 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
         positions, _ = catalog_maps(db)
         payments = paid = None
         if order is not None:
-            payments = repository.list_payments(db, order["id"])
+            payments = repository.list_payments_with_receipts(db, order["id"])
             paid = repository.paid_amount(db, order["id"])
         return render_template(
             "dealer/form.html", active_page="dealer",
@@ -131,6 +135,7 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
             payments=payments, paid=paid,
             remaining=max(0.0, round((order["total"] - paid), 2)) if order is not None else None,
             payment_types=PAYMENT_TYPES, today=dt.date.today().isoformat(),
+            receipts_configured=bool(receipts and receipts.configured()),
             events_panel=events_panel(db, order["id"]) if order is not None and events_panel else None,
             tuning_orders=[
                 {**dict(row), "url": tuning_order_url(row["id"])}
@@ -249,9 +254,13 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
     @blueprint.route("/dealer/orders/<int:order_id>/payments", methods=["POST"])
     @access_required
     def add_payment(order_id):
+        # "Пробить чек" ticked on the form. A form without the checkbox at all
+        # (an old page still open in a tab) only records the payment, as before.
+        punch = bool(request.form.get("fiscalize")) and "fiscalize_shown" in request.form
         ok, message = services.add_payment(
             get_db(), order_id, request.form.get("amount"), request.form.get("payment_type", ""),
             request.form.get("paid_date"), request.form.get("note"),
+            punch_receipt=punch, is_correction=bool(request.form.get("is_correction")), receipts=receipts,
         )
         notice("success" if ok else "error", message)
         return redirect(url_for("dealer.order", order_id=order_id) + "#payments")
@@ -262,6 +271,27 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
         services.delete_payment(get_db(), order_id, payment_id)
         notice("success", "Платёж удалён.")
         return redirect(url_for("dealer.order", order_id=order_id) + "#payments")
+
+    @blueprint.route("/dealer/orders/<int:order_id>/payments/<int:payment_id>/receipt/check", methods=["POST"])
+    @access_required
+    def check_receipt(order_id, payment_id):
+        ok, message = services.check_receipt(get_db(), order_id, payment_id, receipts)
+        notice("success" if ok else "error", message)
+        return redirect(url_for("dealer.order", order_id=order_id) + "#payments")
+
+    @blueprint.route("/dealer/orders/<int:order_id>/payments/<int:payment_id>/receipt/retry", methods=["POST"])
+    @access_required
+    def retry_receipt(order_id, payment_id):
+        ok, message = services.retry_receipt(get_db(), order_id, payment_id, receipts)
+        notice("success" if ok else "error", message)
+        return redirect(url_for("dealer.order", order_id=order_id) + "#payments")
+
+    @blueprint.route("/dealer/orders/<int:order_id>/payments/<int:payment_id>/receipt.pdf")
+    @access_required
+    def receipt_pdf(order_id, payment_id):
+        if receipts is None:
+            return "Чеки не подключены.", 404
+        return receipts.pdf_response(get_db(), order_id, payment_id)
 
     @blueprint.route("/dealer/orders/<int:order_id>/delete", methods=["POST"])
     @access_required

@@ -309,9 +309,18 @@ def set_status(db, order_id, status, warehouse_id=None, actor=None, after_writeo
     return True, f"Статус: «{STATUS_LABELS[status]}».{note}"
 
 
-def add_payment(db, order_id, raw_amount, payment_type, raw_date, note):
-    """(ok, message)."""
-    if repository.get_order(db, order_id) is None:
+def add_payment(db, order_id, raw_amount, payment_type, raw_date, note, punch_receipt=False,
+                is_correction=False, receipts=None):
+    """(ok, message). With `punch_receipt` the payment goes to the cash desk
+    as a fiscal receipt (receipts.fiscalize); `is_correction` makes it a
+    correction receipt for money taken earlier, dated `raw_date`. Without a
+    receipt the payment is only recorded and the date may be an old one.
+
+    receipts: .configured() -> bool and .fiscalize(db, order, payment_id,
+    amount, payment_type, correction_date) — injected from app.py (None = no
+    cash desk at all)."""
+    order = repository.get_order(db, order_id)
+    if order is None:
         return False, "Заказ не найден."
     amount = _number(raw_amount)
     if amount is None or amount <= 0:
@@ -321,21 +330,77 @@ def add_payment(db, order_id, raw_amount, payment_type, raw_date, note):
     day = _date(raw_date)
     if day is False:
         return False, "Некорректная дата платежа."
-    if day and day > dt.date.today().isoformat():
+    today = dt.date.today().isoformat()
+    if day and day > today:
         return False, "Дата платежа не может быть в будущем."
+    punch_receipt = bool(punch_receipt)
+    is_correction = bool(is_correction) and punch_receipt      # a correction exists only with a receipt
+    if is_correction and not day:
+        return False, "Для чека коррекции укажите дату платежа — не позже сегодняшней."
     stamp = now_text()
-    paid_at = f"{day} 12:00" if day and day != dt.date.today().isoformat() else stamp
-    db.execute(
-        "INSERT INTO dealer_payments (order_id, amount, paid_at, payment_type, note, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (order_id, round(amount, 2), paid_at, payment_type, (note or "").strip()[:300], stamp),
-    )
+    # The money of a correction receipt was taken on its date, an ordinary
+    # receipt is dated now; a payment without a receipt may be an old one.
+    if is_correction or (not punch_receipt and day and day != today):
+        paid_at = f"{day} 12:00"
+    else:
+        paid_at = stamp
+    payment_id = db.execute(
+        "INSERT INTO dealer_payments (order_id, amount, paid_at, payment_type, note, created_at, "
+        "is_correction, no_receipt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (order_id, round(amount, 2), paid_at, payment_type, (note or "").strip()[:300], stamp,
+         1 if is_correction else 0, 0 if punch_receipt else 1),
+    ).lastrowid
     db.commit()
-    return True, "Платёж записан."
+    if not punch_receipt:
+        return True, "Платёж записан без чека."
+    if receipts is None or not receipts.configured():
+        return True, "Платёж записан, но касса (МодульКасса) не подключена — чек не пробит."
+    receipts.fiscalize(db, order, payment_id, round(amount, 2), payment_type, day if is_correction else None)
+    sent = repository.latest_receipt(db, payment_id)
+    if sent is not None and (sent["status"] or "").lower() == "failed":
+        return True, "Платёж записан, но чек на кассу не ушёл — его можно повторить в списке платежей."
+    return True, "Платёж записан, чек коррекции отправлен на кассу." if is_correction \
+        else "Платёж записан, чек отправлен на кассу."
+
+
+def check_receipt(db, order_id, payment_id, receipts):
+    """Asks the cash desk how the receipt of a payment is doing. (ok, message)."""
+    payment = repository.get_payment(db, order_id, payment_id)
+    receipt = repository.latest_receipt(db, payment_id) if payment is not None else None
+    if receipt is None:
+        return False, "По этому платежу чека нет."
+    if receipts is None or not receipts.configured():
+        return False, "Касса (МодульКасса) не подключена."
+    receipts.check(db, receipt)
+    db.commit()
+    state = repository.latest_receipt(db, payment_id)["status"]
+    return True, f"Статус чека обновлён: {state}."
+
+
+def retry_receipt(db, order_id, payment_id, receipts):
+    """Sends the receipt of a payment again — only when the last attempt
+    failed or none was made, so a receipt is never punched twice.
+    (ok, message)."""
+    order = repository.get_order(db, order_id)
+    payment = repository.get_payment(db, order_id, payment_id)
+    if order is None or payment is None:
+        return False, "Платёж не найден."
+    if payment["no_receipt"] or payment["payment_type"] not in PAYMENT_TYPES:
+        return False, "Этот платёж записан без чека."
+    last = repository.latest_receipt(db, payment_id)
+    if last is not None and (last["status"] or "").lower() != "failed":
+        return False, "Чек по этому платежу уже отправлен — повторять не нужно."
+    if receipts is None or not receipts.configured():
+        return False, "Касса (МодульКасса) не подключена."
+    receipts.fiscalize(
+        db, order, payment_id, payment["amount"], payment["payment_type"],
+        payment["paid_at"][:10] if payment["is_correction"] else None,
+    )
+    return True, "Чек отправлен на кассу повторно."
 
 
 def delete_payment(db, order_id, payment_id):
-    db.execute("DELETE FROM dealer_payments WHERE id = ? AND order_id = ?", (payment_id, order_id))
+    repository.delete_payment(db, order_id, payment_id)
     db.commit()
 
 

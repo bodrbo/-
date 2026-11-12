@@ -1,5 +1,9 @@
 """SQL access for the dealer center."""
 
+import json
+
+from .constants import RECEIPT_SUCCESS_STATUSES
+
 
 def catalog_positions(db):
     """Boats and motors of the catalog with their selling price (None when
@@ -78,6 +82,97 @@ def list_payments(db, order_id):
     return db.execute(
         "SELECT * FROM dealer_payments WHERE order_id = ? ORDER BY paid_at DESC, id DESC", (order_id,)
     ).fetchall()
+
+
+def get_payment(db, order_id, payment_id):
+    return db.execute(
+        "SELECT * FROM dealer_payments WHERE id = ? AND order_id = ?", (payment_id, order_id)
+    ).fetchone()
+
+
+def fiscal_info(raw):
+    """The fiscal data ModulKassa answered with (a dict), or None."""
+    try:
+        info = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return None
+    return info if isinstance(info, dict) else None
+
+
+def has_fiscal_qr(raw):
+    info = fiscal_info(raw)
+    return bool(info and info.get("qr"))
+
+
+def list_payments_with_receipts(db, order_id):
+    """The payments with the state of their latest receipt: receipt_status,
+    receipt_failure_message and receipt_pdf_available. A retry adds another
+    receipt row for the same payment, so only the newest one is joined."""
+    rows = db.execute(
+        "SELECT p.*, r.status AS receipt_status, r.failure_message AS receipt_failure_message, "
+        "r.fiscal_info_json AS receipt_fiscal_info_json "
+        "FROM dealer_payments p LEFT JOIN dealer_modulkassa_receipts r ON r.id = ("
+        "  SELECT id FROM dealer_modulkassa_receipts r2 WHERE r2.payment_id = p.id ORDER BY r2.id DESC LIMIT 1) "
+        "WHERE p.order_id = ? ORDER BY p.paid_at DESC, p.id DESC",
+        (order_id,),
+    ).fetchall()
+    result = []
+    for row in rows:
+        payment = dict(row)
+        payment["receipt_pdf_available"] = bool(
+            (payment["receipt_status"] or "").lower() in RECEIPT_SUCCESS_STATUSES
+            and has_fiscal_qr(payment["receipt_fiscal_info_json"])
+        )
+        result.append(payment)
+    return result
+
+
+def latest_receipt(db, payment_id):
+    return db.execute(
+        "SELECT * FROM dealer_modulkassa_receipts WHERE payment_id = ? ORDER BY id DESC LIMIT 1", (payment_id,)
+    ).fetchone()
+
+
+_SUCCESSFUL = "LOWER(r2.status) IN ('printed', 'wait_for_callback', 'completed') AND r2.fiscal_info_json IS NOT NULL"
+
+
+def successful_receipt(db, order_id, payment_id):
+    """What the PDF of a receipt is built from: the payment, its client and
+    the fiscal data of the newest successful receipt (None when there is none)."""
+    return db.execute(
+        "SELECT p.id AS payment_id, p.order_id, p.amount, p.paid_at, p.payment_type, "
+        "o.client_id, o.client_name, r.status AS receipt_status, r.fiscal_info_json "
+        "FROM dealer_payments p JOIN dealer_orders o ON o.id = p.order_id "
+        "JOIN dealer_modulkassa_receipts r ON r.id = ("
+        f"  SELECT id FROM dealer_modulkassa_receipts r2 WHERE r2.payment_id = p.id AND {_SUCCESSFUL} "
+        "  ORDER BY r2.id DESC LIMIT 1) "
+        "WHERE p.order_id = ? AND p.id = ?",
+        (order_id, payment_id),
+    ).fetchone()
+
+
+def client_receipts(db, order_id):
+    """The receipts the client may open: only fiscal ones with a QR, no
+    internal data."""
+    rows = db.execute(
+        "SELECT p.id AS payment_id, p.amount, p.paid_at, p.payment_type, r.status AS receipt_status, "
+        "r.fiscal_info_json "
+        "FROM dealer_payments p JOIN dealer_modulkassa_receipts r ON r.id = ("
+        f"  SELECT id FROM dealer_modulkassa_receipts r2 WHERE r2.payment_id = p.id AND {_SUCCESSFUL} "
+        "  ORDER BY r2.id DESC LIMIT 1) "
+        "WHERE p.order_id = ? ORDER BY p.paid_at DESC, p.id DESC",
+        (order_id,),
+    ).fetchall()
+    return [
+        {"payment_id": row["payment_id"], "amount": row["amount"], "paid_at": row["paid_at"]}
+        for row in rows if has_fiscal_qr(row["fiscal_info_json"])
+    ]
+
+
+def delete_payment(db, order_id, payment_id):
+    db.execute("DELETE FROM dealer_modulkassa_receipts WHERE payment_id IN "
+               "(SELECT id FROM dealer_payments WHERE id = ? AND order_id = ?)", (payment_id, order_id))
+    db.execute("DELETE FROM dealer_payments WHERE id = ? AND order_id = ?", (payment_id, order_id))
 
 
 def paid_amount(db, order_id):

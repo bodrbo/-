@@ -6406,6 +6406,14 @@ app.register_blueprint(
             db, phone, client_name, "", client_id=client_id
         ),
         low_stock_check=lambda db, product_id: _maybe_create_low_stock_request(db, product_id),
+        receipts=SimpleNamespace(
+            configured=lambda: _modulkassa_configured(),
+            fiscalize=lambda db, order, payment_id, amount, payment_type, correction_date: (
+                _dealer_receipt_fiscalize(db, order, payment_id, amount, payment_type, correction_date)
+            ),
+            check=lambda db, receipt: _modulkassa_check_status(db, receipt, "dealer_modulkassa_receipts"),
+            pdf_response=lambda db, order_id, payment_id: _dealer_receipt_pdf_response(db, order_id, payment_id),
+        ),
         create_profile=lambda db, kind, name, brand: _dealer_catalog_profile(db, kind, name, brand),
         create_tuning_order=lambda db, order, items, admin_id: _create_tuning_order_from_dealer(
             db, order, items, admin_id
@@ -6424,6 +6432,57 @@ app.register_blueprint(
 # (см. modules/order_events). Визит с принимающим лицом становится его
 # задачей в расписании тюнинга.
 # =======================================================================
+def _dealer_receipt_fiscalize(db, order, payment_id, amount, payment_type, correction_date=None):
+    """Queues the ModulKassa fiscal receipt of one dealer-center payment — the
+    same flow as for tuning orders (one lump line "Оплата по заказу ..."),
+    kept in its own table. Never raises."""
+    _modulkassa_post_document(
+        db, "dealer_modulkassa_receipts", payment_id,
+        doc_num=f"dealer-{order['id']}-payment-{payment_id}",
+        position_name=f"Оплата по заказу дилерского центра №{order['id']}",
+        contact=_modulkassa_contact_from_phone(order["phone"]),
+        amount=amount, payment_type=payment_type, correction_date=correction_date,
+    )
+
+
+def _dealer_receipt_pdf_response(db, order_id, payment_id, client_id=None):
+    """The PDF of a fiscal receipt of a dealer-center payment (a Flask
+    response, or (text, status)). With client_id only that client's own
+    receipt is given out."""
+    from modules.dealer import repository as dealer_repository
+
+    receipt = dealer_repository.successful_receipt(db, order_id, payment_id)
+    if receipt is None or (client_id is not None and receipt["client_id"] != client_id):
+        return "Фискальный чек не найден.", 404
+    data = dict(receipt)
+    data.update(
+        ref_label="Заказ", ref_value=f"№Д{order_id}",
+        item_name=f"Оплата по заказу дилерского центра №{order_id}",
+        pdf_title=f"Чек об оплате заказа дилерского центра №{order_id}",
+    )
+    if not dealer_repository.has_fiscal_qr(data["fiscal_info_json"]):
+        return "Фискальные данные чека ещё не получены.", 404
+    try:
+        pdf_bytes = _build_modulkassa_receipt_pdf(data)
+    except ImportError:
+        return "Формирование PDF временно недоступно: на сервере не установлена библиотека reportlab.", 503
+    response = app.response_class(pdf_bytes, mimetype="application/pdf")
+    response.headers["Content-Disposition"] = f'inline; filename="Receipt-dealer-{order_id}-{payment_id}.pdf"'
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@app.route("/client/<token>/dealer/<int:order_id>/payments/<int:payment_id>/receipt.pdf")
+def client_dealer_receipt_pdf(token, order_id, payment_id):
+    """A client opens the receipt of a payment on his own dealer-center order."""
+    db = get_db()
+    client = db.execute("SELECT id FROM clients WHERE token = ?", (token,)).fetchone()
+    if client is None:
+        return redirect(url_for("home"))
+    return _dealer_receipt_pdf_response(db, order_id, payment_id, client_id=client["id"])
+
+
 def _create_tuning_order_from_dealer(db, dealer_order, items, admin_id):
     """A tuning order for the equipment sold in a dealer-center order: the
     first boat of the order with all its motors, or — when there is no boat —
@@ -14433,8 +14492,13 @@ def cron_check_modulkassa_receipts():
     ).fetchall()
     for r in schedule_pending:
         _modulkassa_check_status(db, r, "schedule_modulkassa_receipts")
+    dealer_pending = db.execute(
+        "SELECT * FROM dealer_modulkassa_receipts WHERE status IN ('queued', 'pending')"
+    ).fetchall()
+    for r in dealer_pending:
+        _modulkassa_check_status(db, r, "dealer_modulkassa_receipts")
     db.commit()
-    return f"checked {len(pending) + len(schedule_pending)} receipt(s)", 200
+    return f"checked {len(pending) + len(schedule_pending) + len(dealer_pending)} receipt(s)", 200
 
 
 @app.route("/tuning/<int:order_id>/notes/add", methods=["POST"])
@@ -15173,6 +15237,7 @@ def _client_dealer_orders(db, client_id, with_payments):
             for item in dealer_repository.list_items(db, order["id"])
         ]
         order["paid_amount"] = dealer_repository.paid_amount(db, order["id"])
+        order["receipt_payments"] = dealer_repository.client_receipts(db, order["id"])
         order["remaining"] = max(0.0, order["total"] - order["paid_amount"])
         order["discount_amount"] = max(0.0, order["subtotal"] - order["total"])
         order["payments"] = (

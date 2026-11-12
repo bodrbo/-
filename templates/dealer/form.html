@@ -119,7 +119,7 @@
     <div class="panel total-card"><span class="k">Оплачено</span><span class="v" style="color:var(--success);">{{ paid|money }} ₽</span></div>
     <div class="panel total-card total-card-grand"><span class="k">Осталось доплатить</span><span class="v">{{ remaining|money }} ₽</span></div>
   </div>
-  <form action="{{ url_for('dealer.add_payment', order_id=order.id) }}" method="post" class="entry-form">
+  <form action="{{ url_for('dealer.add_payment', order_id=order.id) }}" method="post" class="entry-form" id="paymentForm">
     <div class="field field-narrow">
       <label for="pay_amount">Сумма платежа, ₽</label>
       <input type="text" inputmode="decimal" id="pay_amount" name="amount" required>
@@ -131,9 +131,22 @@
         {% for value, label in payment_types.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
       </select>
     </div>
-    <div class="field field-narrow">
+    <div class="field field-checkbox">
+      <input type="hidden" name="fiscalize_shown" value="1">
+      <label class="checkbox-inline" for="fiscalize">
+        <input type="checkbox" id="fiscalize" name="fiscalize" value="1" checked>
+        Пробить чек
+      </label>
+    </div>
+    <div class="field field-checkbox">
+      <label class="checkbox-inline" for="is_correction">
+        <input type="checkbox" id="is_correction" name="is_correction" value="1">
+        Чек коррекции
+      </label>
+    </div>
+    <div class="field field-narrow" id="paymentDateField" hidden>
       <label for="pay_date">Дата платежа</label>
-      <input type="date" id="pay_date" name="paid_date" max="{{ today }}" value="{{ today }}">
+      <input type="date" id="pay_date" name="paid_date" max="{{ today }}">
     </div>
     <div class="field">
       <label for="pay_note">Примечание</label>
@@ -141,20 +154,73 @@
     </div>
     <div class="field field-submit"><button type="submit">Записать платёж</button></div>
   </form>
+  <p class="hint">
+    {% if receipts_configured %}Чек пробивается автоматически через МодульКассу по выбранному способу оплаты.{% else %}Касса (МодульКасса) не подключена — чеки не пробиваются, платежи только записываются.{% endif %}
+    Если снять галочку «Пробить чек», платёж только запишется — без чека, и можно указать его дату (старые платежи). «Чек коррекции» — для платежа, который уже был принят, но чек по нему не пробили: платёж запишется указанной датой, а чек уйдёт как чек коррекции.
+  </p>
+  <script>
+    (function () {
+      var box = document.getElementById('is_correction');
+      var punch = document.getElementById('fiscalize');
+      var field = document.getElementById('paymentDateField');
+      var date = document.getElementById('pay_date');
+      if (!box || !punch || !field || !date) return;
+      function sync() {
+        // a correction receipt only exists together with a receipt
+        if (!punch.checked) box.checked = false;
+        box.disabled = !punch.checked;
+        // the date is typed for a correction receipt and for an old payment
+        // recorded without a receipt (then it is optional: empty = today)
+        field.hidden = !(box.checked || !punch.checked);
+        date.required = box.checked;
+        if (field.hidden) date.value = '';
+      }
+      box.addEventListener('change', sync);
+      punch.addEventListener('change', sync);
+      sync();
+    })();
+  </script>
   {% if payments %}
   <div class="table-scroll">
     <table class="records">
-      <thead><tr><th>Дата</th><th>Сумма</th><th>Способ</th><th>Примечание</th><th></th></tr></thead>
+      <thead><tr><th>Дата</th><th>Сумма</th><th>Способ</th><th>Чек</th><th>Примечание</th><th></th></tr></thead>
       <tbody>
         {% for p in payments %}
         <tr>
           <td class="muted">{{ p.paid_at[:10]|ru_date }}</td>
-          <td class="amount">{{ p.amount|money }}</td>
+          <td class="amount">{{ p.amount|money }}{% if p.is_correction %} <span class="status-badge status-pending">Чек коррекции</span>{% endif %}</td>
           <td class="muted">{{ payment_types.get(p.payment_type, '—') }}</td>
+          <td>
+            {% if p.receipt_status %}
+            <span class="status-badge status-{{ p.receipt_status|mk_status_css }}"
+                  {% if p.receipt_status == 'failed' and p.receipt_failure_message %}title="{{ p.receipt_failure_message }}"{% endif %}>
+              {{ p.receipt_status|mk_status_label }}
+            </span>
+            {% elif p.no_receipt %}
+            <span class="hint">без чека</span>
+            {% elif p.payment_type %}
+            <span class="hint">не отправлен</span>
+            {% else %}
+            <span class="hint">—</span>
+            {% endif %}
+          </td>
           <td class="muted">{{ p.note or '' }}</td>
           <td class="row-actions">
+            {% if p.receipt_status in ('queued', 'pending') %}
+            <form action="{{ url_for('dealer.check_receipt', order_id=order.id, payment_id=p.id) }}" method="post">
+              <button type="submit" class="btn-secondary">Проверить чек</button>
+            </form>
+            {% elif p.receipt_status == 'failed' or (not p.receipt_status and not p.no_receipt and p.payment_type) %}
+            <form action="{{ url_for('dealer.retry_receipt', order_id=order.id, payment_id=p.id) }}" method="post">
+              <button type="submit" class="btn-secondary">Повторить чек</button>
+            </form>
+            {% endif %}
+            {% if p.receipt_pdf_available %}
+            <a href="{{ url_for('dealer.receipt_pdf', order_id=order.id, payment_id=p.id) }}"
+               target="_blank" rel="noopener" class="btn-secondary">PDF чека</a>
+            {% endif %}
             <form action="{{ url_for('dealer.delete_payment', order_id=order.id, payment_id=p.id) }}" method="post"
-                  onsubmit="return confirm('Удалить этот платёж?');">
+                  onsubmit="return confirm('Удалить этот платёж?{% if p.receipt_status %} Пробитый кассовый чек при этом не аннулируется.{% endif %}');">
               <button type="submit" class="icon-btn danger" title="Удалить платёж">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l10 10M15 5L5 15"/></svg>
               </button>

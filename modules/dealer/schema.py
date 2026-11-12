@@ -81,6 +81,35 @@ def init_schema(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_dealer_payments_order ON dealer_payments (order_id)"
     )
+    # Fiscal receipts of the payments (ModulKassa), as in the tuning center.
+    payment_cols = {row[1] for row in conn.execute("PRAGMA table_info(dealer_payments)").fetchall()}
+    if "is_correction" not in payment_cols:
+        # 1 = the money was taken earlier (on paid_at) without a receipt, so
+        # its receipt is a correction receipt dated that day.
+        conn.execute("ALTER TABLE dealer_payments ADD COLUMN is_correction INTEGER NOT NULL DEFAULT 0")
+    if "no_receipt" not in payment_cols:
+        # 1 = recorded without punching a receipt. The payments that exist
+        # when the column appears were all recorded that way.
+        conn.execute("ALTER TABLE dealer_payments ADD COLUMN no_receipt INTEGER NOT NULL DEFAULT 0")
+        conn.execute("UPDATE dealer_payments SET no_receipt = 1")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dealer_modulkassa_receipts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            payment_id INTEGER NOT NULL,
+            doc_id TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL DEFAULT 'queued',
+            fiscal_info_json TEXT,
+            failure_message TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_dealer_modulkassa_receipts_payment "
+        "ON dealer_modulkassa_receipts (payment_id)"
+    )
     # Selling price of a catalog position (the catalog itself has none).
     conn.execute(
         """
