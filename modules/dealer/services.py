@@ -3,7 +3,10 @@
 import datetime as dt
 
 from . import repository
-from .constants import DEFAULT_STATUS, DISCOUNT_TYPES, ITEM_KINDS, PAYMENT_TYPES, STATUS_LABELS
+from .constants import (
+    DEFAULT_GOODS_UNIT, DEFAULT_STATUS, DISCOUNT_TYPES, GOODS_KIND, GOODS_UNITS, ITEM_KINDS,
+    ORDER_TYPE_EQUIPMENT, ORDER_TYPE_GOODS, PAYMENT_TYPES, STATUS_LABELS,
+)
 
 
 def now_text():
@@ -41,41 +44,8 @@ def order_totals(items, discount_type, discount_value):
     return subtotal, round(max(total, 0), 2)
 
 
-def parse_order_form(form, known_profiles):
-    """Reads the order form. known_profiles: {profile_id: equipment_type} of
-    the catalog. Returns (error, data); the lines without a name are skipped
-    (the form always sends a spare empty row)."""
-    errors = []
-    client_name = " ".join(form.get("client_name", "").split())
-    if not client_name:
-        errors.append("Укажите клиента.")
-    elif len(client_name) > 160:
-        errors.append("Имя клиента — не более 160 символов.")
-    phone = form.get("phone", "").strip()
-    if len(phone) > 40:
-        errors.append("Телефон — не более 40 символов.")
-    client_id = form.get("client_id", type=int)
-
-    order_date = _date(form.get("order_date")) or None
-    if _date(form.get("order_date")) is False:
-        errors.append("Некорректная дата заказа.")
-    deadline = _date(form.get("deadline_date"))
-    if deadline is False:
-        errors.append("Некорректная дата передачи клиенту.")
-        deadline = None
-
-    discount_type = form.get("discount_type", "percent")
-    if discount_type not in DISCOUNT_TYPES:
-        discount_type = "percent"
-    discount_value = _number(form.get("discount_value"))
-    if form.get("discount_value", "").strip() and discount_value is None:
-        errors.append("Скидка должна быть числом.")
-    discount_value = discount_value or 0.0
-    if discount_value < 0:
-        errors.append("Скидка не может быть отрицательной.")
-    if discount_type == "percent" and discount_value > 100:
-        errors.append("Скидка в процентах — от 0 до 100.")
-
+def _parse_equipment_items(form, known_profiles, errors):
+    """The boat and motor lines of the form; the problems go to `errors`."""
     kinds = form.getlist("item_kind[]")
     profile_ids = form.getlist("item_profile_id[]")
     names = form.getlist("item_name[]")
@@ -109,11 +79,102 @@ def parse_order_form(form, known_profiles):
             errors.append(f"{label}: слишком длинное название или серийный номер.")
             continue
         items.append({
-            "kind": kind, "profile_id": profile_id, "name": name, "serial_number": serial,
-            "quantity": int(quantity), "price": round(price, 2),
+            "kind": kind, "profile_id": profile_id, "product_id": None, "unit": DEFAULT_GOODS_UNIT,
+            "name": name, "serial_number": serial, "quantity": int(quantity), "price": round(price, 2),
         })
-    if not items and not errors:
-        errors.append("Добавьте в заказ хотя бы одну лодку или мотор.")
+    return items
+
+
+def _parse_goods_items(form, known_products, errors):
+    """The goods lines of the form. known_products: {product_id: unit} of the
+    warehouse catalog; a line with an unknown (or no) product is a good typed
+    by hand. The quantity may be fractional (square or running metres), but
+    pieces are whole."""
+    product_ids = form.getlist("item_product_id[]")
+    names = form.getlist("item_name[]")
+    units = form.getlist("item_unit[]")
+    quantities = form.getlist("item_quantity[]")
+    prices = form.getlist("item_price[]")
+    items = []
+    for index, raw_name in enumerate(names):
+        name = " ".join(raw_name.split())
+        if not name:
+            continue
+        label = f"Товар «{name}»"
+        product_raw = product_ids[index] if index < len(product_ids) else ""
+        product_id = int(product_raw) if product_raw.isdigit() and int(product_raw) in known_products else None
+        if product_id is not None:
+            unit = known_products[product_id]
+        else:
+            unit = units[index] if index < len(units) else ""
+        if unit not in GOODS_UNITS:
+            unit = DEFAULT_GOODS_UNIT
+        quantity = _number(quantities[index] if index < len(quantities) else "1")
+        if quantity is None or quantity <= 0 or quantity > 99999:
+            errors.append(f"{label}: количество — число больше нуля.")
+            continue
+        if unit == "piece" and quantity != int(quantity):
+            errors.append(f"{label}: штуки — целое число.")
+            continue
+        quantity = int(quantity) if quantity == int(quantity) else round(quantity, 3)
+        price = _number(prices[index] if index < len(prices) else "")
+        if price is None or price < 0:
+            errors.append(f"{label}: укажите цену — число, не меньше нуля.")
+            continue
+        if len(name) > 200:
+            errors.append(f"{label}: слишком длинное название.")
+            continue
+        items.append({
+            "kind": GOODS_KIND, "profile_id": None, "product_id": product_id, "unit": unit, "name": name,
+            "serial_number": "", "quantity": quantity, "price": round(price, 2),
+        })
+    return items
+
+
+def parse_order_form(form, known_profiles, order_type=ORDER_TYPE_EQUIPMENT, known_products=None):
+    """Reads the order form. known_profiles: {profile_id: equipment_type} of
+    the catalog of boats and motors, known_products: {product_id: unit} of
+    the warehouse catalog (goods orders). Returns (error, data); the lines
+    without a name are skipped (the form always sends a spare empty row)."""
+    errors = []
+    client_name = " ".join(form.get("client_name", "").split())
+    if not client_name:
+        errors.append("Укажите клиента.")
+    elif len(client_name) > 160:
+        errors.append("Имя клиента — не более 160 символов.")
+    phone = form.get("phone", "").strip()
+    if len(phone) > 40:
+        errors.append("Телефон — не более 40 символов.")
+    client_id = form.get("client_id", type=int)
+
+    order_date = _date(form.get("order_date")) or None
+    if _date(form.get("order_date")) is False:
+        errors.append("Некорректная дата заказа.")
+    deadline = _date(form.get("deadline_date"))
+    if deadline is False:
+        errors.append("Некорректная дата передачи клиенту.")
+        deadline = None
+
+    discount_type = form.get("discount_type", "percent")
+    if discount_type not in DISCOUNT_TYPES:
+        discount_type = "percent"
+    discount_value = _number(form.get("discount_value"))
+    if form.get("discount_value", "").strip() and discount_value is None:
+        errors.append("Скидка должна быть числом.")
+    discount_value = discount_value or 0.0
+    if discount_value < 0:
+        errors.append("Скидка не может быть отрицательной.")
+    if discount_type == "percent" and discount_value > 100:
+        errors.append("Скидка в процентах — от 0 до 100.")
+
+    if order_type == ORDER_TYPE_GOODS:
+        items = _parse_goods_items(form, known_products or {}, errors)
+        if not items and not errors:
+            errors.append("Добавьте в заказ хотя бы один товар.")
+    else:
+        items = _parse_equipment_items(form, known_profiles, errors)
+        if not items and not errors:
+            errors.append("Добавьте в заказ хотя бы одну лодку или мотор.")
 
     subtotal, total = order_totals(items, discount_type, discount_value)
     if discount_type == "amount" and discount_value > subtotal and not errors:
@@ -128,6 +189,7 @@ def parse_order_form(form, known_profiles):
         "order_date": order_date or dt.date.today().isoformat(), "deadline_date": deadline,
         "discount_type": discount_type, "discount_value": discount_value,
         "comment": comment, "items": items, "subtotal": subtotal, "total": total,
+        "order_type": order_type,
     }
 
 
@@ -137,11 +199,11 @@ def save_order(db, order_id, data, client_id):
     if order_id is None:
         order_id = db.execute(
             "INSERT INTO dealer_orders (client_id, client_name, phone, status, order_date, deadline_date, "
-            "discount_type, discount_value, subtotal, total, comment, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "discount_type, discount_value, subtotal, total, comment, order_type, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (client_id, data["client_name"], data["phone"], DEFAULT_STATUS, data["order_date"],
              data["deadline_date"], data["discount_type"], data["discount_value"], data["subtotal"],
-             data["total"], data["comment"], stamp, stamp),
+             data["total"], data["comment"], data["order_type"], stamp, stamp),
         ).lastrowid
     else:
         db.execute(
@@ -155,10 +217,10 @@ def save_order(db, order_id, data, client_id):
         db.execute("DELETE FROM dealer_order_items WHERE order_id = ?", (order_id,))
     for position, item in enumerate(data["items"]):
         db.execute(
-            "INSERT INTO dealer_order_items (order_id, kind, profile_id, name, serial_number, quantity, "
-            "price, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (order_id, item["kind"], item["profile_id"], item["name"], item["serial_number"],
-             item["quantity"], item["price"], position),
+            "INSERT INTO dealer_order_items (order_id, kind, profile_id, product_id, unit, name, serial_number, "
+            "quantity, price, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (order_id, item["kind"], item["profile_id"], item["product_id"], item["unit"], item["name"],
+             item["serial_number"], item["quantity"], item["price"], position),
         )
     db.commit()
     return order_id

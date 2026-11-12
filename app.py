@@ -15141,13 +15141,13 @@ def _client_equipment_summary(items):
 
 
 def _client_dealer_orders(db, client_id, with_payments):
-    """Dealer-center orders (boats and motors) of one client for the cabinet.
+    """Dealer-center orders (boats and motors, marine goods) of one client for the cabinet.
 
     The client sees what he bought and how much is left to pay; the payment
     rows themselves are only loaded for the administrative view.
     """
     from modules.dealer import repository as dealer_repository
-    from modules.dealer.constants import ITEM_KINDS, PAYMENT_TYPES, STATUS_LABELS
+    from modules.dealer.constants import GOODS_UNITS, ITEM_KIND_LABELS, PAYMENT_TYPES, STATUS_LABELS
 
     result = []
     rows = db.execute(
@@ -15159,7 +15159,11 @@ def _client_dealer_orders(db, client_id, with_payments):
         order = dict(row)
         order["status_label"] = STATUS_LABELS.get(order["status"], order["status"])
         order["items"] = [
-            dict(item, kind_label=ITEM_KINDS.get(item["kind"], ""))
+            dict(
+                item,
+                kind_label=ITEM_KIND_LABELS.get(item["kind"], ""),
+                unit_label=GOODS_UNITS.get(item["unit"], "") if item["kind"] == "goods" else "",
+            )
             for item in dealer_repository.list_items(db, order["id"])
         ]
         order["paid_amount"] = dealer_repository.paid_amount(db, order["id"])

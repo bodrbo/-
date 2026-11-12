@@ -1,0 +1,116 @@
+<script id="dealerGoodsData" type="application/json">{{ goods_catalog|tojson }}</script>
+<script id="dealerItemsData" type="application/json">{{ items|tojson }}</script>
+<script>
+(function () {
+  var catalog = JSON.parse(document.getElementById('dealerGoodsData').textContent);
+  var initial = JSON.parse(document.getElementById('dealerItemsData').textContent);
+  var UNITS = {{ goods_units|tojson }};
+  var rows = document.getElementById('dealerItemRows');
+  var list = document.getElementById('dealerGoodsList');
+
+  function label(product) {
+    return product.name + (product.sku ? ' · ' + product.sku : '');
+  }
+  // One option per product: «название · артикул», so that equal names stay apart.
+  catalog.forEach(function (product) {
+    var option = document.createElement('option');
+    option.value = label(product);
+    list.appendChild(option);
+  });
+
+  function number(text) {
+    var value = parseFloat(String(text || '').replace(/\s/g, '').replace(',', '.'));
+    return isNaN(value) ? 0 : value;
+  }
+  function money(value) {
+    return Math.round(value).toLocaleString('ru-RU') + ' ₽';
+  }
+  function find(text) {
+    var wanted = String(text || '').trim().toLowerCase();
+    if (!wanted) { return null; }
+    var byLabel = catalog.filter(function (p) { return label(p).toLowerCase() === wanted; });
+    if (byLabel.length === 1) { return byLabel[0]; }
+    var byName = catalog.filter(function (p) { return p.name.toLowerCase() === wanted; });
+    return byName.length === 1 ? byName[0] : null;
+  }
+  function esc(text) {
+    var div = document.createElement('div');
+    div.textContent = text == null ? '' : String(text);
+    return div.innerHTML.replace(/"/g, '&quot;');
+  }
+
+  function recalc() {
+    var subtotal = 0;
+    rows.querySelectorAll('tr').forEach(function (row) {
+      var line = number(row.querySelector('[name="item_quantity[]"]').value) * number(row.querySelector('[name="item_price[]"]').value);
+      row.querySelector('.dealer-line-total').textContent = line ? money(line) : '—';
+      if (row.querySelector('[name="item_name[]"]').value.trim()) { subtotal += line; }
+    });
+    var type = document.getElementById('discount_type').value;
+    var value = number(document.getElementById('discount_value').value);
+    var discount = type === 'percent' ? subtotal * Math.min(value, 100) / 100 : Math.min(value, subtotal);
+    document.getElementById('dealerSubtotal').textContent = money(subtotal);
+    document.getElementById('dealerDiscount').textContent = discount ? '−' + money(discount) : '0 ₽';
+    document.getElementById('dealerTotal').textContent = money(Math.max(subtotal - discount, 0));
+  }
+
+  function addRow(item) {
+    item = item || {product_id: '', name: '', unit: 'piece', quantity: 1, price: ''};
+    var row = document.createElement('tr');
+    var unitOptions = Object.keys(UNITS).map(function (key) {
+      return '<option value="' + key + '"' + (key === item.unit ? ' selected' : '') + '>' + esc(UNITS[key]) + '</option>';
+    }).join('');
+    row.innerHTML =
+      '<td><input type="text" name="item_name[]" maxlength="200" list="dealerGoodsList" value="' + esc(item.name) + '" placeholder="Начните вводить название или артикул" autocomplete="off">' +
+        '<input type="hidden" name="item_product_id[]" value="' + esc(item.product_id) + '">' +
+        '<span class="hint dealer-goods-state"></span></td>' +
+      '<td><input type="text" inputmode="decimal" name="item_quantity[]" value="' + esc(item.quantity) + '" style="width:72px;"></td>' +
+      '<td><select name="item_unit[]">' + unitOptions + '</select></td>' +
+      '<td><input type="text" inputmode="decimal" name="item_price[]" value="' + esc(item.price === 0 || item.price ? Math.round(item.price * 100) / 100 : '') + '" style="width:130px;"></td>' +
+      '<td class="amount dealer-line-total">—</td>' +
+      '<td class="row-actions"><button type="button" class="icon-btn danger dealer-remove" title="Убрать товар">' +
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l10 10M15 5L5 15"/></svg></button></td>';
+    rows.appendChild(row);
+
+    var name = row.querySelector('[name="item_name[]"]');
+    var product = row.querySelector('[name="item_product_id[]"]');
+    var unit = row.querySelector('[name="item_unit[]"]');
+    var price = row.querySelector('[name="item_price[]"]');
+    var state = row.querySelector('.dealer-goods-state');
+    function showState() {
+      var match = product.value ? catalog.filter(function (p) { return String(p.id) === String(product.value); })[0] : null;
+      state.textContent = match ? (match.sku ? 'Артикул ' + match.sku : 'Из каталога склада')
+        : (name.value.trim() ? 'Нет в каталоге — цена и единица вручную' : '');
+    }
+    name.addEventListener('input', function () {
+      var match = find(name.value);
+      product.value = match ? match.id : '';
+      if (match) {
+        name.value = match.name;
+        unit.value = match.unit;
+        if (!price.value.trim() && match.price != null) { price.value = match.price; }
+      }
+      showState();
+      recalc();
+    });
+    row.querySelectorAll('input, select').forEach(function (input) {
+      input.addEventListener('input', recalc);
+      input.addEventListener('change', recalc);
+    });
+    row.querySelector('.dealer-remove').addEventListener('click', function () {
+      row.remove();
+      if (!rows.children.length) { addRow(); }
+      recalc();
+    });
+    showState();
+    recalc();
+  }
+
+  initial.forEach(addRow);
+  if (!rows.children.length) { addRow(); }
+  document.getElementById('dealerAddRow').addEventListener('click', function () { addRow(); });
+  document.getElementById('discount_value').addEventListener('input', recalc);
+  document.getElementById('discount_type').addEventListener('change', recalc);
+  recalc();
+})();
+</script>

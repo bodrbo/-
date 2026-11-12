@@ -1,0 +1,12 @@
+<section class="panel">
+  <h2>Товары</h2>
+  <p class="hint">Выберите товар из каталога склада — цена и единица подставятся из каталога, цену можно изменить для этого заказа. Товара нет в каталоге — впишите его название и цену вручную.</p>
+  <div class="table-scroll">
+    <table class="records dealer-items dealer-goods-items" id="dealerItems">
+      <thead><tr><th>Товар из каталога</th><th>Кол-во</th><th>Ед.</th><th>Цена, ₽</th><th>Сумма, ₽</th><th></th></tr></thead>
+      <tbody id="dealerItemRows"></tbody>
+    </table>
+  </div>
+  <button type="button" class="btn-secondary dealer-add-row" id="dealerAddRow">+ Добавить товар</button>
+  <datalist id="dealerGoodsList"></datalist>
+</section>

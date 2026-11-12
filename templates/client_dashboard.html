@@ -686,7 +686,8 @@
 
   {% if dealer_orders %}
   <section class="client-orders client-dealer-orders" id="dealer-orders">
-    <div class="partner-orders-heading"><h2>Лодки и моторы</h2></div>
+    {% set dealer_goods_count = dealer_orders|selectattr('order_type', 'equalto', 'goods')|list|length %}
+    <div class="partner-orders-heading"><h2>{{ 'Морские товары' if dealer_goods_count == dealer_orders|length else ('Лодки, моторы и морские товары' if dealer_goods_count else 'Лодки и моторы') }}</h2></div>
     <div class="order-card-list">
       {% for d in dealer_orders %}
       <details class="panel order-card" id="dealer-order-{{ d.id }}">
@@ -723,7 +724,7 @@
                   <td>{{ item.name }}</td>
                   <td>{{ item.kind_label }}</td>
                   <td>{{ item.serial_number or '—' }}</td>
-                  <td>{{ item.quantity }}</td>
+                  <td>{{ '%g'|format(item.quantity) }}{% if item.unit_label %} {{ item.unit_label }}{% endif %}</td>
                   <td class="amount">{{ item.price|money }}</td>
                 </tr>
                 {% endfor %}

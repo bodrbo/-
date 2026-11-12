@@ -5,7 +5,7 @@
 {% block content %}
 {% set values = form_state if form_state else (order if order else {}) %}
 {% set discount_raw = values.get('discount_value') %}
-<a href="{{ url_for('dealer.orders') }}" class="term" style="display:inline-block; margin-bottom:14px;">← Все заказы</a>
+<a href="{{ list_url }}" class="term" style="display:inline-block; margin-bottom:14px;">← {{ 'Все заказы на товары' if is_goods else 'Все заказы' }}</a>
 
 {% if error %}<div class="alert" role="alert"><strong>Не удалось сохранить:</strong> {{ error }}</div>{% endif %}
 
@@ -19,7 +19,7 @@
 </section>
 {% endif %}
 
-<form method="post" id="dealerOrderForm" action="{{ url_for('dealer.order', order_id=order.id) if order else url_for('dealer.new_order') }}">
+<form method="post" id="dealerOrderForm" action="{{ url_for('dealer.order', order_id=order.id) if order else url_for('dealer.new_goods_order' if is_goods else 'dealer.new_order') }}">
   <section class="panel">
     <h2>Клиент</h2>
     <div class="entry-form">
@@ -63,6 +63,9 @@
     </div>
   </section>
 
+  {% if is_goods %}
+  {% include 'dealer/_goods_items.html' %}
+  {% else %}
   <section class="panel">
     <h2>Лодки и моторы</h2>
     <p class="hint">Выберите лодку или мотор из каталога — цена подставится из прайс-листа, её можно изменить для этого заказа.</p>
@@ -76,6 +79,7 @@
     <datalist id="dealerCatalogBoat"></datalist>
     <datalist id="dealerCatalogMotor"></datalist>
   </section>
+  {% endif %}
 
   <section class="panel">
     <h2>Скидка и итог</h2>
@@ -166,6 +170,7 @@
   {% endif %}
 </section>
 
+{% if not is_goods %}
 <section class="panel" id="tuning">
   <h2>Заказ на тюнинг</h2>
   {% if tuning_orders %}
@@ -180,6 +185,7 @@
   <p class="hint">Добавьте в заказ лодку или мотор и сохраните его — тогда отсюда можно создать заказ на тюнинг.</p>
   {% endif %}
 </section>
+{% endif %}
 
 {% if events_panel %}{% include '_order_events_panel.html' %}{% endif %}
 
@@ -194,6 +200,9 @@
 {% endblock %}
 
 {% block scripts %}
+{% if is_goods %}
+{% include 'dealer/_goods_script.html' %}
+{% else %}
 <script id="dealerCatalogData" type="application/json">{{ catalog|tojson }}</script>
 <script id="dealerItemsData" type="application/json">{{ items|tojson }}</script>
 <script>
@@ -291,4 +300,5 @@
   recalc();
 })();
 </script>
+{% endif %}
 {% endblock %}

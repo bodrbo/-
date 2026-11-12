@@ -17,6 +17,7 @@ def init_schema(conn):
             subtotal REAL NOT NULL DEFAULT 0,
             total REAL NOT NULL DEFAULT 0,
             comment TEXT NOT NULL DEFAULT '',
+            order_type TEXT NOT NULL DEFAULT 'equipment',
             completed_at TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
@@ -34,10 +35,23 @@ def init_schema(conn):
             serial_number TEXT NOT NULL DEFAULT '',
             quantity INTEGER NOT NULL DEFAULT 1,
             price REAL NOT NULL DEFAULT 0,
-            position INTEGER NOT NULL DEFAULT 0
+            position INTEGER NOT NULL DEFAULT 0,
+            product_id INTEGER,
+            unit TEXT NOT NULL DEFAULT 'piece'
         )
         """
     )
+    # Databases created before the "Морские товары" subsection: orders there
+    # were all boats and motors; a goods line names a warehouse product
+    # (product_id, NULL = typed by hand) and its unit.
+    order_cols = {row[1] for row in conn.execute("PRAGMA table_info(dealer_orders)").fetchall()}
+    if "order_type" not in order_cols:
+        conn.execute("ALTER TABLE dealer_orders ADD COLUMN order_type TEXT NOT NULL DEFAULT 'equipment'")
+    item_cols = {row[1] for row in conn.execute("PRAGMA table_info(dealer_order_items)").fetchall()}
+    if "product_id" not in item_cols:
+        conn.execute("ALTER TABLE dealer_order_items ADD COLUMN product_id INTEGER")
+    if "unit" not in item_cols:
+        conn.execute("ALTER TABLE dealer_order_items ADD COLUMN unit TEXT NOT NULL DEFAULT 'piece'")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_dealer_order_items_order ON dealer_order_items (order_id)"
     )

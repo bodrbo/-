@@ -1,7 +1,9 @@
 {% extends 'dealer/base.html' %}
 {% from '_status_picker.html' import status_picker %}
-{% block title %}Заказы — Дилерский центр{% endblock %}
-{% block heading %}Заказы{% endblock %}
+{% set is_goods = order_type == 'goods' %}
+{% set list_endpoint = 'dealer.goods' if is_goods else 'dealer.orders' %}
+{% block title %}{{ 'Морские товары' if is_goods else 'Заказы' }} — Дилерский центр{% endblock %}
+{% block heading %}{{ 'Морские товары' if is_goods else 'Заказы' }}{% endblock %}
 {% block content %}
 <div class="totals-grid">
   <div class="panel total-card">
@@ -24,13 +26,13 @@
 
 <section class="panel">
   <div class="dealer-list-head">
-    <h2>Заказы на лодки и моторы</h2>
-    <a class="dealer-new-btn" href="{{ url_for('dealer.new_order') }}">+ Новый заказ</a>
+    <h2>{{ 'Заказы на морские товары' if is_goods else 'Заказы на лодки и моторы' }}</h2>
+    <a class="dealer-new-btn" href="{{ url_for('dealer.new_goods_order' if is_goods else 'dealer.new_order') }}">+ Новый заказ</a>
   </div>
   <form method="get" class="entry-form dealer-filters">
     <div class="field">
       <label for="dealerSearch">Поиск</label>
-      <input type="search" id="dealerSearch" name="q" value="{{ search_query }}" placeholder="Клиент, телефон, номер, лодка или мотор">
+      <input type="search" id="dealerSearch" name="q" value="{{ search_query }}" placeholder="{{ 'Клиент, телефон, номер или товар' if is_goods else 'Клиент, телефон, номер, лодка или мотор' }}">
     </div>
     <div class="field field-narrow">
       <label for="dealerStatus">Статус</label>
@@ -43,14 +45,14 @@
     </div>
     <div class="field field-submit">
       <button type="submit">Найти</button>
-      {% if search_query or selected_status %}<a href="{{ url_for('dealer.orders') }}" class="btn-secondary dealer-reset">Сбросить</a>{% endif %}
+      {% if search_query or selected_status %}<a href="{{ url_for(list_endpoint) }}" class="btn-secondary dealer-reset">Сбросить</a>{% endif %}
     </div>
   </form>
   {% if orders %}
   <div class="table-scroll">
     <table class="records" id="dealer-orders-table">
       <thead>
-        <tr><th>№</th><th>Дата</th><th>Клиент</th><th>Позиции</th><th>Статус</th><th>Сумма</th><th>Оплачено</th><th>Остаток</th></tr>
+        <tr><th>№</th><th>Дата</th><th>Клиент</th><th>{{ 'Товары' if is_goods else 'Позиции' }}</th><th>Статус</th><th>Сумма</th><th>Оплачено</th><th>Остаток</th></tr>
       </thead>
       <tbody>
         {% for o in orders %}
@@ -72,7 +74,7 @@
   <div class="empty-state">
     {% include '_empty_state_logo.html' %}
     <div class="t">{{ 'Заказы не найдены' if search_query or selected_status else 'Заказов пока нет' }}</div>
-    <div class="s">{{ 'Измените запрос или сбросьте фильтры.' if search_query or selected_status else 'Создайте первый заказ на лодку или мотор из каталога.' }}</div>
+    <div class="s">{{ 'Измените запрос или сбросьте фильтры.' if search_query or selected_status else ('Создайте первый заказ на товары из каталога склада.' if is_goods else 'Создайте первый заказ на лодку или мотор из каталога.') }}</div>
   </div>
   {% endif %}
   <p class="hint">Отменённые заказы остаются в списке, но в итоговые суммы не входят.</p>

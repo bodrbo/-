@@ -4108,6 +4108,9 @@ tr.dealer-cancelled td { opacity: 0.55; }
 .dealer-items input[type="text"], .dealer-items select { min-width: 0; }
 .dealer-items td:nth-child(2) input[type="text"] { min-width: 220px; }
 .dealer-add-row { margin-top: 10px; }
+.dealer-goods-items td:first-child { min-width: 300px; }
+.dealer-goods-items td:first-child input[type="text"] { width: 100%; min-width: 260px; }
+.dealer-goods-state { display: block; margin-top: 4px; }
 .dealer-totals { margin-top: 14px; }
 .status-badge.status-handed_over { background: rgba(47, 107, 79, 0.16); color: var(--success); }
 .status-badge.status-handed_over::before {

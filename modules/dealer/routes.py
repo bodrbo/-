@@ -5,7 +5,10 @@ import datetime as dt
 from flask import Blueprint, redirect, render_template, request, session, url_for
 
 from . import repository, services
-from .constants import DEALER_STATUSES, ITEM_KINDS, PAYMENT_TYPES, STATUS_LABELS
+from .constants import (
+    DEALER_STATUSES, GOODS_UNITS, ITEM_KINDS, ORDER_TYPE_EQUIPMENT, ORDER_TYPE_GOODS, PAYMENT_TYPES,
+    STATUS_LABELS,
+)
 
 
 def create_dealer_blueprint(get_db, access_required, client_choices, resolve_client,
@@ -27,6 +30,16 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
         positions = repository.catalog_positions(db)
         return positions, {row["id"]: row["equipment_type"] for row in positions}
 
+    def goods_units(db):
+        """{product_id: unit} of the warehouse catalog."""
+        return {
+            row["id"]: row["cost_unit"] if row["cost_unit"] in GOODS_UNITS else "piece"
+            for row in repository.catalog_goods(db)
+        }
+
+    def list_url(order_type):
+        return url_for("dealer.goods" if order_type == ORDER_TYPE_GOODS else "dealer.orders")
+
     def notice(kind, text):
         session["dealer_notice"] = {"type": kind, "message": text}
 
@@ -40,7 +53,14 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
     @blueprint.route("/dealer/orders")
     @access_required
     def orders():
-        db = get_db()
+        return render_list(get_db(), ORDER_TYPE_EQUIPMENT)
+
+    @blueprint.route("/dealer/goods")
+    @access_required
+    def goods():
+        return render_list(get_db(), ORDER_TYPE_GOODS)
+
+    def render_list(db, order_type):
         query = request.args.get("q", "").strip()[:120]
         status = request.args.get("status", "").strip()
         if status not in STATUS_LABELS:
@@ -49,9 +69,9 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
             "SELECT o.*, COALESCE((SELECT SUM(amount) FROM dealer_payments WHERE order_id = o.id), 0) AS paid, "
             "COALESCE((SELECT GROUP_CONCAT(name || CASE WHEN quantity > 1 THEN ' ×' || quantity ELSE '' END, '; ') "
             " FROM dealer_order_items WHERE order_id = o.id), '') AS items_text "
-            "FROM dealer_orders o " + ("WHERE o.status = ? " if status else "")
+            "FROM dealer_orders o WHERE o.order_type = ? " + ("AND o.status = ? " if status else "")
             + "ORDER BY o.order_date DESC, o.id DESC",
-            (status,) if status else (),
+            (order_type, status) if status else (order_type,),
         ).fetchall()
         words = query.casefold().split()
         shown = []
@@ -69,7 +89,8 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
         # A cancelled order stays in the list but is left out of the totals.
         counted = [o for o in shown if o["status"] != "cancelled"]
         return render_template(
-            "dealer/orders.html", active_page="dealer", sub_page="orders",
+            "dealer/orders.html", active_page="dealer",
+            sub_page="goods" if order_type == ORDER_TYPE_GOODS else "orders", order_type=order_type,
             orders=shown, statuses=DEALER_STATUSES, selected_status=status, search_query=query,
             total_sum=sum(o["total"] for o in counted),
             paid_sum=sum(o["paid"] for o in counted),
@@ -79,14 +100,24 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
 
     # ---- one order
 
-    def render_form(db, order, items, form_state=None, error=None):
+    def render_form(db, order, items, form_state=None, error=None, order_type=ORDER_TYPE_EQUIPMENT):
+        if order is not None:
+            order_type = order.get("order_type") or ORDER_TYPE_EQUIPMENT
         positions, _ = catalog_maps(db)
         payments = paid = None
         if order is not None:
             payments = repository.list_payments(db, order["id"])
             paid = repository.paid_amount(db, order["id"])
         return render_template(
-            "dealer/form.html", active_page="dealer", sub_page="orders",
+            "dealer/form.html", active_page="dealer",
+            sub_page="goods" if order_type == ORDER_TYPE_GOODS else "orders",
+            order_type=order_type, is_goods=order_type == ORDER_TYPE_GOODS, list_url=list_url(order_type),
+            goods_catalog=[
+                {"id": g["id"], "name": g["name"], "sku": g["sku"] or "", "price": g["sale_price"],
+                 "unit": g["cost_unit"] if g["cost_unit"] in GOODS_UNITS else "piece"}
+                for g in repository.catalog_goods(db)
+            ] if order_type == ORDER_TYPE_GOODS else [],
+            goods_units=GOODS_UNITS,
             order=order, items=items, form_state=form_state, error=error,
             catalog=[
                 {"id": p["id"], "kind": p["equipment_type"], "name": p["model_name"],
@@ -103,7 +134,8 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
                 {**dict(row), "url": tuning_order_url(row["id"])}
                 for row in repository.list_tuning_orders(db, order["id"])
             ] if order is not None and tuning_order_url else [],
-            can_make_tuning_order=order is not None and bool(create_tuning_order) and any(
+            can_make_tuning_order=order is not None and order_type == ORDER_TYPE_EQUIPMENT
+            and bool(create_tuning_order) and any(
                 item["kind"] in ITEM_KINDS for item in repository.list_items(db, order["id"])
             ),
             notice=session.pop("dealer_notice", None),
@@ -118,6 +150,7 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
                 return values[index] if index < len(values) else default
             items.append({
                 "kind": at("item_kind[]", "boat"), "profile_id": at("item_profile_id[]"), "name": name,
+                "product_id": at("item_product_id[]"), "unit": at("item_unit[]", "piece"),
                 "serial_number": at("item_serial[]"), "quantity": at("item_quantity[]", "1"),
                 "price": at("item_price[]"),
             })
@@ -126,26 +159,36 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
             "discount_type", "discount_value", "comment",
         )}, items
 
-    def save_from_request(db, order_id):
+    def save_from_request(db, order_id, order_type):
         _, known = catalog_maps(db)
-        error, data = services.parse_order_form(request.form, known)
+        error, data = services.parse_order_form(
+            request.form, known, order_type, goods_units(db) if order_type == ORDER_TYPE_GOODS else None
+        )
         if error:
             return error, None
         client_id = resolve_client(db, data["client_id"], data["client_name"], data["phone"])
         return None, services.save_order(db, order_id, data, client_id)
 
-    @blueprint.route("/dealer/orders/new", methods=["GET", "POST"])
-    @access_required
-    def new_order():
+    def create_order(order_type):
         db = get_db()
         if request.method == "POST":
-            error, order_id = save_from_request(db, None)
+            error, order_id = save_from_request(db, None, order_type)
             if error is None:
                 notice("success", "Заказ создан.")
                 return redirect(url_for("dealer.order", order_id=order_id))
             state, items = state_from_form(request.form)
-            return render_form(db, None, items, form_state=state, error=error), 400
-        return render_form(db, None, [])
+            return render_form(db, None, items, form_state=state, error=error, order_type=order_type), 400
+        return render_form(db, None, [], order_type=order_type)
+
+    @blueprint.route("/dealer/orders/new", methods=["GET", "POST"])
+    @access_required
+    def new_order():
+        return create_order(ORDER_TYPE_EQUIPMENT)
+
+    @blueprint.route("/dealer/goods/new", methods=["GET", "POST"])
+    @access_required
+    def new_goods_order():
+        return create_order(ORDER_TYPE_GOODS)
 
     @blueprint.route("/dealer/orders/<int:order_id>", methods=["GET", "POST"])
     @access_required
@@ -155,7 +198,7 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
         if row is None:
             return redirect(url_for("dealer.orders"))
         if request.method == "POST":
-            error, _ = save_from_request(db, order_id)
+            error, _ = save_from_request(db, order_id, row["order_type"])
             if error is None:
                 notice("success", "Заказ сохранён.")
                 return redirect(url_for("dealer.order", order_id=order_id))
@@ -194,13 +237,15 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
     @access_required
     def delete_order(order_id):
         db = get_db()
+        existing = repository.get_order(db, order_id)
+        order_type = existing["order_type"] if existing is not None else ORDER_TYPE_EQUIPMENT
         ok, message = services.delete_order(db, order_id)
         notice("success" if ok else "error", message)
         if ok:
             if forget_events:
                 forget_events(db, order_id)
                 db.commit()
-            return redirect(url_for("dealer.orders"))
+            return redirect(list_url(order_type))
         return redirect(url_for("dealer.order", order_id=order_id))
 
     @blueprint.route("/dealer/orders/<int:order_id>/tuning", methods=["POST"])
@@ -208,7 +253,7 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
     def make_tuning_order(order_id):
         db = get_db()
         row = repository.get_order(db, order_id)
-        if row is None or create_tuning_order is None:
+        if row is None or create_tuning_order is None or row["order_type"] != ORDER_TYPE_EQUIPMENT:
             return redirect(url_for("dealer.orders"))
         tuning_order_id = create_tuning_order(
             db, dict(row), [dict(i) for i in repository.list_items(db, order_id)], session.get("admin_id")

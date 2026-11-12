@@ -13,6 +13,13 @@ def catalog_positions(db):
     ).fetchall()
 
 
+def catalog_goods(db):
+    """Goods of the warehouse catalog with their selling price, by name."""
+    return db.execute(
+        "SELECT id, name, sku, sale_price, cost_unit FROM supply_products ORDER BY name COLLATE NOCASE, id"
+    ).fetchall()
+
+
 # Orders that count as "standing" for the price list: a cancelled order's
 # models do not keep a position in it.
 _IN_ORDERS = (
