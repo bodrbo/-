@@ -9381,6 +9381,7 @@ def tuning_index():
         tuning_subcontract_notice=session.pop("tuning_subcontract_notice", None),
         tuning_bulk_error=session.pop("tuning_bulk_error", None),
         tuning_bulk_notice=session.pop("tuning_bulk_notice", None),
+        tuning_bulk_warning=session.pop("tuning_bulk_warning", None),
         order_statuses=ORDER_STATUSES,
         active_page="tuning", sub_page="orders",
     )
@@ -12858,10 +12859,26 @@ def _tuning_bulk_return_url():
     return url_for("tuning_index", **query) + "#tuning-orders"
 
 
-def _bulk_convert_tuning_orders(db, order_ids, target, return_url):
-    """Moves the selected tuning orders (they must have no works) to the dealer
-    center: «Морские товары» or «Лодки и моторы». All or nothing: one order
-    that cannot be moved refuses the whole selection."""
+def _drop_tuning_order_works(db, order_id):
+    """Deletes every work of the order the way removing a work on the order
+    card does: its schedule tasks, photos and videos go with it."""
+    for item in db.execute("SELECT id FROM tuning_order_items WHERE order_id = ?", (order_id,)).fetchall():
+        for assignment in db.execute(
+            "SELECT id FROM tuning_item_assignments WHERE item_id = ?", (item["id"],)
+        ).fetchall():
+            tuning_schedule_services.drop_tasks_of_assignment(db, assignment["id"])
+        db.execute("DELETE FROM tuning_item_assignments WHERE item_id = ?", (item["id"],))
+        db.execute("DELETE FROM work_item_photos WHERE item_id = ?", (item["id"],))
+        db.execute("DELETE FROM work_item_videos WHERE item_id = ?", (item["id"],))
+    db.execute("DELETE FROM tuning_order_items WHERE order_id = ?", (order_id,))
+
+
+def _bulk_convert_tuning_orders(db, order_ids, target, return_url, drop_works=False):
+    """Moves the selected tuning orders to the dealer center: «Морские товары»
+    or «Лодки и моторы». All or nothing: one order that cannot be moved refuses
+    the whole selection. A dealer order has no works, so when some selected
+    orders have them nothing moves until the admin agrees to lose them
+    (`drop_works`): the page then shows a warning with the choice."""
     from modules.dealer import from_tuning
 
     orders = [from_tuning.get_order(db, order_id) for order_id in order_ids]
@@ -12876,10 +12893,20 @@ def _bulk_convert_tuning_orders(db, order_ids, target, return_url):
             shown.append(f"…и ещё {len(problems) - len(shown)}.")
         session["tuning_bulk_error"] = " ".join(shown) + " Ничего не перенесено."
         return redirect(return_url)
+    with_works = [(order["id"], from_tuning.works_count(db, order)) for order in orders]
+    with_works = [(order_id, count) for order_id, count in with_works if count]
+    if with_works and not drop_works:
+        session["tuning_bulk_warning"] = {
+            "order_ids": order_ids, "target": target, "target_label": from_tuning.TARGETS[target],
+            "with_works": with_works, "total": len(order_ids),
+            "return_params": {key: request.form.get(key, "") for key in (
+                "return_q", "return_status", "return_date_from", "return_date_to")},
+        }
+        return redirect(return_url)
     try:
         moved = [
             (order["id"], from_tuning.convert(db, order, target, _tuning_equipment_profile_id,
-                                              _delete_tuning_order_records))
+                                              _delete_tuning_order_records, _drop_tuning_order_works))
             for order in orders
         ]
         db.commit()
@@ -12893,9 +12920,11 @@ def _bulk_convert_tuning_orders(db, order_ids, target, return_url):
     shown = ", ".join(f"№{old} → №{new}" for old, new in moved[:10])
     if len(moved) > 10:
         shown += f" и ещё {len(moved) - 10}"
+    dropped = sum(count for _order_id, count in with_works)
     session["tuning_bulk_notice"] = (
         f"Перенесено в «{from_tuning.TARGETS[target]}»: {len(moved)} "
         f"{_plural_ru(len(moved), ('заказ', 'заказа', 'заказов'))} ({shown}). Новые номера — в дилерском центре."
+        + (f" Удалено работ: {dropped}." if dropped else "")
     )
     return redirect(return_url)
 
@@ -12964,7 +12993,9 @@ def bulk_edit_tuning_orders():
         return redirect(return_url)
 
     if action == "convert":
-        return _bulk_convert_tuning_orders(db, order_ids, convert_target, return_url)
+        return _bulk_convert_tuning_orders(
+            db, order_ids, convert_target, return_url,
+            drop_works=request.form.get("drop_works") == "1")
 
     if action == "status":
         # Same completed_at rules as the single-order status route, applied

@@ -5,7 +5,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{ page_title or 'Тюнинг-центр' }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260912-tuning-bulk">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20261113-bulk-warning">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
 <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
@@ -98,6 +98,25 @@
   {% endif %}
   {% if tuning_bulk_error %}
   <div class="alert"><strong>Не удалось изменить заказы:</strong> {{ tuning_bulk_error }}</div>
+  {% endif %}
+  {% if tuning_bulk_warning %}
+  {% set warn = tuning_bulk_warning %}
+  <div class="alert warning tuning-bulk-warning" role="alert" id="tuning-bulk-warning">
+    <strong>В {{ 'выбранном заказе' if warn.total == 1 else 'части выбранных заказов' }} есть работы.</strong>
+    Заказ дилерского центра — это только {{ 'товары' if warn.target == 'goods' else 'лодки и моторы' }}, работ в нём нет:
+    при переносе в «{{ warn.target_label }}» работы будут удалены безвозвратно
+    ({% for order_id, count in warn.with_works %}заказ №{{ order_id }} — {{ count }}{% if not loop.last %}; {% endif %}{% endfor %}).
+    {% if warn.total > 1 %}Перенесутся все выбранные заказы ({{ warn.total }}).{% endif %}
+    <form action="{{ url_for('bulk_edit_tuning_orders') }}" method="post" class="tuning-bulk-warning-actions">
+      <input type="hidden" name="action" value="convert">
+      <input type="hidden" name="bulk_target" value="{{ warn.target }}">
+      <input type="hidden" name="drop_works" value="1">
+      {% for order_id in warn.order_ids %}<input type="hidden" name="order_id" value="{{ order_id }}">{% endfor %}
+      {% for key, value in warn.return_params.items() %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+      <button type="submit" class="btn-primary">Перенести и удалить работы</button>
+      <a href="{{ url_for('tuning_index') }}#tuning-orders" class="btn-secondary">Не переносить</a>
+    </form>
+  </div>
   {% endif %}
   {% if tuning_bulk_notice %}
   <div class="alert success" role="status">{{ tuning_bulk_notice }}</div>
@@ -856,7 +875,7 @@
     if (submitter.value === 'convert') {
       var where = target.options[target.selectedIndex].text;
       if (!target.value || !window.confirm('Перенести выбранные заказы (' + selected + ') в «' + where + '»? ' +
-          'Перенести можно только заказы без работ. Тюнинг-заказы будут удалены, вместо них появятся заказы дилерского центра.')) {
+          'Если в заказах есть работы, вас спросят отдельно: они не переносятся. Тюнинг-заказы будут удалены, вместо них появятся заказы дилерского центра.')) {
         event.preventDefault();
       }
       return;

@@ -1,10 +1,11 @@
-"""Turning a tuning-center order without works into a dealer-center order.
+"""Turning a tuning-center order into a dealer-center order.
 
-Only an order with no works can be moved: its goods become an order of
-«Морские товары», or its boat and motors an order of «Лодки и моторы». The
-client, dates, discount, payments (with their cash-desk receipts), the events
-and the notes move along; the tuning order is deleted. Nothing here commits —
-the caller does, or rolls everything back.
+Its goods become an order of «Морские товары», or its boat and motors an order
+of «Лодки и моторы». The client, dates, discount, payments (with their
+cash-desk receipts), the events and the notes move along; the tuning order is
+deleted. A dealer order has no works: those of the tuning order are dropped, so
+the caller asks first (`works_count`) and passes `drop_works` to `convert`.
+Nothing here commits — the caller does, or rolls everything back.
 """
 
 from . import services
@@ -81,13 +82,16 @@ def equipment_lines(db, order, profile_id_for):
     return lines
 
 
+def works_count(db, order):
+    """How many works the order has (removed ones do not count): they are lost on a move."""
+    return _count(db, "SELECT COUNT(*) FROM tuning_order_items WHERE order_id = ? AND status != 'removed'",
+                  order["id"])
+
+
 def problem(db, order, target, profile_id_for):
-    """Why the order cannot be moved to `target` (a sentence), or None."""
+    """Why the order cannot be moved to `target` (a sentence), or None. Works
+    are no obstacle — see `works_count`."""
     label = f"Заказ №{order['id']}"
-    works = _count(db, "SELECT COUNT(*) FROM tuning_order_items WHERE order_id = ? AND status != 'removed'",
-                   order["id"])
-    if works:
-        return f"{label}: в заказе есть работы ({works}) — перенести можно только заказ без работ."
     if _count(db, "SELECT COUNT(*) FROM partner_commissions WHERE order_id = ?", order["id"]):
         return f"{label}: по заказу начислена комиссия партнёра — перенести его нельзя."
     if _count(db, "SELECT COUNT(*) FROM tuning_yookassa_payments WHERE order_id = ?", order["id"]):
@@ -161,10 +165,12 @@ def _comment(db, order, target):
     return text if len(text) <= COMMENT_LIMIT else text[:COMMENT_LIMIT - 1].rstrip() + "…"
 
 
-def convert(db, order, target, profile_id_for, delete_records):
+def convert(db, order, target, profile_id_for, delete_records, drop_works):
     """Makes the dealer order of `target` from the tuning order, moves what
-    belongs to it and deletes the tuning order. Returns the new order's id.
-    The caller has checked `problem` and commits."""
+    belongs to it and deletes the tuning order together with its works
+    (`drop_works(db, order_id)` clears them, schedule cards and photos too).
+    Returns the new order's id. The caller has checked `problem`, has the
+    admin's consent for losing the works and commits."""
     order_id = order["id"]
     stamp = services.now_text()
     items = goods_lines(db, order_id) if target == ORDER_TYPE_GOODS else equipment_lines(db, order, profile_id_for)
@@ -229,5 +235,6 @@ def convert(db, order, target, profile_id_for, delete_records):
     db.execute("DELETE FROM tuning_order_notes WHERE order_id = ?", (order_id,))
     db.execute("DELETE FROM tuning_order_products WHERE order_id = ?", (order_id,))
     db.execute("DELETE FROM projects WHERE tuning_order_id = ?", (order_id,))
+    drop_works(db, order_id)
     delete_records(db, [order_id])
     return new_id

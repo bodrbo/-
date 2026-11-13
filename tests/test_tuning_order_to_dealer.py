@@ -116,9 +116,11 @@ class TuningOrderToDealerTests(unittest.TestCase):
             application_module._recompute_order_totals(db, oid)
             return oid
 
-    def convert(self, ids, target="goods"):
-        response = self.client.post("/tuning/bulk", data={"action": "convert", "bulk_target": target,
-                                                         "order_id": [str(i) for i in ids]})
+    def convert(self, ids, target="goods", drop_works=False):
+        data = {"action": "convert", "bulk_target": target, "order_id": [str(i) for i in ids]}
+        if drop_works:
+            data["drop_works"] = "1"
+        response = self.client.post("/tuning/bulk", data=data)
         self.assertEqual(response.status_code, 302)
         with self.client.session_transaction() as session:
             return session.pop("tuning_bulk_notice", None), session.pop("tuning_bulk_error", None)
@@ -292,18 +294,74 @@ class TuningOrderToDealerTests(unittest.TestCase):
 
     # ---- what cannot be moved
 
-    def test_an_order_with_works_is_refused_and_nothing_moves(self):
+    def warning(self):
+        with self.client.session_transaction() as session:
+            return session.get("tuning_bulk_warning")
+
+    def test_an_order_with_works_asks_first_and_nothing_moves(self):
         with_works = self.tuning_order(goods=[self.ROPE_LINE()], works=2)
         clean = self.tuning_order(goods=[self.ROPE_LINE()])
-        for target in ("goods", "equipment"):
-            notice, error = self.convert([clean, with_works], target)
-            self.assertIsNone(notice)
-            self.assertIn(f"Заказ №{with_works}", error)
-            self.assertIn("есть работы (2)", error)
-            self.assertIn("Ничего не перенесено", error)
+        notice, error = self.convert([clean, with_works], "goods")
+        self.assertIsNone(notice)
+        self.assertIsNone(error)
+        warning = self.warning()
+        self.assertEqual([tuple(pair) for pair in warning["with_works"]], [(with_works, 2)])
+        self.assertEqual(warning["order_ids"], [clean, with_works])
+        self.assertEqual(warning["target"], "goods")
         self.assertTrue(self.tuning_exists(with_works))
         self.assertTrue(self.tuning_exists(clean))                  # the good one stays too
         self.assertEqual(self.dealer_orders(), [])
+
+    def test_the_warning_is_shown_with_both_choices(self):
+        with_works = self.tuning_order(goods=[self.ROPE_LINE()], works=3)
+        self.convert([with_works])
+        page = self.client.get("/tuning").get_data(as_text=True)
+        self.assertIn("tuning-bulk-warning", page)
+        self.assertIn(f"заказ №{with_works} — 3", page)
+        self.assertIn("Перенести и удалить работы", page)
+        self.assertIn("Не переносить", page)
+        self.assertIn('name="drop_works" value="1"', page)
+        self.assertIsNone(self.warning())                           # shown once
+        self.assertNotIn("tuning-bulk-warning", self.client.get("/tuning").get_data(as_text=True))
+
+    def test_agreeing_moves_the_order_and_drops_its_works(self):
+        with_works = self.tuning_order(goods=[self.ROPE_LINE("3", 1200)], works=2)
+        clean = self.tuning_order(goods=[self.ROPE_LINE("1", 1200)])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            item_id = db.execute("SELECT id FROM tuning_order_items WHERE order_id = ?", (with_works,)).fetchone()[0]
+            db.execute("INSERT INTO tuning_item_assignments (item_id, employee_name, rate, norm_hours, assigned_at) "
+                       "VALUES (?, 'Иван', 100, 2, '2026-09-10')", (item_id,))
+            db.execute("INSERT INTO work_item_photos (item_id, filename, created_at) VALUES (?, 'x.jpg', '2026-09-10')",
+                       (item_id,))
+            db.commit()
+        notice, error = self.convert([clean, with_works], "goods", drop_works=True)
+        self.assertIsNone(error)
+        self.assertIn("Перенесено в «Морские товары»: 2", notice)
+        self.assertIn("Удалено работ: 2", notice)
+        self.assertFalse(self.tuning_exists(with_works))
+        self.assertFalse(self.tuning_exists(clean))
+        self.assertEqual(len(self.dealer_orders()), 2)
+        self.assertEqual(self.rows("SELECT id FROM tuning_order_items WHERE order_id = ?", with_works), [])
+        self.assertEqual(self.rows("SELECT id FROM tuning_item_assignments WHERE item_id = ?", item_id), [])
+        self.assertEqual(self.rows("SELECT id FROM work_item_photos WHERE item_id = ?", item_id), [])
+        self.assertEqual(sorted(o["total"] for o in self.dealer_orders()), [1200, 3600])                # goods only: the works did not add up
+
+    def test_agreeing_does_not_override_other_obstacles(self):
+        with_works = self.tuning_order(goods=[], works=1)           # nothing to move to «Морские товары»
+        _, error = self.convert([with_works], "goods", drop_works=True)
+        self.assertIn("нет товаров", error)
+        self.assertTrue(self.tuning_exists(with_works))
+        self.assertEqual(self.rows("SELECT id FROM tuning_order_items WHERE order_id = ?", with_works) != [], True)
+
+    def test_an_order_with_works_but_no_other_obstacle_to_the_equipment_order(self):
+        with_works = self.tuning_order(works=2)                     # a boat, no goods
+        self.convert([with_works], "equipment")
+        self.assertIsNotNone(self.warning())
+        notice, error = self.convert([with_works], "equipment", drop_works=True)
+        self.assertIsNone(error)
+        self.assertIn("Удалено работ: 2", notice)
+        self.assertFalse(self.tuning_exists(with_works))
 
     def test_removed_works_do_not_block_the_move(self):
         oid = self.tuning_order(goods=[self.ROPE_LINE()])
