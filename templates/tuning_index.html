@@ -248,7 +248,7 @@
               {% endif %}
             </td>
             <td>
-              <span class="equipment-kind">{{ 'Мотор' if o.equipment_type == 'motor' else 'Лодка' }}</span>
+              <span class="equipment-kind">{{ o.equipment_type|equipment_kind_label }}</span>
               {% if o.equipment_type == 'boat' and o.fleet_boat_index is not none %}
               <a href="{{ url_for('fleet.boat_detail', boat_index=o.fleet_boat_index) }}"
                  class="tuning-boat-profile-link">{{ o.boat_model }}</a>
@@ -260,6 +260,9 @@
                  class="tuning-boat-profile-link">{{ o.motor_model }}</a>
               {% elif o.equipment_type == 'motor' %}
               <span class="equipment-model">{{ o.motor_model }}</span>
+              {% elif o.equipment_type == 'trailer' and o.trailer_profile_id %}
+              <a href="{{ url_for('tuning_trailer_profile', profile_id=o.trailer_profile_id) }}"
+                 class="tuning-boat-profile-link">{{ o.boat_model }}</a>
               {% else %}
               <span class="equipment-model">{{ o.boat_model }}</span>
               {% endif %}
@@ -275,6 +278,8 @@
               <span class="equipment-number">Бортовой №: {{ o.boat_registration_number }}</span>
               {% elif o.equipment_type == 'motor' and o.motor_serial_number %}
               <span class="equipment-number">Серийный №: {{ o.motor_serial_number }}</span>
+              {% elif o.equipment_type == 'trailer' and o.boat_registration_number %}
+              <span class="equipment-number">Номер прицепа: {{ o.boat_registration_number }}</span>
               {% endif %}
               {% if o.dealer_order_id %}
               <span class="equipment-motor"><a href="{{ url_for('dealer.order', order_id=o.dealer_order_id) }}">Куплена у Бодрого Боцмана</a></span>
@@ -398,14 +403,21 @@
     {% endif %}
   </section>
 
-  {% elif sub_page in ['boat_catalog', 'motor_catalog'] and catalog_view == 'list' %}
+  {% elif sub_page in ['boat_catalog', 'motor_catalog', 'trailer_catalog'] and catalog_view == 'list' %}
   {% set is_motor_catalog = catalog_equipment_type == 'motor' %}
+  {% set is_trailer_catalog = catalog_equipment_type == 'trailer' %}
+  {% set cat = {'boat': {'of': 'лодки', 'of_pl': 'лодок', 'heading': 'Лодки, с которыми мы работали', 'label': 'Лодка', 'stamp': 'MODEL', 'number': 'Бортовой номер'},
+                'motor': {'of': 'мотора', 'of_pl': 'моторов', 'heading': 'Моторы, с которыми мы работали', 'label': 'Мотор', 'stamp': 'MOTOR', 'number': 'Серийный номер'},
+                'trailer': {'of': 'прицепа', 'of_pl': 'прицепов', 'heading': 'Прицепы, с которыми мы работали', 'label': 'Прицеп', 'stamp': 'TRAILER', 'number': 'Номер прицепа'}
+               }[catalog_equipment_type] %}
+  {% set cat_catalog_endpoint = {'boat': 'tuning_boat_catalog', 'motor': 'tuning_motor_catalog', 'trailer': 'tuning_trailer_catalog'}[catalog_equipment_type] %}
+  {% set cat_profile_endpoint = {'boat': 'tuning_boat_profile', 'motor': 'tuning_motor_profile', 'trailer': 'tuning_trailer_profile'}[catalog_equipment_type] %}
   <section class="boat-catalog-page" aria-labelledby="boat-catalog-heading">
     <div class="boat-catalog-heading">
       <div>
         <p class="boat-catalog-eyebrow">Архив тюнинг-центра</p>
-        <h2 id="boat-catalog-heading">{{ 'Моторы, с которыми мы работали' if is_motor_catalog else 'Лодки, с которыми мы работали' }}</h2>
-        <p>Профиль создаётся автоматически для каждой модели {{ 'мотора' if is_motor_catalog else 'лодки' }}, указанной в заказах.</p>
+        <h2 id="boat-catalog-heading">{{ cat.heading }}</h2>
+        <p>Профиль создаётся автоматически для каждой модели {{ cat.of }}, указанной в заказах.</p>
       </div>
       <div class="boat-catalog-ledger" aria-label="Сводка каталога">
         <span><strong>{{ boat_profiles|length }}</strong> моделей</span>
@@ -415,12 +427,12 @@
 
     {% if boat_profiles %}
     <div class="boat-catalog-tools">
-      <label class="sr-only" for="boatCatalogSearch">Найти модель {{ 'мотора' if is_motor_catalog else 'лодки' }}</label>
+      <label class="sr-only" for="boatCatalogSearch">Найти модель {{ cat.of }}</label>
       <input id="boatCatalogSearch" type="search" placeholder="Найти модель…" autocomplete="off">
     </div>
     <div class="boat-model-grid" id="boatModelGrid">
       {% for profile in boat_profiles %}
-      <a href="{{ url_for('tuning_motor_profile' if is_motor_catalog else 'tuning_boat_profile', profile_id=profile.id) }}"
+      <a href="{{ url_for(cat_profile_endpoint, profile_id=profile.id) }}"
          class="boat-model-card" data-boat-model="{{ profile.model_name|lower }}">
         <div class="boat-model-visual {{ 'boat-model-visual-motor' if is_motor_catalog else 'boat-model-visual-boat' }}">
           {% if profile.photo_url %}
@@ -433,6 +445,12 @@
               <path d="M50 20h28M55 54v13l-7 6h27l-7-6V54M57 73v-8h9v8"/>
               <path d="M86 28h10M37 28h-8"/>
             </svg>
+            {% elif is_trailer_catalog %}
+            <svg viewBox="0 0 120 70" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 40h86M94 40l16-6M18 40l12-14h40l10 14M30 26h40"/>
+              <path d="M26 40v8h48v-8"/>
+              <circle cx="50" cy="52" r="7"/><circle cx="50" cy="52" r="2"/>
+            </svg>
             {% else %}
             <svg viewBox="0 0 120 70" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 48h96l-13 13H31L12 48z"/>
@@ -442,7 +460,7 @@
             {% endif %}
           </div>
           {% endif %}
-          <span class="boat-model-stamp">{{ 'MOTOR' if is_motor_catalog else 'MODEL' }} / {{ '%03d'|format(profile.id) }}</span>
+          <span class="boat-model-stamp">{{ cat.stamp }} / {{ '%03d'|format(profile.id) }}</span>
         </div>
         <div class="boat-model-card-body">
           <h3>{{ profile.model_name }}</h3>
@@ -467,22 +485,35 @@
           <path d="M43 12h34l9 13-5 29H48l-6-29 1-13z"/>
           <path d="M50 20h28M55 54v13l-7 6h27l-7-6V54M57 73v-8h9v8"/>
         </svg>
+        {% elif is_trailer_catalog %}
+        <svg viewBox="0 0 120 70" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 40h86M94 40l16-6M18 40l12-14h40l10 14M30 26h40"/>
+          <path d="M26 40v8h48v-8"/>
+          <circle cx="50" cy="52" r="7"/><circle cx="50" cy="52" r="2"/>
+        </svg>
         {% else %}
         <svg viewBox="0 0 120 70" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 48h96l-13 13H31L12 48z"/><path d="M39 48l9-24h28l14 24M53 24V13h19l8 11"/>
         </svg>
         {% endif %}
       </div>
-      <div class="t">В заказах пока нет моделей {{ 'моторов' if is_motor_catalog else 'лодок' }}</div>
-      <div class="s">Укажите модель {{ 'мотора' if is_motor_catalog else 'лодки' }} в заказе — её профиль автоматически появится здесь.</div>
+      <div class="t">В заказах пока нет моделей {{ cat.of_pl }}</div>
+      <div class="s">Укажите модель {{ cat.of }} в заказе — её профиль автоматически появится здесь.</div>
     </div>
     {% endif %}
   </section>
 
-  {% elif sub_page in ['boat_catalog', 'motor_catalog'] and catalog_view == 'profile' %}
+  {% elif sub_page in ['boat_catalog', 'motor_catalog', 'trailer_catalog'] and catalog_view == 'profile' %}
   {% set is_motor_catalog = catalog_equipment_type == 'motor' %}
+  {% set is_trailer_catalog = catalog_equipment_type == 'trailer' %}
+  {% set cat = {'boat': {'of': 'лодки', 'of_pl': 'лодок', 'heading': 'Лодки, с которыми мы работали', 'label': 'Лодка', 'stamp': 'MODEL', 'number': 'Бортовой номер'},
+                'motor': {'of': 'мотора', 'of_pl': 'моторов', 'heading': 'Моторы, с которыми мы работали', 'label': 'Мотор', 'stamp': 'MOTOR', 'number': 'Серийный номер'},
+                'trailer': {'of': 'прицепа', 'of_pl': 'прицепов', 'heading': 'Прицепы, с которыми мы работали', 'label': 'Прицеп', 'stamp': 'TRAILER', 'number': 'Номер прицепа'}
+               }[catalog_equipment_type] %}
+  {% set cat_catalog_endpoint = {'boat': 'tuning_boat_catalog', 'motor': 'tuning_motor_catalog', 'trailer': 'tuning_trailer_catalog'}[catalog_equipment_type] %}
+  {% set cat_profile_endpoint = {'boat': 'tuning_boat_profile', 'motor': 'tuning_motor_profile', 'trailer': 'tuning_trailer_profile'}[catalog_equipment_type] %}
   <section class="boat-profile-page">
-    <a href="{{ url_for('tuning_motor_catalog' if is_motor_catalog else 'tuning_boat_catalog') }}" class="boat-profile-back">← Все модели</a>
+    <a href="{{ url_for(cat_catalog_endpoint) }}" class="boat-profile-back">← Все модели</a>
 
     {% if profile_notice %}<div class="alert success">{{ profile_notice }}</div>{% endif %}
     {% if profile_error %}<div class="alert">{{ profile_error }}</div>{% endif %}
@@ -501,6 +532,12 @@
               <path d="M50 20h28M55 54v13l-7 6h27l-7-6V54M57 73v-8h9v8"/>
               <path d="M86 28h10M37 28h-8"/>
             </svg>
+            {% elif is_trailer_catalog %}
+            <svg viewBox="0 0 120 70" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 40h86M94 40l16-6M18 40l12-14h40l10 14M30 26h40"/>
+              <path d="M26 40v8h48v-8"/>
+              <circle cx="50" cy="52" r="7"/><circle cx="50" cy="52" r="2"/>
+            </svg>
             {% else %}
             <svg viewBox="0 0 120 70" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 48h96l-13 13H31L12 48z"/>
@@ -510,7 +547,7 @@
             {% endif %}
           </div>
           {% endif %}
-          <span class="boat-model-stamp">{{ 'MOTOR' if is_motor_catalog else 'MODEL' }} / {{ '%03d'|format(boat_profile.id) }}</span>
+          <span class="boat-model-stamp">{{ cat.stamp }} / {{ '%03d'|format(boat_profile.id) }}</span>
         </div>
         <label class="boat-photo-control">
           <span>{{ 'Заменить фотографию' if boat_profile.photo_url else 'Добавить фотографию' }}</span>
@@ -526,8 +563,11 @@
       <div class="boat-profile-identity">
         <div class="boat-profile-kicker-line">
           <p class="boat-catalog-eyebrow">Профиль модели</p>
+          {% if is_trailer_catalog %}
+          <span class="boat-profile-type-static">Прицеп</span>
+          {% else %}
           <details class="boat-profile-type-editor"{% if profile_type_editor_open %} open{% endif %}>
-            <summary>{{ 'Мотор' if is_motor_catalog else 'Лодка' }} <span aria-hidden="true">⌄</span></summary>
+            <summary>{{ cat.label }} <span aria-hidden="true">⌄</span></summary>
             <div class="boat-profile-type-popover">
               <strong>Тип карточки</strong>
               <label><input type="radio" name="equipment_type" value="boat" {{ 'checked' if not is_motor_catalog }}> Лодка</label>
@@ -536,6 +576,7 @@
                       formmethod="post" onclick="return confirm('Тип изменится у всех связанных заказов. Несовместимые номера будут очищены. Продолжить?');">Перенести</button>
             </div>
           </details>
+          {% endif %}
         </div>
         <div class="boat-profile-title-editor">
           <div class="boat-profile-title-line">
@@ -569,7 +610,7 @@
           <div><strong>{{ profile_orders[0].order_date|ru_date if profile_orders else '—' }}</strong><span>Последняя работа</span></div>
         </div>
 
-        {% if not is_motor_catalog %}
+        {% if catalog_equipment_type == 'boat' %}
         <div class="entry-form boat-profile-dimensions">
           <div class="field field-narrow">
             <label for="boatLengthM">Длина, м</label>
@@ -622,7 +663,7 @@
         {% endif %}
 
         <div class="boat-profile-specifications">
-          <h3>Характеристики {{ 'мотора' if is_motor_catalog else 'лодки' }}</h3>
+          <h3>Характеристики {{ cat.of }}</h3>
           {% if boat_profile.specification_items %}
           <dl class="boat-specification-grid">
             {% for item in boat_profile.specification_items %}
@@ -730,7 +771,7 @@
       {% if profile_orders %}
       <div class="table-scroll">
         <table class="records">
-          <thead><tr><th>Заказ</th><th>Дата</th><th>Клиент</th><th>{{ 'Серийный номер' if is_motor_catalog else 'Бортовой номер' }}</th>{% if not is_motor_catalog %}<th>Мотор</th>{% endif %}<th>Выполненные работы</th><th>Сумма</th><th>Статус</th></tr></thead>
+          <thead><tr><th>Заказ</th><th>Дата</th><th>Клиент</th><th>{{ cat.number }}</th>{% if catalog_equipment_type == 'boat' %}<th>Мотор</th>{% endif %}<th>Выполненные работы</th><th>Сумма</th><th>Статус</th></tr></thead>
           <tbody>
             {% for order in profile_orders %}
             <tr>
@@ -738,7 +779,7 @@
               <td class="muted">{{ order.order_date|ru_date }}</td>
               <td>{{ order.client_name }}</td>
               <td>{{ (order.catalog_motor_serial_number if is_motor_catalog else order.boat_registration_number) or '—' }}</td>
-              {% if not is_motor_catalog %}<td>{% if order.motors %}{% for motor in order.motors %}{{ motor.motor_model }}{% if motor.motor_serial_number %} <span class="muted">№ {{ motor.motor_serial_number }}</span>{% endif %}{{ ', ' if not loop.last }}{% endfor %}{% else %}—{% endif %}</td>{% endif %}
+              {% if catalog_equipment_type == 'boat' %}<td>{% if order.motors %}{% for motor in order.motors %}{{ motor.motor_model }}{% if motor.motor_serial_number %} <span class="muted">№ {{ motor.motor_serial_number }}</span>{% endif %}{{ ', ' if not loop.last }}{% endfor %}{% else %}—{% endif %}</td>{% endif %}
               <td class="boat-order-works">{{ order.work_names or 'Работы пока не добавлены' }}</td>
               <td class="amount">{{ order.total|money }}</td>
               <td><span class="status-badge status-{{ order.status }}">{{ order.status|order_status_label }}</span>{% if order.pending_price_count and order.source != 'subcontract_request' %} <span class="status-badge status-awaiting-calc" title="Работ без цены: {{ order.pending_price_count }} — их нужно рассчитать">Ждёт расчёта</span>{% endif %}</td>
@@ -828,7 +869,7 @@
 })();
 </script>
 {% endif %}
-{% if sub_page in ['boat_catalog', 'motor_catalog'] and catalog_view == 'list' and boat_profiles %}
+{% if sub_page in ['boat_catalog', 'motor_catalog', 'trailer_catalog'] and catalog_view == 'list' and boat_profiles %}
 <script>
 (function () {
   var input = document.getElementById('boatCatalogSearch');

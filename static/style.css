@@ -7513,6 +7513,18 @@ button.schedule-roster-remove svg { width: 15px; height: 15px; }
   list-style: none;
   cursor: pointer;
 }
+.boat-profile-type-static {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--paper-alt);
+  color: var(--ink-soft);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+}
 .boat-profile-type-editor summary::-webkit-details-marker { display: none; }
 .boat-profile-type-editor summary:hover,
 .boat-profile-type-editor[open] summary {

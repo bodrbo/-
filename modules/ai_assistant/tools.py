@@ -42,7 +42,7 @@ SCHEDULE_KIND_LABELS = {
     "booking": "Индивидуальная экскурсия",
     "event": "Групповая экскурсия",
 }
-EQUIPMENT_TYPE_LABELS = {"boat": "Лодки", "motor": "Моторы"}
+EQUIPMENT_TYPE_LABELS = {"boat": "Лодки", "motor": "Моторы", "trailer": "Прицепы"}
 MONTH_NAMES_SHORT = (
     "янв", "фев", "мар", "апр", "май", "июн",
     "июл", "авг", "сен", "окт", "ноя", "дек",

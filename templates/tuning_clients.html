@@ -240,7 +240,7 @@
             {% else %}
             <td>
               {% if client.latest_equipment_model %}
-              <span class="equipment-kind">{{ 'Мотор' if client.latest_equipment_type == 'motor' else 'Лодка' }}</span>
+              <span class="equipment-kind">{{ client.latest_equipment_type|equipment_kind_label }}</span>
               <span class="tuning-client-equipment">{{ client.latest_equipment_model }}</span>
               {% elif client.boat_model %}
               <span class="equipment-kind">Лодка</span><span class="tuning-client-equipment">{{ client.boat_model }}</span>

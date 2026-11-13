@@ -137,8 +137,9 @@
       {% set equipment_type = form_values.get('equipment_type', 'boat') if form_values else 'boat' %}
       <fieldset class="partner-equipment-switch">
         <legend>Тип техники</legend>
-        <label><input type="radio" name="equipment_type" value="boat" {{ 'checked' if equipment_type != 'motor' }}><span>Лодка</span></label>
+        <label><input type="radio" name="equipment_type" value="boat" {{ 'checked' if equipment_type not in ['motor', 'trailer'] }}><span>Лодка</span></label>
         <label><input type="radio" name="equipment_type" value="motor" {{ 'checked' if equipment_type == 'motor' }}><span>Мотор</span></label>
+        <label><input type="radio" name="equipment_type" value="trailer" {{ 'checked' if equipment_type == 'trailer' }}><span>Прицеп</span></label>
       </fieldset>
 
       <div id="partnerBoatFields" class="partner-request-fields">
@@ -182,6 +183,20 @@
           <label for="partner_motor_serial">Серийный номер</label>
           <input id="partner_motor_serial" name="motor_serial_number" type="text" maxlength="160"
                  value="{{ form_values.get('motor_serial_number', '') if form_values else '' }}" placeholder="Необязательно">
+        </div>
+      </div>
+      <div id="partnerTrailerFields" class="partner-request-fields">
+        <div class="field">
+          <label for="partner_trailer_model">Модель прицепа</label>
+          <input id="partner_trailer_model" name="trailer_model" type="text" list="partnerTrailerModels" maxlength="200" autocomplete="off"
+                 value="{{ form_values.get('trailer_model', '') if form_values else '' }}" placeholder="Выберите из каталога или введите новую">
+          <datalist id="partnerTrailerModels">{% for model in trailer_model_choices|default([]) %}<option value="{{ model }}">{% endfor %}</datalist>
+          <small>Новая модель автоматически появится в каталоге прицепов.</small>
+        </div>
+        <div class="field">
+          <label for="partner_trailer_number">Номер прицепа</label>
+          <input id="partner_trailer_number" name="trailer_registration_number" type="text" maxlength="160"
+                 value="{{ form_values.get('trailer_registration_number', '') if form_values else '' }}" placeholder="Необязательно">
         </div>
       </div>
       <datalist id="partnerMotorModels">{% for model in motor_model_choices %}<option value="{{ model }}">{% endfor %}</datalist>
@@ -237,14 +252,18 @@
 (function () {
   var boatFields = document.getElementById('partnerBoatFields');
   var motorFields = document.getElementById('partnerMotorFields');
+  var trailerFields = document.getElementById('partnerTrailerFields');
   var boatModel = document.getElementById('partner_boat_model');
   var motorModel = document.getElementById('partner_motor_model');
+  var trailerModel = document.getElementById('partner_trailer_model');
   function syncEquipment() {
-    var isMotor = document.querySelector('input[name="equipment_type"]:checked').value === 'motor';
-    boatFields.hidden = isMotor;
-    motorFields.hidden = !isMotor;
-    boatModel.required = !isMotor;
-    motorModel.required = isMotor;
+    var kind = document.querySelector('input[name="equipment_type"]:checked').value;
+    boatFields.hidden = kind !== 'boat';
+    motorFields.hidden = kind !== 'motor';
+    trailerFields.hidden = kind !== 'trailer';
+    boatModel.required = kind === 'boat';
+    motorModel.required = kind === 'motor';
+    trailerModel.required = kind === 'trailer';
   }
   document.querySelectorAll('input[name="equipment_type"]').forEach(function (input) { input.addEventListener('change', syncEquipment); });
   syncEquipment();

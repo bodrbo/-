@@ -108,6 +108,9 @@ def problem(db, order, target, profile_id_for):
         if not goods:
             return f"{label}: в заказе нет товаров — переносить в «Морские товары» нечего."
     elif target == ORDER_TYPE_EQUIPMENT:
+        if order["equipment_type"] == "trailer":
+            return (f"{label}: прицеп нельзя перенести в «Лодки и моторы» — там только лодки и моторы. "
+                    "Товары заказа можно перенести в «Морские товары».")
         if goods:
             return (f"{label}: в заказе есть товары ({goods}) — в заказ на лодки и моторы они не переносятся, "
                     "перенесите заказ в «Морские товары».")
@@ -138,7 +141,8 @@ def _comment(db, order, target):
     if target == ORDER_TYPE_GOODS:
         equipment = []
         if (order["boat_model"] or "").strip():
-            equipment.append(f"лодка {order['boat_model'].strip()}")
+            kind = "прицеп" if order["equipment_type"] == "trailer" else "лодка"
+            equipment.append(f"{kind} {order['boat_model'].strip()}")
         for motor in db.execute(
             "SELECT motor_model FROM tuning_order_motors WHERE order_id = ? ORDER BY position, id", (order["id"],)
         ).fetchall():

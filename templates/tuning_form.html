@@ -261,12 +261,15 @@
         <a href="{{ url_for('tuning_motor_profile', profile_id=motor_profile_id) }}">{{ edit_order.motor_model }}</a>
         {% elif edit_order.equipment_type == 'motor' %}
         {{ edit_order.motor_model }}
+        {% elif edit_order.equipment_type == 'trailer' and trailer_profile_id is defined and trailer_profile_id %}
+        <a href="{{ url_for('tuning_trailer_profile', profile_id=trailer_profile_id) }}">{{ edit_order.boat_model }}</a>
         {% else %}
         {{ edit_order.boat_model }}
         {% endif %}
       </span>
       <span class="d">
-        {{ 'Мотор' if edit_order.equipment_type == 'motor' else 'Лодка' }}
+        {{ edit_order.equipment_type|equipment_kind_label }}
+        {%- if edit_order.equipment_type == 'trailer' and edit_order.boat_registration_number %} · № {{ edit_order.boat_registration_number }}{% endif -%}
         {%- if edit_order.equipment_type == 'boat' and edit_order.boat_registration_number %} · Бортовой № {{ edit_order.boat_registration_number }}{% endif -%}
         {%- if edit_order.equipment_type == 'motor' and edit_order.motor_serial_number %} · Серийный № {{ edit_order.motor_serial_number }}{% endif -%}
       </span>
@@ -1098,12 +1101,17 @@
                      {{ 'checked' if selected_equipment_type == 'motor' }} onchange="updateEquipmentFields()">
               <span>Мотор</span>
             </label>
+            <label>
+              <input type="radio" name="equipment_type" value="trailer"
+                     {{ 'checked' if selected_equipment_type == 'trailer' }} onchange="updateEquipmentFields()">
+              <span>Прицеп</span>
+            </label>
           </div>
         </fieldset>
         </div>
 
         <div class="field-row-inner" style="margin-top:16px;">
-        <div class="field" id="boatModelField" {{ 'hidden' if selected_equipment_type == 'motor' }}>
+        <div class="field" id="boatModelField" {{ 'hidden' if selected_equipment_type != 'boat' }}>
           <div class="field-label-with-link">
             <label for="boat_model_search">Модель лодки</label>
             {% if fleet_boat_index is defined and fleet_boat_index is not none and selected_equipment_type == 'boat' %}
@@ -1114,7 +1122,7 @@
                class="tuning-boat-profile-link">Открыть профиль ↗</a>
             {% endif %}
           </div>
-          {% set current_boat_model = form_values.boat_model if form_values else '' %}
+          {% set current_boat_model = form_values.boat_model if form_values and selected_equipment_type == 'boat' else '' %}
           <div class="combo-field" data-combo data-combo-allow-custom>
             <input type="text" id="boat_model_search" class="combo-input" data-combo-input
                    value="{{ current_boat_model }}" data-selected-label="{{ current_boat_model }}"
@@ -1135,10 +1143,10 @@
           </div>
           <span class="field-context">Выберите модель из каталога или введите название новой.</span>
         </div>
-        <div class="field field-narrow" id="boatRegistrationNumberField" {{ 'hidden' if selected_equipment_type == 'motor' }}>
+        <div class="field field-narrow" id="boatRegistrationNumberField" {{ 'hidden' if selected_equipment_type != 'boat' }}>
           <label for="boat_registration_number">Бортовой номер</label>
           <input type="text" id="boat_registration_number" name="boat_registration_number"
-                 value="{{ form_values.boat_registration_number if form_values else '' }}"
+                 value="{{ form_values.boat_registration_number if form_values and selected_equipment_type == 'boat' else '' }}"
                  placeholder="Например: Р 12-34 ЛО">
           <span class="field-context">Необязательно</span>
         </div>
@@ -1178,10 +1186,46 @@
                  placeholder="Указан на шильдике мотора">
           <span class="field-context">Необязательно</span>
         </div>
+        <div class="field" id="trailerModelField" {{ 'hidden' if selected_equipment_type != 'trailer' }}>
+          <div class="field-label-with-link">
+            <label for="trailer_model_search">Модель прицепа</label>
+            {% if trailer_profile_id is defined and trailer_profile_id %}
+            <a href="{{ url_for('tuning_trailer_profile', profile_id=trailer_profile_id) }}"
+               class="tuning-boat-profile-link">Открыть профиль ↗</a>
+            {% endif %}
+          </div>
+          {% set current_trailer_model = (form_values.get('trailer_model') or form_values.get('boat_model') or '') if form_values and selected_equipment_type == 'trailer' else '' %}
+          <div class="combo-field" data-combo data-combo-allow-custom data-combo-optional>
+            <input type="text" id="trailer_model_search" class="combo-input" data-combo-input
+                   value="{{ current_trailer_model }}" data-selected-label="{{ current_trailer_model }}"
+                   placeholder="Начните вводить модель прицепа…" autocomplete="off"
+                   role="combobox" aria-autocomplete="list"
+                   {{ 'required' if selected_equipment_type == 'trailer' }}>
+            <input type="hidden" id="trailer_model" name="trailer_model" data-combo-value
+                   value="{{ current_trailer_model }}">
+            <div class="combo-dropdown hidden" data-combo-dropdown>
+              <p class="combo-empty hidden" data-combo-empty>Создать новую модель: введённое название будет добавлено в каталог прицепов.</p>
+              {% for model in trailer_model_choices|default([]) %}
+              <div class="combo-option" data-value="{{ model }}" data-label="{{ model }}"
+                   data-search="{{ model|lower }}">
+                <span class="combo-option-name">{{ model }}</span>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          <span class="field-context">Выберите прицеп из каталога или введите новую модель.</span>
+        </div>
+        <div class="field field-narrow" id="trailerRegistrationNumberField" {{ 'hidden' if selected_equipment_type != 'trailer' }}>
+          <label for="trailer_registration_number">Номер прицепа</label>
+          <input type="text" id="trailer_registration_number" name="trailer_registration_number"
+                 value="{{ (form_values.get('trailer_registration_number') or form_values.get('boat_registration_number') or '') if form_values and selected_equipment_type == 'trailer' else '' }}"
+                 placeholder="Госномер или VIN">
+          <span class="field-context">Необязательно</span>
+        </div>
         </div>
 
         <div class="field-row-inner" style="margin-top:16px;">
-        <div class="field-wide boat-motors-field" id="boatMotorsField" {{ 'hidden' if selected_equipment_type == 'motor' }}>
+        <div class="field-wide boat-motors-field" id="boatMotorsField" {{ 'hidden' if selected_equipment_type != 'boat' }}>
           <div class="boat-motors-heading">
             <div>
               <span class="field-static-label">Моторы</span>
@@ -2068,7 +2112,23 @@ document.addEventListener('DOMContentLoaded', function () {
 
 function updateEquipmentFields() {
   var selected = document.querySelector('input[name="equipment_type"]:checked');
-  var motorOnly = selected && selected.value === 'motor';
+  var kind = selected ? selected.value : 'boat';
+  var motorOnly = kind === 'motor';
+  var notBoat = kind !== 'boat';
+  var trailerField = document.getElementById('trailerModelField');
+  var trailerNumberField = document.getElementById('trailerRegistrationNumberField');
+  var trailerInput = document.getElementById('trailer_model');
+  var trailerSearchInput = document.getElementById('trailer_model_search');
+  var trailerNumberInput = document.getElementById('trailer_registration_number');
+  if (trailerField && trailerNumberField && trailerInput && trailerSearchInput && trailerNumberInput) {
+    var isTrailer = kind === 'trailer';
+    trailerField.hidden = !isTrailer;
+    trailerNumberField.hidden = !isTrailer;
+    trailerInput.disabled = !isTrailer;
+    trailerSearchInput.disabled = !isTrailer;
+    trailerNumberInput.disabled = !isTrailer;
+    trailerSearchInput.required = isTrailer;
+  }
   var boatField = document.getElementById('boatModelField');
   var boatNumberField = document.getElementById('boatRegistrationNumberField');
   var boatInput = document.getElementById('boat_model');
@@ -2080,19 +2140,21 @@ function updateEquipmentFields() {
   var motorSerialField = document.getElementById('motorSerialNumberField');
   if (!boatField || !boatNumberField || !boatMotorsField || !motorModelField || !boatInput || !boatSearchInput || !motorInput || !motorSearchInput || !motorSerialField) return;
 
-  boatField.hidden = motorOnly;
-  boatNumberField.hidden = motorOnly;
-  boatMotorsField.hidden = motorOnly;
+  boatField.hidden = notBoat;
+  boatNumberField.hidden = notBoat;
+  boatMotorsField.hidden = notBoat;
   motorModelField.hidden = !motorOnly;
   motorSerialField.hidden = !motorOnly;
-  boatInput.disabled = motorOnly;
-  boatSearchInput.disabled = motorOnly;
+  boatInput.disabled = notBoat;
+  boatSearchInput.disabled = notBoat;
+  document.getElementById('boat_registration_number').disabled = notBoat;
   boatMotorsField.querySelectorAll('input').forEach(function (input) {
-    input.disabled = motorOnly;
+    input.disabled = notBoat;
   });
   motorInput.disabled = !motorOnly;
   motorSearchInput.disabled = !motorOnly;
-  boatSearchInput.required = !motorOnly;
+  document.getElementById('motor_serial_number').disabled = !motorOnly;
+  boatSearchInput.required = kind === 'boat';
   motorSearchInput.required = motorOnly;
 }
 
