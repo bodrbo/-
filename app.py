@@ -21053,8 +21053,10 @@ def _project_totals(db, project_id):
 def _item_profitability(db, order_id):
     """Per-work-item breakdown for one order: price (what the item is
     billed at) against its costs — material write-offs (via the existing
-    tuning_item_assignments chain — team_tuning_task_writeoff_material)
-    and any expense transactions explicitly linked to that item (the new
+    tuning_item_assignments chain — team_tuning_task_writeoff_material),
+    the pay of the work: employees' payroll entries of the item's tasks plus
+    the agreed cost of the tasks handed to contractors (`works_expense`), and
+    any expense transactions explicitly linked to that item (the new
     "Весь проект"/work-item picker in _transactions_table.html and
     transaction_split.html). Income transactions are deliberately NOT
     attributed per item here: the client pays for the whole project, not
@@ -21089,12 +21091,20 @@ def _item_profitability(db, order_id):
             "WHERE item_id = ? AND partner_id IS NOT NULL AND assignment_status != 'rejected'",
             (item["id"],),
         ).fetchone()["expense"]
+        employee_expense = db.execute(
+            "SELECT COALESCE(SUM(e.amount), 0) AS expense FROM entries e "
+            "JOIN tuning_item_assignments tia ON tia.entry_id = e.id "
+            "WHERE tia.item_id = ? AND tia.partner_id IS NULL",
+            (item["id"],),
+        ).fetchone()["expense"]
+        works_expense = employee_expense + contractor_expense
         price_pending = bool(item["price_pending"])
         price = item["price"] if item["status"] != "removed" and not price_pending else 0.0
-        profit = price - materials_expense - tx_expense - contractor_expense
+        profit = price - materials_expense - tx_expense - works_expense
         result.append({
             "item": item, "price": price, "materials_expense": materials_expense,
             "tx_expense": tx_expense, "contractor_expense": contractor_expense,
+            "employee_expense": employee_expense, "works_expense": works_expense,
             "profit": profit, "price_pending": price_pending,
         })
     return result
@@ -21211,8 +21221,12 @@ def project_detail(project_id):
         "AND id NOT IN (SELECT transaction_id FROM transaction_splits) "
         "ORDER BY operation_date DESC, id DESC LIMIT 300"
     ).fetchall()
+    # Pay booked to the project but not to one of its works (a work's own pay
+    # is in the «Работы» column of the profitability table).
     work_entries = db.execute(
-        "SELECT * FROM entries WHERE project_id = ? ORDER BY work_date DESC, id DESC",
+        "SELECT * FROM entries WHERE project_id = ? "
+        "AND id NOT IN (SELECT entry_id FROM tuning_item_assignments WHERE entry_id IS NOT NULL) "
+        "ORDER BY work_date DESC, id DESC",
         (project_id,),
     ).fetchall()
     material_writeoffs = db.execute(

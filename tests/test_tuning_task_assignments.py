@@ -1642,6 +1642,100 @@ class TuningTaskContractorCostTests(_ContractorFixture, unittest.TestCase):
         self.assertIn("syncAssignRowKind", page)
 
 
+class ProjectWorksColumnTests(_ContractorFixture, unittest.TestCase):
+    """Аналитика → проект: the profitability table has one «Работы» column
+    (employees' pay + contractors' cost of the work's tasks, no «Транз. расход»
+    / «Подрядчики» columns); «Общие работы по проекту» lists pay booked to the
+    project but to none of its works."""
+
+    GENERAL = "Общий Исполнитель"
+
+    def setUp(self):
+        super().setUp()
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.project_id = db.execute(
+                "INSERT INTO projects (name, tuning_order_id, created_at) VALUES ('Работы', ?, "
+                "'2026-09-01 10:00')", (self.order_id,),
+            ).lastrowid
+            db.commit()
+
+    def tearDown(self):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute("DELETE FROM entries WHERE employee = ?", (self.GENERAL,))
+            db.execute("DELETE FROM projects WHERE tuning_order_id = ?", (self.order_id,))
+            db.commit()
+        super().tearDown()
+
+    def add_general_entry(self, amount=700):
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.execute(
+                "INSERT INTO entries (employee, work_type, rate, quantity, amount, work_date, created_at, "
+                "project_id) VALUES (?, 'Уборка после работ', ?, 1, ?, '2026-09-05', '2026-09-05 10:00', ?)",
+                (self.GENERAL, amount, amount, self.project_id))
+            db.commit()
+
+    def row(self):
+        with application_module.app.app_context():
+            (row,) = application_module._item_profitability(application_module.get_db(), self.order_id)
+            return row
+
+    def page(self):
+        self.login_admin()
+        return self.client.get(f"/analytics/projects/{self.project_id}").get_data(as_text=True)
+
+    def test_works_column_sums_employee_pay_and_contractor_cost(self):
+        self.assign_quietly([(self.EMPLOYEE_A, 1000, 2), (self.partner_key, 3000, 1)])
+        self.login_admin()
+        for assignment in self.rows():
+            if assignment["partner_id"] is None:
+                self.client.post(f"/tuning/assignments/{assignment['id']}/status", data={"status": "done"})
+        row = self.row()
+        self.assertEqual(row["employee_expense"], 2000)
+        self.assertEqual(row["contractor_expense"], 3000)
+        self.assertEqual(row["works_expense"], 5000)
+        self.assertEqual(row["profit"], row["price"] - 5000)
+
+    def test_unfinished_employee_task_is_not_pay_yet(self):
+        self.assign_quietly([(self.EMPLOYEE_A, 1000, 2)])
+        self.assertEqual(self.row()["works_expense"], 0)
+
+    def test_the_table_has_a_works_column_and_no_old_ones(self):
+        self.assign_quietly([(self.partner_key, 5000, 1)])
+        page = self.page()
+        head = page[page.index("Прибыльность по работам"):]
+        head = head[:head.index("</thead>")]
+        self.assertIn("<th>Работы</th>", head)
+        self.assertNotIn("Транз. расход", head)
+        self.assertNotIn("Подрядчики", head)
+        self.assertNotIn("Работы, отнесённые на расходы", page)
+
+    def test_pay_of_a_work_is_not_listed_among_general_works(self):
+        self.assign_quietly([(self.EMPLOYEE_A, 1000, 2)])
+        self.login_admin()
+        (assignment,) = self.rows()
+        self.client.post(f"/tuning/assignments/{assignment['id']}/status", data={"status": "done"})
+        page = self.page()
+        section = page[page.index("Общие работы по проекту"):]
+        section = section[:section.index("</section>")]
+        self.assertIn("Общих работ нет", section)
+        self.assertNotIn(self.EMPLOYEE_A, section)
+
+    def test_pay_booked_to_the_project_only_is_a_general_work(self):
+        self.add_general_entry()
+        page = self.page()
+        section = page[page.index("Общие работы по проекту"):]
+        section = section[:section.index("</section>")]
+        self.assertIn(self.GENERAL, section)
+        self.assertIn("Уборка после работ", section)
+        self.assertNotIn("Общих работ нет", section)
+        self.assertEqual(self.row()["works_expense"], 0)           # not any work's pay
+        with application_module.app.app_context():                  # but still a project expense
+            self.assertEqual(application_module._project_totals(application_module.get_db(), self.project_id)[1], 700)
+
+
 class TuningTaskContractorLocationTests(_ContractorFixture, unittest.TestCase):
     """"На территории подрядчика": the boat is off the shop map for the
     task's period and back on the date the period ends."""
