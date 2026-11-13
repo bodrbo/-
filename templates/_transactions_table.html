@@ -68,7 +68,7 @@
           <form action="{{ url_for('set_transaction_project') }}" method="post" data-ajax-form>
             <input type="hidden" name="transaction_id" value="{{ t.id }}">
             <input type="hidden" name="next" value="{{ current_url }}">
-            <select name="target" class="project-select" onchange="txTargetChanged(this.form, 'target')">
+            <select name="target" class="project-select" data-searchable onchange="txTargetChanged(this.form, 'target')">
               <option value="">— без проекта —</option>
               {% for p in projects %}
               <optgroup label="{{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.tuning_order_id %} ({{ p|tuning_equipment_label }}){% endif %}">

@@ -38,7 +38,7 @@
 
 {% macro split_row(row=None) %}
 <div class="split-row">
-  <select name="target[]" class="split-project">
+  <select name="target[]" class="split-project" data-searchable>
     <option value="" disabled {{ 'selected' if not row or not row.target }}>Выберите проект или работу</option>
     {% for p in projects %}
     <optgroup label="{{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.tuning_order_id %} ({{ p|tuning_equipment_label }}){% endif %}">
@@ -200,6 +200,7 @@ document.getElementById('split-container').addEventListener('input', function (e
 document.addEventListener('DOMContentLoaded', updateSplitSummary);
 </script>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script src="{{ url_for('static', filename='select-search.js') }}"></script>
 
 </body>
 </html>
