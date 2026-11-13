@@ -4768,6 +4768,11 @@ tr.dealer-cancelled td { opacity: 0.55; }
 }
 .split-row .split-project { flex: 2 1 260px; min-width: 0; }
 .split-row .split-amount { flex: 1 1 140px; min-width: 0; }
+/* Expense type («Работа» / «Закупка материалов/оборудования») next to the project picker. */
+.cost-type-select { margin-top: 4px; max-width: 100%; }
+.cost-type-select[hidden] { display: none; }
+.cost-type-select.needs-type { border-color: var(--danger); box-shadow: 0 0 0 2px rgba(179, 64, 44, .15); }
+.split-row .split-cost-type { flex: 1 1 170px; min-width: 0; }
 
 /* Dashed border reads as "secondary/optional action" throughout the site
    (matches .btn-add) — a stitched-canvas cue rather than a generic outline

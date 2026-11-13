@@ -49,6 +49,14 @@
     </optgroup>
     {% endfor %}
   </select>
+  {% if transaction.direction == 'out' %}
+  <select name="cost_type[]" class="split-cost-type" aria-label="Тип">
+    <option value="" disabled {{ 'selected' if not row or not row.cost_type }}>Тип…</option>
+    {% for value, label in TRANSACTION_COST_TYPES.items() %}
+    <option value="{{ value }}" {{ 'selected' if row and row.cost_type == value }}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
   <input type="text" inputmode="decimal" name="amount[]" placeholder="Сумма, ₽" class="split-amount"
          value="{{ row.amount if row else '' }}" oninput="updateSplitSummary()">
   <button type="button" class="btn-delete" onclick="removeSplitRow(this)" title="Убрать строку">

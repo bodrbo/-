@@ -61,14 +61,14 @@
           <div class="hint" style="margin:0;">
             Разбито:
             {% for s in splits_by_transaction[t.id] %}
-            {{ s.project_name }}{% if s.item_name %} → {{ s.item_name }}{% endif %} ({{ s.amount|money }} ₽){% if not loop.last %}, {% endif %}
+            {{ s.project_name }}{% if s.item_name %} → {{ s.item_name }}{% endif %} ({{ s.amount|money }} ₽{% if s.cost_type %}, {{ TRANSACTION_COST_TYPES[s.cost_type]|lower }}{% endif %}){% if not loop.last %}, {% endif %}
             {% endfor %}
           </div>
           {% else %}
           <form action="{{ url_for('set_transaction_project') }}" method="post" data-ajax-form>
             <input type="hidden" name="transaction_id" value="{{ t.id }}">
             <input type="hidden" name="next" value="{{ current_url }}">
-            <select name="target" class="project-select" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()">
+            <select name="target" class="project-select" onchange="txTargetChanged(this.form, 'target')">
               <option value="">— без проекта —</option>
               {% for p in projects %}
               <optgroup label="{{ p.name }}{% if p.client_name %} — {{ p.client_name }}{% endif %}{% if p.tuning_order_id %} ({{ p|tuning_equipment_label }}){% endif %}">
@@ -79,6 +79,15 @@
               </optgroup>
               {% endfor %}
             </select>
+            {% if t.direction == 'out' %}
+            <select name="cost_type" class="cost-type-select{{ ' needs-type' if t.project_id and not t.cost_type }}" aria-label="Тип транзакции"
+                    {% if not t.project_id %}hidden{% endif %} onchange="txTargetChanged(this.form, 'type')">
+              {% if not t.cost_type %}<option value="" selected disabled>Тип…</option>{% endif %}
+              {% for value, label in TRANSACTION_COST_TYPES.items() %}
+              <option value="{{ value }}"{{ ' selected' if t.cost_type == value }}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            {% endif %}
           </form>
           {% endif %}
         </td>

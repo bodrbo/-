@@ -115,8 +115,8 @@
             <td class="amount{{ ' work-price-pending' if row.price_pending }}">
               {{ (row.price|money ~ ' ₽') if not row.price_pending else 'Ждёт расчёта' }}
             </td>
-            <td class="amount">{{ row.materials_expense|money }}</td>
-            <td class="amount"{% if row.works_expense %} title="Сотрудники: {{ row.employee_expense|money }} ₽, подрядчики: {{ row.contractor_expense|money }} ₽"{% endif %}>{{ row.works_expense|money }}</td>
+            <td class="amount"{% if row.tx_materials %} title="Закупки по транзакциям: {{ row.tx_materials|money }} ₽"{% endif %}>{{ row.materials_expense|money }}</td>
+            <td class="amount"{% if row.works_expense %} title="Сотрудники: {{ row.employee_expense|money }} ₽, подрядчики: {{ row.contractor_expense|money }} ₽, транзакции: {{ row.tx_work|money }} ₽"{% endif %}>{{ row.works_expense|money }}</td>
             {% if row.price_pending %}
             <td class="amount work-price-pending">Ждёт расчёта</td>
             {% else %}
@@ -127,7 +127,11 @@
         </tbody>
       </table>
     </div>
-    <p class="hint">«Работы» — выплаты сотрудникам за выполненные задачи этой работы и стоимость задач, поручённых подрядчикам (подробности — во всплывающей подсказке суммы). Доход по проекту не делится по работам — клиент платит за весь заказ целиком, поэтому прибыль работы считается как цена минус её расходы: материалы, работы и расходные транзакции, привязанные именно к этой работе.</p>
+    <p class="hint">«Материалы» — списания со склада и расходные транзакции типа «Закупка материалов/оборудования», привязанные к этой работе. «Работы» — выплаты сотрудникам за выполненные задачи, стоимость задач, поручённых подрядчикам, и расходные транзакции типа «Работа», привязанные к этой работе (подробности — во всплывающей подсказке суммы). Доход по проекту не делится по работам — клиент платит за весь заказ целиком, поэтому прибыль работы считается как цена минус её расходы.</p>
+    {% set untyped = item_profitability|sum(attribute='tx_untyped') %}
+    {% if untyped %}
+    <p class="hint">Есть расходные транзакции без типа на {{ untyped|money }} ₽ — они вычитаются из прибыли работы, но не входят ни в «Материалы», ни в «Работы». Выберите тип в списке привязанных транзакций ниже.</p>
+    {% endif %}
   </section>
   {% endif %}
 
@@ -142,6 +146,7 @@
             <th>Сумма</th>
             <th>Контрагент</th>
             <th>Назначение платежа</th>
+            <th>Тип</th>
             <th></th>
           </tr>
         </thead>
@@ -165,6 +170,22 @@
                   </svg>
                 </button>
               </form>
+            </td>
+            <td>
+              {% if t.direction == 'out' %}
+              <form action="{{ url_for('set_transaction_cost_type') }}" method="post">
+                <input type="hidden" name="transaction_id" value="{{ t.id }}">
+                {% if t.is_split %}<input type="hidden" name="split_id" value="{{ t.split_id }}">{% endif %}
+                <input type="hidden" name="next" value="{{ url_for('project_detail', project_id=project.id) }}">
+                <select name="cost_type" class="cost-type-select{{ ' needs-type' if not t.cost_type }}" aria-label="Тип транзакции"
+                        onchange="this.form.submit()">
+                  {% if not t.cost_type %}<option value="" selected disabled>Выберите тип…</option>{% endif %}
+                  {% for value, label in TRANSACTION_COST_TYPES.items() %}
+                  <option value="{{ value }}"{{ ' selected' if t.cost_type == value }}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </form>
+              {% else %}<span class="muted">—</span>{% endif %}
             </td>
             <td class="row-actions">
               <a href="{{ url_for('transaction_split', transaction_id=t.id, next=url_for('project_detail', project_id=project.id)) }}"
@@ -234,31 +255,31 @@
 
   <section class="panel">
     <h2>Общие работы по проекту</h2>
-    {% if work_entries %}
+    {% if general_works %}
     <div class="table-scroll">
       <table class="records">
         <thead>
           <tr>
             <th>Дата</th>
-            <th>Сотрудник</th>
+            <th>Исполнитель</th>
             <th>Вид работы</th>
             <th>Сумма</th>
           </tr>
         </thead>
         <tbody>
-          {% for e in work_entries %}
+          {% for w in general_works %}
           <tr>
-            <td class="muted">{{ e.work_date|ru_date }}</td>
-            <td>{{ e.employee }}</td>
-            <td>{{ e.work_type }}</td>
-            <td class="amount">{{ e.amount|money }}</td>
+            <td class="muted">{{ w.date|ru_date }}</td>
+            <td>{{ w.who }}</td>
+            <td>{{ w.what }}{% if w.from_transaction %} <span class="hint">(транзакция)</span>{% endif %}</td>
+            <td class="amount">{{ w.amount|money }}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
     {% else %}
-    <p class="hint">Общих работ нет. Сюда попадают выплаты, привязанные к проекту, но не к конкретной его работе, — например, добавленные в разделе «Зарплаты». Выплаты по работам проекта — в столбце «Работы» таблицы выше.</p>
+    <p class="hint">Общих работ нет. Сюда попадают выплаты и расходные транзакции типа «Работа», привязанные ко всему проекту, но не к конкретной его работе. Выплаты по работам проекта — в столбце «Работы» таблицы выше.</p>
     {% endif %}
   </section>
 
@@ -294,34 +315,35 @@
   </section>
 
   <section class="panel">
-    <h2>Списанные материалы</h2>
-    {% if material_writeoffs %}
+    <h2>Материалы</h2>
+    {% if materials %}
     <div class="table-scroll">
       <table class="records">
         <thead>
           <tr>
             <th>Дата</th>
-            <th>Сотрудник</th>
+            <th>Сотрудник / контрагент</th>
             <th>Материал</th>
             <th>Количество</th>
             <th>Сумма</th>
           </tr>
         </thead>
         <tbody>
-          {% for w in material_writeoffs %}
+          {% for m in materials %}
           <tr>
-            <td class="muted">{{ w.created_at[:10]|ru_date }}</td>
-            <td>{{ w.employee_name or '—' }}</td>
-            <td>{{ w.product_name }}</td>
-            <td class="amount">{{ w.quantity|float|round(2) }}</td>
-            <td class="amount">{{ w.amount|money }}</td>
+            <td class="muted">{{ m.date|ru_date }}</td>
+            <td>{{ m.who }}</td>
+            <td>{{ m.what }}{% if m.from_transaction %} <span class="hint">(закупка)</span>{% endif %}</td>
+            <td class="amount">{{ (m.quantity|float|round(2)) if m.quantity is not none else '—' }}</td>
+            <td class="amount">{{ m.amount|money }}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+    <p class="hint">Списания материалов со склада и расходные транзакции типа «Закупка материалов/оборудования», привязанные ко всему проекту (привязанные к конкретной работе — в столбце «Материалы» таблицы выше).</p>
     {% else %}
-    <p class="hint">К проекту пока не привязано ни одного списания материалов.</p>
+    <p class="hint">К проекту пока не привязано ни одного списания и закупки материалов.</p>
     {% endif %}
   </section>
 
@@ -336,12 +358,21 @@
         <select id="transaction_id" name="transaction_id" required>
           <option value="" disabled selected>Выберите транзакцию</option>
           {% for t in unattached %}
-          <option value="{{ t.id }}">
+          <option value="{{ t.id }}" data-direction="{{ t.direction }}">
             {{ t.operation_date[:10]|ru_date }} ·
             {{ '+' if t.direction == 'in' else '−' }}{{ t.amount|money }} ₽ ·
             {{ t.counterparty_name or '—' }}
             {% if t.purpose %} · {{ t.purpose }}{% endif %}
           </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field" id="bind-cost-type-field" hidden>
+        <label for="bind_cost_type">Тип</label>
+        <select id="bind_cost_type" name="cost_type">
+          <option value="" selected disabled>Выберите тип…</option>
+          {% for value, label in TRANSACTION_COST_TYPES.items() %}
+          <option value="{{ value }}">{{ label }}</option>
           {% endfor %}
         </select>
       </div>
@@ -356,6 +387,20 @@
 
 </main>
 
+<script>
+(function () {
+  // An expense must be given a type when bound to the project; an income has none.
+  var pick = document.getElementById('transaction_id');
+  var field = document.getElementById('bind-cost-type-field');
+  var type = document.getElementById('bind_cost_type');
+  if (!pick || !field || !type) return;
+  pick.addEventListener('change', function () {
+    var expense = pick.options[pick.selectedIndex].getAttribute('data-direction') === 'out';
+    field.hidden = !expense;
+    type.required = expense;
+  });
+})();
+</script>
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 
 </body>

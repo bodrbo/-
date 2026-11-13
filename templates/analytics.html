@@ -236,6 +236,25 @@
 
 <script src="{{ url_for('static', filename='loader.js') }}"></script>
 <script>
+// Bind a transaction to a project: an expense also needs its type («Работа» /
+// «Закупка материалов/оборудования»), so the form is sent once both are chosen
+// (or at once when the project is cleared / the transaction is an income).
+function txTargetChanged(form, source) {
+  var target = form.elements["target"];
+  var type = form.elements["cost_type"];
+  if (type) {
+    type.hidden = !target.value;
+    if (!target.value) type.value = "";
+  }
+  if (target.value && type && !type.value) {
+    type.classList.add("needs-type");
+    if (source === "target") type.focus();
+    return;
+  }
+  if (type) type.classList.remove("needs-type");
+  if (form.requestSubmit) form.requestSubmit(); else form.submit();
+}
+
 // Applying the date filter, assigning a project, or saving a purpose all
 // used to be full page navigations — this fetches the transactions table
 // in place instead, the same "no reload" feel as the instant search.
@@ -265,11 +284,11 @@
           body: new FormData(form),
           headers: {"X-Requested-With": "XMLHttpRequest"},
         }).then(function (r) {
+          if (!r.ok) throw new Error();
           // Some of these forms (e.g. deleting a manual transaction) add or
           // remove a whole row, which the fetch response alone doesn't
           // reflect — refetch the table fragment so it's not left stale.
           if (form.hasAttribute("data-ajax-refresh")) {
-            if (!r.ok) throw new Error();
             loadTransactions(paramsFromInputs(currentPage()), false);
           }
         }).catch(function () {

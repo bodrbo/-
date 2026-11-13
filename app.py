@@ -3140,6 +3140,12 @@ def init_db(db_path=None, include_bootstrap_data=True):
         # are profitable, not just whole orders. NULL means "whole
         # project", same as before this column existed.
         conn.execute("ALTER TABLE bank_transactions ADD COLUMN item_id INTEGER")
+    if "cost_type" not in bank_tx_cols:
+        # What an expense bound to a project/work is: 'work' (pay for a work —
+        # goes to «Работы») or 'materials' (a purchase of materials or
+        # equipment — goes to «Материалы»). NULL: not bound, an income, or
+        # bound before the type existed.
+        conn.execute("ALTER TABLE bank_transactions ADD COLUMN cost_type TEXT")
     if "source" not in bank_tx_cols:
         # 'tbank' (the default, so every row imported before this column
         # existed is correctly backfilled) or 'manual' — a cash payment or
@@ -3644,6 +3650,9 @@ def init_db(db_path=None, include_bootstrap_data=True):
     if "item_id" not in transaction_split_cols:
         # Same optional per-work-item attribution as bank_transactions.item_id.
         conn.execute("ALTER TABLE transaction_splits ADD COLUMN item_id INTEGER")
+    if "cost_type" not in transaction_split_cols:
+        # Same as bank_transactions.cost_type, per part of a split.
+        conn.execute("ALTER TABLE transaction_splits ADD COLUMN cost_type TEXT")
     # Migration path for tuning_orders created before client_id/status existed.
     tuning_cols = [row[1] for row in conn.execute("PRAGMA table_info(tuning_orders)").fetchall()]
     if "client_id" not in tuning_cols:
@@ -19097,6 +19106,19 @@ def _project_id_for_tuning_order(db, order_id):
     return row["id"] if row else None
 
 
+TRANSACTION_COST_TYPES = {
+    "work": "Работа",
+    "materials": "Закупка материалов/оборудования",
+}
+COST_TYPE_REQUIRED_MESSAGE = "Выберите тип транзакции: «Работа» или «Закупка материалов/оборудования»."
+app.jinja_env.globals["TRANSACTION_COST_TYPES"] = TRANSACTION_COST_TYPES
+
+
+def _transaction_cost_type(raw):
+    raw = (raw or "").strip()
+    return raw if raw in TRANSACTION_COST_TYPES else None
+
+
 def _resolve_transaction_target(db, raw):
     """Parses the value of a transaction/split "target" <select> — see
     _transactions_table.html and transaction_split.html — into
@@ -20769,7 +20791,7 @@ def _fetch_filtered_transactions(
     if transaction_ids:
         placeholders = ",".join("?" for _ in transaction_ids)
         split_rows = db.execute(
-            "SELECT ts.transaction_id, ts.amount, projects.name AS project_name, "
+            "SELECT ts.transaction_id, ts.amount, ts.cost_type, projects.name AS project_name, "
             "tuning_order_items.work_name AS item_name "
             "FROM transaction_splits ts JOIN projects ON projects.id = ts.project_id "
             "LEFT JOIN tuning_order_items ON tuning_order_items.id = ts.item_id "
@@ -20781,7 +20803,8 @@ def _fetch_filtered_transactions(
     splits_by_transaction = {}
     for s in split_rows:
         splits_by_transaction.setdefault(s["transaction_id"], []).append(
-            {"project_name": s["project_name"], "amount": s["amount"], "item_name": s["item_name"]}
+            {"project_name": s["project_name"], "amount": s["amount"], "item_name": s["item_name"],
+             "cost_type": s["cost_type"]}
         )
     return transactions, splits_by_transaction, total_count, page, total_pages
 
@@ -21073,19 +21096,27 @@ def _item_profitability(db, order_id):
             "WHERE tia.item_id = ?",
             (item["id"],),
         ).fetchone()["expense"]
-        tx_expense_direct = db.execute(
-            "SELECT COALESCE(SUM(amount), 0) AS expense FROM bank_transactions "
+        # expense transactions of the item by what they are: pay for work,
+        # a purchase of materials, or (bound before the types) not told
+        tx_by_type = {}
+        for row in db.execute(
+            "SELECT cost_type, SUM(amount) AS expense FROM bank_transactions "
             "WHERE item_id = ? AND direction = 'out' "
-            "AND id NOT IN (SELECT transaction_id FROM transaction_splits)",
+            "AND id NOT IN (SELECT transaction_id FROM transaction_splits) GROUP BY cost_type",
             (item["id"],),
-        ).fetchone()["expense"]
-        tx_expense_split = db.execute(
-            "SELECT COALESCE(SUM(ts.amount), 0) AS expense "
+        ).fetchall():
+            tx_by_type[row["cost_type"]] = tx_by_type.get(row["cost_type"], 0) + row["expense"]
+        for row in db.execute(
+            "SELECT ts.cost_type AS cost_type, SUM(ts.amount) AS expense "
             "FROM transaction_splits ts JOIN bank_transactions bt ON bt.id = ts.transaction_id "
-            "WHERE ts.item_id = ? AND bt.direction = 'out'",
+            "WHERE ts.item_id = ? AND bt.direction = 'out' GROUP BY ts.cost_type",
             (item["id"],),
-        ).fetchone()["expense"]
-        tx_expense = tx_expense_direct + tx_expense_split
+        ).fetchall():
+            tx_by_type[row["cost_type"]] = tx_by_type.get(row["cost_type"], 0) + row["expense"]
+        tx_work = tx_by_type.get("work", 0)
+        tx_materials = tx_by_type.get("materials", 0)
+        tx_untyped = sum(v for k, v in tx_by_type.items() if k not in TRANSACTION_COST_TYPES)
+        tx_expense = tx_work + tx_materials + tx_untyped
         contractor_expense = db.execute(
             "SELECT COALESCE(SUM(rate * norm_hours), 0) AS expense FROM tuning_item_assignments "
             "WHERE item_id = ? AND partner_id IS NOT NULL AND assignment_status != 'rejected'",
@@ -21097,13 +21128,15 @@ def _item_profitability(db, order_id):
             "WHERE tia.item_id = ? AND tia.partner_id IS NULL",
             (item["id"],),
         ).fetchone()["expense"]
-        works_expense = employee_expense + contractor_expense
+        materials_expense += tx_materials
+        works_expense = employee_expense + contractor_expense + tx_work
         price_pending = bool(item["price_pending"])
         price = item["price"] if item["status"] != "removed" and not price_pending else 0.0
-        profit = price - materials_expense - tx_expense - works_expense
+        profit = price - materials_expense - works_expense - tx_untyped
         result.append({
             "item": item, "price": price, "materials_expense": materials_expense,
-            "tx_expense": tx_expense, "contractor_expense": contractor_expense,
+            "tx_expense": tx_expense, "tx_work": tx_work, "tx_materials": tx_materials,
+            "tx_untyped": tx_untyped, "contractor_expense": contractor_expense,
             "employee_expense": employee_expense, "works_expense": works_expense,
             "profit": profit, "price_pending": price_pending,
         })
@@ -21203,14 +21236,14 @@ def project_detail(project_id):
         "  SELECT bt.id AS id, bt.operation_date AS operation_date, bt.direction AS direction, "
         "         bt.counterparty_name AS counterparty_name, bt.purpose AS purpose, "
         "         bt.amount AS full_amount, bt.amount AS display_amount, "
-        "         0 AS is_split, NULL AS split_id "
+        "         0 AS is_split, NULL AS split_id, bt.item_id AS item_id, bt.cost_type AS cost_type "
         "  FROM bank_transactions bt "
         "  WHERE bt.project_id = ? AND bt.id NOT IN (SELECT transaction_id FROM transaction_splits) "
         "  UNION ALL "
         "  SELECT bt.id AS id, bt.operation_date AS operation_date, bt.direction AS direction, "
         "         bt.counterparty_name AS counterparty_name, bt.purpose AS purpose, "
         "         bt.amount AS full_amount, ts.amount AS display_amount, "
-        "         1 AS is_split, ts.id AS split_id "
+        "         1 AS is_split, ts.id AS split_id, ts.item_id AS item_id, ts.cost_type AS cost_type "
         "  FROM transaction_splits ts JOIN bank_transactions bt ON bt.id = ts.transaction_id "
         "  WHERE ts.project_id = ?"
         ") ORDER BY operation_date DESC, id DESC",
@@ -21223,18 +21256,46 @@ def project_detail(project_id):
     ).fetchall()
     # Pay booked to the project but not to one of its works (a work's own pay
     # is in the «Работы» column of the profitability table).
-    work_entries = db.execute(
-        "SELECT * FROM entries WHERE project_id = ? "
-        "AND id NOT IN (SELECT entry_id FROM tuning_item_assignments WHERE entry_id IS NOT NULL) "
-        "ORDER BY work_date DESC, id DESC",
-        (project_id,),
-    ).fetchall()
-    material_writeoffs = db.execute(
-        "SELECT sw.*, sp.name AS product_name "
-        "FROM supply_writeoffs sw JOIN supply_products sp ON sp.id = sw.product_id "
-        "WHERE sw.project_id = ? ORDER BY sw.created_at DESC, sw.id DESC",
-        (project_id,),
-    ).fetchall()
+    # «Общие работы по проекту»: payroll entries booked to the project but to
+    # none of its works, and expense transactions of type «Работа» bound to
+    # the project as a whole.
+    general_works = [
+        {"date": e["work_date"], "who": e["employee"], "what": e["work_type"], "amount": e["amount"],
+         "from_transaction": False}
+        for e in db.execute(
+            "SELECT * FROM entries WHERE project_id = ? "
+            "AND id NOT IN (SELECT entry_id FROM tuning_item_assignments WHERE entry_id IS NOT NULL)",
+            (project_id,),
+        ).fetchall()
+    ]
+    general_works += [
+        {"date": t["operation_date"][:10], "who": t["counterparty_name"] or "—",
+         "what": t["purpose"] or "Банковская операция", "amount": t["display_amount"], "from_transaction": True}
+        for t in transactions
+        if t["direction"] == "out" and not t["item_id"] and t["cost_type"] == "work"
+    ]
+    general_works.sort(key=lambda row: row["date"] or "", reverse=True)
+    # «Материалы»: write-offs from the warehouse and purchases of materials /
+    # equipment (expense transactions of type «Закупка…») bound to the project
+    # as a whole.
+    materials = [
+        {"date": (w["created_at"] or "")[:10], "who": w["employee_name"] or "—", "what": w["product_name"],
+         "quantity": w["quantity"], "amount": w["amount"], "from_transaction": False}
+        for w in db.execute(
+            "SELECT sw.*, sp.name AS product_name "
+            "FROM supply_writeoffs sw JOIN supply_products sp ON sp.id = sw.product_id "
+            "WHERE sw.project_id = ?",
+            (project_id,),
+        ).fetchall()
+    ]
+    materials += [
+        {"date": t["operation_date"][:10], "who": t["counterparty_name"] or "—",
+         "what": t["purpose"] or "Закупка по банковской операции", "quantity": None,
+         "amount": t["display_amount"], "from_transaction": True}
+        for t in transactions
+        if t["direction"] == "out" and not t["item_id"] and t["cost_type"] == "materials"
+    ]
+    materials.sort(key=lambda row: row["date"] or "", reverse=True)
     payments = db.execute(
         "SELECT * FROM tuning_payments WHERE project_id = ? ORDER BY paid_at DESC, id DESC",
         (project_id,),
@@ -21253,7 +21314,7 @@ def project_detail(project_id):
     return render_template(
         "project_detail.html", active_page="analytics", sub_page="projects",
         project=project, order=order, transactions=transactions, unattached=unattached,
-        work_entries=work_entries, material_writeoffs=material_writeoffs, payments=payments,
+        general_works=general_works, materials=materials, payments=payments,
         contractor_costs=_project_contractor_costs(db, project_id), income=income, expense=expense, profit=profit, item_profitability=item_profitability,
     )
 
@@ -21343,17 +21404,55 @@ def set_transaction_project():
     db = get_db()
     transaction_id = request.form.get("transaction_id", "").strip()
     project_id, item_id = _resolve_transaction_target(db, request.form.get("target", ""))
+    cost_type = _transaction_cost_type(request.form.get("cost_type"))
     if transaction_id.isdigit():
-        # A direct single-project assignment always overrides any prior split.
-        db.execute(
-            "DELETE FROM transaction_splits WHERE transaction_id = ?", (int(transaction_id),)
-        )
-        db.execute(
-            "UPDATE bank_transactions SET project_id = ?, item_id = ? WHERE id = ?",
-            (project_id, item_id, int(transaction_id)),
-        )
-        db.commit()
+        row = db.execute(
+            "SELECT direction FROM bank_transactions WHERE id = ?", (int(transaction_id),)
+        ).fetchone()
+        if row is not None:
+            if project_id is not None and row["direction"] == "out" and cost_type is None:
+                # an expense bound to a project must say what it is
+                return (COST_TYPE_REQUIRED_MESSAGE, 400)
+            if project_id is None or row["direction"] != "out":
+                cost_type = None  # unbound, or an income: there is no type
+            # A direct single-project assignment always overrides any prior split.
+            db.execute(
+                "DELETE FROM transaction_splits WHERE transaction_id = ?", (int(transaction_id),)
+            )
+            db.execute(
+                "UPDATE bank_transactions SET project_id = ?, item_id = ?, cost_type = ? WHERE id = ?",
+                (project_id, item_id, cost_type, int(transaction_id)),
+            )
+            db.commit()
     next_url = request.form.get("next") or url_for("analytics_index")
+    return _redirect_or_ajax_ok(next_url)
+
+
+@app.route("/analytics/transactions/cost-type", methods=["POST"])
+@admin_login_required
+def set_transaction_cost_type():
+    """Changes the type of an expense that is already bound to a project (a
+    whole transaction, or one part of a split when split_id is given)."""
+    db = get_db()
+    cost_type = _transaction_cost_type(request.form.get("cost_type"))
+    transaction_id = request.form.get("transaction_id", "").strip()
+    split_id = request.form.get("split_id", "").strip()
+    next_url = request.form.get("next") or url_for("analytics_index")
+    if cost_type is None:
+        return (COST_TYPE_REQUIRED_MESSAGE, 400)
+    if split_id.isdigit():
+        db.execute(
+            "UPDATE transaction_splits SET cost_type = ? WHERE id = ? AND transaction_id IN "
+            "(SELECT id FROM bank_transactions WHERE direction = 'out')",
+            (cost_type, int(split_id)),
+        )
+    elif transaction_id.isdigit():
+        db.execute(
+            "UPDATE bank_transactions SET cost_type = ? WHERE id = ? AND direction = 'out' "
+            "AND project_id IS NOT NULL",
+            (cost_type, int(transaction_id)),
+        )
+    db.commit()
     return _redirect_or_ajax_ok(next_url)
 
 
@@ -21452,8 +21551,8 @@ def _normalize_transaction_split(db, transaction_id):
     ).fetchall()
     if len(remaining) == 1:
         db.execute(
-            "UPDATE bank_transactions SET project_id = ?, item_id = ? WHERE id = ?",
-            (remaining[0]["project_id"], remaining[0]["item_id"], transaction_id),
+            "UPDATE bank_transactions SET project_id = ?, item_id = ?, cost_type = ? WHERE id = ?",
+            (remaining[0]["project_id"], remaining[0]["item_id"], remaining[0]["cost_type"], transaction_id),
         )
         db.execute("DELETE FROM transaction_splits WHERE id = ?", (remaining[0]["id"],))
 
@@ -21490,6 +21589,7 @@ def transaction_split(transaction_id):
             {
                 "target": f"i{s['item_id']}" if s["item_id"] else f"p{s['project_id']}",
                 "amount": f"{s['amount']:.2f}".rstrip("0").rstrip("."),
+                "cost_type": s["cost_type"] or "",
             }
             for s in existing
         ]
@@ -21502,14 +21602,17 @@ def transaction_split(transaction_id):
     next_url = request.form.get("next") or url_for("analytics_index")
     targets_raw = request.form.getlist("target[]")
     amounts = request.form.getlist("amount[]")
+    types_raw = request.form.getlist("cost_type[]")
+    is_expense = transaction["direction"] == "out"
 
     display_rows = []
     for i in range(max(len(targets_raw), len(amounts))):
         target_raw = targets_raw[i].strip() if i < len(targets_raw) else ""
         amt_raw = amounts[i].strip() if i < len(amounts) else ""
+        type_raw = types_raw[i].strip() if i < len(types_raw) else ""
         if not target_raw and not amt_raw:
             continue
-        display_rows.append({"target": target_raw, "amount": amt_raw})
+        display_rows.append({"target": target_raw, "amount": amt_raw, "cost_type": type_raw})
 
     errors = []
     parsed_rows = []
@@ -21518,6 +21621,10 @@ def transaction_split(transaction_id):
         project_id, item_id = _resolve_transaction_target(db, r["target"])
         if project_id is None:
             errors.append(f"Строка {idx}: выберите проект или работу.")
+            continue
+        cost_type = _transaction_cost_type(r["cost_type"]) if is_expense else None
+        if is_expense and cost_type is None:
+            errors.append(f"Строка {idx}: выберите тип — «Работа» или «Закупка материалов/оборудования».")
             continue
         target_key = (project_id, item_id)
         if target_key in seen_targets:
@@ -21532,7 +21639,7 @@ def transaction_split(transaction_id):
             errors.append(f"Строка {idx}: сумма должна быть больше нуля.")
             continue
         seen_targets.add(target_key)
-        parsed_rows.append({"project_id": project_id, "item_id": item_id, "amount": amt})
+        parsed_rows.append({"project_id": project_id, "item_id": item_id, "amount": amt, "cost_type": cost_type})
 
     if not errors and len(parsed_rows) < 2:
         errors.append("Укажите минимум два получателя (проекта или работы), чтобы разбить сумму — для одного используйте обычный выбор.")
@@ -21557,11 +21664,11 @@ def transaction_split(transaction_id):
     db.execute("DELETE FROM transaction_splits WHERE transaction_id = ?", (transaction_id,))
     for r in parsed_rows:
         db.execute(
-            "INSERT INTO transaction_splits (transaction_id, project_id, item_id, amount, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (transaction_id, r["project_id"], r["item_id"], r["amount"], now),
+            "INSERT INTO transaction_splits (transaction_id, project_id, item_id, cost_type, amount, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (transaction_id, r["project_id"], r["item_id"], r["cost_type"], r["amount"], now),
         )
-    db.execute("UPDATE bank_transactions SET project_id = NULL, item_id = NULL WHERE id = ?", (transaction_id,))
+    db.execute("UPDATE bank_transactions SET project_id = NULL, item_id = NULL, cost_type = NULL WHERE id = ?", (transaction_id,))
     db.commit()
     return redirect(next_url)
 
