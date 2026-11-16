@@ -13968,6 +13968,151 @@ def _set_tuning_item_assignment_status(db, assignment_id, status, handed_over=Fa
     db.commit()
 
 
+# Columns of the projects board (/tuning/board): the order statuses during
+# which the shop actually works on the equipment. Earlier statuses (request,
+# estimate, approval) only show as a link to the filtered orders list;
+# handed-over and cancelled orders leave the board.
+TUNING_PROJECTS_BOARD_COLUMNS = [
+    {"status": "approved", "label": "Согласовано"},
+    {"status": "in_progress", "label": "В работе"},
+    {"status": "qc", "label": "Контроль качества"},
+    {"status": "done", "label": "Ждёт выдачи"},
+]
+TUNING_PROJECTS_BOARD_PREWORK_STATUSES = ("new_request", "awaiting_estimate", "estimate")
+TUNING_ACTIVE_ASSIGNMENT_STATUSES = ("pending", "accepted", "in_progress")
+
+
+def _tuning_projects_board_orders(db):
+    """Orders on the projects board, each with the numbers its card shows:
+    work progress, who is on it, deadline state and the problems that need
+    the tuning chief's attention."""
+    column_statuses = [column["status"] for column in TUNING_PROJECTS_BOARD_COLUMNS]
+    placeholders = ",".join("?" for _ in column_statuses)
+    orders = [
+        dict(row) for row in db.execute(
+            "SELECT o.*, COALESCE(p.paid_total, 0) AS paid_total "
+            "FROM tuning_orders o "
+            "LEFT JOIN (SELECT order_id, SUM(amount) AS paid_total "
+            "           FROM tuning_payments GROUP BY order_id) p ON p.order_id = o.id "
+            f"WHERE o.status IN ({placeholders}) AND o.source != ? "
+            "ORDER BY CASE WHEN o.deadline_date IS NULL OR o.deadline_date = '' THEN 1 ELSE 0 END, "
+            "o.deadline_date, o.id",
+            [*column_statuses, SUBCONTRACT_REQUEST_SOURCE],
+        ).fetchall()
+    ]
+    if not orders:
+        return []
+    by_id = {order["id"]: order for order in orders}
+    for order in orders:
+        order.update(
+            works_total=0, works_done=0, works_pending_price=0, works_unassigned=0,
+            rejected_tasks=0, assignees=[],
+        )
+    order_placeholders = ",".join("?" for _ in by_id)
+    items = db.execute(
+        "SELECT id, order_id, status, price_pending FROM tuning_order_items "
+        f"WHERE order_id IN ({order_placeholders}) AND status != 'removed'",
+        list(by_id),
+    ).fetchall()
+    assignments_by_item = {}
+    for row in db.execute(
+        "SELECT a.item_id, a.assignment_status, a.employee_name, a.partner_id, "
+        "c.client_name AS partner_name "
+        "FROM tuning_item_assignments a "
+        "JOIN tuning_order_items i ON i.id = a.item_id "
+        "LEFT JOIN clients c ON c.id = a.partner_id "
+        f"WHERE i.order_id IN ({order_placeholders}) ORDER BY a.id",
+        list(by_id),
+    ).fetchall():
+        assignments_by_item.setdefault(row["item_id"], []).append(row)
+    for item in items:
+        order = by_id[item["order_id"]]
+        order["works_total"] += 1
+        if item["status"] == "done":
+            order["works_done"] += 1
+        if item["price_pending"]:
+            order["works_pending_price"] += 1
+        assignments = assignments_by_item.get(item["id"], [])
+        working = [
+            a for a in assignments
+            if a["assignment_status"] in TUNING_ACTIVE_ASSIGNMENT_STATUSES
+            or a["assignment_status"] in ("done", ASSIGNMENT_STATUS_HANDED_OVER)
+        ]
+        if item["status"] in ("approved", "in_progress") and not working:
+            order["works_unassigned"] += 1
+        for a in assignments:
+            if a["assignment_status"] == "rejected":
+                order["rejected_tasks"] += 1
+            elif a["assignment_status"] in TUNING_ACTIVE_ASSIGNMENT_STATUSES:
+                name = (a["partner_name"] if a["partner_id"] else None) or a["employee_name"]
+                if name and name not in order["assignees"]:
+                    order["assignees"].append(name)
+    today = dt.date.today()
+    for order in orders:
+        order.update(_tuning_order_deadline_view(
+            order["deadline_date"], order["completed_at"], order["status"]
+        ))
+        order["deadline_soon"] = False
+        if order["deadline_date"] and not order["deadline_is_overdue"] and order["status"] not in TUNING_DONE_STATUSES:
+            days_left = (dt.date.fromisoformat(order["deadline_date"]) - today).days
+            order["deadline_soon"] = 0 <= days_left <= 2
+        order["progress_percent"] = (
+            round(order["works_done"] * 100 / order["works_total"]) if order["works_total"] else 0
+        )
+        order["unpaid"] = round(max(0.0, (order["total"] or 0) - (order["paid_total"] or 0)), 2)
+        order["equipment_model"] = (
+            order["motor_model"] if order["equipment_type"] == "motor" else order["boat_model"]
+        ) or ""
+        flags = []
+        if order["deadline_is_overdue"]:
+            flags.append("overdue")
+        if order["rejected_tasks"]:
+            flags.append("rejected")
+        if order["works_unassigned"] and order["status"] not in TUNING_DONE_STATUSES:
+            flags.append("unassigned")
+        if order["works_pending_price"]:
+            flags.append("pending_price")
+        if order["status"] in TUNING_DONE_STATUSES and order["unpaid"] > 0:
+            flags.append("unpaid")
+        order["flags"] = flags
+    return orders
+
+
+@app.route("/tuning/board")
+@admin_login_required
+def tuning_projects_board():
+    db = get_db()
+    orders = _tuning_projects_board_orders(db)
+    columns = [
+        dict(column, orders=[o for o in orders if o["status"] == column["status"]])
+        for column in TUNING_PROJECTS_BOARD_COLUMNS
+    ]
+    attention = [
+        {"key": "overdue", "label": "Просрочено"},
+        {"key": "rejected", "label": "Отклонённые задачи"},
+        {"key": "unassigned", "label": "Работы без исполнителя"},
+        {"key": "pending_price", "label": "Ждут расчёта"},
+        {"key": "unpaid", "label": "Не оплачено"},
+    ]
+    for chip in attention:
+        chip["count"] = sum(1 for o in orders if chip["key"] in o["flags"])
+    prework_placeholders = ",".join("?" for _ in TUNING_PROJECTS_BOARD_PREWORK_STATUSES)
+    prework_count = db.execute(
+        f"SELECT COUNT(*) FROM tuning_orders WHERE status IN ({prework_placeholders}) AND source != ?",
+        [*TUNING_PROJECTS_BOARD_PREWORK_STATUSES, SUBCONTRACT_REQUEST_SOURCE],
+    ).fetchone()[0]
+    return render_template(
+        "tuning_projects_board.html",
+        columns=columns,
+        attention=attention,
+        orders_count=len(orders),
+        prework_count=prework_count,
+        active_page="tuning",
+        sub_page="projects_board",
+        page_title="Доска проектов",
+    )
+
+
 @app.route("/tuning/<int:order_id>/board")
 @admin_login_required
 def tuning_order_board(order_id):

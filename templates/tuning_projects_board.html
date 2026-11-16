@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ page_title or 'Тюнинг-центр' }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20261116-projects-board">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<meta name="theme-color" content="#3498db">
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Боцман">
+</head>
+<body>
+
+<div class="page-loader" id="pageLoader" aria-hidden="true">
+  <div class="loader-body">
+    <svg class="propeller" viewBox="0 0 100 100">
+      <g fill="var(--brass)">
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(120 50 50)"/>
+        <path d="M47 37C32 35 18 26 16 14C16 9 20 6 25 7C36 9 46 17 50 27C52 31 53 34 53 37Z" transform="rotate(240 50 50)"/>
+      </g>
+      <g fill="none" stroke="var(--brass)" stroke-width="2.6" stroke-linecap="round" opacity="0.85">
+        <path d="M55 15A24 24 0 0 1 62 22" transform="rotate(-6 50 50)"/>
+        <path d="M55 15A24 24 0 0 1 62 22" transform="rotate(114 50 50)"/>
+        <path d="M18 60A24 24 0 0 1 15 51" transform="rotate(4 50 50)"/>
+      </g>
+      <circle cx="50" cy="50" r="15" fill="none" stroke="var(--ink)" stroke-width="4"/>
+      <circle cx="50" cy="50" r="13" fill="none" stroke="var(--brass)" stroke-width="8"/>
+    </svg>
+    <span class="loader-label">Загрузка…</span>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="topbar-top-row">
+      <div class="brand">{% include '_topbar_brand.html' %}</div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Меню" aria-expanded="false" aria-controls="mainNav">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 5.5h14M3 10h14M3 14.5h14"/>
+        </svg>
+      </button>
+    </div>
+    {% include '_admin_main_nav.html' %}
+    <div class="title-block">
+      <h1>{{ page_title or 'Тюнинг-центр' }}</h1>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="push-toggle" id="pushToggle" title="Уведомления" aria-label="Уведомления">
+        <svg class="push-toggle-off" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8z"/>
+          <path d="M8.3 16a1.7 1.7 0 003.4 0"/>
+        </svg>
+        <svg class="push-toggle-on" viewBox="0 0 20 20" fill="currentColor" stroke="none">
+          <path d="M6 8a4 4 0 118 0c0 3.5 1.2 5 1.2 5H4.8S6 11.5 6 8z"/>
+        </svg>
+      </button>
+      <form action="{{ url_for('admin_logout') }}" method="post" class="topbar-logout">
+        <button type="submit">Выйти</button>
+      </form>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  {% include '_tuning_subnav.html' %}
+
+  <div class="projects-board-attention" role="group" aria-label="Требует внимания">
+    {% for chip in attention %}
+    <button type="button" class="projects-board-chip chip-{{ chip.key }}{{ ' is-empty' if not chip.count }}"
+            data-flag="{{ chip.key }}" aria-pressed="false"{{ ' disabled' if not chip.count }}>
+      {{ chip.label }} <strong>{{ chip.count }}</strong>
+    </button>
+    {% endfor %}
+    <a href="{{ url_for('tuning_index') }}" class="projects-board-prework" title="Новые заявки, ждут расчёт, на согласовании">До начала работ: {{ prework_count }} →</a>
+  </div>
+
+  {% if orders_count %}
+  <div class="projects-board" id="projectsBoard">
+    {% for column in columns %}
+    <section class="projects-board-column" data-status="{{ column.status }}" aria-label="{{ column.label }}">
+      <header class="projects-board-column-head">
+        <span>{{ column.label }}</span>
+        <span class="projects-board-count">{{ column.orders|length }}</span>
+      </header>
+      <div class="projects-board-cards">
+        {% for o in column.orders %}
+        <a class="projects-board-card{{ ' is-overdue' if o.deadline_is_overdue }}"
+           href="{{ url_for('tuning_order_board', order_id=o.id) }}"
+           draggable="true" data-order-id="{{ o.id }}" data-status-url="{{ url_for('set_tuning_order_status', order_id=o.id) }}" data-status="{{ o.status }}"
+           data-flags="{{ o.flags|join(' ') }}">
+          <span class="projects-board-card-top">
+            <span class="projects-board-kind">{{ o.equipment_type|equipment_kind_label }} · №{{ o.id }}</span>
+            {% if o.deadline_display %}
+            <span class="projects-board-deadline{{ ' is-overdue' if o.deadline_is_overdue }}{{ ' is-soon' if o.deadline_soon }}"
+                  {% if o.deadline_overdue_tooltip %}title="{{ o.deadline_overdue_tooltip }}"{% endif %}>
+              {{ 'сдан ' if o.deadline_is_actual else 'до ' }}{{ o.deadline_display|ru_date }}
+            </span>
+            {% endif %}
+          </span>
+          <strong class="projects-board-model">{{ o.equipment_model or '—' }}</strong>
+          <span class="projects-board-client">{{ o.client_name or 'Без клиента' }}</span>
+          {% if o.works_total %}
+          <span class="projects-board-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ o.progress_percent }}" aria-label="Выполнено работ">
+            <span style="width: {{ o.progress_percent }}%"></span>
+          </span>
+          <span class="projects-board-meta">Работы: {{ o.works_done }}/{{ o.works_total }}{% if o.assignees %} · {{ o.assignees|join(', ') }}{% endif %}</span>
+          {% else %}
+          <span class="projects-board-meta">Работ пока нет</span>
+          {% endif %}
+          {% if o.flags %}
+          <span class="projects-board-flags">
+            {% if 'rejected' in o.flags %}<span class="projects-board-flag flag-danger">Отклонено задач: {{ o.rejected_tasks }}</span>{% endif %}
+            {% if 'unassigned' in o.flags %}<span class="projects-board-flag flag-warning">Без исполнителя: {{ o.works_unassigned }}</span>{% endif %}
+            {% if 'pending_price' in o.flags %}<span class="projects-board-flag flag-warning">Ждёт расчёта: {{ o.works_pending_price }}</span>{% endif %}
+            {% if 'unpaid' in o.flags %}<span class="projects-board-flag flag-danger">Не оплачено {{ o.unpaid|money }} ₽</span>{% endif %}
+          </span>
+          {% endif %}
+        </a>
+        {% else %}
+        <p class="projects-board-empty">Пусто</p>
+        {% endfor %}
+      </div>
+    </section>
+    {% endfor %}
+  </div>
+  <p class="hint projects-board-hint">Нажмите на проект, чтобы открыть его доску задач. Перетащите карточку в другую колонку, чтобы сменить статус заказа.</p>
+  {% else %}
+  <section class="panel empty-state">
+    <p>Сейчас нет заказов в работе. Новые заявки и расчёты — во вкладке «Заказы».</p>
+  </section>
+  {% endif %}
+
+  <form method="post" id="projectsBoardStatusForm" hidden>
+    <input type="hidden" name="status" value="">
+    <input type="hidden" name="next" value="{{ url_for('tuning_projects_board') }}">
+  </form>
+
+</main>
+
+<script src="{{ url_for('static', filename='loader.js') }}"></script>
+<script>
+(function () {
+  var board = document.getElementById('projectsBoard');
+  if (!board) return;
+  var cards = Array.prototype.slice.call(board.querySelectorAll('.projects-board-card'));
+  var chips = Array.prototype.slice.call(document.querySelectorAll('.projects-board-chip'));
+  var activeFlag = '';
+  chips.forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      var flag = chip.getAttribute('data-flag');
+      activeFlag = activeFlag === flag ? '' : flag;
+      chips.forEach(function (c) { c.setAttribute('aria-pressed', c.getAttribute('data-flag') === activeFlag ? 'true' : 'false'); });
+      board.classList.toggle('is-filtered', !!activeFlag);
+      cards.forEach(function (card) {
+        var flags = (card.getAttribute('data-flags') || '').split(' ');
+        card.classList.toggle('is-match', !!activeFlag && flags.indexOf(activeFlag) !== -1);
+      });
+    });
+  });
+
+  var form = document.getElementById('projectsBoardStatusForm');
+  var dragged = null;
+  cards.forEach(function (card) {
+    card.addEventListener('dragstart', function (event) {
+      dragged = card;
+      card.classList.add('is-dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', card.getAttribute('data-order-id'));
+    });
+    card.addEventListener('dragend', function () {
+      card.classList.remove('is-dragging');
+      dragged = null;
+    });
+  });
+  Array.prototype.forEach.call(board.querySelectorAll('.projects-board-column'), function (column) {
+    column.addEventListener('dragover', function (event) {
+      if (!dragged || dragged.getAttribute('data-status') === column.getAttribute('data-status')) return;
+      event.preventDefault();
+      column.classList.add('is-drop-target');
+    });
+    column.addEventListener('dragleave', function (event) {
+      if (!column.contains(event.relatedTarget)) column.classList.remove('is-drop-target');
+    });
+    column.addEventListener('drop', function (event) {
+      event.preventDefault();
+      column.classList.remove('is-drop-target');
+      if (!dragged) return;
+      var status = column.getAttribute('data-status');
+      if (dragged.getAttribute('data-status') === status) return;
+      column.querySelector('.projects-board-cards').appendChild(dragged);
+      form.action = dragged.getAttribute('data-status-url');
+      form.elements.status.value = status;
+      form.submit();
+    });
+  });
+})();
+</script>
+
+</body>
+</html>

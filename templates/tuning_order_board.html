@@ -5,7 +5,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Доска задач — заказ №{{ order.id }}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20261116-projects-board">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <meta name="theme-color" content="#3498db">
 <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
@@ -71,7 +71,13 @@
 
 <main class="wrap tuning-board-page">
 
-  <a href="{{ url_for('edit_tuning_order', order_id=order.id) }}" class="term board-back-link">← К заказу №{{ order.id }}</a>
+  <nav class="board-breadcrumbs" aria-label="Навигация">
+    {% if order.source != 'subcontract_request' %}
+    <a href="{{ url_for('tuning_projects_board') }}" class="term board-back-link">← Доска проектов</a>
+    <span class="board-breadcrumbs-sep" aria-hidden="true">/</span>
+    {% endif %}
+    <a href="{{ url_for('edit_tuning_order', order_id=order.id) }}" class="term board-back-link">Заказ №{{ order.id }}</a>
+  </nav>
 
   <div id="board-alerts">
   {% if budget_warning %}
