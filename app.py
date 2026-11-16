@@ -9363,7 +9363,7 @@ def tuning_index():
         if order["status"] in TUNING_ACTIVE_TOTAL_STATUSES
     )
     completed_orders_total = sum(
-        order["total"] for order in orders if order["status"] == "done"
+        order["total"] for order in orders if order["status"] in TUNING_DONE_STATUSES
     )
     filters_active = bool(
         search_query or selected_status or date_from or date_to or awaiting_only

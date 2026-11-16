@@ -190,6 +190,7 @@ class TuningEquipmentTypeTests(unittest.TestCase):
                 ("estimate", 22000),
                 ("in_progress", 33000),
                 ("done", 44000),
+                ("handed_over", 7000),
                 ("qc", 55000),
                 ("cancelled", 66000),
             ), start=1):
@@ -221,8 +222,9 @@ class TuningEquipmentTypeTests(unittest.TestCase):
             self.assertIsNotNone(match)
             return match.group(1)
 
-        self.assertEqual(card_value("Сумма активных заказов"), "66 000,00 ₽")
-        self.assertEqual(card_value("Сумма выполненных заказов"), "44 000,00 ₽")
+        self.assertEqual(card_value("Сумма активных заказов"), "66 000 ₽")
+        self.assertEqual(card_value("Сумма выполненных заказов"), "51 000 ₽")
+        self.assertIn("Выполнен · Выполнен, передан", html)
         self.assertNotIn("Сумма по всем заказам", html)
         self.assertIn("Новая заявка · Ждет расчет · На согласовании · Согласовано · В работе", html)
         self.assertLess(
@@ -277,12 +279,12 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertRegex(
             html,
             r'<span class="k">Сумма активных заказов</span>\s*'
-            r'<span class="v">10 000,00 ₽</span>',
+            r'<span class="v">10 000 ₽</span>',
         )
         self.assertRegex(
             html,
             r'<span class="k">Сумма выполненных заказов</span>\s*'
-            r'<span class="v">20 000,00 ₽</span>',
+            r'<span class="v">20 000 ₽</span>',
         )
         self.assertIn('href="/tuning" class="btn-secondary">Сбросить</a>', html)
 
@@ -331,7 +333,7 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertRegex(
             html,
             r'<span class="k">Сумма выполненных заказов</span>\s*'
-            r'<span class="v">15 000,00 ₽</span>',
+            r'<span class="v">15 000 ₽</span>',
         )
 
     def test_orders_dashboard_rejects_reversed_date_period(self):
