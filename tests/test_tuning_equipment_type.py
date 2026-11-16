@@ -225,6 +225,16 @@ class TuningEquipmentTypeTests(unittest.TestCase):
         self.assertEqual(card_value("Сумма активных заказов"), "66 000 ₽")
         self.assertEqual(card_value("Сумма выполненных заказов"), "51 000 ₽")
         self.assertIn("Выполнен · Выполнен, передан", html)
+        self.assertEqual(card_value("Заказов всего"), "7")
+        self.assertEqual(card_value("Выполненных заказов"), "2")
+        self.assertLess(
+            html.index('<span class="k">Заказов всего</span>'),
+            html.index('<span class="k">Выполненных заказов</span>'),
+        )
+        self.assertLess(
+            html.index('<span class="k">Выполненных заказов</span>'),
+            html.index('<span class="k">Сумма активных заказов</span>'),
+        )
         self.assertNotIn("Сумма по всем заказам", html)
         self.assertIn("Новая заявка · Ждет расчет · На согласовании · Согласовано · В работе", html)
         self.assertLess(
@@ -275,6 +285,11 @@ class TuningEquipmentTypeTests(unittest.TestCase):
             html,
             r'<span class="k">Заказов по фильтру</span>\s*'
             r'<span class="v">2</span>',
+        )
+        self.assertRegex(
+            html,
+            r'<span class="k">Выполненных заказов</span>\s*'
+            r'<span class="v">1</span>',
         )
         self.assertRegex(
             html,

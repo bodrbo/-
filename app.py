@@ -9365,6 +9365,9 @@ def tuning_index():
     completed_orders_total = sum(
         order["total"] for order in orders if order["status"] in TUNING_DONE_STATUSES
     )
+    completed_orders_count = sum(
+        1 for order in orders if order["status"] in TUNING_DONE_STATUSES
+    )
     filters_active = bool(
         search_query or selected_status or date_from or date_to or awaiting_only
     )
@@ -9379,6 +9382,7 @@ def tuning_index():
         orders=orders,
         active_orders_total=active_orders_total,
         completed_orders_total=completed_orders_total,
+        completed_orders_count=completed_orders_count,
         search_query=search_query,
         selected_status=selected_status,
         awaiting_only=awaiting_only,
