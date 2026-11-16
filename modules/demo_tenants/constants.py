@@ -59,7 +59,7 @@ DEMO_TOUR_STEPS = [
     },
     {
         "endpoint": "tuning_index",
-        "targets": ["[data-tour-target='tuning-subnav-orders']"],
+        "targets": ["[data-tour-target='tuning-subnav-orders']", "[data-tour-target='tuning-subnav-toggle']"],
         "title": "Заказы",
         "text": (
             "В подразделе «Заказы» выдаётся полный список всех заказов — тут и "
@@ -76,7 +76,7 @@ DEMO_TOUR_STEPS = [
     },
     {
         "endpoint": "tuning_index",
-        "targets": ["[data-tour-target='tuning-add-order']"],
+        "targets": ["[data-tour-target='tuning-add-order']", "[data-tour-target='tuning-add-order-mobile']"],
         "title": "Новый заказ",
         "text": "Добавить заказ можно по этой кнопке.",
     },

@@ -1,0 +1,22 @@
+{# Mobile "+" in the orders/subcontracts headings: asks what to create in a
+   dialog instead of two wide buttons. Desktop keeps its text buttons. #}
+<button type="button" class="tuning-create-plus" aria-haspopup="dialog" aria-label="Создать"
+        title="Создать" data-tuning-create-open data-tour-target="tuning-add-order-mobile">
+  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>
+</button>
+<dialog class="tuning-create-dialog" aria-labelledby="tuningCreateTitle" data-tuning-create-dialog>
+  <div class="tuning-create-dialog-head">
+    <h3 id="tuningCreateTitle">Что создать?</h3>
+    <button type="button" class="icon-btn" aria-label="Закрыть" data-tuning-create-close>
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></svg>
+    </button>
+  </div>
+  <a href="{{ url_for('add_tuning_order') }}" class="tuning-create-option">
+    <strong>Заказ</strong>
+    <span>Клиентская техника на работы в нашем тюнинг-центре</span>
+  </a>
+  <a href="{{ url_for('add_tuning_subcontract') }}" class="tuning-create-option">
+    <strong>Субподряд</strong>
+    <span>Заявка партнёру-исполнителю</span>
+  </a>
+</dialog>

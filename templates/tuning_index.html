@@ -185,8 +185,9 @@
     <div class="tuning-orders-heading">
       <h2>Заказы</h2>
       <div class="tuning-orders-actions">
-        <a href="{{ url_for('add_tuning_subcontract') }}" class="btn-secondary">Добавить субподряд</a>
-        <a href="{{ url_for('add_tuning_order') }}" class="btn-add" data-tour-target="tuning-add-order">Добавить заказ</a>
+        <a href="{{ url_for('add_tuning_subcontract') }}" class="btn-secondary tuning-create-desktop">Добавить субподряд</a>
+        <a href="{{ url_for('add_tuning_order') }}" class="btn-add tuning-create-desktop" data-tour-target="tuning-add-order">Добавить заказ</a>
+        {% include '_tuning_create_menu.html' %}
       </div>
     </div>
     {% if orders %}
@@ -380,7 +381,8 @@
         <h2>Субподряды</h2>
       </div>
       <div class="tuning-orders-actions">
-        <a href="{{ url_for('add_tuning_subcontract') }}" class="btn-add">Добавить субподряд</a>
+        <a href="{{ url_for('add_tuning_subcontract') }}" class="btn-add tuning-create-desktop">Добавить субподряд</a>
+        {% include '_tuning_create_menu.html' %}
       </div>
     </div>
     {% if subcontracts %}
@@ -914,5 +916,17 @@
 </script>
 {% endif %}
 
+<script>
+(function () {
+  var dialog = document.querySelector('[data-tuning-create-dialog]');
+  var opener = document.querySelector('[data-tuning-create-open]');
+  if (!dialog || !opener || typeof dialog.showModal !== 'function') return;
+  opener.addEventListener('click', function () { dialog.showModal(); });
+  dialog.querySelector('[data-tuning-create-close]').addEventListener('click', function () { dialog.close(); });
+  dialog.addEventListener('click', function (event) {
+    if (event.target === dialog) dialog.close();  // tap on the backdrop
+  });
+})();
+</script>
 </body>
 </html>

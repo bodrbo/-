@@ -1,10 +1,36 @@
+{% set tuning_subnav_tabs = [
+  ('projects_board', url_for('tuning_projects_board'), 'Доска проектов', ''),
+  ('orders', url_for('tuning_index'), 'Заказы', 'tuning-subnav-orders'),
+  ('subcontracts', url_for('tuning_subcontracts'), 'Субподряды', ''),
+  ('diagnostics', url_for('tuning_diagnostics'), 'Диагностика лодок', ''),
+  ('boat_catalog', url_for('tuning_boat_catalog'), 'Каталог лодок', ''),
+  ('motor_catalog', url_for('tuning_motor_catalog'), 'Каталог моторов', ''),
+  ('trailer_catalog', url_for('tuning_trailer_catalog'), 'Каталог прицепов', ''),
+  ('shop_map', url_for('tuning_shop_map'), 'Карты пространств', ''),
+] %}
+{% set tuning_subnav_current = (tuning_subnav_tabs|selectattr(0, 'equalto', sub_page)|map(attribute=2)|first) or 'Тюнинг-центр' %}
+<div class="sub-tabs-collapsible" data-sub-tabs>
+  <button type="button" class="sub-tabs-toggle" aria-expanded="false" aria-controls="tuningSubTabs"
+          data-sub-tabs-toggle data-tour-target="tuning-subnav-toggle">
+    <span class="sub-tabs-toggle-current">{{ tuning_subnav_current }}</span>
+    <span class="sub-tabs-toggle-cta">Выбрать раздел<span class="chev" aria-hidden="true"></span></span>
+  </button>
+<div class="sub-tabs-panel" id="tuningSubTabs">
 <nav class="sub-tabs">
-  <a href="{{ url_for('tuning_projects_board') }}" class="{{ 'active' if sub_page == 'projects_board' }}">Доска проектов</a>
-  <a href="{{ url_for('tuning_index') }}" class="{{ 'active' if sub_page == 'orders' }}" data-tour-target="tuning-subnav-orders">Заказы</a>
-  <a href="{{ url_for('tuning_subcontracts') }}" class="{{ 'active' if sub_page == 'subcontracts' }}">Субподряды</a>
-  <a href="{{ url_for('tuning_diagnostics') }}" class="{{ 'active' if sub_page == 'diagnostics' }}">Диагностика лодок</a>
-  <a href="{{ url_for('tuning_boat_catalog') }}" class="{{ 'active' if sub_page == 'boat_catalog' }}">Каталог лодок</a>
-  <a href="{{ url_for('tuning_motor_catalog') }}" class="{{ 'active' if sub_page == 'motor_catalog' }}">Каталог моторов</a>
-  <a href="{{ url_for('tuning_trailer_catalog') }}" class="{{ 'active' if sub_page == 'trailer_catalog' }}">Каталог прицепов</a>
-  <a href="{{ url_for('tuning_shop_map') }}" class="{{ 'active' if sub_page == 'shop_map' }}">Карты пространств</a>
+  {% for key, href, label, tour in tuning_subnav_tabs %}
+  <a {% if sub_page == key %}aria-current="page" {% endif %}href="{{ href }}" class="{{ 'active' if sub_page == key }}"{% if tour %} data-tour-target="{{ tour }}"{% endif %}>{{ label }}</a>
+  {% endfor %}
 </nav>
+</div>
+</div>
+<script>
+(function () {
+  var root = document.currentScript && document.currentScript.previousElementSibling;
+  if (!root || !root.hasAttribute('data-sub-tabs')) return;
+  var toggle = root.querySelector('[data-sub-tabs-toggle]');
+  toggle.addEventListener('click', function () {
+    var open = root.classList.toggle('is-open');
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+})();
+</script>

@@ -77,7 +77,8 @@
       var targets = [];
       selectors.forEach(function (selector) {
         var el = document.querySelector(selector);
-        if (el) targets.push(el);
+        // Skip layout-hidden twins (desktop vs. mobile variants of the same control).
+        if (el && el.getClientRects().length) targets.push(el);
       });
 
       if (!targets.length) {
