@@ -6591,7 +6591,12 @@ def _dealer_catalog_profile(db, kind, name, brand):
 
 def _order_events_panel(db, order_kind, order_id):
     hosts = [employee["name"] for employee in tuning_schedule_repository.list_tuning_crew_employees(db)]
-    return order_events_panel_context(db, order_kind, order_id, hosts)
+    tasks_enabled = order_kind == "tuning"
+    return order_events_panel_context(
+        db, order_kind, order_id, hosts,
+        recipients=_note_reminder_recipients(db) if tasks_enabled else None,
+        tasks_enabled=tasks_enabled,
+    )
 
 
 def _order_event_context(db, order_kind, order_id):
@@ -6625,6 +6630,50 @@ def _create_visit_schedule_task(db, host, title, comment, day, start, hours, tun
     )
 
 
+def _create_event_schedule_task(db, executor, title, comment, day, start, hours, tuning_order_id, form):
+    """"Создать задачу" under an order event: an unpaid task of `executor` in
+    the tuning schedule plus a Telegram reminder (form's remind_recipient /
+    remind_at / remind_message — the same recipients and delivery cron as
+    the task reminders on the board). The reminder is checked first, so a
+    bad reminder leaves nothing behind."""
+    remind_employee_id, remind_admin_id = _parse_reminder_recipient(db, form)
+    remind_at = _parse_reminder_time(form.get("remind_at", ""))
+    message = form.get("remind_message", "").strip()
+    if not (remind_employee_id or remind_admin_id):
+        return False, "Выберите, кому напомнить в Telegram.", None
+    if remind_at is None:
+        return False, "Укажите дату и время напоминания.", None
+    if len(message) > TASK_REMINDER_MESSAGE_MAX_LENGTH:
+        return False, f"Текст напоминания слишком длинный (максимум {TASK_REMINDER_MESSAGE_MAX_LENGTH} символов).", None
+    ok, task_message, task_id = tuning_schedule_services.create_free_task(
+        db, executor, title, "", comment, [(day, start, str(hours))], order_id=tuning_order_id, unpaid=True,
+    )
+    if not ok:
+        return False, task_message, None
+    db.execute(
+        "INSERT INTO tuning_task_reminders "
+        "(assignment_id, schedule_task_id, remind_admin_id, remind_employee_id, remind_at, message, created_at) "
+        "VALUES (NULL, ?, ?, ?, ?, ?, ?)",
+        (task_id, remind_admin_id or session.get("admin_id"), remind_employee_id, remind_at, message,
+         dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+    )
+    recipient = _reminder_recipient_name(db, remind_employee_id, remind_admin_id)
+    text = (
+        f"Задача «{title}» для {executor} добавлена в расписание тюнинга, "
+        f"напоминание в Telegram {recipient} — {format_ru_date(remind_at[:10])} в {remind_at[11:]}."
+    )
+    extra = task_message.replace("Задача добавлена в расписание.", "").strip()
+    return True, (text + " " + extra).strip(), task_id
+
+
+def _reminder_recipient_name(db, employee_id, admin_id):
+    if employee_id:
+        row = db.execute("SELECT name FROM employees WHERE id = ?", (employee_id,)).fetchone()
+    else:
+        row = db.execute("SELECT admin_name AS name FROM admin_accounts WHERE id = ?", (admin_id,)).fetchone()
+    return row["name"] if row else "получателю"
+
+
 def _delete_visit_schedule_task(db, task_id):
     return tuning_schedule_services.delete_task(db, task_id, lambda *_args: (False, "Задача привязана к заказу."))
 
@@ -6637,6 +6686,7 @@ app.register_blueprint(
         order_url=_order_event_url,
         make_visit_task=_create_visit_schedule_task,
         delete_task=_delete_visit_schedule_task,
+        make_event_task=_create_event_schedule_task,
     )
 )
 
@@ -24406,6 +24456,8 @@ def _send_due_task_reminders(db, now):
         "COALESCE(ti.work_name, st.title) AS work_name, "
         "COALESCE(tia.employee_name, st.employee_name) AS task_executor, "
         "tia.due_from, tia.due_to, o.client_name, o.equipment_type, "
+        "(SELECT d.work_date || ' ' || d.start_time FROM tuning_schedule_task_days d "
+        " WHERE d.task_id = st.id ORDER BY d.work_date, d.start_time LIMIT 1) AS task_starts_at, "
         "o.boat_model, o.boat_registration_number, o.motor_model, o.motor_serial_number, "
         "e.name AS remind_employee_name "
         "FROM tuning_task_reminders r "
@@ -24430,6 +24482,10 @@ def _send_due_task_reminders(db, now):
         due_text = format_task_due(r["due_from"], r["due_to"])
         if due_text:
             lines.append(f"Срок: {due_text}")
+        elif r["task_starts_at"]:  # a schedule task: when it stands in the schedule
+            lines.append(
+                f"Когда: {format_ru_date(r['task_starts_at'][:10])}, {r['task_starts_at'][11:]}"
+            )
         if r["message"]:
             lines.append("\n" + html.escape(r["message"]))
         text = "\n".join(lines)

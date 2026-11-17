@@ -11,7 +11,7 @@
 
     {% if ev.events %}
     {% for event in ev.events %}
-    <div class="note-card order-event order-event-{{ event.kind }}">
+    <div class="note-card order-event order-event-{{ event.kind }}" id="event-{{ event.id }}">
       <div class="note-meta">
         <span class="status-badge {{ 'status-defect-new' if event.kind == 'new_request' else ('status-pending' if event.upcoming else 'status-defect-resolved') }}">{{ event.kind_label }}</span>
         <span class="term">{{ event.event_date|ru_date }}{% if event.event_time %}, {{ event.event_time }}{% if event.end_time %}–{{ event.end_time }}{% endif %}{% endif %}</span>
@@ -30,6 +30,81 @@
       <p class="muted" style="margin:4px 0;">Принимает: {{ event.host_employee }}{% if event.task_exists %} · <a href="{{ url_for('tuning_schedule.index', date=event.event_date) }}">задача в расписании</a>{% endif %}</p>
       {% endif %}
       {% if event.text %}<p class="note-text">{{ event.text }}</p>{% endif %}
+      {% if ev.tasks_enabled %}
+      {% if event.tasks %}
+      <ul class="order-event-tasks">
+        {% for task in event.tasks %}
+        <li>
+          <span class="order-event-task-title">Задача: {{ task.title }}</span>
+          <span class="muted">{{ task.employee_name }}{% if task.work_date %} · {{ task.work_date|ru_date }}, {{ task.start_time }}{% endif %}
+            {% if task.work_date %} · <a href="{{ url_for('tuning_schedule.index', date=task.work_date) }}">в расписании</a>{% endif %}</span>
+          {% for r in task.reminders %}
+          <span class="order-event-task-reminder">
+            <span class="status-badge {{ 'status-defect-resolved' if r.sent_at else 'status-defect-new' }}">{{ 'Отправлено' if r.sent_at else 'Напомнит' }}</span>
+            {{ r.recipient_name or 'Неизвестный' }} — {{ r.remind_at[:10]|ru_date }} {{ r.remind_at[11:] }}
+          </span>
+          {% endfor %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      <details class="order-event-task-create">
+        <summary>+ Создать задачу с напоминанием</summary>
+        <form action="{{ url_for('order_events.add_task', event_id=event.id) }}" method="post"
+              class="entry-form order-event-task-form" data-event-task-form>
+          <div class="field field-wide">
+            <label for="task_title_{{ event.id }}">Что сделать</label>
+            <input type="text" id="task_title_{{ event.id }}" name="task_title" value="{{ event.task_title }}" maxlength="200" required>
+          </div>
+          <div class="field field-narrow">
+            <label for="task_executor_{{ event.id }}">Исполнитель</label>
+            <select id="task_executor_{{ event.id }}" name="task_executor" required data-task-executor>
+              <option value="" selected disabled>Выберите…</option>
+              {% for name in ev.hosts %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="field field-narrow">
+            <label for="task_date_{{ event.id }}">Дата</label>
+            <input type="date" id="task_date_{{ event.id }}" name="task_date" value="{{ ev.today }}" required data-task-date>
+          </div>
+          <div class="field field-narrow">
+            <label for="task_time_{{ event.id }}">Время</label>
+            <input type="time" id="task_time_{{ event.id }}" name="task_time" value="{{ ev.default_task_time }}" required data-task-time>
+          </div>
+          <div class="field field-narrow">
+            <label for="task_minutes_{{ event.id }}">Продолжительность</label>
+            <select id="task_minutes_{{ event.id }}" name="task_minutes">
+              {% for minutes, label in ev.task_durations %}<option value="{{ minutes }}" {% if minutes == ev.default_task_minutes %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="field field-wide">
+            <label for="task_comment_{{ event.id }}">Комментарий</label>
+            <textarea id="task_comment_{{ event.id }}" name="task_comment" rows="2" maxlength="1000"
+                      placeholder="Текст события и номер заказа добавятся к задаче сами"></textarea>
+          </div>
+          <div class="field field-narrow">
+            <label for="remind_recipient_{{ event.id }}">Напомнить в Telegram</label>
+            <select id="remind_recipient_{{ event.id }}" name="remind_recipient" required data-remind-recipient>
+              <option value="" selected disabled>Кому напомнить…</option>
+              {% for recipient in ev.recipients %}
+              <option value="{{ recipient.value }}" data-name="{{ recipient.name }}">{{ recipient.name }}{{ '' if recipient.telegram_linked else ' (нет Telegram)' }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field field-narrow">
+            <label for="remind_at_{{ event.id }}">Когда напомнить</label>
+            <input type="datetime-local" id="remind_at_{{ event.id }}" name="remind_at" required data-remind-at>
+          </div>
+          <div class="field field-wide">
+            <label for="remind_message_{{ event.id }}">Текст напоминания</label>
+            <input type="text" id="remind_message_{{ event.id }}" name="remind_message" maxlength="500" placeholder="Необязательно">
+          </div>
+          <div class="field field-submit">
+            <button type="submit">Создать задачу</button>
+          </div>
+        </form>
+      </details>
+      {% endif %}
     </div>
     {% endfor %}
     {% else %}
@@ -74,6 +149,42 @@
       </div>
     </form>
     <p class="hint">Если выбрать принимающего, ему в расписании тюнинга появится задача на время визита (без оплаты). Новые заявки с сайта попадают сюда сами.</p>
+    {% if ev.tasks_enabled %}
+    <script>
+      (function () {
+        var lead = {{ ev.reminder_lead_minutes|int }};
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        document.querySelectorAll('[data-event-task-form]').forEach(function (form) {
+          var executor = form.querySelector('[data-task-executor]');
+          var recipient = form.querySelector('[data-remind-recipient]');
+          var date = form.querySelector('[data-task-date]');
+          var time = form.querySelector('[data-task-time]');
+          var remindAt = form.querySelector('[data-remind-at]');
+          var recipientTouched = false, remindTouched = false;
+          // The reminder follows the task (who, and `lead` minutes before it) until changed by hand.
+          function syncRecipient() {
+            if (recipientTouched) return;
+            Array.prototype.forEach.call(recipient.options, function (option) {
+              if (option.getAttribute('data-name') === executor.value) recipient.value = option.value;
+            });
+          }
+          function syncRemindAt() {
+            if (remindTouched || !date.value || !time.value) return;
+            var parts = date.value.split('-').map(Number), hm = time.value.split(':').map(Number);
+            var at = new Date(parts[0], parts[1] - 1, parts[2], hm[0], hm[1] - lead);
+            remindAt.value = at.getFullYear() + '-' + pad(at.getMonth() + 1) + '-' + pad(at.getDate()) +
+              'T' + pad(at.getHours()) + ':' + pad(at.getMinutes());
+          }
+          executor.addEventListener('change', syncRecipient);
+          recipient.addEventListener('change', function () { recipientTouched = true; });
+          remindAt.addEventListener('change', function () { remindTouched = true; });
+          date.addEventListener('change', syncRemindAt);
+          time.addEventListener('change', syncRemindAt);
+          syncRemindAt();
+        });
+      })();
+    </script>
+    {% endif %}
     <script>
       (function () {
         var form = document.getElementById('eventForm');

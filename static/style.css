@@ -12706,3 +12706,20 @@ button.partner-open-price-save svg {
   .tuning-create-plus svg { width: 20px; height: 20px; }
   .tuning-create-plus:active { transform: scale(.96); }
 }
+
+/* Order events: tasks made from an event ("Создать задачу с напоминанием") */
+.order-event-tasks { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.order-event-tasks li {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+  padding: 8px 10px; border-radius: 8px; background: var(--paper-alt); font-size: 13px;
+}
+.order-event-task-title { font-weight: 700; }
+.order-event-task-reminder { display: inline-flex; align-items: center; gap: 6px; }
+.order-event-task-create { margin-top: 8px; }
+.order-event-task-create > summary {
+  display: inline-block; cursor: pointer; font-size: 13px; font-weight: 700; color: var(--brass-strong);
+  list-style: none;
+}
+.order-event-task-create > summary::-webkit-details-marker { display: none; }
+.order-event-task-create[open] > summary { margin-bottom: 8px; }
+.order-event-task-form { padding: 12px; border: 1px dashed var(--hairline); border-radius: 10px; }

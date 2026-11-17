@@ -6,13 +6,16 @@ from . import repository, services
 from .constants import ORDER_KINDS
 
 
-def create_order_events_blueprint(get_db, access_required, order_context, order_url, make_visit_task, delete_task):
+def create_order_events_blueprint(get_db, access_required, order_context, order_url, make_visit_task, delete_task,
+                                  make_event_task=None):
     """order_context(db, order_kind, order_id) -> {"client", "label",
     "tuning_order_id"} or None when there is no such order; order_url(
     order_kind, order_id) -> the order's page; make_visit_task(db, host,
     title, comment, day, start, hours, tuning_order_id) -> (ok, message,
     task_id) and delete_task(db, task_id) -> (ok, message) — the tuning
-    schedule, injected from app.py."""
+    schedule, injected from app.py. make_event_task (see
+    services.add_event_task) enables "Создать задачу" under the events of a
+    tuning order."""
     blueprint = Blueprint("order_events", __name__)
 
     def back(order_kind, order_id):
@@ -43,5 +46,19 @@ def create_order_events_blueprint(get_db, access_required, order_context, order_
         _ok, message = services.delete_event(db, event_id, lambda task_id: delete_task(db, task_id))
         session["order_events_notice"] = message
         return back(event["order_kind"], event["order_id"])
+
+    @blueprint.route("/events/<int:event_id>/task", methods=["POST"])
+    @access_required
+    def add_task(event_id):
+        db = get_db()
+        event = repository.get_event(db, event_id)
+        if event is None:
+            return redirect("/")
+        context = order_context(db, event["order_kind"], event["order_id"])
+        if make_event_task is None or context is None or event["order_kind"] != "tuning":
+            return back(event["order_kind"], event["order_id"])
+        ok, message = services.add_event_task(db, event_id, request.form, context, make_event_task)
+        session["order_events_notice" if ok else "order_events_error"] = message
+        return redirect(order_url(event["order_kind"], event["order_id"]) + f"#event-{event_id}")
 
     return blueprint

@@ -20,3 +20,13 @@ VISIT_DURATION_CHOICES = [
     (15, "15 минут"), (30, "30 минут"), (45, "45 минут"), (60, "1 час"),
     (90, "1,5 часа"), (120, "2 часа"), (180, "3 часа"), (240, "4 часа"),
 ]
+
+# "Создать задачу" from an event: what the title field starts with.
+TASK_TITLE_SUGGESTIONS = {
+    "new_request": "Связаться с клиентом",
+    "dialog": "Перезвонить клиенту",
+    "visit": "Подготовиться к визиту",
+}
+DEFAULT_TASK_MINUTES = 30
+DEFAULT_REMINDER_LEAD_MINUTES = 30
+TASK_DURATION_CHOICES = [(15, "15 минут"), (30, "30 минут"), (60, "1 час"), (120, "2 часа"), (240, "4 часа")]
