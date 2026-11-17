@@ -316,7 +316,7 @@
               <small>Работы: {{ o.work_total|money }} ₽{% if o.discount_value %} · до скидки{% endif %}</small>
               <small>Товары: {{ o.goods_total|money }} ₽{% if o.discount_value %} · до скидки{% endif %}</small>
             </td>
-            <td>{{ status_picker(url_for('set_tuning_order_status', order_id=o.id), o.status, order_statuses, next_url=request.full_path.rstrip('?'), aria='Статус заказа №' ~ o.id) }}{% if o.pending_price_count and o.source != 'subcontract_request' %} <span class="status-badge status-awaiting-calc" title="Работ без цены: {{ o.pending_price_count }} — их нужно рассчитать">Ждёт расчёта</span>{% endif %}</td>
+            <td>{{ status_picker(url_for('set_tuning_order_status', order_id=o.id), o.status, order_statuses, next_url=request.full_path.rstrip('?'), aria='Статус заказа №' ~ o.id) }}{% if o.pending_price_count and o.source != 'subcontract_request' and o.status != 'awaiting_estimate' %} <span class="status-badge status-awaiting-calc" title="Работ без цены: {{ o.pending_price_count }} — их нужно рассчитать">Ждёт расчёта</span>{% endif %}</td>
             <td class="row-actions">
               <a href="{{ url_for('edit_tuning_order', order_id=o.id) }}" class="icon-btn" title="Редактировать">
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -808,7 +808,7 @@
               {% if catalog_equipment_type == 'boat' %}<td>{% if order.motors %}{% for motor in order.motors %}{{ motor.motor_model }}{% if motor.motor_serial_number %} <span class="muted">№ {{ motor.motor_serial_number }}</span>{% endif %}{{ ', ' if not loop.last }}{% endfor %}{% else %}—{% endif %}</td>{% endif %}
               <td class="boat-order-works">{{ order.work_names or 'Работы пока не добавлены' }}</td>
               <td class="amount">{{ order.total|money }}</td>
-              <td><span class="status-badge status-{{ order.status }}">{{ order.status|order_status_label }}</span>{% if order.pending_price_count and order.source != 'subcontract_request' %} <span class="status-badge status-awaiting-calc" title="Работ без цены: {{ order.pending_price_count }} — их нужно рассчитать">Ждёт расчёта</span>{% endif %}</td>
+              <td><span class="status-badge status-{{ order.status }}">{{ order.status|order_status_label }}</span>{% if order.pending_price_count and order.source != 'subcontract_request' and order.status != 'awaiting_estimate' %} <span class="status-badge status-awaiting-calc" title="Работ без цены: {{ order.pending_price_count }} — их нужно рассчитать">Ждёт расчёта</span>{% endif %}</td>
             </tr>
             {% endfor %}
           </tbody>

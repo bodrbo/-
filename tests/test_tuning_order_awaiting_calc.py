@@ -88,6 +88,18 @@ class TuningOrderAwaitingCalcTests(unittest.TestCase):
             board = self.client.get(f"/tuning/{order_id}/board").get_data(as_text=True)
             self.assertIn("Ждёт расчёта · 1", board, status)
 
+    def test_no_extra_badge_when_the_status_is_already_awaiting_estimate(self):
+        order_id = self.create("G", [("Без цены", "", "")])
+        self.set_status(order_id, "awaiting_estimate")
+        self.assertEqual(self.count(order_id), 1)
+        page = self.listing(f"?q={self.CLIENT_NAME}G")
+        self.assertIn(f"{self.CLIENT_NAME}G", page)
+        self.assertNotIn("status-awaiting-calc", page)
+        self.assertNotIn("status-awaiting-calc", self.client.get(f"/tuning/edit/{order_id}").get_data(as_text=True))
+        self.assertNotIn("status-awaiting-calc", self.client.get(f"/tuning/{order_id}/board").get_data(as_text=True))
+        # the "only waiting for a calculation" filter still finds it
+        self.assertIn(f"{self.CLIENT_NAME}G", self.listing(f"?q={self.CLIENT_NAME}G&awaiting=1"))
+
     def test_pricing_the_work_removes_the_badge(self):
         order_id = self.create("D", [("Без цены", "", "")])
         self.assertEqual(self.count(order_id), 1)

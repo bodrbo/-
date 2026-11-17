@@ -107,7 +107,7 @@
     </div>
     <span class="board-order-badges">
       <span class="status-badge status-{{ order.status }}">{{ order.status|order_status_label }}</span>
-      {% if pending_price_count and order.source != 'subcontract_request' %}
+      {% if pending_price_count and order.source != 'subcontract_request' and order.status != 'awaiting_estimate' %}
       <span class="status-badge status-awaiting-calc" title="Работ без цены: {{ pending_price_count }} — их нужно рассчитать">Ждёт расчёта · {{ pending_price_count }}</span>
       {% endif %}
     </span>
