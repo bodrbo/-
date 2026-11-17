@@ -9193,6 +9193,7 @@ COMPANY_REQUISITES = (
     ("Телефон", "+7 (963) 324-66-27"),
 )
 COMPANY_SHORT_NAME = "ООО «Бодрый Боцман»"
+COMPANY_DIRECTOR = "Д. Е. Жмаев"
 COMMERCIAL_OFFER_VALID_DAYS = 14
 
 
@@ -9357,9 +9358,11 @@ def _build_commercial_offer_pdf(order, items, goods=(), today=None):
         f"({COMMERCIAL_OFFER_VALID_DAYS} календарных дней с даты составления).",
         style_text,
     ))
+    # a demo tenant signs with a blank line, not our director's name
+    director = COMPANY_DIRECTOR if requisites else "_________________"
     sig_tbl = Table(
         [[Paragraph("Генеральный директор", style_left),
-          Paragraph("_________________ / _________________", style_right)],
+          Paragraph(f"_________________ / {_pdf_text(director)}", style_right)],
          ["", Paragraph("М. П.", style_right)]],
         colWidths=[70 * mm, 100 * mm],
     )

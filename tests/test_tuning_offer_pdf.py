@@ -77,6 +77,7 @@ class TuningCommercialOfferPdfTests(_GoodsFixture, unittest.TestCase):
                       "044525974", "30101810145250000974", "АО «ТБанк»"):
             self.assertIn(value, text)
         self.assertIn("Генеральный директор", text)
+        self.assertIn("Д. Е. Жмаев", text)
 
     def test_a_demo_tenant_never_sees_our_requisites(self):
         if not shutil.which("pdftotext"):
@@ -87,6 +88,7 @@ class TuningCommercialOfferPdfTests(_GoodsFixture, unittest.TestCase):
         self.assertNotIn("7843019417", text)
         self.assertNotIn("Бодрый Боцман", text)
         self.assertNotIn("Реквизиты", text)
+        self.assertNotIn("Жмаев", text)
 
     def test_markup_and_an_empty_order_still_build(self):
         pdf = self.build(dict(self.ORDER, client_name="ИП <Иванов> & Ко"), [], [])
