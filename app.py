@@ -6785,10 +6785,13 @@ def _order_business_date(order):
 
 
 def _process_tuning_form(
-    form, default_order_date=None, direct_price_mode=False
+    form, default_order_date=None, direct_price_mode=False, require_work=True
 ):
     """Validate a tuning-center order form and compute derived amounts.
-    Returns (errors, data). data is None if there are errors."""
+    Returns (errors, data). data is None if there are errors.
+    `require_work`: refuse a form without a single work — kept for partner
+    estimate requests and new subcontracts; an order created or edited by
+    an administrator may have no works (yet)."""
     errors = []
 
     client_name = form.get("client_name", "").strip()
@@ -7048,7 +7051,7 @@ def _process_tuning_form(
             if _get(item_removed, i).strip() != "1":
                 subtotal += price
 
-    if not items and not any("Работа" in e for e in errors):
+    if require_work and not items and not any("Работа" in e for e in errors):
         errors.append("Добавьте хотя бы одну работу.")
 
     if discount_type == "amount" and discount_value > subtotal:
@@ -12012,7 +12015,7 @@ def add_tuning_order():
         )
 
     db = get_db()
-    errors, data = _process_tuning_form(request.form)
+    errors, data = _process_tuning_form(request.form, require_work=False)
     if not errors:
         own_error = _own_order_boat_error(
             db, data["client_id"], data["equipment_type"], data["boat_model"]
@@ -12739,6 +12742,7 @@ def edit_tuning_order(order_id):
         request.form,
         default_order_date=order["order_date"],
         direct_price_mode=is_subcontract,
+        require_work=False,
     )
     if not errors:
         own_error = _own_order_boat_error(

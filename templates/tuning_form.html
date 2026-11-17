@@ -2023,8 +2023,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
 function removeWorkRow(btn) {
   var rows = document.querySelectorAll('#work-container .work-row');
-  if (rows.length <= 1) return;
-  btn.closest('.work-row').remove();
+  var row = btn.closest('.work-row');
+  if (rows.length <= 1) {
+    // The last work goes too (an order may have none): an empty row takes
+    // its place for the next work; an empty row is skipped on save.
+    var template = document.getElementById('work-row-template');
+    row.parentNode.insertBefore(template.content.cloneNode(true), row);
+  }
+  row.remove();
   updateOrderTotal();
 }
 
