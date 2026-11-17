@@ -9177,6 +9177,250 @@ def tuning_order_estimate_pdf(order_id):
     return response
 
 
+# Реквизиты for the formal documents (коммерческое предложение): the same
+# ones as in the signature block of the storage / winter-parking contracts.
+COMPANY_REQUISITES = (
+    ("Полное наименование", 'Общество с ограниченной ответственностью «Бодрый Боцман»'),
+    ("Сокращённое наименование", "ООО «Бодрый Боцман»"),
+    ("Юридический адрес",
+     "197760, г. Санкт-Петербург, г. Кронштадт, ул. Мануильского, д. 20, литера А, помещ. 2"),
+    ("ИНН / КПП", "7843019417 / 784301001"),
+    ("ОГРН", "1217800157101"),
+    ("Расчётный счёт", "40702810710000912141"),
+    ("Банк", "АО «ТБанк»"),
+    ("БИК", "044525974"),
+    ("Корр. счёт", "30101810145250000974"),
+    ("Телефон", "+7 (963) 324-66-27"),
+)
+COMPANY_SHORT_NAME = "ООО «Бодрый Боцман»"
+COMMERCIAL_OFFER_VALID_DAYS = 14
+
+
+def _document_requisites():
+    """(short name, requisites rows) for a formal document. A demo tenant
+    gets its own name and no requisites at all — ours must not leak."""
+    if session.get("demo_tenant_id"):
+        return session.get("demo_tenant_name") or "Демо", ()
+    return COMPANY_SHORT_NAME, COMPANY_REQUISITES
+
+
+def _build_commercial_offer_pdf(order, items, goods=(), today=None):
+    """«Коммерческое предложение»: unlike the other documents, no logo —
+    a formal letter from the company with its requisites, the works and
+    goods of the order with their prices, what is to be paid, the validity
+    term and a place for the director's signature."""
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_RIGHT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        HRFlowable, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+    )
+
+    _register_act_fonts()
+    buf = BytesIO()
+    company_name, requisites = _document_requisites()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        # a frame pads its content by 6pt: margins less that pad leave exactly
+        # 170 mm, so the 170 mm tables line up with the text on both edges
+        leftMargin=25 * mm - 6, rightMargin=15 * mm - 6, topMargin=18 * mm, bottomMargin=18 * mm,
+        title=f"Коммерческое предложение № {order['id']}", author=company_name,
+    )
+
+    style_head = ParagraphStyle("kp-head", fontName="OpenSans-Bold", fontSize=10.5, leading=14,
+                                alignment=TA_CENTER)
+    style_head_small = ParagraphStyle("kp-head-small", fontName="OpenSans", fontSize=8.5, leading=11.5,
+                                      alignment=TA_CENTER)
+    style_text = ParagraphStyle("kp-text", fontName="OpenSans", fontSize=10, leading=14.5,
+                                alignment=TA_JUSTIFY)
+    style_left = ParagraphStyle("kp-left", fontName="OpenSans", fontSize=10, leading=14)
+    style_right = ParagraphStyle("kp-right", fontName="OpenSans", fontSize=10, leading=14,
+                                 alignment=TA_RIGHT)
+    style_title = ParagraphStyle("kp-title", fontName="OpenSans-Bold", fontSize=13, leading=17,
+                                 alignment=TA_CENTER, spaceBefore=18, spaceAfter=14)
+    style_section = ParagraphStyle("kp-section", fontName="OpenSans-Bold", fontSize=10.5, leading=14,
+                                   spaceBefore=6, spaceAfter=6)
+    style_cell = ParagraphStyle("kp-cell", fontName="OpenSans", fontSize=9, leading=12)
+    style_req_label = ParagraphStyle("kp-req-label", fontName="OpenSans", fontSize=9, leading=12)
+    style_req_value = ParagraphStyle("kp-req-value", fontName="OpenSans", fontSize=9, leading=12)
+
+    today = today or dt.date.today()
+    valid_until = today + dt.timedelta(days=COMMERCIAL_OFFER_VALID_DAYS)
+
+    flow = []
+    # letterhead: name and the main requisites in one block, no logo
+    flow.append(Paragraph(_pdf_text(company_name), style_head))
+    if requisites:
+        req = dict(requisites)
+        flow.append(Paragraph(_pdf_text(req["Юридический адрес"]), style_head_small))
+        flow.append(Paragraph(
+            _pdf_text(f"ИНН / КПП {req['ИНН / КПП']} · ОГРН {req['ОГРН']} · тел. {req['Телефон']}"),
+            style_head_small,
+        ))
+    flow.append(HRFlowable(width="100%", thickness=1.2, color=colors.black,
+                           spaceBefore=6, spaceAfter=1))
+    flow.append(HRFlowable(width="100%", thickness=0.4, color=colors.black, spaceAfter=14))
+
+    ref_tbl = Table(
+        [[Paragraph(f"Исх. № КП-{order['id']} от {today.strftime('%d.%m.%Y')}", style_left),
+          Paragraph(f"Кому: {_pdf_text(order['client_name'])}", style_right)]],
+        colWidths=[85 * mm, 85 * mm],
+    )
+    ref_tbl.setStyle(TableStyle([
+        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    flow.append(ref_tbl)
+    flow.append(Paragraph("КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ", style_title))
+    flow.append(Paragraph(
+        f"{_pdf_text(company_name)} предлагает выполнить работы и поставить материалы "
+        f"по объекту: {_pdf_text(tuning_equipment_label(order))}. Состав работ и их "
+        "стоимость приведены ниже.",
+        style_text,
+    ))
+    flow.append(Spacer(1, 12))
+
+    table_style = TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), "OpenSans"),
+        ("FONTNAME", (0, 0), (-1, 0), "OpenSans-Bold"),
+        ("FONTNAME", (0, -1), (-1, -1), "OpenSans-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+        ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+        ("ALIGN", (2, 0), (-1, 0), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ])
+
+    total_sum = 0.0
+    work_widths = [12 * mm, 76 * mm, 24 * mm, 18 * mm, 18 * mm, 22 * mm]
+    if items:
+        flow.append(Paragraph("Работы", style_section))
+        work_widths, table_data, total_sum = _act_work_table_rows(items, style_cell, mm)
+        tbl = Table(table_data, colWidths=work_widths, repeatRows=1)
+        tbl.setStyle(table_style)
+        flow.append(tbl)
+
+    if goods:
+        if items:
+            flow.append(Spacer(1, 12))
+        flow.append(Paragraph("Материалы и товары", style_section))
+        goods_data = [["№", "Наименование", "Цена", "Кол-во", "Ед. изм.", "Сумма"]]
+        goods_sum = 0.0
+        goods_qty = 0.0
+        for i, g in enumerate(goods, start=1):
+            line_sum = g["quantity"] * g["unit_price"]
+            unit_label = next((u["label"] for u in SUPPLY_COST_UNITS if u["value"] == g["unit"]), g["unit"])
+            goods_data.append([
+                str(i), Paragraph(_pdf_text(g["product_name"]), style_cell),
+                f"{g['unit_price']:.2f}".replace(".", ","),
+                f"{g['quantity']:g}", unit_label, f"{line_sum:.2f}".replace(".", ","),
+            ])
+            goods_sum += line_sum
+            goods_qty += g["quantity"]
+        goods_data.append(["", "", "", f"{goods_qty:g}", "Итого:", f"{goods_sum:.2f}".replace(".", ",")])
+        goods_tbl = Table(goods_data, colWidths=[12 * mm, 76 * mm, 24 * mm, 18 * mm, 18 * mm, 22 * mm],
+                          repeatRows=1)
+        goods_tbl.setStyle(table_style)
+        flow.append(goods_tbl)
+        total_sum += goods_sum
+
+    if not items and not goods:
+        flow.append(Paragraph("Состав работ уточняется.", style_text))
+
+    summary_tbl, payable = _act_order_discount_summary(order, total_sum, goods, work_widths, mm)
+    if summary_tbl is not None:
+        flow.append(summary_tbl)
+        total_sum = payable
+
+    pending = any("price_pending" in item.keys() and item["price_pending"] for item in items)
+    total_label = f"{total_sum:,.2f}".replace(",", "\u00a0").replace(".", ",")
+    terms = [
+        Spacer(1, 14),
+        Paragraph(
+            f'<font name="OpenSans-Bold">Общая стоимость: {total_label} руб.</font> '
+            f"({_rubles_to_words(total_sum)}).",
+            style_text,
+        ),
+    ]
+    if pending:
+        terms.append(Paragraph(
+            "Стоимость работ, отмеченных «Ждёт расчёта», будет сообщена дополнительно "
+            "и в общую стоимость не включена.", style_text,
+        ))
+    terms.append(Paragraph(
+        f"Предложение действительно до {valid_until.strftime('%d.%m.%Y')} "
+        f"({COMMERCIAL_OFFER_VALID_DAYS} календарных дней с даты составления).",
+        style_text,
+    ))
+    sig_tbl = Table(
+        [[Paragraph("Генеральный директор", style_left),
+          Paragraph("_________________ / _________________", style_right)],
+         ["", Paragraph("М. П.", style_right)]],
+        colWidths=[70 * mm, 100 * mm],
+    )
+    sig_tbl.setStyle(TableStyle([
+        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+    ]))
+    # the terms and the signature never part onto different pages
+    flow.append(KeepTogether(terms + [Spacer(1, 24), sig_tbl]))
+
+    if requisites:
+        req_rows = [[Paragraph(_pdf_text(label), style_req_label), Paragraph(_pdf_text(value), style_req_value)]
+                    for label, value in requisites]
+        req_tbl = Table(req_rows, colWidths=[52 * mm, 118 * mm])
+        req_tbl.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        flow.append(KeepTogether([
+            Spacer(1, 18), Paragraph("Реквизиты", style_section), req_tbl,
+        ]))
+
+    doc.build(flow)
+    return buf.getvalue()
+
+
+@app.route("/tuning/<int:order_id>/offer.pdf")
+@admin_login_required
+def tuning_order_offer_pdf(order_id):
+    db = get_db()
+    order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
+    if order is None:
+        return redirect(url_for("tuning_index"))
+    order = dict(order)
+    order["motors"] = _tuning_order_motors(db, order_id)
+    items = db.execute(
+        "SELECT * FROM tuning_order_items WHERE order_id = ? AND status != 'removed' ORDER BY position, id",
+        (order_id,),
+    ).fetchall()
+    goods = db.execute(
+        "SELECT * FROM tuning_order_products WHERE order_id = ? ORDER BY position, id", (order_id,)
+    ).fetchall()
+    try:
+        pdf_bytes = _build_commercial_offer_pdf(order, items, goods)
+    except ImportError:
+        return (
+            "Формирование PDF временно недоступно: на сервере не установлена "
+            "библиотека reportlab. Установите зависимости из requirements.txt "
+            "и перезапустите приложение.",
+            503,
+        )
+    except Exception:
+        app.logger.exception("КП по заказу №%s: не удалось собрать PDF", order_id)
+        return "Не удалось сформировать документ. Подробности записаны в журнал ошибок.", 500
+    response = app.response_class(pdf_bytes, mimetype="application/pdf")
+    response.headers["Content-Disposition"] = f'inline; filename="KP-{order_id}.pdf"'
+    return response
+
+
 CONTRACT_TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "contract_template.docx")
 
 
