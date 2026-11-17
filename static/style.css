@@ -4018,12 +4018,14 @@ input[type="password"]:focus, input[type="search"]:focus, select:focus, textarea
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232f6b4f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5'/%3E%3C/svg%3E");
 }
 /* an order with works that still have no price: a second badge next to its status */
-.status-badge.status-awaiting-calc { background: rgba(176, 112, 24, 0.16); color: #8a560f; margin-left: 6px; }
+.status-badge.status-awaiting-calc { background: rgba(176, 112, 24, 0.16); color: #8a560f; }
 .status-badge.status-awaiting-calc::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238a560f' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='8' r='5.5'/%3E%3Cpath d='M8 5v3.4l2 1.2'/%3E%3C/svg%3E");
 }
 .board-order-badges { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.board-order-badges .status-awaiting-calc { margin-left: 0; }
+/* An order's status and its "Ждёт расчёта" badge: one row, or stacked flush
+   left with a gap when the cell is too narrow. */
+.status-stack { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .tuning-orders-filter-checkbox { display: flex; align-items: center; gap: 8px; min-height: 40px; font-size: 13px; white-space: nowrap; }
 .tuning-orders-filter-form .tuning-orders-filter-checkbox input { width: auto; min-height: 0; margin: 0; }
 .entry-form .field-checkbox { flex: 0 0 auto; align-self: flex-end; }
@@ -12723,3 +12725,13 @@ button.partner-open-price-save svg {
 .order-event-task-create > summary::-webkit-details-marker { display: none; }
 .order-event-task-create[open] > summary { margin-bottom: 8px; }
 .order-event-task-form { padding: 12px; border: 1px dashed var(--hairline); border-radius: 10px; }
+
+/* Long statuses ("Проходит независимый контроль качества") wrap on phones
+   instead of running out of their panel. */
+@media (max-width: 560px) {
+  .status-picker-form, .status-picker, .status-badge.status-picker-trigger { max-width: 100%; }
+  .status-badge.status-picker-trigger { white-space: normal; text-align: left; line-height: 1.35; }
+  .board-order-summary { flex-direction: column; align-items: flex-start; }
+  .board-order-badges { max-width: 100%; }
+  .board-order-badges .status-badge { white-space: normal; max-width: 100%; line-height: 1.35; }
+}
