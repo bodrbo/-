@@ -9195,6 +9195,26 @@ COMPANY_REQUISITES = (
 COMPANY_SHORT_NAME = "ООО «Бодрый Боцман»"
 COMPANY_DIRECTOR = "Д. Е. Жмаев"
 COMMERCIAL_OFFER_VALID_DAYS = 14
+# ModulKassa VAT tag (Настройки → НДС и фискальные чеки) -> the rate in
+# percent; None for «НДС не облагается». A calculated rate (20/120 …) is
+# the same percentage of a price that already includes the tax.
+MODULKASSA_VAT_RATES = {
+    1104: 0, 1103: 10, 1102: 20, 1105: None, 1106: 20, 1107: 10,
+    1109: 5, 1110: 7, 1111: 5, 1112: 7, 1113: 22, 1114: 22,
+}
+
+
+def _commercial_offer_vat_line(total, vat_tag):
+    """The VAT sentence of a commercial offer for prices that include the
+    tax, or None when the tag is unknown (better silent than wrong)."""
+    if vat_tag not in MODULKASSA_VAT_RATES:
+        return None
+    rate = MODULKASSA_VAT_RATES[vat_tag]
+    if rate is None:
+        return "НДС не облагается."
+    vat = round(total * rate / (100 + rate), 2)
+    vat_label = f"{vat:,.2f}".replace(",", "\u00a0").replace(".", ",")
+    return f"В том числе НДС {rate}%: {vat_label} руб."
 
 
 def _document_requisites():
@@ -9205,7 +9225,7 @@ def _document_requisites():
     return COMPANY_SHORT_NAME, COMPANY_REQUISITES
 
 
-def _build_commercial_offer_pdf(order, items, goods=(), today=None):
+def _build_commercial_offer_pdf(order, items, goods=(), today=None, vat_tag=None):
     """«Коммерческое предложение»: unlike the other documents, no logo —
     a formal letter from the company with its requisites, the works and
     goods of the order with their prices, what is to be paid, the validity
@@ -9348,6 +9368,9 @@ def _build_commercial_offer_pdf(order, items, goods=(), today=None):
             style_text,
         ),
     ]
+    vat_line = _commercial_offer_vat_line(total_sum, vat_tag)
+    if vat_line:
+        terms.append(Paragraph(vat_line, style_text))
     if pending:
         terms.append(Paragraph(
             "Стоимость работ, отмеченных «Ждёт расчёта», будет сообщена дополнительно "
@@ -9408,7 +9431,9 @@ def tuning_order_offer_pdf(order_id):
         "SELECT * FROM tuning_order_products WHERE order_id = ? ORDER BY position, id", (order_id,)
     ).fetchall()
     try:
-        pdf_bytes = _build_commercial_offer_pdf(order, items, goods)
+        pdf_bytes = _build_commercial_offer_pdf(
+            order, items, goods, vat_tag=_current_modulkassa_vat_tag(db)
+        )
     except ImportError:
         return (
             "Формирование PDF временно недоступно: на сервере не установлена "
