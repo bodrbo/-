@@ -9264,8 +9264,6 @@ def _build_commercial_offer_pdf(order, items, goods=(), today=None, vat_tag=None
     style_section = ParagraphStyle("kp-section", fontName="OpenSans-Bold", fontSize=10.5, leading=14,
                                    spaceBefore=6, spaceAfter=6)
     style_cell = ParagraphStyle("kp-cell", fontName="OpenSans", fontSize=9, leading=12)
-    style_req_label = ParagraphStyle("kp-req-label", fontName="OpenSans", fontSize=9, leading=12)
-    style_req_value = ParagraphStyle("kp-req-value", fontName="OpenSans", fontSize=9, leading=12)
 
     today = today or dt.date.today()
     valid_until = today + dt.timedelta(days=COMMERCIAL_OFFER_VALID_DAYS)
@@ -9278,6 +9276,11 @@ def _build_commercial_offer_pdf(order, items, goods=(), today=None, vat_tag=None
         flow.append(Paragraph(_pdf_text(req["Юридический адрес"]), style_head_small))
         flow.append(Paragraph(
             _pdf_text(f"ИНН / КПП {req['ИНН / КПП']} · ОГРН {req['ОГРН']} · тел. {req['Телефон']}"),
+            style_head_small,
+        ))
+        flow.append(Paragraph(
+            _pdf_text(f"р/с {req['Расчётный счёт']} в {req['Банк']} · БИК {req['БИК']} · "
+                      f"к/с {req['Корр. счёт']}"),
             style_head_small,
         ))
     flow.append(HRFlowable(width="100%", thickness=1.2, color=colors.black,
@@ -9395,20 +9398,6 @@ def _build_commercial_offer_pdf(order, items, goods=(), today=None, vat_tag=None
     ]))
     # the terms and the signature never part onto different pages
     flow.append(KeepTogether(terms + [Spacer(1, 24), sig_tbl]))
-
-    if requisites:
-        req_rows = [[Paragraph(_pdf_text(label), style_req_label), Paragraph(_pdf_text(value), style_req_value)]
-                    for label, value in requisites]
-        req_tbl = Table(req_rows, colWidths=[52 * mm, 118 * mm])
-        req_tbl.setStyle(TableStyle([
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ]))
-        flow.append(KeepTogether([
-            Spacer(1, 18), Paragraph("Реквизиты", style_section), req_tbl,
-        ]))
 
     doc.build(flow)
     return buf.getvalue()

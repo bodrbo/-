@@ -78,6 +78,10 @@ class TuningCommercialOfferPdfTests(_GoodsFixture, unittest.TestCase):
                       "044525974", "30101810145250000974", "АО «ТБанк»"):
             self.assertIn(value, text)
         self.assertIn("Генеральный директор", text)
+        # requisites live only in the letterhead, no separate table
+        self.assertNotIn("Реквизиты", text)
+        self.assertNotIn("Полное наименование", text)
+        self.assertIn("р/с 40702810710000912141 в АО «ТБанк»", text)
         self.assertIn("Д. Е. Жмаев", text)
 
     def test_the_vat_line_follows_the_rate_from_the_settings(self):
