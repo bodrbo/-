@@ -444,7 +444,7 @@
   </section>
 </div>
 
-<div class="schedule-modal" id="tuningInboxModal" hidden>
+<div class="schedule-modal tuning-inbox-drawer" id="tuningInboxModal" hidden>
   <div class="schedule-modal-backdrop" onclick="closeTuningInbox()"></div>
   <section class="schedule-modal-card tuning-inbox-card" role="dialog" aria-modal="true" aria-labelledby="tuningInboxTitle">
     <header class="schedule-modal-header">
@@ -484,6 +484,7 @@
       <div class="tuning-inbox-list" id="tuningInboxList">
         {% for item in backlog %}
         <article class="tuning-inbox-item" data-backlog-id="{{ item.id }}">
+          <span class="tuning-inbox-grip" data-inbox-grip title="Перетащите на календарь" aria-hidden="true">⋮⋮</span>
           <div class="tuning-inbox-item-main">
             <strong>{{ item.title }}</strong>
             <div class="tuning-inbox-chips">
@@ -537,7 +538,7 @@
           <button type="button" class="btn-secondary" onclick="closeBacklogEdit()">Отмена</button>
         </div>
       </form>
-      <p class="hint">«Назначить» откроет окно задачи на {{ day_label }}: выберите сотрудника из смены, время и ставку. Для другого дня сначала перейдите на нужную дату.</p>
+      <p class="hint">Перетащите задачу на календарь — на строку сотрудника и время, откроется окно задачи на {{ day_label }}. Кнопка «Назначить» делает то же без перетаскивания. Для другого дня сначала перейдите на нужную дату.</p>
     </div>
   </section>
 </div>
@@ -1070,9 +1071,11 @@ document.querySelectorAll('form[data-ajax-task-form]').forEach(function (form) {
     }).then(function (result) {
       if (result.ok && result.data && result.data.ok) {
         var target = result.data.redirect || window.location.href;
-        if (form.hasAttribute('data-reopen-inbox')) target = target.split('#')[0] + '#inbox';
+        var reopenInbox = form.hasAttribute('data-reopen-inbox')
+          || (form.id === 'quickTaskForm' && document.getElementById('quickTaskBacklogId').value !== '');
+        if (reopenInbox) target = target.split('#')[0] + '#inbox';
         window.location.href = target;
-        if (form.hasAttribute('data-reopen-inbox') && target.split('#')[0] === window.location.href.split('#')[0]) window.location.reload();
+        if (reopenInbox && target.split('#')[0] === window.location.href.split('#')[0]) window.location.reload();
         return;
       }
       showTaskFormError(form, (result.data && result.data.message) || 'Не удалось сохранить задачу.');
@@ -1090,12 +1093,10 @@ var TUNING_BACKLOG_URL = {{ url_for('tuning_schedule.add_backlog')|tojson }};
 
 function openTuningInbox() {
   document.getElementById('tuningInboxModal').hidden = false;
-  document.body.classList.add('schedule-modal-open');
 }
 
 function closeTuningInbox() {
   document.getElementById('tuningInboxModal').hidden = true;
-  document.body.classList.remove('schedule-modal-open');
   closeBacklogEdit();
 }
 
@@ -1103,11 +1104,13 @@ function findBacklogItem(id) {
   return TUNING_BACKLOG.filter(function (item) { return item.id === id; })[0] || null;
 }
 
-function assignBacklogItem(id) {
+// Opens the new-task window filled from the draft; `where` (a drop on the
+// calendar) overrides the person and the time.
+function assignBacklogItem(id, where) {
   var item = findBacklogItem(id);
   if (!item) return;
-  closeTuningInbox();
-  openQuickTask(item.employee_name || '', 540);
+  where = where || {};
+  openQuickTask(where.employee || item.employee_name || '', where.minutes === undefined ? 540 : where.minutes);
   document.getElementById('quickTaskBacklogId').value = String(item.id);
   document.getElementById('quickTaskName').value = item.title;
   document.getElementById('quickTaskComment').value = item.comment || '';
@@ -1142,8 +1145,77 @@ function closeBacklogEdit() {
 
 document.addEventListener('keydown', function (event) {
   var modal = document.getElementById('tuningInboxModal');
-  if (event.key === 'Escape' && modal && !modal.hidden) closeTuningInbox();
+  var quick = document.getElementById('quickTaskModal');
+  if (event.key === 'Escape' && modal && !modal.hidden && quick.hidden) closeTuningInbox();
 });
+
+// Dragging a draft onto the calendar: a ghost follows the pointer, the column
+// under it lights up, and dropping opens the task window for that person/time.
+// Mouse drags from anywhere on the card; touch only from the grip (so the
+// list can still be scrolled with a finger).
+var inboxDrag = null;
+
+document.getElementById('tuningInboxList').addEventListener('pointerdown', function (event) {
+  var card = event.target.closest('.tuning-inbox-item');
+  if (!card || event.button > 0 || event.target.closest('button, a, form')) return;
+  if (event.pointerType === 'touch' && !event.target.closest('[data-inbox-grip]')) return;
+  inboxDrag = {id: parseInt(card.dataset.backlogId, 10), card: card, pointerId: event.pointerId,
+               x: event.clientX, y: event.clientY, moved: false, ghost: null, column: null};
+  document.addEventListener('pointermove', moveInboxDrag);
+  document.addEventListener('pointerup', endInboxDrag);
+  document.addEventListener('pointercancel', cancelInboxDrag);
+});
+
+function moveInboxDrag(event) {
+  var state = inboxDrag;
+  if (!state || event.pointerId !== state.pointerId) return;
+  if (!state.moved && Math.hypot(event.clientX - state.x, event.clientY - state.y) < 6) return;
+  if (!state.moved) {
+    state.moved = true;
+    state.ghost = state.card.cloneNode(true);
+    state.ghost.classList.add('tuning-inbox-ghost');
+    state.ghost.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(state.ghost);
+    state.card.classList.add('is-drag-source');
+    document.body.classList.add('tuning-is-dragging');
+  }
+  event.preventDefault();
+  state.ghost.style.left = (event.clientX + 12) + 'px';
+  state.ghost.style.top = (event.clientY + 8) + 'px';
+  state.column = tuningColumnAt(event.clientX, event.clientY);
+  document.querySelectorAll('.tuning-calendar-column').forEach(function (column) {
+    column.classList.toggle('is-drop-target', column === state.column);
+  });
+}
+
+function finishInboxDrag() {
+  var state = inboxDrag;
+  inboxDrag = null;
+  document.removeEventListener('pointermove', moveInboxDrag);
+  document.removeEventListener('pointerup', endInboxDrag);
+  document.removeEventListener('pointercancel', cancelInboxDrag);
+  if (!state) return null;
+  if (state.ghost) state.ghost.remove();
+  state.card.classList.remove('is-drag-source');
+  document.body.classList.remove('tuning-is-dragging');
+  document.querySelectorAll('.tuning-calendar-column.is-drop-target').forEach(function (column) {
+    column.classList.remove('is-drop-target');
+  });
+  return state;
+}
+
+function endInboxDrag(event) {
+  if (inboxDrag && event.pointerId !== inboxDrag.pointerId) return;
+  var state = finishInboxDrag();
+  if (!state || !state.moved || !state.column) return;
+  var rect = state.column.getBoundingClientRect();
+  assignBacklogItem(state.id, {
+    employee: state.column.dataset.employeeName,
+    minutes: TUNING_GRID_START + (event.clientY - rect.top) / TUNING_PX,
+  });
+}
+
+function cancelInboxDrag() { finishInboxDrag(); }
 
 if (window.location.hash === '#inbox') {
   openTuningInbox();
