@@ -142,9 +142,18 @@
             <div class="tuning-calendar-now" id="tuningNowLine" aria-hidden="true" hidden></div>
             {% for employee in day_crew %}
             <div class="tuning-calendar-column" data-employee-id="{{ employee.id }}" data-employee-name="{{ employee.name }}"
-                 title="Нажмите на свободное место, чтобы добавить задачу">
+                 title="Нажмите на свободное место, чтобы добавить задачу или перерыв">
               {% for mark in hour_marks %}
               <span class="tuning-calendar-hour-line" style="top: {{ mark.top_px }}px;"></span>
+              {% endfor %}
+              {% for brk in breaks_by_employee.get(employee.name, []) %}
+              <div class="tuning-calendar-break{{ ' is-dayoff' if brk.kind == 'dayoff' }}"
+                   style="top: {{ brk.top_px }}px; height: {{ brk.height_px }}px;"
+                   data-break='{{ brk|tojson }}' role="button" tabindex="0"
+                   title="{{ brk.label }} {{ brk.start }}–{{ brk.end }} · нажмите, чтобы изменить или удалить"
+                   onclick="openBreakEditor(this)" onkeydown="if (event.key === 'Enter') openBreakEditor(this)">
+                <span>{{ brk.label }} {{ brk.start }}–{{ brk.end }}</span>
+              </div>
               {% endfor %}
               {% for card in cards_by_employee.get(employee.name, []) %}
               <div class="tuning-calendar-card status-{{ card.status }}{{ ' is-parallel' if card.lane_count > 1 }}"
@@ -544,6 +553,64 @@
       <p class="hint">Перетащите задачу на календарь — на строку сотрудника и время, откроется окно задачи на {{ day_label }}. Для другого дня сначала перейдите на нужную дату.</p>
     </div>
 </aside>
+
+<div class="schedule-modal" id="slotChoiceModal" hidden>
+  <div class="schedule-modal-backdrop" data-slot-close></div>
+  <section class="schedule-modal-card slot-choice-card" role="dialog" aria-modal="true" aria-labelledby="slotChoiceTitle">
+    <header class="schedule-modal-header">
+      <div>
+        <span id="slotChoiceWho">Сотрудник</span>
+        <h2 id="slotChoiceTitle">Что добавить?</h2>
+      </div>
+      <button type="button" class="schedule-modal-close" data-slot-close aria-label="Закрыть">×</button>
+    </header>
+    <div class="slot-choice-body">
+      <button type="button" onclick="chooseSlot('task')">Задача</button>
+      <button type="button" class="btn-secondary" onclick="chooseSlot('break')">Перерыв</button>
+    </div>
+  </section>
+</div>
+
+<div class="schedule-modal" id="breakModal" hidden>
+  <div class="schedule-modal-backdrop" data-break-close></div>
+  <section class="schedule-modal-card slot-choice-card" role="dialog" aria-modal="true" aria-labelledby="breakModalTitle">
+    <header class="schedule-modal-header">
+      <div>
+        <span id="breakModalWho">Сотрудник</span>
+        <h2 id="breakModalTitle">Перерыв</h2>
+      </div>
+      <button type="button" class="schedule-modal-close" data-break-close aria-label="Закрыть">×</button>
+    </header>
+    <form method="post" class="quick-task-body break-form" id="breakForm" data-ajax-task-form>
+      <div class="alert task-form-error quick-task-wide" role="alert" hidden></div>
+      <input type="hidden" name="work_date" value="{{ day.isoformat() }}">
+      <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
+      <input type="hidden" name="employee_id" id="breakEmployeeId" value="">
+      <div class="quick-task-row quick-task-wide">
+        <label class="quick-task-field"><span>Начало</span>
+          <input type="time" name="start_time" id="breakStart" value="13:00" required>
+        </label>
+        <label class="quick-task-field"><span>Окончание</span>
+          <input type="time" name="end_time" id="breakEnd" value="14:00" required>
+        </label>
+      </div>
+      <div class="break-options quick-task-wide" id="breakAddOptions">
+        <label><input type="checkbox" name="day_off" value="1" id="breakDayOff" onchange="syncBreakDayOff()"> Выходной — на всю смену</label>
+        <label><input type="checkbox" name="for_all" value="1" id="breakForAll"> Для всех сотрудников в смене</label>
+      </div>
+      <p class="hint quick-task-wide">В это время задачи ставить нельзя; область на календаре закрашивается серым.</p>
+      <div class="quick-task-actions quick-task-wide">
+        <button type="submit" id="breakSubmit">Добавить перерыв</button>
+        <button type="button" class="btn-secondary" data-break-close>Отмена</button>
+      </div>
+    </form>
+    <form method="post" class="break-delete-form" id="breakDeleteForm" data-ajax-task-form hidden>
+      <div class="alert task-form-error" role="alert" hidden></div>
+      <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
+      <button type="submit" class="btn-secondary danger-text">Удалить перерыв</button>
+    </form>
+  </section>
+</div>
 
 <div class="schedule-modal" id="quickTaskModal" hidden>
   <div class="schedule-modal-backdrop" data-quick-close></div>
@@ -1222,6 +1289,11 @@ function endInboxDrag(event) {
   if (inboxDrag && event.pointerId !== inboxDrag.pointerId) return;
   var state = finishInboxDrag();
   if (!state || !state.moved || !state.column) return;
+  var under = document.elementFromPoint(event.clientX, event.clientY);
+  if (under && under.closest('.tuning-calendar-break')) {
+    showTuningNotice('В это время перерыв или выходной — задачу сюда не поставить.', false);
+    return;
+  }
   var rect = state.column.getBoundingClientRect();
   assignBacklogItem(state.id, {
     employee: state.column.dataset.employeeName,
@@ -1242,6 +1314,109 @@ function cancelInboxDrag() { finishInboxDrag(); }
     setTuningInbox(true, false);
   }
 })();
+
+// Click on an empty spot of a column: choose a task or a break (the break is
+// a time the person can't be given tasks in; it is hatched grey on the calendar).
+var BREAKS_URL = {{ url_for('tuning_schedule.add_break')|tojson }};
+var slotChoice = null;
+
+function openSlotChoice(employeeName, employeeId, minutes) {
+  slotChoice = {name: employeeName, id: employeeId, minutes: minutes};
+  document.getElementById('slotChoiceWho').textContent =
+    employeeName + ' · ' + quickTaskTimeLabel(minutes);
+  document.getElementById('slotChoiceModal').hidden = false;
+  document.body.classList.add('schedule-modal-open');
+}
+
+function closeSlotChoice() {
+  document.getElementById('slotChoiceModal').hidden = true;
+  document.body.classList.remove('schedule-modal-open');
+}
+
+function chooseSlot(kind) {
+  var slot = slotChoice;
+  closeSlotChoice();
+  if (!slot) return;
+  if (kind === 'task') openQuickTask(slot.name, slot.minutes);
+  else openBreakModal(slot);
+}
+
+function breakTimeAfter(label, addMinutes) {
+  var parts = label.split(':');
+  var total = Math.min(23 * 60 + 59, parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10) + addMinutes);
+  return (Math.floor(total / 60) < 10 ? '0' : '') + Math.floor(total / 60) + ':'
+    + (total % 60 < 10 ? '0' : '') + (total % 60);
+}
+
+function syncBreakDayOff() {
+  var off = document.getElementById('breakDayOff').checked;
+  ['breakStart', 'breakEnd'].forEach(function (id) {
+    var input = document.getElementById(id);
+    input.disabled = off;
+    input.required = !off;
+  });
+}
+
+function showBreakModal() {
+  document.getElementById('breakModal').hidden = false;
+  document.body.classList.add('schedule-modal-open');
+}
+
+function openBreakModal(slot) {
+  var form = document.getElementById('breakForm');
+  clearTaskFormError(form);
+  form.action = BREAKS_URL;
+  document.getElementById('breakEmployeeId').value = slot.id;
+  var start = quickTaskTimeLabel(slot.minutes);
+  document.getElementById('breakStart').value = start;
+  document.getElementById('breakEnd').value = breakTimeAfter(start, 30);
+  document.getElementById('breakDayOff').checked = false;
+  document.getElementById('breakForAll').checked = false;
+  syncBreakDayOff();
+  document.getElementById('breakAddOptions').hidden = false;
+  document.getElementById('breakDeleteForm').hidden = true;
+  document.getElementById('breakModalWho').textContent = slot.name;
+  document.getElementById('breakModalTitle').textContent = 'Новый перерыв';
+  document.getElementById('breakSubmit').textContent = 'Добавить перерыв';
+  showBreakModal();
+}
+
+function openBreakEditor(element) {
+  var data = JSON.parse(element.dataset.break);
+  var form = document.getElementById('breakForm');
+  clearTaskFormError(form);
+  form.action = BREAKS_URL + '/' + data.id + '/update';
+  document.getElementById('breakDayOff').checked = false;
+  syncBreakDayOff();
+  document.getElementById('breakStart').value = data.start;
+  document.getElementById('breakEnd').value = data.end;
+  document.getElementById('breakAddOptions').hidden = true;
+  var del = document.getElementById('breakDeleteForm');
+  clearTaskFormError(del);
+  del.action = BREAKS_URL + '/' + data.id + '/delete';
+  del.hidden = false;
+  document.getElementById('breakModalWho').textContent = data.employee_name;
+  document.getElementById('breakModalTitle').textContent = data.label;
+  document.getElementById('breakSubmit').textContent = 'Сохранить';
+  showBreakModal();
+}
+
+function closeBreakModal() {
+  document.getElementById('breakModal').hidden = true;
+  document.body.classList.remove('schedule-modal-open');
+}
+
+document.querySelectorAll('[data-slot-close]').forEach(function (element) {
+  element.addEventListener('click', closeSlotChoice);
+});
+document.querySelectorAll('[data-break-close]').forEach(function (element) {
+  element.addEventListener('click', closeBreakModal);
+});
+document.addEventListener('keydown', function (event) {
+  if (event.key !== 'Escape') return;
+  if (!document.getElementById('slotChoiceModal').hidden) closeSlotChoice();
+  else if (!document.getElementById('breakModal').hidden) closeBreakModal();
+});
 
 function openQuickTask(employeeName, startMinutes) {
   var modal = document.getElementById('quickTaskModal');
@@ -1485,10 +1660,10 @@ document.addEventListener('keydown', function (event) {
 
 document.querySelectorAll('.tuning-calendar-column').forEach(function (column) {
   column.addEventListener('click', function (event) {
-    if (event.target.closest('.tuning-calendar-card') || tuningDrag || tuningDragSaving) return;
+    if (event.target.closest('.tuning-calendar-card, .tuning-calendar-break') || tuningDrag || tuningDragSaving) return;
     var rect = column.getBoundingClientRect();
     var minutes = TUNING_GRID_START + (event.clientY - rect.top) / TUNING_PX;
-    openQuickTask(column.dataset.employeeName, minutes);
+    openSlotChoice(column.dataset.employeeName, column.dataset.employeeId, minutes);
   });
 });
 

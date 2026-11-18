@@ -115,3 +115,22 @@ def init_schema(conn):
         )
         """
     )
+    # Breaks and days off: a stretch of a person's day closed to tasks.
+    # kind 'break' = a pause the user set, 'dayoff' = the whole shift.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tuning_schedule_breaks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            work_date TEXT NOT NULL,
+            employee_id INTEGER NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'break',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tuning_schedule_breaks_date "
+        "ON tuning_schedule_breaks(work_date, employee_id)"
+    )

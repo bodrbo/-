@@ -541,3 +541,53 @@ def update_backlog_item(db, item_id, title, comment, order_id, employee_name, es
 def delete_backlog_item(db, item_id):
     cursor = db.execute("DELETE FROM tuning_schedule_backlog WHERE id = ?", (item_id,))
     return cursor.rowcount > 0
+
+
+_BREAK_SELECT = (
+    "SELECT b.id, b.work_date, b.employee_id, b.start_time, b.end_time, b.kind, "
+    "e.name AS employee_name FROM tuning_schedule_breaks b "
+    "JOIN employees e ON e.id = b.employee_id "
+)
+
+
+def list_day_breaks(db, day):
+    return db.execute(
+        _BREAK_SELECT + "WHERE b.work_date = ? ORDER BY b.start_time, b.id", (day,)
+    ).fetchall()
+
+
+def list_person_breaks(db, day, employee_name):
+    return db.execute(
+        _BREAK_SELECT + "WHERE b.work_date = ? AND e.name = ? ORDER BY b.start_time, b.id",
+        (day, employee_name),
+    ).fetchall()
+
+
+def get_break(db, break_id):
+    return db.execute(_BREAK_SELECT + "WHERE b.id = ?", (break_id,)).fetchone()
+
+
+def add_break(db, day, employee_id, start_time, end_time, kind, created_at):
+    db.execute(
+        "INSERT INTO tuning_schedule_breaks "
+        "(work_date, employee_id, start_time, end_time, kind, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (day, employee_id, start_time, end_time, kind, created_at),
+    )
+
+
+def update_break_times(db, break_id, start_time, end_time):
+    db.execute(
+        "UPDATE tuning_schedule_breaks SET start_time = ?, end_time = ? WHERE id = ?",
+        (start_time, end_time, break_id),
+    )
+
+
+def delete_break(db, break_id):
+    return db.execute("DELETE FROM tuning_schedule_breaks WHERE id = ?", (break_id,)).rowcount > 0
+
+
+def delete_employee_day_breaks(db, day, employee_id):
+    db.execute(
+        "DELETE FROM tuning_schedule_breaks WHERE work_date = ? AND employee_id = ?",
+        (day, employee_id),
+    )

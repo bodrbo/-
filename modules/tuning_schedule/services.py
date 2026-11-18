@@ -165,15 +165,168 @@ def employees_off_shift(db, day_iso, employee_names):
     ]
 
 
-def _next_free_start(db, day_iso, employee_name, shift_start, exclude_task_id=None):
+# --- Breaks and days off -----------------------------------------------------
+
+BREAK_KIND_LABELS = {"break": "Перерыв", "dayoff": "Выходной"}
+
+
+def break_conflict(db, employee_name, day_iso, start_minutes, end_minutes):
+    """The person's break (row) that overlaps [start, end) minutes of that
+    day, or None."""
+    for row in repository.list_person_breaks(db, day_iso, employee_name):
+        begins, ends = _minutes(row["start_time"]), _minutes(row["end_time"])
+        if begins is not None and ends is not None and begins < end_minutes and start_minutes < ends:
+            return row
+    return None
+
+
+def _break_message(person, day_iso, row):
+    kind = "выходной" if row["kind"] == "dayoff" else f"перерыв {row['start_time']}–{row['end_time']}"
+    return f"{person}: на {_ru_day(dt.date.fromisoformat(day_iso))} {kind} — в это время задачу не поставить."
+
+
+def _break_errors(db, shares, clean_days, errors):
+    """`shares`: {person: {date: hours}} — adds an error for every person
+    whose card of a day (start from clean_days) would run into their break."""
+    for work_date, start_time, _hours in clean_days:
+        start = _minutes(start_time)
+        for person, per_day in shares.items():
+            hours = per_day.get(work_date)
+            if hours is None or start is None:
+                continue
+            clash = break_conflict(db, person, work_date, start, start + round(hours * 60))
+            if clash is not None:
+                errors.append(_break_message(person, work_date, clash))
+
+
+def _clean_break_times(raw_start, raw_end, errors):
+    start, end = _minutes(str(raw_start or "").strip()), _minutes(str(raw_end or "").strip())
+    if start is None or end is None:
+        errors.append("Укажите время начала и окончания перерыва.")
+        return None
+    if end <= start:
+        errors.append("Окончание перерыва должно быть позже начала.")
+        return None
+    return start, end
+
+
+def _tasks_in_interval(db, employee_name, day_iso, start, end):
+    for row in repository.list_day_tasks(db, day_iso):
+        if row["employee_name"] != employee_name:
+            continue
+        begins = _minutes(row["start_time"]) or 0
+        if begins < end and start < begins + round(row["planned_hours"] * 60):
+            return row
+    return None
+
+
+def _break_problem(db, employee_name, day_iso, start, end, exclude_break_id=None):
+    """Why the interval can't be a break for this person, or None."""
+    for row in repository.list_person_breaks(db, day_iso, employee_name):
+        if row["id"] == exclude_break_id:
+            continue
+        begins, ends = _minutes(row["start_time"]), _minutes(row["end_time"])
+        if begins < end and start < ends:
+            return f"{employee_name}: в это время уже есть {BREAK_KIND_LABELS[row['kind']].lower()}."
+    task = _tasks_in_interval(db, employee_name, day_iso, start, end)
+    if task is not None:
+        return f"{employee_name}: в это время стоит задача «{task['title']}» — сначала перенесите её."
+    return None
+
+
+def add_breaks(db, day, employee_id, raw_start, raw_end, for_all=False, day_off=False):
+    """A break (or, with `day_off`, the whole shift) for one person of the day's
+    roster, or — `for_all` — for everyone on it. With `for_all`, people whose
+    time is already taken are skipped and named in the message. Returns
+    (success, message)."""
+    day_iso = day.isoformat()
+    crew = {e["id"]: e for e in repository.list_tuning_crew_employees(db)}
+    on_roster = repository.list_day_crew_ids(db, day_iso)
+    if for_all:
+        targets = [crew[i] for i in on_roster if i in crew]
+        if not targets:
+            return False, "В смене этого дня никого нет."
+    else:
+        try:
+            employee_id = int(employee_id)
+        except (TypeError, ValueError):
+            return False, "Сотрудник не найден."
+        if employee_id not in crew or employee_id not in on_roster:
+            return False, "Этот сотрудник не стоит в смене на эту дату."
+        targets = [crew[employee_id]]
+    errors = []
+    times = None if day_off else _clean_break_times(raw_start, raw_end, errors)
+    if errors:
+        return False, " ".join(errors)
+    created, problems = 0, []
+    shifts = repository.list_day_crew_shifts(db, day_iso)
+    for employee in targets:
+        if day_off:
+            start_label, end_label = shifts.get(employee["id"], (None, None))
+            start = _minutes(start_label or DEFAULT_SHIFT_START)
+            end = _minutes(end_label or DEFAULT_SHIFT_END)
+        else:
+            start, end = times
+        problem = _break_problem(db, employee["name"], day_iso, start, end)
+        if problem:
+            problems.append(problem)
+            continue
+        repository.add_break(
+            db, day_iso, employee["id"], _label(start), _label(end),
+            "dayoff" if day_off else "break", current_timestamp(),
+        )
+        created += 1
+    if not created:
+        return False, " ".join(problems)
+    db.commit()
+    what = "Выходной" if day_off else "Перерыв"
+    message = f"{what} добавлен." if created == 1 else f"{what} добавлен: {created} чел."
+    if problems:
+        message += " Пропущены: " + " ".join(problems)
+    return True, message
+
+
+def update_break(db, break_id, raw_start, raw_end):
+    row = repository.get_break(db, break_id)
+    if row is None:
+        return False, "Перерыв не найден — возможно, его уже удалили."
+    errors = []
+    times = _clean_break_times(raw_start, raw_end, errors)
+    if errors:
+        return False, " ".join(errors)
+    problem = _break_problem(
+        db, row["employee_name"], row["work_date"], times[0], times[1], exclude_break_id=break_id
+    )
+    if problem:
+        return False, problem
+    repository.update_break_times(db, break_id, _label(times[0]), _label(times[1]))
+    db.commit()
+    return True, "Перерыв изменён."
+
+
+def delete_break(db, break_id):
+    deleted = repository.delete_break(db, break_id)
+    db.commit()
+    return (True, "Перерыв удалён.") if deleted else (False, "Перерыв не найден.")
+
+
+def _next_free_start(db, day_iso, employee_name, shift_start, exclude_task_id=None, hours=None):
     """Minute of the day a new task of this employee should start at: the
-    start of their shift, or the end of their last task that day if later."""
+    start of their shift, or the end of their last task that day if later —
+    and never inside a break (a task of `hours` that would run into one
+    starts after it instead)."""
     start_minutes = _minutes(shift_start)
     for row in repository.list_day_tasks(db, day_iso):
         if row["employee_name"] != employee_name or row["task_id"] == exclude_task_id:
             continue
         begins = _minutes(row["start_time"]) or 0
         start_minutes = max(start_minutes, begins + round(row["planned_hours"] * 60))
+    duration = max(1, round((hours or 0) * 60))
+    for _pass in range(50):
+        clash = break_conflict(db, employee_name, day_iso, start_minutes, start_minutes + duration)
+        if clash is None:
+            break
+        start_minutes = _minutes(clash["end_time"])
     return start_minutes
 
 
@@ -189,7 +342,7 @@ def place_assignment_task(db, assignment_id, employee_name, title, rate, comment
     if hours <= 0 or hours > MAX_DAY_HOURS:
         return {"placed": False, "reason": "hours"}
     shift_start, shift_end = shift_bounds(crew)
-    start_minutes = _next_free_start(db, day_iso, employee_name, shift_start)
+    start_minutes = _next_free_start(db, day_iso, employee_name, shift_start, hours=hours)
     end_minutes = start_minutes + round(hours * 60)
     if end_minutes > 24 * 60:
         return {"placed": False, "reason": "midnight"}
@@ -229,8 +382,8 @@ def move_assignment_task(db, assignment_id, employee_name, day_iso):
     if crew is None:
         return {"moved": False, "reason": "off_shift"}
     shift_start, _shift_end = shift_bounds(crew)
-    start_minutes = _next_free_start(db, day_iso, employee_name, shift_start)
     hours = days[0]["planned_hours"]
+    start_minutes = _next_free_start(db, day_iso, employee_name, shift_start, hours=hours)
     if start_minutes + round(hours * 60) > 24 * 60:
         return {"moved": False, "reason": "midnight"}
     repository.delete_task_days(db, task["id"])
@@ -287,7 +440,9 @@ def place_assignment_period(
         if day_hours <= 0:
             continue
         shift_start, shift_end = shift_bounds(crew)
-        start = _next_free_start(db, day_iso, employee_name, shift_start, exclude_task_id=task_id)
+        start = _next_free_start(
+            db, day_iso, employee_name, shift_start, exclude_task_id=task_id, hours=day_hours
+        )
         end = start + round(day_hours * 60)
         if end > 24 * 60:
             skipped.append(day_iso)
@@ -392,6 +547,8 @@ def remove_day_crew_member(db, day, employee_id):
     removed = repository.remove_day_crew_member(db, day.isoformat(), employee_id)
     if not removed:
         return False, "Сотрудник уже отсутствует в расписании на эту дату."
+    repository.delete_employee_day_breaks(db, day.isoformat(), employee_id)  # a day off needs no shift
+    db.commit()
     return True, f"{employee_name} убран из расписания."
 
 
@@ -577,8 +734,25 @@ def calendar_view(db, day, day_crew):
             "earnings": round(sum(card["planned_hours"] * (card["rate"] or 0) for card in counted), 2),
             "tasks": len(counted),
         }
+    # breaks / days off, clamped to the visible grid
+    breaks_by_employee = {employee["name"]: [] for employee in day_crew}
+    for row in repository.list_day_breaks(db, day_iso):
+        if row["employee_name"] not in breaks_by_employee:
+            continue
+        begins, ends = _minutes(row["start_time"]), _minutes(row["end_time"])
+        if begins is None or ends is None or ends <= earliest or begins >= latest:
+            continue
+        shown_start, shown_end = max(begins, earliest), min(ends, latest)
+        breaks_by_employee[row["employee_name"]].append({
+            "id": row["id"], "kind": row["kind"], "start": row["start_time"], "end": row["end_time"],
+            "label": BREAK_KIND_LABELS[row["kind"]],
+            "top_px": round((shown_start - earliest) * PX_PER_MINUTE, 2),
+            "height_px": round((shown_end - shown_start) * PX_PER_MINUTE, 2),
+            "employee_name": row["employee_name"],
+        })
     return {
         "day_totals": day_totals,
+        "breaks_by_employee": breaks_by_employee,
         "cards_by_employee": cards_by_employee,
         "hour_marks": hour_marks,
         "grid_height": round(total_minutes * PX_PER_MINUTE, 2),
@@ -773,6 +947,11 @@ def create_free_task(db, employee_name, title, rate, comment, day_rows, order_id
         errors.append("Проект не найден или отменён.")
     clean_days = _clean_task_days(day_rows, errors)
     members = clean_extra_participants(db, extras, employee_name, errors, clean_days)
+    if not errors:
+        shares = {employee_name: {d: h for d, _s, h in clean_days}}
+        for name, _rate, member_hours in members:
+            shares[name] = {d: h for d, _s, h in person_days(clean_days, member_hours)}
+        _break_errors(db, shares, clean_days, errors)
     if errors:
         return False, " ".join(errors), None
     added_days = _ensure_on_roster(db, employee_name, clean_days, everyone=unpaid)
@@ -806,6 +985,8 @@ def create_linked_task(db, item, employee_name, rate, comment, day_rows, create_
         errors.append("Выберите сотрудника из списка тюнингмэнов.")
     rate = _clean_rate(db, employee_name, rate, errors)
     clean_days = _clean_task_days(day_rows, errors)
+    if not errors:
+        _break_errors(db, {employee_name: {d: h for d, _s, h in clean_days}}, clean_days, errors)
     if errors:
         return False, " ".join(errors), None
     added_days = _ensure_on_roster(db, employee_name, clean_days)
@@ -830,6 +1011,11 @@ def add_task_day(db, task_id, raw_date, raw_start_time, raw_hours):
     if errors:
         return False, " ".join(errors)
     work_date, start_time, hours = clean_days[0]
+    task = repository.get_task(db, task_id)
+    if task is not None:
+        _break_errors(db, {task["employee_name"]: {work_date: hours}}, clean_days, errors)
+        if errors:
+            return False, " ".join(errors)
     repository.add_task_day(db, task_id, work_date, start_time, hours)
     return True, "День добавлен в расписание задачи."
 
@@ -923,6 +1109,12 @@ def move_task_card(db, task_id, day_id, raw_start, raw_target_employee_id, reass
         target_name = names[target_id]
         if target_name != current_name and (target_name == primary_name or target_name in members):
             return False, f"{target_name} уже участвует в этой задаче.", None
+
+    for person, person_hours in own_hours.items():
+        person_name = target_name if person == current_name else person
+        clash = break_conflict(db, person_name, day_iso, start_minutes, start_minutes + round(person_hours * 60))
+        if clash is not None:
+            return False, _break_message(person_name, day_iso, clash), None
 
     message = "Задача перенесена."
     if target_name != current_name:
@@ -1099,6 +1291,7 @@ def update_task(db, task_id, form, hooks):
                         and repository.get_day_crew_shift_by_name(db, work_date, person) is None:
                     errors.append(f"{person} не стоит в смене на {_ru_day(work_date)}.")
                     continue
+        _break_errors(db, shares, clean_days, errors)
     if errors:
         return False, " ".join(errors)
 

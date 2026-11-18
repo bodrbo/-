@@ -1066,8 +1066,10 @@ class TuningScheduleQuickTaskTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertIn('id="quickTaskModal"', page)
         self.assertIn(f'data-employee-name="{self.EMPLOYEE_A}"', page)
         self.assertIn("Нажмите на свободное место, чтобы добавить задачу", page)
-        self.assertIn("openQuickTask(column.dataset.employeeName, minutes)", page)
-        self.assertIn("if (event.target.closest('.tuning-calendar-card')", page)  # a click on a card is not an empty place
+        # a click on an empty place first asks: a task or a break; "task" opens the window
+        self.assertIn("openSlotChoice(column.dataset.employeeName, column.dataset.employeeId, minutes)", page)
+        self.assertIn("if (kind === 'task') openQuickTask(slot.name, slot.minutes);", page)
+        self.assertIn("if (event.target.closest('.tuning-calendar-card, .tuning-calendar-break')", page)  # a card or a break is not an empty place
         modal = page.split('id="quickTaskModal"')[1]
         self.assertIn('name="order_id"', modal)
         self.assertIn('name="order_item_id"', modal)

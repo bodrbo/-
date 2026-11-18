@@ -12605,6 +12605,28 @@ button.partner-open-price-save svg {
 }
 .tuning-inbox-ghost .tuning-inbox-item-actions, .tuning-inbox-ghost .tuning-inbox-comment { display: none; }
 
+/* Перерывы и выходные: область закрыта для задач и заштрихована серым */
+.tuning-calendar-break {
+  position: absolute; left: 0; right: 0; z-index: 1; overflow: hidden; cursor: pointer;
+  background: repeating-linear-gradient(135deg, rgba(110, 122, 135, .30) 0 6px, rgba(110, 122, 135, .14) 6px 12px);
+  border-top: 1px solid rgba(110, 122, 135, .55); border-bottom: 1px solid rgba(110, 122, 135, .55);
+  color: #4a5662; font-size: 11px; font-weight: 600;
+}
+.tuning-calendar-break:hover, .tuning-calendar-break:focus-visible { outline: 2px solid var(--brass); outline-offset: -2px; }
+.tuning-calendar-break.is-dayoff { background: repeating-linear-gradient(135deg, rgba(90, 100, 112, .42) 0 6px, rgba(90, 100, 112, .22) 6px 12px); }
+.tuning-calendar-break span { display: block; padding: 3px 6px; text-shadow: 0 0 3px #fff, 0 0 3px #fff; }
+.tuning-calendar-card { z-index: 2; }
+.slot-choice-card { width: min(420px, 100%); }
+.slot-choice-body { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 18px 22px 22px; }
+.slot-choice-body button { min-height: 54px; font-size: 16px; }
+.break-form { padding-bottom: 8px; }
+.break-options { display: grid; gap: 8px; }
+.break-options label { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+.break-delete-form { padding: 0 22px 20px; }
+.break-delete-form[hidden], .break-options[hidden] { display: none; }
+.break-delete-form button { background: transparent; color: #b3261e; border: 1px solid #e0b4b0; box-shadow: none; }
+.break-delete-form button:hover { background: #fdeceb; }
+
 /* Личные кабинеты клиента и партнёра: на всю ширину экрана и без блоков
    внутри блоков. Заказы — это сами карточки (без общей рамки вокруг них),
    «Доходность» — полоса показателей без вложенных карточек, а внутри

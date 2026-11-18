@@ -235,6 +235,33 @@ def create_tuning_schedule_blueprint(
         success, message = services.delete_backlog_item(get_db(), item_id)
         return respond(success, message, day)
 
+    @blueprint.route("/schedule/tuning/breaks", methods=["POST"])
+    @manage_required
+    def add_break():
+        day = services.parse_day(request.form.get("work_date"))
+        success, message = services.add_breaks(
+            get_db(), day, request.form.get("employee_id"),
+            request.form.get("start_time"), request.form.get("end_time"),
+            for_all=request.form.get("for_all") == "1", day_off=request.form.get("day_off") == "1",
+        )
+        return respond(success, message, day.isoformat())
+
+    @blueprint.route("/schedule/tuning/breaks/<int:break_id>/update", methods=["POST"])
+    @manage_required
+    def update_break(break_id):
+        day = services.parse_day(request.form.get("return_date")).isoformat()
+        success, message = services.update_break(
+            get_db(), break_id, request.form.get("start_time"), request.form.get("end_time")
+        )
+        return respond(success, message, day)
+
+    @blueprint.route("/schedule/tuning/breaks/<int:break_id>/delete", methods=["POST"])
+    @manage_required
+    def delete_break(break_id):
+        day = services.parse_day(request.form.get("return_date")).isoformat()
+        success, message = services.delete_break(get_db(), break_id)
+        return respond(success, message, day)
+
     @blueprint.route("/schedule/tuning/tasks/<int:task_id>/days", methods=["POST"])
     @manage_required
     def add_task_day(task_id):
