@@ -66,17 +66,25 @@ class TuningScheduleInboxTests(_TuningScheduleFixture, unittest.TestCase):
     def test_the_page_lists_the_inbox_behind_a_button_with_the_count(self):
         self.add(titles="Собрать консоль", order_id=str(self.order_id))
         page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
-        self.assertIn('onclick="openTuningInbox()"', page)
+        self.assertIn('onclick="toggleTuningInbox()"', page)
         self.assertIn('id="tuningInboxModal"', page)
         modal = page.split('id="tuningInboxModal"')[1].split('id="quickTaskModal"')[0]
         self.assertIn("Собрать консоль", modal)
         self.assertIn("Клиент Мультизадач", modal)  # the project's label
 
-    def test_the_inbox_is_a_side_panel_whose_cards_can_be_dragged_onto_the_calendar(self):
+    def test_the_inbox_is_a_docked_side_panel_not_a_modal(self):
+        page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
+        self.assertIn('<aside class="tuning-inbox-panel" id="tuningInboxModal"', page)
+        self.assertIn('onclick="toggleTuningInbox()"', page)
+        self.assertNotIn("tuning-inbox-drawer", page)
+        # one flat toolbar and the calendar, not cards inside cards
+        self.assertIn('<section class="tuning-flat">', page)
+        self.assertNotIn("Календарь на", page)
+
+    def test_the_inbox_cards_can_be_dragged_onto_the_calendar(self):
         self.put_on_shift(self.EMPLOYEE_A)
         self.add(titles="Собрать консоль")
         page = self.client.get(f"/schedule/tuning?date={self.DAY}").get_data(as_text=True)
-        self.assertIn('class="schedule-modal tuning-inbox-drawer" id="tuningInboxModal"', page)
         self.assertIn("data-inbox-grip", page)
         for hook in ("function moveInboxDrag", "function endInboxDrag", "assignBacklogItem(state.id",
                      "tuningColumnAt(event.clientX, event.clientY)"):
@@ -84,7 +92,7 @@ class TuningScheduleInboxTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertIn('id="quickTaskBacklogId"', page)  # a drop fills the usual task window
         import pathlib
         css = (pathlib.Path(application_module.__file__).parent / "static" / "style.css").read_text(encoding="utf-8")
-        self.assertIn(".schedule-modal.tuning-inbox-drawer { pointer-events: none;", css)
+        self.assertIn("body.tuning-inbox-open { padding-right: 380px; }", css)
 
     def test_placing_the_task_from_the_inbox_creates_it_and_empties_the_inbox(self):
         self.put_on_shift(self.EMPLOYEE_A)

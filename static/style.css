@@ -12440,6 +12440,11 @@ button.partner-open-price-save svg {
    calendar grows to the height of the screen instead of 70vh. */
 .tuning-schedule-wide { max-width: none; padding-right: 16px; padding-left: 16px; }
 .tuning-schedule-wide .tuning-calendar-board-scroll { max-height: max(480px, calc(100vh - 150px)); }
+/* No cards inside cards: the day controls and the calendar sit straight on the page. */
+.tuning-schedule-wide { padding: 10px 12px 24px; }
+.tuning-flat { margin-bottom: 14px; }
+.tuning-flat .tuning-calendar-heading { margin-bottom: 10px; }
+.tuning-schedule-wide .tuning-calendar-board-scroll { max-height: max(480px, calc(100vh - 170px)); }
 .tuning-calendar-column { cursor: cell; }
 .tuning-calendar-card { cursor: grab; }
 /* A wide two-column window instead of a narrow one with its own scrollbar:
@@ -12532,8 +12537,7 @@ button.partner-open-price-save svg {
   display: inline-grid; place-items: center; min-width: 21px; height: 21px; padding: 0 6px;
   border-radius: 999px; background: var(--brass); color: #fff; font-size: 12px;
 }
-.tuning-inbox-card { width: min(720px, 100%); }
-.tuning-inbox-body { display: grid; gap: 14px; padding: 16px 18px 18px; overflow-y: auto; max-height: calc(94vh - 90px); }
+.tuning-inbox-body { display: grid; align-content: start; gap: 14px; padding: 16px 18px 18px; overflow-y: auto; }
 .tuning-inbox-add, .tuning-inbox-edit { display: grid; gap: 10px; }
 .tuning-inbox-add > button { justify-self: start; }
 .tuning-inbox-more summary { cursor: pointer; color: var(--ink-soft); font-size: 13px; font-weight: 600; }
@@ -12559,26 +12563,46 @@ button.partner-open-price-save svg {
   .tuning-inbox-item-actions { justify-content: flex-start; }
 }
 
-/* «Входящие» — панель справа без затемнения: календарь остаётся доступен для перетаскивания */
-.schedule-modal.tuning-inbox-drawer { pointer-events: none; place-items: stretch end; padding: 70px 12px 12px; }
-.tuning-inbox-drawer .schedule-modal-backdrop { display: none; }
-.tuning-inbox-drawer .tuning-inbox-card { pointer-events: auto; width: min(400px, 100%); max-height: none; box-shadow: 0 18px 50px -14px rgba(4,23,33,.55); }
-.tuning-inbox-drawer .tuning-inbox-body { max-height: none; flex: 1; }
+/* «Входящие» — боковая панель справа, как главное меню слева: страница
+   уступает ей место (на узких экранах панель ложится поверх). */
+.tuning-inbox-panel[hidden] { display: none; }
+.tuning-inbox-panel {
+  position: fixed; z-index: 1200; top: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column; width: min(380px, 100%);
+  background: var(--paper); border-left: 1px solid var(--hairline);
+  box-shadow: -10px 0 28px -24px rgba(4, 23, 33, .9);
+}
+.tuning-inbox-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  min-height: 76px; padding: 16px 14px 14px 18px; flex: none; color: #fff;
+  background: linear-gradient(135deg, #102f3d, #174b61);
+}
+.tuning-inbox-header span { color: #8ec8e5; font-family: 'PT Mono', monospace; font-size: 9px; text-transform: uppercase; }
+.tuning-inbox-header h2 { margin: 4px 0 0; color: #fff; font-size: 21px; }
+.tuning-inbox-collapse {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 34px; height: 34px; padding: 0; color: #b9d0d6; cursor: pointer;
+  background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .13); border-radius: 5px;
+}
+.tuning-inbox-collapse:hover { color: #fff; background: rgba(1, 116, 142, .32); }
+.tuning-inbox-collapse svg { width: 18px; height: 18px; }
+.tuning-inbox-panel .tuning-inbox-body { flex: 1; min-height: 0; max-height: none; }
+@media (min-width: 1101px) {
+  body.tuning-inbox-open { padding-right: 380px; }
+  body.has-admin-sidebar { transition: padding .2s ease; }
+}
 .tuning-inbox-item { cursor: grab; user-select: none; }
 .tuning-inbox-item.is-drag-source { opacity: .4; }
 .tuning-inbox-grip { flex: none; align-self: center; color: var(--ink-soft); letter-spacing: -2px; touch-action: none; cursor: grab; }
-.tuning-inbox-item-actions { flex-direction: column; align-items: stretch; }
+.tuning-inbox-edit[hidden] { display: none; }
+/* the panel is narrow: the card is a column — title and chips, then the buttons in a row */
+.tuning-inbox-item { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 8px 8px; text-align: left; }
+.tuning-inbox-item-actions { grid-column: 1 / -1; flex-direction: row; justify-content: flex-start; flex-wrap: wrap; }
 .tuning-inbox-ghost {
   position: fixed; z-index: 4000; width: 260px; pointer-events: none; opacity: .92;
   box-shadow: 0 14px 34px -10px rgba(4,23,33,.6); background: var(--paper);
 }
 .tuning-inbox-ghost .tuning-inbox-item-actions, .tuning-inbox-ghost .tuning-inbox-comment { display: none; }
-@media (max-width: 900px) {
-  .schedule-modal.tuning-inbox-drawer { pointer-events: auto; place-items: center; padding: 18px; }
-  .tuning-inbox-drawer .schedule-modal-backdrop { display: block; }
-  .tuning-inbox-drawer .tuning-inbox-card { width: min(720px, 100%); max-height: min(900px, calc(100vh - 36px)); }
-  .tuning-inbox-grip { display: none; }
-}
 
 /* Личные кабинеты клиента и партнёра: на всю ширину экрана и без блоков
    внутри блоков. Заказы — это сами карточки (без общей рамки вокруг них),

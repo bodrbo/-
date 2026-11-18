@@ -80,26 +80,22 @@
   <p class="alert{{ ' success' if notice.type == 'success' }}" role="status">{{ notice.message }}</p>
   {% endif %}
 
-  <section class="panel">
-    <div class="schedule-date-controls">
-      <a class="btn-secondary" href="{{ url_for('tuning_schedule.index', date=today) }}">Сегодня</a>
-      <div class="schedule-stepper">
-        <a href="{{ url_for('tuning_schedule.index', date=previous_day) }}" aria-label="Предыдущий день">‹</a>
-        <a href="{{ url_for('tuning_schedule.index', date=next_day) }}" aria-label="Следующий день">›</a>
-      </div>
-      <label class="schedule-date-picker">
-        <span>{{ day_label }}</span>
-        <input type="date" value="{{ day.isoformat() }}" aria-label="Выбрать дату"
-               onchange='location.href = {{ url_for("tuning_schedule.index")|tojson }} + "?date=" + this.value'>
-      </label>
-    </div>
-  </section>
-
-  <section class="panel">
+  <section class="tuning-flat">
     <div class="tuning-calendar-heading">
-      <h2 style="margin:0;">Календарь на {{ day_label }}</h2>
+      <div class="schedule-date-controls">
+        <a class="btn-secondary" href="{{ url_for('tuning_schedule.index', date=today) }}">Сегодня</a>
+        <div class="schedule-stepper">
+          <a href="{{ url_for('tuning_schedule.index', date=previous_day) }}" aria-label="Предыдущий день">‹</a>
+          <a href="{{ url_for('tuning_schedule.index', date=next_day) }}" aria-label="Следующий день">›</a>
+        </div>
+        <label class="schedule-date-picker">
+          <span>{{ day_label }}</span>
+          <input type="date" value="{{ day.isoformat() }}" aria-label="Выбрать дату"
+                 onchange='location.href = {{ url_for("tuning_schedule.index")|tojson }} + "?date=" + this.value'>
+        </label>
+      </div>
       <div class="tuning-calendar-tools">
-      <button type="button" class="tuning-inbox-button" onclick="openTuningInbox()" title="Задачи, которым ещё не назначены исполнитель и время">
+      <button type="button" class="tuning-inbox-button" id="tuningInboxToggle" onclick="toggleTuningInbox()" aria-expanded="false" aria-controls="tuningInboxModal" title="Задачи, которым ещё не назначены исполнитель и время">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11.5 5.2 4.5h9.6L17 11.5v4H3z"/><path d="M3 11.5h4.2a2.8 2.8 0 0 0 5.6 0H17"/></svg>
         <span>Входящие</span>
         <b>{{ backlog|length }}</b>
@@ -444,16 +440,16 @@
   </section>
 </div>
 
-<div class="schedule-modal tuning-inbox-drawer" id="tuningInboxModal" hidden>
-  <div class="schedule-modal-backdrop" onclick="closeTuningInbox()"></div>
-  <section class="schedule-modal-card tuning-inbox-card" role="dialog" aria-modal="true" aria-labelledby="tuningInboxTitle">
-    <header class="schedule-modal-header">
-      <div>
-        <span>Первый этап планирования</span>
-        <h2 id="tuningInboxTitle">Входящие</h2>
-      </div>
-      <button type="button" class="schedule-modal-close" onclick="closeTuningInbox()" aria-label="Закрыть">×</button>
-    </header>
+<aside class="tuning-inbox-panel" id="tuningInboxModal" aria-labelledby="tuningInboxTitle" hidden>
+  <div class="tuning-inbox-header">
+    <div>
+      <span>Первый этап планирования</span>
+      <h2 id="tuningInboxTitle">Входящие</h2>
+    </div>
+    <button type="button" class="tuning-inbox-collapse" onclick="closeTuningInbox()" aria-label="Свернуть панель «Входящие»" title="Свернуть панель">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 5l5 5-5 5"/></svg>
+    </button>
+  </div>
     <div class="tuning-inbox-body">
       <form method="post" action="{{ url_for('tuning_schedule.add_backlog') }}" class="tuning-inbox-add" data-ajax-task-form data-reopen-inbox>
         <div class="alert task-form-error" role="alert" hidden></div>
@@ -540,8 +536,7 @@
       </form>
       <p class="hint">Перетащите задачу на календарь — на строку сотрудника и время, откроется окно задачи на {{ day_label }}. Кнопка «Назначить» делает то же без перетаскивания. Для другого дня сначала перейдите на нужную дату.</p>
     </div>
-  </section>
-</div>
+</aside>
 
 <div class="schedule-modal" id="quickTaskModal" hidden>
   <div class="schedule-modal-backdrop" data-quick-close></div>
@@ -1070,12 +1065,18 @@ document.querySelectorAll('form[data-ajax-task-form]').forEach(function (form) {
       return response.json().then(function (data) { return {ok: response.ok, data: data}; });
     }).then(function (result) {
       if (result.ok && result.data && result.data.ok) {
-        var target = result.data.redirect || window.location.href;
-        var reopenInbox = form.hasAttribute('data-reopen-inbox')
-          || (form.id === 'quickTaskForm' && document.getElementById('quickTaskBacklogId').value !== '');
-        if (reopenInbox) target = target.split('#')[0] + '#inbox';
-        window.location.href = target;
-        if (reopenInbox && target.split('#')[0] === window.location.href.split('#')[0]) window.location.reload();
+        var url = new URL(result.data.redirect || window.location.href, window.location.href);
+        // a form of the inbox (or a draft being placed) keeps the panel open after the reload
+        if (form.hasAttribute('data-reopen-inbox')
+            || (form.id === 'quickTaskForm' && document.getElementById('quickTaskBacklogId').value !== '')) {
+          url.hash = 'inbox';
+        }
+        if (url.pathname === window.location.pathname && url.search === window.location.search) {
+          history.replaceState(null, '', url.pathname + url.search + url.hash);
+          window.location.reload();   // the same page: a hash-only change would not reload it
+        } else {
+          window.location.href = url.href;
+        }
         return;
       }
       showTaskFormError(form, (result.data && result.data.message) || 'Не удалось сохранить задачу.');
@@ -1091,13 +1092,25 @@ document.querySelectorAll('form[data-ajax-task-form]').forEach(function (form) {
 var TUNING_BACKLOG = {{ backlog|tojson }};
 var TUNING_BACKLOG_URL = {{ url_for('tuning_schedule.add_backlog')|tojson }};
 
-function openTuningInbox() {
-  document.getElementById('tuningInboxModal').hidden = false;
+// The inbox is a side panel docked to the right edge (like the main menu on
+// the left): the page makes room for it, and on wide screens it stays open
+// across reloads until it is collapsed.
+var TUNING_INBOX_KEY = 'bodrbo-tuning-inbox-open';
+
+function setTuningInbox(open, persist) {
+  document.getElementById('tuningInboxModal').hidden = !open;
+  document.body.classList.toggle('tuning-inbox-open', open);
+  var toggle = document.getElementById('tuningInboxToggle');
+  if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (!open) closeBacklogEdit();
+  if (!persist) return;
+  try { localStorage.setItem(TUNING_INBOX_KEY, open ? '1' : '0'); } catch (error) {}
 }
 
-function closeTuningInbox() {
-  document.getElementById('tuningInboxModal').hidden = true;
-  closeBacklogEdit();
+function openTuningInbox() { setTuningInbox(true, true); }
+function closeTuningInbox() { setTuningInbox(false, true); }
+function toggleTuningInbox() {
+  setTuningInbox(document.getElementById('tuningInboxModal').hidden, true);
 }
 
 function findBacklogItem(id) {
@@ -1142,12 +1155,6 @@ function closeBacklogEdit() {
   var form = document.getElementById('tuningInboxEditForm');
   if (form) form.hidden = true;
 }
-
-document.addEventListener('keydown', function (event) {
-  var modal = document.getElementById('tuningInboxModal');
-  var quick = document.getElementById('quickTaskModal');
-  if (event.key === 'Escape' && modal && !modal.hidden && quick.hidden) closeTuningInbox();
-});
 
 // Dragging a draft onto the calendar: a ghost follows the pointer, the column
 // under it lights up, and dropping opens the task window for that person/time.
@@ -1217,10 +1224,17 @@ function endInboxDrag(event) {
 
 function cancelInboxDrag() { finishInboxDrag(); }
 
-if (window.location.hash === '#inbox') {
-  openTuningInbox();
-  history.replaceState(null, '', window.location.pathname + window.location.search);
-}
+(function () {
+  var wide = window.matchMedia('(min-width: 1101px)').matches;
+  var remembered = false;
+  try { remembered = wide && localStorage.getItem(TUNING_INBOX_KEY) === '1'; } catch (error) {}
+  if (window.location.hash === '#inbox') {
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+    setTuningInbox(true, false);
+  } else if (remembered) {
+    setTuningInbox(true, false);
+  }
+})();
 
 function openQuickTask(employeeName, startMinutes) {
   var modal = document.getElementById('quickTaskModal');
