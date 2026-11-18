@@ -492,11 +492,14 @@
             {% if item.comment %}<p class="tuning-inbox-comment">{{ item.comment }}</p>{% endif %}
           </div>
           <div class="tuning-inbox-item-actions">
-            <button type="button" onclick="assignBacklogItem({{ item.id }})">Назначить</button>
-            <button type="button" class="btn-secondary" onclick="editBacklogItem({{ item.id }})">Изменить</button>
+            <button type="button" class="tuning-inbox-icon" onclick="editBacklogItem({{ item.id }})" aria-label="Изменить задачу «{{ item.title }}»" title="Изменить">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16l.6-3.4L13.7 3.5a1.5 1.5 0 0 1 2.1 0l.7.7a1.5 1.5 0 0 1 0 2.1L7.4 15.4z"/><path d="M12.2 5l2.8 2.8"/></svg>
+            </button>
             <form method="post" action="{{ url_for('tuning_schedule.delete_backlog', item_id=item.id) }}" data-ajax-task-form data-reopen-inbox>
               <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
-              <button type="submit" class="btn-secondary" aria-label="Удалить задачу «{{ item.title }}»">Удалить</button>
+              <button type="submit" class="tuning-inbox-icon is-danger" aria-label="Удалить задачу «{{ item.title }}»" title="Удалить">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h12M8 6V4h4v2M6 6l.7 10h6.6L14 6M8.5 9v4M11.5 9v4"/></svg>
+              </button>
             </form>
           </div>
         </article>
@@ -534,7 +537,7 @@
           <button type="button" class="btn-secondary" onclick="closeBacklogEdit()">Отмена</button>
         </div>
       </form>
-      <p class="hint">Перетащите задачу на календарь — на строку сотрудника и время, откроется окно задачи на {{ day_label }}. Кнопка «Назначить» делает то же без перетаскивания. Для другого дня сначала перейдите на нужную дату.</p>
+      <p class="hint">Перетащите задачу на календарь — на строку сотрудника и время, откроется окно задачи на {{ day_label }}. Для другого дня сначала перейдите на нужную дату.</p>
     </div>
 </aside>
 
