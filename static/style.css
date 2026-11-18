@@ -12555,7 +12555,6 @@ button.partner-open-price-save svg {
 .tuning-inbox-comment { margin: 0; color: var(--ink-soft); font-size: 13px; white-space: pre-wrap; }
 .tuning-inbox-item-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; flex: none; }
 .tuning-inbox-item-actions form { margin: 0; }
-.tuning-inbox-item-actions button { min-height: 36px; padding: 0 12px; font-size: 13px; }
 .tuning-inbox-edit { padding: 12px; border: 1px dashed var(--brass); border-radius: 12px; }
 .tuning-inbox-edit h3 { margin: 0; font-size: 15px; }
 @media (max-width: 640px) {
@@ -12597,17 +12596,9 @@ button.partner-open-price-save svg {
 .tuning-inbox-edit[hidden] { display: none; }
 /* the panel is narrow: the card is a column — title and chips, then the buttons in a row */
 .tuning-inbox-item { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 8px 8px; text-align: left; }
-/* two small icons in the top-right corner of the card: edit and delete */
+/* the edit / delete icons are the stock .row-actions .icon-btn of the tuning orders, in the card's top-right corner */
 .tuning-inbox-item { grid-template-columns: auto minmax(0, 1fr) auto; }
-.tuning-inbox-item-actions { grid-column: 3; grid-row: 1; flex-direction: row; flex-wrap: nowrap; gap: 4px; }
-.tuning-inbox-item-actions button.tuning-inbox-icon {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; min-height: 0; padding: 0; color: var(--ink-soft);
-  background: transparent; border: 1px solid transparent; border-radius: 6px; cursor: pointer; box-shadow: none;
-}
-.tuning-inbox-icon svg { width: 16px; height: 16px; }
-.tuning-inbox-item-actions button.tuning-inbox-icon:hover { color: var(--brass-strong); background: #f1efe9; border-color: var(--hairline); }
-.tuning-inbox-item-actions button.tuning-inbox-icon.is-danger:hover { color: #b3261e; background: #fdeceb; border-color: #f2c4c0; }
+.tuning-inbox-item-actions { grid-column: 3; grid-row: 1; flex-direction: row; flex-wrap: nowrap; }
 .tuning-inbox-ghost {
   position: fixed; z-index: 4000; width: 260px; pointer-events: none; opacity: .92;
   box-shadow: 0 14px 34px -10px rgba(4,23,33,.6); background: var(--paper);

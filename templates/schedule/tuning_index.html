@@ -491,14 +491,18 @@
             </div>
             {% if item.comment %}<p class="tuning-inbox-comment">{{ item.comment }}</p>{% endif %}
           </div>
-          <div class="tuning-inbox-item-actions">
-            <button type="button" class="tuning-inbox-icon" onclick="editBacklogItem({{ item.id }})" aria-label="Изменить задачу «{{ item.title }}»" title="Изменить">
-              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16l.6-3.4L13.7 3.5a1.5 1.5 0 0 1 2.1 0l.7.7a1.5 1.5 0 0 1 0 2.1L7.4 15.4z"/><path d="M12.2 5l2.8 2.8"/></svg>
+          <div class="tuning-inbox-item-actions row-actions">
+            <button type="button" class="icon-btn" onclick="editBacklogItem({{ item.id }})" aria-label="Изменить задачу «{{ item.title }}»" title="Редактировать">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M13.5 3.5l3 3L6 17H3v-3L13.5 3.5z"/>
+              </svg>
             </button>
             <form method="post" action="{{ url_for('tuning_schedule.delete_backlog', item_id=item.id) }}" data-ajax-task-form data-reopen-inbox>
               <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
-              <button type="submit" class="tuning-inbox-icon is-danger" aria-label="Удалить задачу «{{ item.title }}»" title="Удалить">
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h12M8 6V4h4v2M6 6l.7 10h6.6L14 6M8.5 9v4M11.5 9v4"/></svg>
+              <button type="submit" class="icon-btn danger" aria-label="Удалить задачу «{{ item.title }}»" title="Удалить">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 5h12M8 5V3.5h4V5M6 5v11.5A1.5 1.5 0 007.5 18h5a1.5 1.5 0 001.5-1.5V5"/>
+                </svg>
               </button>
             </form>
           </div>
