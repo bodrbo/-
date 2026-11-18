@@ -98,11 +98,18 @@
   <section class="panel">
     <div class="tuning-calendar-heading">
       <h2 style="margin:0;">Календарь на {{ day_label }}</h2>
+      <div class="tuning-calendar-tools">
+      <button type="button" class="tuning-inbox-button" onclick="openTuningInbox()" title="Задачи, которым ещё не назначены исполнитель и время">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11.5 5.2 4.5h9.6L17 11.5v4H3z"/><path d="M3 11.5h4.2a2.8 2.8 0 0 0 5.6 0H17"/></svg>
+        <span>Входящие</span>
+        <b>{{ backlog|length }}</b>
+      </button>
       <button type="button" class="schedule-roster-button" onclick="openTuningRosterModal()">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="3"/><circle cx="14.5" cy="8" r="2.2"/><path d="M2.5 16c.4-3 2.1-4.6 4.7-4.6s4.4 1.6 4.8 4.6M12 12.2c2.8-.6 4.8.7 5.5 3.8"/></svg>
         <span>Состав</span>
         <b>{{ day_crew|length }}</b>
       </button>
+      </div>
     </div>
     {% if day_crew %}
     <div class="tuning-calendar-board">
@@ -437,6 +444,104 @@
   </section>
 </div>
 
+<div class="schedule-modal" id="tuningInboxModal" hidden>
+  <div class="schedule-modal-backdrop" onclick="closeTuningInbox()"></div>
+  <section class="schedule-modal-card tuning-inbox-card" role="dialog" aria-modal="true" aria-labelledby="tuningInboxTitle">
+    <header class="schedule-modal-header">
+      <div>
+        <span>Первый этап планирования</span>
+        <h2 id="tuningInboxTitle">Входящие</h2>
+      </div>
+      <button type="button" class="schedule-modal-close" onclick="closeTuningInbox()" aria-label="Закрыть">×</button>
+    </header>
+    <div class="tuning-inbox-body">
+      <form method="post" action="{{ url_for('tuning_schedule.add_backlog') }}" class="tuning-inbox-add" data-ajax-task-form data-reopen-inbox>
+        <div class="alert task-form-error" role="alert" hidden></div>
+        <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
+        <label class="quick-task-field"><span>Что нужно сделать <small>одна задача — одна строка</small></span>
+          <textarea name="titles" id="inboxTitles" rows="3" maxlength="12000" placeholder="Заменить трос газа&#10;Собрать консоль&#10;Убрать цех" required></textarea>
+        </label>
+        <details class="tuning-inbox-more">
+          <summary>Проект, исполнитель, оценка — необязательно</summary>
+          <div class="tuning-inbox-more-grid">
+            <div class="quick-task-field"><span>Проект</span>
+              {{ order_picker('inboxAddOrder', 'Без проекта — введите номер, чтобы найти') }}
+            </div>
+            <label class="quick-task-field"><span>Исполнитель</span>
+              <select name="employee_name">
+                <option value="">Не выбран</option>
+                {% for employee in editor_employees %}<option value="{{ employee.name }}">{{ employee.name }}</option>{% endfor %}
+              </select>
+            </label>
+            <label class="quick-task-field"><span>Оценка, ч</span>
+              <input type="text" inputmode="decimal" name="est_hours" placeholder="1.5">
+            </label>
+          </div>
+        </details>
+        <button type="submit">Добавить во «Входящие»</button>
+      </form>
+
+      <div class="tuning-inbox-list" id="tuningInboxList">
+        {% for item in backlog %}
+        <article class="tuning-inbox-item" data-backlog-id="{{ item.id }}">
+          <div class="tuning-inbox-item-main">
+            <strong>{{ item.title }}</strong>
+            <div class="tuning-inbox-chips">
+              {% if item.order_label %}<span class="tuning-inbox-chip">{{ item.order_label }}</span>{% endif %}
+              {% if item.employee_name %}<span class="tuning-inbox-chip">{{ item.employee_name }}</span>{% endif %}
+              {% if item.est_hours %}<span class="tuning-inbox-chip">{{ item.est_hours|float|round(2) }} ч</span>{% endif %}
+              {% if not item.order_label and not item.employee_name %}<span class="tuning-inbox-chip is-empty">не распределена</span>{% endif %}
+            </div>
+            {% if item.comment %}<p class="tuning-inbox-comment">{{ item.comment }}</p>{% endif %}
+          </div>
+          <div class="tuning-inbox-item-actions">
+            <button type="button" onclick="assignBacklogItem({{ item.id }})">Назначить</button>
+            <button type="button" class="btn-secondary" onclick="editBacklogItem({{ item.id }})">Изменить</button>
+            <form method="post" action="{{ url_for('tuning_schedule.delete_backlog', item_id=item.id) }}" data-ajax-task-form data-reopen-inbox>
+              <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
+              <button type="submit" class="btn-secondary" aria-label="Удалить задачу «{{ item.title }}»">Удалить</button>
+            </form>
+          </div>
+        </article>
+        {% else %}
+        <p class="hint">Пока пусто. Впишите задачи выше — исполнителя, проект и время можно назначить позже.</p>
+        {% endfor %}
+      </div>
+
+      <form method="post" class="tuning-inbox-edit" id="tuningInboxEditForm" data-ajax-task-form data-reopen-inbox hidden>
+        <div class="alert task-form-error" role="alert" hidden></div>
+        <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
+        <h3>Изменить задачу</h3>
+        <label class="quick-task-field"><span>Название</span>
+          <input type="text" name="title" id="inboxEditTitle" maxlength="200" required>
+        </label>
+        <div class="quick-task-field"><span>Проект <small>необязательно</small></span>
+          {{ order_picker('inboxEditOrder', 'Без проекта — введите номер, чтобы найти') }}
+        </div>
+        <div class="tuning-inbox-more-grid">
+          <label class="quick-task-field"><span>Исполнитель</span>
+            <select name="employee_name" id="inboxEditEmployee">
+              <option value="">Не выбран</option>
+              {% for employee in editor_employees %}<option value="{{ employee.name }}">{{ employee.name }}</option>{% endfor %}
+            </select>
+          </label>
+          <label class="quick-task-field"><span>Оценка, ч</span>
+            <input type="text" inputmode="decimal" name="est_hours" id="inboxEditHours">
+          </label>
+        </div>
+        <label class="quick-task-field"><span>Комментарий</span>
+          <textarea name="comment" id="inboxEditComment" rows="2" maxlength="2000"></textarea>
+        </label>
+        <div class="quick-task-actions">
+          <button type="submit">Сохранить</button>
+          <button type="button" class="btn-secondary" onclick="closeBacklogEdit()">Отмена</button>
+        </div>
+      </form>
+      <p class="hint">«Назначить» откроет окно задачи на {{ day_label }}: выберите сотрудника из смены, время и ставку. Для другого дня сначала перейдите на нужную дату.</p>
+    </div>
+  </section>
+</div>
+
 <div class="schedule-modal" id="quickTaskModal" hidden>
   <div class="schedule-modal-backdrop" data-quick-close></div>
   <section class="schedule-modal-card quick-task-card" role="dialog" aria-modal="true" aria-labelledby="quickTaskTitle">
@@ -451,6 +556,7 @@
       <div class="alert task-form-error quick-task-wide" role="alert" hidden></div>
       <input type="hidden" name="return_date" value="{{ day.isoformat() }}">
       <input type="hidden" name="work_date[]" value="{{ day.isoformat() }}">
+      <input type="hidden" name="backlog_id" id="quickTaskBacklogId" value="">
 
       <div class="quick-task-column">
       <label class="quick-task-field"><span>Сотрудник</span>
@@ -498,7 +604,7 @@
       </div>
 
       <label class="quick-task-field quick-task-wide"><span>Комментарий</span>
-        <textarea name="comment" rows="2" maxlength="2000"></textarea>
+        <textarea name="comment" id="quickTaskComment" rows="2" maxlength="2000"></textarea>
       </label>
 
       <div class="quick-task-actions quick-task-wide">
@@ -963,7 +1069,10 @@ document.querySelectorAll('form[data-ajax-task-form]').forEach(function (form) {
       return response.json().then(function (data) { return {ok: response.ok, data: data}; });
     }).then(function (result) {
       if (result.ok && result.data && result.data.ok) {
-        window.location.href = result.data.redirect || window.location.href;
+        var target = result.data.redirect || window.location.href;
+        if (form.hasAttribute('data-reopen-inbox')) target = target.split('#')[0] + '#inbox';
+        window.location.href = target;
+        if (form.hasAttribute('data-reopen-inbox') && target.split('#')[0] === window.location.href.split('#')[0]) window.location.reload();
         return;
       }
       showTaskFormError(form, (result.data && result.data.message) || 'Не удалось сохранить задачу.');
@@ -975,6 +1084,72 @@ document.querySelectorAll('form[data-ajax-task-form]').forEach(function (form) {
   });
 });
 
+// «Входящие»: tasks noted down before anyone / any day is chosen.
+var TUNING_BACKLOG = {{ backlog|tojson }};
+var TUNING_BACKLOG_URL = {{ url_for('tuning_schedule.add_backlog')|tojson }};
+
+function openTuningInbox() {
+  document.getElementById('tuningInboxModal').hidden = false;
+  document.body.classList.add('schedule-modal-open');
+}
+
+function closeTuningInbox() {
+  document.getElementById('tuningInboxModal').hidden = true;
+  document.body.classList.remove('schedule-modal-open');
+  closeBacklogEdit();
+}
+
+function findBacklogItem(id) {
+  return TUNING_BACKLOG.filter(function (item) { return item.id === id; })[0] || null;
+}
+
+function assignBacklogItem(id) {
+  var item = findBacklogItem(id);
+  if (!item) return;
+  closeTuningInbox();
+  openQuickTask(item.employee_name || '', 540);
+  document.getElementById('quickTaskBacklogId').value = String(item.id);
+  document.getElementById('quickTaskName').value = item.title;
+  document.getElementById('quickTaskComment').value = item.comment || '';
+  if (item.est_hours) document.getElementById('quickTaskHours').value = String(item.est_hours);
+  if (item.order_id) {
+    setOrderPicker('quickTaskOrder', String(item.order_id));
+    loadQuickTaskWorks(String(item.order_id));
+  }
+  updateQuickTaskRate();
+}
+
+function editBacklogItem(id) {
+  var item = findBacklogItem(id);
+  if (!item) return;
+  var form = document.getElementById('tuningInboxEditForm');
+  clearTaskFormError(form);
+  form.action = TUNING_BACKLOG_URL + '/' + item.id + '/update';
+  document.getElementById('inboxEditTitle').value = item.title;
+  document.getElementById('inboxEditEmployee').value = item.employee_name || '';
+  document.getElementById('inboxEditHours').value = item.est_hours || '';
+  document.getElementById('inboxEditComment').value = item.comment || '';
+  setOrderPicker('inboxEditOrder', item.order_id ? String(item.order_id) : '');
+  form.hidden = false;
+  form.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+  document.getElementById('inboxEditTitle').focus();
+}
+
+function closeBacklogEdit() {
+  var form = document.getElementById('tuningInboxEditForm');
+  if (form) form.hidden = true;
+}
+
+document.addEventListener('keydown', function (event) {
+  var modal = document.getElementById('tuningInboxModal');
+  if (event.key === 'Escape' && modal && !modal.hidden) closeTuningInbox();
+});
+
+if (window.location.hash === '#inbox') {
+  openTuningInbox();
+  history.replaceState(null, '', window.location.pathname + window.location.search);
+}
+
 function openQuickTask(employeeName, startMinutes) {
   var modal = document.getElementById('quickTaskModal');
   clearTaskFormError(document.getElementById('quickTaskForm'));
@@ -985,6 +1160,8 @@ function openQuickTask(employeeName, startMinutes) {
   document.getElementById('quickTaskRate').value = '';
   setOrderPicker('quickTaskOrder', '');
   document.getElementById('quickTaskName').value = '';
+  document.getElementById('quickTaskBacklogId').value = '';
+  document.getElementById('quickTaskComment').value = '';
   loadQuickTaskWorks('');
   clearExtraPeople('quickTaskExtraRows');
   updateQuickTaskRate();

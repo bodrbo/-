@@ -97,3 +97,21 @@ def init_schema(conn):
         "CREATE INDEX IF NOT EXISTS idx_tuning_schedule_tasks_assignment "
         "ON tuning_schedule_tasks(assignment_id)"
     )
+    # "Входящие": tasks jotted down before anyone is chosen or a day is set.
+    # Deliberately NOT tuning_schedule_tasks — those need an employee, a rate
+    # and a day, and payroll/calendar/reminders all rely on that. A draft
+    # turns into a real task (and is deleted) when it is placed on the calendar.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tuning_schedule_backlog (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            comment TEXT NOT NULL DEFAULT '',
+            order_id INTEGER,
+            employee_name TEXT,
+            est_hours REAL,
+            sort INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )
+        """
+    )

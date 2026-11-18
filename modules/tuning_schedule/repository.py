@@ -500,3 +500,44 @@ def list_order_work_items(db, order_id):
         "WHERE order_id = ? AND status != 'removed' ORDER BY position, id",
         (order_id,),
     ).fetchall()
+
+
+def list_backlog(db):
+    return db.execute(
+        "SELECT * FROM tuning_schedule_backlog ORDER BY sort, id"
+    ).fetchall()
+
+
+def count_backlog(db):
+    return db.execute("SELECT COUNT(*) FROM tuning_schedule_backlog").fetchone()[0]
+
+
+def get_backlog_item(db, item_id):
+    return db.execute(
+        "SELECT * FROM tuning_schedule_backlog WHERE id = ?", (item_id,)
+    ).fetchone()
+
+
+def add_backlog_item(db, title, comment, order_id, employee_name, est_hours, created_at):
+    next_sort = db.execute(
+        "SELECT COALESCE(MAX(sort), 0) + 1 FROM tuning_schedule_backlog"
+    ).fetchone()[0]
+    db.execute(
+        "INSERT INTO tuning_schedule_backlog "
+        "(title, comment, order_id, employee_name, est_hours, sort, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (title, comment, order_id, employee_name, est_hours, next_sort, created_at),
+    )
+
+
+def update_backlog_item(db, item_id, title, comment, order_id, employee_name, est_hours):
+    db.execute(
+        "UPDATE tuning_schedule_backlog "
+        "SET title = ?, comment = ?, order_id = ?, employee_name = ?, est_hours = ? WHERE id = ?",
+        (title, comment, order_id, employee_name, est_hours, item_id),
+    )
+
+
+def delete_backlog_item(db, item_id):
+    cursor = db.execute("DELETE FROM tuning_schedule_backlog WHERE id = ?", (item_id,))
+    return cursor.rowcount > 0

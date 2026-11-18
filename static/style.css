@@ -12518,6 +12518,47 @@ button.partner-open-price-save svg {
   .goods-add-form .field-submit label { display: none; }
 }
 
+/* Расписание тюнинга: «Входящие» — задачи до назначения исполнителя и времени */
+.tuning-calendar-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tuning-inbox-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: 44px; padding: 0 12px; border: 1px solid var(--hairline); border-radius: 11px;
+  background: var(--paper); color: var(--ink-soft); font-weight: 700; cursor: pointer;
+}
+.tuning-inbox-button:hover { border-color: var(--brass); color: var(--brass-strong); }
+.tuning-inbox-button:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.tuning-inbox-button svg { width: 18px; height: 18px; }
+.tuning-inbox-button b {
+  display: inline-grid; place-items: center; min-width: 21px; height: 21px; padding: 0 6px;
+  border-radius: 999px; background: var(--brass); color: #fff; font-size: 12px;
+}
+.tuning-inbox-card { width: min(720px, 100%); }
+.tuning-inbox-body { display: grid; gap: 14px; padding: 16px 18px 18px; overflow-y: auto; max-height: calc(94vh - 90px); }
+.tuning-inbox-add, .tuning-inbox-edit { display: grid; gap: 10px; }
+.tuning-inbox-add > button { justify-self: start; }
+.tuning-inbox-more summary { cursor: pointer; color: var(--ink-soft); font-size: 13px; font-weight: 600; }
+.tuning-inbox-more-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-top: 10px; }
+.tuning-inbox-list { display: grid; gap: 8px; }
+.tuning-inbox-item {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 10px 12px; border: 1px solid var(--hairline); border-radius: 12px; background: var(--paper);
+}
+.tuning-inbox-item-main { min-width: 0; display: grid; gap: 6px; }
+.tuning-inbox-item-main strong { overflow-wrap: anywhere; }
+.tuning-inbox-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.tuning-inbox-chip { padding: 2px 8px; border-radius: 999px; background: #eaf5fd; color: #1f5c85; font-size: 12px; font-weight: 600; }
+.tuning-inbox-chip.is-empty { background: #f1efe9; color: var(--ink-soft); font-weight: 500; }
+.tuning-inbox-comment { margin: 0; color: var(--ink-soft); font-size: 13px; white-space: pre-wrap; }
+.tuning-inbox-item-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; flex: none; }
+.tuning-inbox-item-actions form { margin: 0; }
+.tuning-inbox-item-actions button { min-height: 36px; padding: 0 12px; font-size: 13px; }
+.tuning-inbox-edit { padding: 12px; border: 1px dashed var(--brass); border-radius: 12px; }
+.tuning-inbox-edit h3 { margin: 0; font-size: 15px; }
+@media (max-width: 640px) {
+  .tuning-inbox-item { flex-direction: column; }
+  .tuning-inbox-item-actions { justify-content: flex-start; }
+}
+
 /* Личные кабинеты клиента и партнёра: на всю ширину экрана и без блоков
    внутри блоков. Заказы — это сами карточки (без общей рамки вокруг них),
    «Доходность» — полоса показателей без вложенных карточек, а внутри

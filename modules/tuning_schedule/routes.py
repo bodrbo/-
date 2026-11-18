@@ -71,6 +71,7 @@ def create_tuning_schedule_blueprint(
         for employee in context["crew"]:
             employee["avatar_url"] = avatar_url(employee["name"])
         calendar = services.calendar_view(db, day, context["day_crew"])
+        linkable_orders = repository.list_linkable_orders(db)
         return render_template(
             "schedule/tuning_index.html",
             **context,
@@ -82,7 +83,8 @@ def create_tuning_schedule_blueprint(
             previous_day=(day - dt.timedelta(days=1)).isoformat(),
             next_day=(day + dt.timedelta(days=1)).isoformat(),
             today=dt.date.today().isoformat(),
-            linkable_orders=repository.list_linkable_orders(db),
+            linkable_orders=linkable_orders,
+            backlog=services.backlog_view(db, linkable_orders),
             order_status_labels=order_status_labels or {},
             reminder_recipients=reminder_recipients(db) if reminder_recipients else [],
             editor_employees=[
@@ -201,6 +203,36 @@ def create_tuning_schedule_blueprint(
                 db, employee_name, title, rate, comment, day_rows, project_id,
                 extras=services.collect_extra_participants(request.form),
             )
+        if success:
+            # a task placed from «Входящие» leaves the inbox
+            backlog_id = request.form.get("backlog_id", "").strip()
+            if backlog_id.isdigit():
+                services.delete_backlog_item(db, int(backlog_id))
+        return respond(success, message, day)
+
+    @blueprint.route("/schedule/tuning/backlog", methods=["POST"])
+    @manage_required
+    def add_backlog():
+        day = services.parse_day(request.form.get("return_date")).isoformat()
+        success, message = services.add_backlog_items(
+            get_db(), request.form.get("titles"), request.form.get("order_id"),
+            request.form.get("employee_name"), request.form.get("est_hours"),
+            request.form.get("comment"),
+        )
+        return respond(success, message, day)
+
+    @blueprint.route("/schedule/tuning/backlog/<int:item_id>/update", methods=["POST"])
+    @manage_required
+    def update_backlog(item_id):
+        day = services.parse_day(request.form.get("return_date")).isoformat()
+        success, message = services.update_backlog_item(get_db(), item_id, request.form)
+        return respond(success, message, day)
+
+    @blueprint.route("/schedule/tuning/backlog/<int:item_id>/delete", methods=["POST"])
+    @manage_required
+    def delete_backlog(item_id):
+        day = services.parse_day(request.form.get("return_date")).isoformat()
+        success, message = services.delete_backlog_item(get_db(), item_id)
         return respond(success, message, day)
 
     @blueprint.route("/schedule/tuning/tasks/<int:task_id>/days", methods=["POST"])

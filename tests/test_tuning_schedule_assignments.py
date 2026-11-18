@@ -1224,7 +1224,7 @@ class TuningScheduleQuickTaskTests(_TuningScheduleFixture, unittest.TestCase):
         self.assertNotIn("Отменён", options)
         self.assertIn("Выполнен, передан", options)
         self.assertIn(f'data-search="{self.order_id} №{self.order_id} ', options)   # the number leads the search text
-        self.assertEqual(page.count('<div class="combo-field" data-order-combo'), 3)   # add form, quick window, task window
+        self.assertEqual(page.count('<div class="combo-field" data-order-combo'), 5)   # add form, quick window, task window, inbox add + edit
         self.assertIn('data-combo-recent="12"', page)
         self.assertNotIn('<select name="order_id"', page)
 

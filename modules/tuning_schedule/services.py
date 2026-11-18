@@ -1173,3 +1173,115 @@ def delete_task(db, task_id, revoke_order_assignment):
     repository.delete_task_reminders(db, task_id)
     repository.delete_task(db, task_id)
     return True, f"Задача «{task['title']}» удалена."
+
+
+# --- «Входящие»: tasks noted down before anyone / any day is chosen ---------
+
+MAX_BACKLOG_ITEMS = 500
+MAX_BACKLOG_BATCH = 50
+
+
+def _clean_backlog_hours(raw_hours, errors):
+    text = str(raw_hours or "").strip().replace(",", ".")
+    if not text:
+        return None
+    try:
+        hours = float(text)
+    except ValueError:
+        errors.append("Оценка в часах — число.")
+        return None
+    if not math.isfinite(hours) or hours <= 0 or hours > MAX_DAY_HOURS * 5:
+        errors.append("Оценка в часах — от нуля до %d." % (MAX_DAY_HOURS * 5))
+        return None
+    return round(hours, 2)
+
+
+def _clean_backlog_links(db, raw_order_id, raw_employee, errors):
+    """The optional project and person of a draft (None when left empty)."""
+    order_id = None
+    raw_order_id = str(raw_order_id or "").strip()
+    if raw_order_id:
+        try:
+            order_id = int(raw_order_id)
+        except ValueError:
+            order_id = None
+        if order_id is None or repository.get_linkable_order(db, order_id) is None:
+            errors.append("Проект не найден или отменён.")
+            order_id = None
+    employee_name = _normalise_text(raw_employee, EMPLOYEE_NAME_MAX_LENGTH) or None
+    if employee_name:
+        eligible = {e["name"] for e in repository.list_tuning_crew_employees(db)}
+        if employee_name not in eligible:
+            errors.append("Выберите сотрудника из списка тюнингмэнов.")
+            employee_name = None
+    return order_id, employee_name
+
+
+def add_backlog_items(db, raw_titles, raw_order_id="", raw_employee="", raw_hours="", raw_comment=""):
+    """One task per non-empty line; the optional project / person / hours /
+    comment apply to every line added. Returns (success, message)."""
+    errors = []
+    titles = [line.strip() for line in str(raw_titles or "").splitlines() if line.strip()]
+    if not titles:
+        return False, "Впишите название задачи (одна задача — одна строка)."
+    if len(titles) > MAX_BACKLOG_BATCH:
+        return False, "За раз можно добавить не больше %d задач." % MAX_BACKLOG_BATCH
+    if any(len(title) > TASK_TITLE_MAX_LENGTH for title in titles):
+        return False, "Название задачи — не длиннее %d символов." % TASK_TITLE_MAX_LENGTH
+    if repository.count_backlog(db) + len(titles) > MAX_BACKLOG_ITEMS:
+        return False, "Во «Входящих» слишком много задач — разберите накопившиеся."
+    comment = _normalise_text(raw_comment, COMMENT_MAX_LENGTH)
+    order_id, employee_name = _clean_backlog_links(db, raw_order_id, raw_employee, errors)
+    hours = _clean_backlog_hours(raw_hours, errors)
+    if errors:
+        return False, " ".join(errors)
+    created_at = current_timestamp()
+    for title in titles:
+        repository.add_backlog_item(db, title, comment, order_id, employee_name, hours, created_at)
+    db.commit()
+    if len(titles) == 1:
+        return True, "Задача добавлена во «Входящие»."
+    return True, "Добавлено задач во «Входящие»: %d." % len(titles)
+
+
+def update_backlog_item(db, item_id, form):
+    if repository.get_backlog_item(db, item_id) is None:
+        return False, "Задача не найдена — возможно, её уже назначили."
+    errors = []
+    title = _normalise_text(form.get("title"), TASK_TITLE_MAX_LENGTH)
+    if not title:
+        errors.append("Укажите название задачи.")
+    comment = _normalise_text(form.get("comment"), COMMENT_MAX_LENGTH)
+    order_id, employee_name = _clean_backlog_links(
+        db, form.get("order_id"), form.get("employee_name"), errors
+    )
+    hours = _clean_backlog_hours(form.get("est_hours"), errors)
+    if errors:
+        return False, " ".join(errors)
+    repository.update_backlog_item(db, item_id, title, comment, order_id, employee_name, hours)
+    db.commit()
+    return True, "Задача обновлена."
+
+
+def delete_backlog_item(db, item_id):
+    deleted = repository.delete_backlog_item(db, item_id)
+    db.commit()
+    return (True, "Задача удалена из «Входящих».") if deleted else (False, "Задача не найдена.")
+
+
+def backlog_view(db, orders):
+    """The inbox for the page: each draft with its project's label."""
+    labels = {}
+    for order in orders:
+        model = order["motor_model"] if order["equipment_type"] == "motor" else order["boat_model"]
+        labels[order["id"]] = "№%s — %s%s" % (
+            order["id"], order["client_name"], " (%s)" % model if model else "",
+        )
+    items = []
+    for row in repository.list_backlog(db):
+        item = dict(row)
+        item["order_label"] = labels.get(item["order_id"], "") if item["order_id"] else ""
+        if item["order_id"] and not item["order_label"]:
+            item["order_label"] = "№%s" % item["order_id"]  # cancelled since
+        items.append(item)
+    return items
