@@ -590,7 +590,20 @@
               </form>
               {% endif %}
             </td>
-            <td class="amount">{{ g.quantity|float|round(2) }} {{ cost_units|selectattr('value', 'equalto', g.unit)|map(attribute='label')|first }}</td>
+            <td class="amount">
+              <form action="{{ url_for('set_tuning_order_product_quantity', order_id=edit_order.id, row_id=g.id) }}"
+                    method="post" class="goods-price-form goods-qty-form">
+                <input type="text" inputmode="decimal" name="quantity" value="{{ '%g' % (g.quantity|float|round(3)) }}"
+                       class="goods-price-input goods-qty-input" aria-label="Количество" title="Количество товара в этом заказе"
+                       required>
+                <span class="goods-qty-unit">{{ cost_units|selectattr('value', 'equalto', g.unit)|map(attribute='label')|first }}</span>
+                <button type="submit" class="icon-btn approve" title="Сохранить количество">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 10.5l4 4 8-9"/>
+                  </svg>
+                </button>
+              </form>
+            </td>
             <td class="amount">
               <form action="{{ url_for('set_tuning_order_product_price', order_id=edit_order.id, row_id=g.id) }}"
                     method="post" class="goods-price-form">

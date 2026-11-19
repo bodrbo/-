@@ -15585,6 +15585,69 @@ def set_tuning_order_product_price(order_id, row_id):
     return redirect(url_for("edit_tuning_order", order_id=order_id) + "#goods")
 
 
+@app.route("/tuning/<int:order_id>/products/<int:row_id>/quantity", methods=["POST"])
+@admin_login_required
+def set_tuning_order_product_quantity(order_id, row_id):
+    """Changes the quantity of one goods line after it was added. A line
+    already written off its warehouse takes the difference from (or gives
+    it back to) the same warehouse, so the stock always matches the order."""
+    db = get_db()
+    line = db.execute(
+        "SELECT * FROM tuning_order_products WHERE id = ? AND order_id = ?", (row_id, order_id)
+    ).fetchone()
+    back = url_for("edit_tuning_order", order_id=order_id) + "#goods"
+    if line is None:
+        return redirect(url_for("edit_tuning_order", order_id=order_id))
+    raw = request.form.get("quantity", "").strip().replace(",", ".").replace(" ", "")
+    try:
+        quantity = float(raw)
+        if quantity <= 0 or quantity != quantity or quantity == float("inf"):
+            raise ValueError
+    except ValueError:
+        session["tuning_goods_error"] = "Количество должно быть числом больше нуля."
+        return redirect(back)
+    quantity = round(quantity, 3)
+
+    writeoff = db.execute(
+        "SELECT * FROM supply_writeoffs WHERE tuning_order_product_id = ?", (row_id,)
+    ).fetchone()
+    if writeoff is not None:
+        delta = quantity - writeoff["quantity"]
+        stock = db.execute(
+            "SELECT ss.*, sw.name AS warehouse_name FROM supply_stock ss "
+            "JOIN supply_warehouses sw ON sw.id = ss.warehouse_id "
+            "WHERE ss.product_id = ? AND ss.warehouse_id = ?",
+            (writeoff["product_id"], writeoff["warehouse_id"]),
+        ).fetchone()
+        if delta > 1e-9 and (stock is None or stock["quantity"] < delta - 1e-9):
+            have = stock["quantity"] if stock is not None else 0
+            warehouse_name = stock["warehouse_name"] if stock is not None else "—"
+            session["tuning_goods_error"] = (
+                f"Количество «{line['product_name']}» не изменено: товар уже списан, "
+                f"а на складе «{warehouse_name}» осталось {have:g}, нужно ещё {delta:g}."
+            )
+            return redirect(back)
+        if stock is not None:
+            db.execute("UPDATE supply_stock SET quantity = quantity - ? WHERE id = ?", (delta, stock["id"]))
+        else:  # giving back to a warehouse that lost its stock row
+            db.execute(
+                "INSERT INTO supply_stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)",
+                (writeoff["product_id"], writeoff["warehouse_id"], -delta),
+            )
+        cost_price = writeoff["cost_price"] if writeoff["cost_price"] is not None else 0
+        db.execute(
+            "UPDATE supply_writeoffs SET quantity = ?, amount = ? WHERE id = ?",
+            (quantity, quantity * cost_price, writeoff["id"]),
+        )
+    db.execute("UPDATE tuning_order_products SET quantity = ? WHERE id = ?", (quantity, row_id))
+    db.commit()
+    if writeoff is not None and quantity > writeoff["quantity"]:
+        _maybe_create_low_stock_request(db, writeoff["product_id"])
+    _recompute_order_totals(db, order_id)
+    session["tuning_goods_notice"] = "Количество товара в заказе обновлено."
+    return redirect(back)
+
+
 def _parse_goods_discount(raw_value, raw_type, price):
     """A goods line's discount as typed -> (error, type, value). Empty or zero
     means no discount. A percent is 0-100; rubles are taken off one unit."""
