@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Бодрый Боцман — иконка приложения</title>
+  <desc id="desc">Короткий знак «ББ» белого цвета с оранжевыми носами катеров на тёмно-синем фоне.</desc>
+  <rect width="512" height="512" fill="#06243D"/>
+  <g transform="translate(28 140) scale(.61)">
+    <path fill="#FFFFFF" fill-rule="evenodd" d="M102 24H382L362 93H187L174 155H227C309 155 370 192 370 246L312 255C289 226 272 211 242 211H161L140 284L29 305L102 24Z"/>
+    <path fill="#FFFFFF" fill-rule="evenodd" d="M28 321 368 262 278 355H24L28 321Z"/>
+    <path fill="#F58213" fill-rule="evenodd" d="M330 269 368 262 278 355 330 269Z"/>
+    <path fill="#FFFFFF" fill-rule="evenodd" d="M442 24H722L702 93H527L514 155H567C649 155 710 192 710 246L652 255C629 226 612 211 582 211H501L480 284L369 305L442 24Z"/>
+    <path fill="#FFFFFF" fill-rule="evenodd" d="M368 321 708 262 618 355H364L368 321Z"/>
+    <path fill="#F58213" fill-rule="evenodd" d="M670 269 708 262 618 355 670 269Z"/>
+  </g>
+</svg>

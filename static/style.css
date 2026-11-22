@@ -2130,7 +2130,7 @@ h1, h2, h3 { font-family: 'Open Sans', -apple-system, sans-serif; }
 .topbar-top-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .brand { display: flex; align-items: center; }
 .brand a { display: inline-flex; align-items: center; text-decoration: none; }
-.brand-logo { display: block; height: 58px; width: auto; max-width: min(360px, 52vw); object-fit: contain; }
+.brand-logo { display: block; height: 58px; width: auto; max-width: min(460px, 64vw); object-fit: contain; }
 /* The client cabinet is the one page a person can land on with zero prior
    context (a bare link, no login) — give the brand a bit more presence
    there than in the internal admin/investor/team screens. */
