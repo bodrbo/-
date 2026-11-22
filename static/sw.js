@@ -1,4 +1,4 @@
-var SHELL_CACHE = "bodry-offline-shell-v3";
+var SHELL_CACHE = "bodry-offline-shell-v4";
 var PAGE_CACHE = "bodry-offline-pages-v1";
 var DOCUMENT_CACHE = "bodry-offline-documents-v1";
 var DB_NAME = "bodry-offline-v1";

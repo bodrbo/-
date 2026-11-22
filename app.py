@@ -8422,10 +8422,12 @@ def _build_modulkassa_receipt_pdf(receipt):
     )
 
     logo_path = os.path.join(app.static_folder, "logo-act.png")
-    logo = Image(logo_path, width=132, height=132 * 230 / 836)
-    logo.hAlign = "CENTER"
-    flow = [
-        logo,
+    logo = _scaled_logo_flowable(logo_path, 132, 132 * 230 / 836)
+    flow = []
+    if logo is not None:
+        logo.hAlign = "CENTER"
+        flow.append(logo)
+    flow.extend([
         Spacer(1, 10),
         Paragraph(safe(COMPANY_NAME), center),
         Paragraph(safe(COMPANY_ADDRESS), center),
@@ -8433,7 +8435,7 @@ def _build_modulkassa_receipt_pdf(receipt):
         Paragraph(safe(data.get("doc_title") or "Кассовый чек"), title),
         Paragraph(safe(data.get("doc_subtitle") or "Электронная копия данных фискализации"), subtitle),
         Spacer(1, 18),
-    ]
+    ])
 
     check_type = str(fiscal_info.get("checkType") or "SALE").upper()
     check_type_label = {
