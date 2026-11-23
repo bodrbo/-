@@ -8278,6 +8278,13 @@ def _scaled_logo_flowable(logo_path, max_width, max_height):
     return Image(logo_path, width=width * scale, height=height * scale)
 
 
+# The approved two-line combined lockup is taller than the previous one-line
+# wordmark. Give it a little more room in printed documents while retaining a
+# hard bounding box for tenant-uploaded logos of arbitrary proportions.
+_DOCUMENT_LOGO_MAX_WIDTH = 145
+_DOCUMENT_LOGO_MAX_HEIGHT = 58
+
+
 COMPANY_NAME = 'ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "БОДРЫЙ БОЦМАН"'
 COMPANY_ADDRESS = "197762, Россия, г Санкт-Петербург, г Кронштадт, ул Мануильского, 20 литера а, 2"
 
@@ -8422,7 +8429,9 @@ def _build_modulkassa_receipt_pdf(receipt):
     )
 
     logo_path = os.path.join(app.static_folder, "logo-act.png")
-    logo = _scaled_logo_flowable(logo_path, 132, 132 * 230 / 836)
+    logo = _scaled_logo_flowable(
+        logo_path, _DOCUMENT_LOGO_MAX_WIDTH, _DOCUMENT_LOGO_MAX_HEIGHT
+    )
     flow = []
     if logo is not None:
         logo.hAlign = "CENTER"
@@ -8712,8 +8721,9 @@ def _build_act_pdf(order, items, goods=()):
         order_date = _order_business_date(order)
 
     flow = []
-    logo_w = 130
-    logo_flowable = _scaled_logo_flowable(_document_logo_path(), logo_w, logo_w * 230 / 836)
+    logo_flowable = _scaled_logo_flowable(
+        _document_logo_path(), _DOCUMENT_LOGO_MAX_WIDTH, _DOCUMENT_LOGO_MAX_HEIGHT
+    )
     if logo_flowable is not None:
         flow.append(logo_flowable)
     flow.append(Spacer(1, 12))
@@ -8907,8 +8917,9 @@ def _build_handover_act_pdf(order, items, goods=()):
         order_date = _order_business_date(order)
 
     flow = []
-    logo_w = 130
-    logo_flowable = _scaled_logo_flowable(_document_logo_path(), logo_w, logo_w * 230 / 836)
+    logo_flowable = _scaled_logo_flowable(
+        _document_logo_path(), _DOCUMENT_LOGO_MAX_WIDTH, _DOCUMENT_LOGO_MAX_HEIGHT
+    )
     if logo_flowable is not None:
         flow.append(logo_flowable)
     flow.append(Spacer(1, 12))
@@ -9050,8 +9061,9 @@ def _build_estimate_pdf(order, items, goods=()):
         order_date = _order_business_date(order)
 
     flow = []
-    logo_w = 130
-    logo_flowable = _scaled_logo_flowable(_document_logo_path(), logo_w, logo_w * 230 / 836)
+    logo_flowable = _scaled_logo_flowable(
+        _document_logo_path(), _DOCUMENT_LOGO_MAX_WIDTH, _DOCUMENT_LOGO_MAX_HEIGHT
+    )
     if logo_flowable is not None:
         flow.append(logo_flowable)
     flow.append(Spacer(1, 12))

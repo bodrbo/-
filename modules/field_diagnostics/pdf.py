@@ -170,7 +170,10 @@ def build_diagnostic_pdf(sheet, answers, inspection_label, fonts_dir,
         # artwork already includes the logo and website address, so keeping
         # it as one image preserves the brand proportions exactly.
         logo_path = os.path.join(os.path.dirname(fonts_dir), "logo-act.png")
-    logo_width = 130
+    # The current combined brand lockup is two lines and intentionally a bit
+    # larger than the previous one-line document header.
+    logo_width = 145
+    logo_max_height = 58
     logo_flowable = None
     if logo_path and os.path.isfile(logo_path):
         try:
@@ -178,7 +181,6 @@ def build_diagnostic_pdf(sheet, answers, inspection_label, fonts_dir,
         except Exception:
             actual_width = actual_height = None
         if actual_width and actual_height:
-            logo_max_height = logo_width * 230 / 836
             scale = min(logo_width / actual_width, logo_max_height / actual_height)
             logo_flowable = Image(
                 logo_path, width=actual_width * scale, height=actual_height * scale
