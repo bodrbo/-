@@ -8275,7 +8275,9 @@ def _scaled_logo_flowable(logo_path, max_width, max_height):
     except Exception:
         return None
     scale = min(max_width / width, max_height / height)
-    return Image(logo_path, width=width * scale, height=height * scale)
+    logo = Image(logo_path, width=width * scale, height=height * scale)
+    logo.hAlign = "LEFT"
+    return logo
 
 
 # The approved two-line combined lockup is taller than the previous one-line
@@ -8434,7 +8436,6 @@ def _build_modulkassa_receipt_pdf(receipt):
     )
     flow = []
     if logo is not None:
-        logo.hAlign = "CENTER"
         flow.append(logo)
     flow.extend([
         Spacer(1, 10),

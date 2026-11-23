@@ -185,6 +185,7 @@ def build_diagnostic_pdf(sheet, answers, inspection_label, fonts_dir,
             logo_flowable = Image(
                 logo_path, width=actual_width * scale, height=actual_height * scale
             )
+            logo_flowable.hAlign = "LEFT"
     story = []
     if logo_flowable is not None:
         story.append(logo_flowable)

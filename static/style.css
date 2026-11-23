@@ -12849,12 +12849,14 @@ button.partner-open-price-save svg {
 #goods .goods-qty-form input.goods-qty-input { width: 64px; }
 #goods .goods-qty-unit { font-size: 13px; color: var(--ink-soft); white-space: nowrap; }
 
-/* The full one-line wordmark is intentionally quieter on desktop so the
-   current section remains the primary header landmark. Mobile sizing stays
-   unchanged. */
+/* On desktop the header spans a much wider workspace than the page content.
+   Keep the brand close to the workspace's left edge instead of centring the
+   entire header row inside the old 1080px content column. Mobile sizing and
+   positioning stay unchanged. */
 @media (min-width: 1101px) {
-  .topbar:not(.schedule-topbar) .brand-logo:not(.brand-logo-large) { height: 39px; }
-  .topbar .brand-logo-large { height: 51px; }
-  .schedule-topbar .brand-logo { height: 27px; }
-  body.has-admin-sidebar .topbar:not(.schedule-topbar) .brand-logo:not(.brand-logo-large) { height: 33px; }
+  .topbar .topbar-inner { max-width: none; margin-right: 0; margin-left: 0; }
+  .topbar:not(.schedule-topbar) .brand-logo:not(.brand-logo-large) { height: 52px; }
+  .topbar .brand-logo-large { height: 68px; }
+  .schedule-topbar .brand-logo { height: 38px; }
+  body.has-admin-sidebar .topbar:not(.schedule-topbar) .brand-logo:not(.brand-logo-large) { height: 52px; }
 }
