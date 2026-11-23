@@ -12848,3 +12848,13 @@ button.partner-open-price-save svg {
 /* Товары заказа: количество меняется прямо в таблице */
 #goods .goods-qty-form input.goods-qty-input { width: 64px; }
 #goods .goods-qty-unit { font-size: 13px; color: var(--ink-soft); white-space: nowrap; }
+
+/* The full one-line wordmark is intentionally quieter on desktop so the
+   current section remains the primary header landmark. Mobile sizing stays
+   unchanged. */
+@media (min-width: 1101px) {
+  .topbar:not(.schedule-topbar) .brand-logo:not(.brand-logo-large) { height: 39px; }
+  .topbar .brand-logo-large { height: 51px; }
+  .schedule-topbar .brand-logo { height: 27px; }
+  body.has-admin-sidebar .topbar:not(.schedule-topbar) .brand-logo:not(.brand-logo-large) { height: 33px; }
+}
