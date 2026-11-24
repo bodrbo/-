@@ -1342,6 +1342,20 @@ def update_task(db, task_id, form, hooks):
         repository.replace_task_members(db, task_id, extras)
         for name, _extra_rate, extra_hours in extras:
             added_days += _ensure_on_roster(db, name, person_days(clean_days, extra_hours))
+    if not linked:
+        # Existing accruals must follow edits to the calendar's paid hours.
+        payout_day = task_payout_date(db, task_id)
+        payouts = [(task["entry_id"], rate, total_hours)]
+        for member in repository.list_task_members(db, task_id):
+            payouts.append((member["entry_id"], member["rate"],
+                            member["hours"] if member["hours"] is not None else total_hours))
+        for entry_id, payout_rate, payout_hours in payouts:
+            if entry_id:
+                db.execute(
+                    "UPDATE entries SET rate = ?, quantity = ?, amount = ?, work_date = COALESCE(?, work_date) WHERE id = ?",
+                    (payout_rate, payout_hours, payout_rate * payout_hours, payout_day, entry_id),
+                )
+        db.commit()
     if status != current_status:
         set_task_status(db, task_id, status, hooks["pay_free_task"], hooks["update_status"])
     elif not linked and current_status == "done":
