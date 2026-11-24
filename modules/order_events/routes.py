@@ -15,7 +15,7 @@ def create_order_events_blueprint(get_db, access_required, order_context, order_
     task_id) and delete_task(db, task_id) -> (ok, message) — the tuning
     schedule, injected from app.py. make_event_task (see
     services.add_event_task) enables "Создать задачу" under the events of a
-    tuning order."""
+    tuning or dealer order."""
     blueprint = Blueprint("order_events", __name__)
 
     def back(order_kind, order_id):
@@ -55,7 +55,7 @@ def create_order_events_blueprint(get_db, access_required, order_context, order_
         if event is None:
             return redirect("/")
         context = order_context(db, event["order_kind"], event["order_id"])
-        if make_event_task is None or context is None or event["order_kind"] != "tuning":
+        if make_event_task is None or context is None or event["order_kind"] not in ORDER_KINDS:
             return back(event["order_kind"], event["order_id"])
         ok, message = services.add_event_task(db, event_id, request.form, context, make_event_task)
         session["order_events_notice" if ok else "order_events_error"] = message

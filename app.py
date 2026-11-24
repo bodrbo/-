@@ -6591,7 +6591,7 @@ def _dealer_catalog_profile(db, kind, name, brand):
 
 def _order_events_panel(db, order_kind, order_id):
     hosts = [employee["name"] for employee in tuning_schedule_repository.list_tuning_crew_employees(db)]
-    tasks_enabled = order_kind == "tuning"
+    tasks_enabled = order_kind in ("tuning", "dealer")
     return order_events_panel_context(
         db, order_kind, order_id, hosts,
         recipients=_note_reminder_recipients(db) if tasks_enabled else None,
