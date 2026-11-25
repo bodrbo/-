@@ -12888,7 +12888,7 @@ button.partner-open-price-save svg {
 .tuning-task-status-menu button[aria-checked="true"] { color: var(--brass-strong); font-weight: 700; opacity: .7; cursor: default; }
 
 /* Work photo viewer: reserve space for captions within the viewport. */
-#photo-modal { box-sizing: border-box; overscroll-behavior: contain; }
+#photo-modal { box-sizing: border-box; overscroll-behavior: contain; padding-top: 40px; }
 #photo-modal .photo-modal-inner {
   display: flex; flex-direction: column; align-items: center;
   width: min(1100px, 100%); height: 100%; max-width: 100%; max-height: 100%;
@@ -12904,7 +12904,7 @@ button.partner-open-price-save svg {
   overscroll-behavior: contain;
 }
 @media (max-width: 560px) {
-  #photo-modal { padding: 28px 22px; }
+  #photo-modal { padding: 40px 22px 28px; }
   #photo-modal-comment { padding: 10px 12px; }
 }
 

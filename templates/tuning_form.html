@@ -1737,7 +1737,6 @@ function openCreateProductModal() {
   document.getElementById('create-product-to-catalog').checked = true;
   updateCreateProductHint();
   modal.classList.remove('hidden');
-  requestAnimationFrame(positionPhotoCloseButton);
 }
 
 function updateCreateProductHint() {
@@ -1783,8 +1782,8 @@ function positionPhotoCloseButton() {
   var width = image.naturalWidth * scale;
   var height = image.naturalHeight * scale;
   var close = modal.querySelector('.photo-modal-close');
-  close.style.left = (box.left - frame.left + (box.width + width) / 2 - close.offsetWidth - 4) + 'px';
-  close.style.top = (box.top - frame.top + (box.height - height) / 2 + 4) + 'px';
+  close.style.left = (box.left - frame.left + (box.width + width) / 2 - close.offsetWidth) + 'px';
+  close.style.top = (box.top - frame.top + (box.height - height) / 2 - close.offsetHeight - 4) + 'px';
 }
 var photoViewerImage = document.getElementById('photo-modal-img');
 photoViewerImage.addEventListener('load', positionPhotoCloseButton);
@@ -1806,6 +1805,7 @@ function openPhotoModal(photos) {
     document.body.style.overflow = 'hidden';
   }
   modal.classList.remove('hidden');
+  requestAnimationFrame(positionPhotoCloseButton);
 }
 
 function renderPhotoModal() {
