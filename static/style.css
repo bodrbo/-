@@ -12886,3 +12886,24 @@ button.partner-open-price-save svg {
 .tuning-task-status-menu button { display: block; width: 100%; padding: 9px 12px; text-align: left; background: transparent; color: var(--ink); border: 0; border-radius: 5px; box-shadow: none; cursor: pointer; }
 .tuning-task-status-menu button:hover, .tuning-task-status-menu button:focus-visible { background: var(--ink); color: var(--paper); }
 .tuning-task-status-menu button[aria-checked="true"] { color: var(--brass-strong); font-weight: 700; opacity: .7; cursor: default; }
+
+/* Work photo viewer: reserve space for captions within the viewport. */
+#photo-modal { box-sizing: border-box; overscroll-behavior: contain; }
+#photo-modal .photo-modal-inner {
+  display: flex; flex-direction: column; align-items: center;
+  width: min(1100px, 100%); height: 100%; max-width: 100%; max-height: 100%;
+  min-width: 0; min-height: 0;
+}
+#photo-modal-img {
+  flex: 1 1 0; min-height: 0; width: 100%; max-width: 100%; max-height: 100%;
+  object-fit: contain; box-shadow: none;
+}
+#photo-modal-comment {
+  flex: 0 1 auto; box-sizing: border-box; width: 100%; max-width: 100%;
+  max-height: 30%; min-height: 0; overflow-y: auto; overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+}
+@media (max-width: 560px) {
+  #photo-modal { padding: 28px 22px; }
+  #photo-modal-comment { padding: 10px 12px; }
+}

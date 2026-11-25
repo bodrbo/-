@@ -1768,12 +1768,21 @@ function removeAssignEmployeeRow(btn) {
 
 var photoModalPhotos = [];
 var photoModalIndex = 0;
+var photoModalScrollStyles = null;
 
 function openPhotoModal(photos) {
   photoModalPhotos = photos || [];
   photoModalIndex = 0;
   renderPhotoModal();
-  document.getElementById('photo-modal').classList.remove('hidden');
+  var modal = document.getElementById('photo-modal');
+  // Keep the fixed viewer outside any transformed page containers.
+  if (modal.parentElement !== document.body) document.body.appendChild(modal);
+  if (!photoModalScrollStyles) {
+    photoModalScrollStyles = [document.documentElement.style.overflow, document.body.style.overflow];
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+  }
+  modal.classList.remove('hidden');
 }
 
 function renderPhotoModal() {
@@ -1782,6 +1791,7 @@ function renderPhotoModal() {
   document.getElementById('photo-modal-img').src = photo.url;
 
   var commentEl = document.getElementById('photo-modal-comment');
+  commentEl.scrollTop = 0;
   if (photo.comment) {
     commentEl.textContent = photo.comment;
     commentEl.classList.remove('hidden');
@@ -1815,6 +1825,11 @@ function closePhotoModal() {
   document.getElementById('photo-modal').classList.add('hidden');
   document.getElementById('photo-modal-img').src = '';
   photoModalPhotos = [];
+  if (photoModalScrollStyles) {
+    document.documentElement.style.overflow = photoModalScrollStyles[0];
+    document.body.style.overflow = photoModalScrollStyles[1];
+    photoModalScrollStyles = null;
+  }
 }
 
 function openPhotoUploadModal(actionUrl) {
