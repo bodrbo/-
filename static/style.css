@@ -12932,3 +12932,28 @@ button.partner-open-price-save svg {
 @media (min-width: 1101px) {
   body.has-admin-sidebar #photo-modal { left: var(--admin-sidebar-width); }
 }
+
+/* Orders use the available workspace, including when the rail is expanded. */
+.wrap.tuning-orders-page { max-width: none; width: 100%; box-sizing: border-box; }
+@media (min-width: 1101px) {
+  .tuning-orders-page #orders-table { min-width: 0; table-layout: fixed; }
+  .tuning-orders-page #orders-table th,
+  .tuning-orders-page #orders-table td { box-sizing: border-box; padding: 10px clamp(5px, .6vw, 12px); overflow-wrap: anywhere; }
+  .tuning-orders-page #orders-table th:nth-child(1) { width: 4%; }
+  .tuning-orders-page #orders-table th:nth-child(2) { width: 5%; }
+  .tuning-orders-page #orders-table th:nth-child(3) { width: 10%; }
+  .tuning-orders-page #orders-table th:nth-child(4) { width: 14%; }
+  .tuning-orders-page #orders-table th:nth-child(5) { width: 23%; }
+  .tuning-orders-page #orders-table th:nth-child(6) { width: 11%; }
+  .tuning-orders-page #orders-table th:nth-child(7) { width: 12%; }
+  .tuning-orders-page #orders-table th:nth-child(8) { width: 14%; }
+  .tuning-orders-page #orders-table th:nth-child(9) { width: 7%; }
+  .tuning-orders-page #orders-table td.muted,
+  .tuning-orders-page #orders-table .tuning-order-amount-breakdown strong,
+  .tuning-orders-page #orders-table .tuning-order-amount-breakdown small { white-space: normal; }
+  .tuning-orders-page #orders-table .status-picker-form,
+  .tuning-orders-page #orders-table .status-picker { max-width: 100%; }
+  .tuning-orders-page #orders-table .status-badge { max-width: 100%; white-space: normal; }
+  .tuning-orders-page #orders-table .status-picker-trigger { text-align: left; }
+  .tuning-orders-page #orders-table .row-actions { flex-wrap: wrap; white-space: normal; }
+}
