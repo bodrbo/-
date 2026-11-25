@@ -162,7 +162,7 @@
                    data-move-url="{{ url_for('tuning_schedule.move_task_card', task_id=card.task_id, day_id=card.day_id) }}"
                    data-start-minutes="{{ card._start_minutes }}" data-duration-minutes="{{ card._end_minutes - card._start_minutes }}"
                    data-editor='{{ card.editor|tojson }}'
-                   onpointerdown="startTuningDrag(event, this)" onclick="openTaskEditor(this, event)">
+                   onpointerdown="startTuningDrag(event, this)" onclick="openTaskEditor(this, event)" oncontextmenu="openTaskStatusMenu(event, this)">
                 <div class="tuning-calendar-card-head">
                   {% if card.board_url %}
                   <a class="tuning-card-bell tuning-card-board" href="{{ card.board_url }}"
@@ -1547,6 +1547,67 @@ function clearExtraPeople(containerId) {
   var container = document.getElementById(containerId);
   if (container) container.innerHTML = '';
 }
+
+// Quick status changes use the same protected endpoint as the task editor.
+var taskStatusMenu = null;
+var taskStatusSaving = false;
+var taskStatusChoices = {{ assignment_statuses|tojson }};
+function closeTaskStatusMenu() {
+  if (taskStatusMenu) taskStatusMenu.remove();
+  taskStatusMenu = null;
+}
+function openTaskStatusMenu(event, card) {
+  if (event.target.closest('a') || tuningDrag || tuningDragSaving || taskStatusSaving) return;
+  event.preventDefault();
+  event.stopPropagation();
+  closeTaskStatusMenu();
+  var task = JSON.parse(card.dataset.editor);
+  var menu = document.createElement('div');
+  menu.className = 'tuning-task-status-menu';
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', 'Статус задачи');
+  taskStatusChoices.forEach(function (choice) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = choice.label;
+    button.setAttribute('role', 'menuitemradio');
+    button.setAttribute('aria-checked', choice.value === task.status ? 'true' : 'false');
+    button.disabled = choice.value === task.status;
+    button.addEventListener('click', function () {
+      if (taskStatusSaving) return;
+      taskStatusSaving = true;
+      closeTaskStatusMenu();
+      fetch('/schedule/tuning/tasks/' + task.task_id + '/status', {
+        method: 'POST', credentials: 'same-origin',
+        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+        body: JSON.stringify({status: choice.value})
+      }).then(function (response) {
+        return response.json().then(function (data) {
+          if (!response.ok || !data.ok) throw new Error(data.message || 'Не удалось изменить статус.');
+          window.location.reload();
+        });
+      }).catch(function (error) {
+        taskStatusSaving = false;
+        showTuningNotice(error.message || 'Не удалось изменить статус.', false);
+      });
+    });
+    menu.appendChild(button);
+  });
+  document.body.appendChild(menu);
+  taskStatusMenu = menu;
+  menu.style.left = Math.max(4, Math.min(event.clientX, window.innerWidth - menu.offsetWidth - 4)) + 'px';
+  menu.style.top = Math.max(4, Math.min(event.clientY, window.innerHeight - menu.offsetHeight - 4)) + 'px';
+  var first = menu.querySelector('button:not(:disabled)');
+  if (first) first.focus();
+}
+document.addEventListener('pointerdown', function (event) {
+  if (taskStatusMenu && !taskStatusMenu.contains(event.target)) closeTaskStatusMenu();
+});
+document.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape') closeTaskStatusMenu();
+});
+window.addEventListener('resize', closeTaskStatusMenu);
+window.addEventListener('scroll', closeTaskStatusMenu, true);
 
 function openTaskEditor(card, event, fromButton) {
   if (!fromButton && event && event.target.closest && event.target.closest('select, option, button, a')) return;

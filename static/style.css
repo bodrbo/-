@@ -12860,3 +12860,9 @@ button.partner-open-price-save svg {
   .schedule-topbar .brand-logo { height: 38px; }
   body.has-admin-sidebar .topbar:not(.schedule-topbar) .brand-logo:not(.brand-logo-large) { height: 52px; }
 }
+
+/* Quick status menu on tuning calendar tasks. */
+.tuning-task-status-menu { position: fixed; z-index: 4100; min-width: 190px; padding: 5px; background: var(--paper); border: 1px solid var(--hairline); border-radius: 8px; box-shadow: 0 8px 28px rgba(4,23,33,.25); }
+.tuning-task-status-menu button { display: block; width: 100%; padding: 9px 12px; text-align: left; background: transparent; color: var(--ink); border: 0; border-radius: 5px; box-shadow: none; cursor: pointer; }
+.tuning-task-status-menu button:hover, .tuning-task-status-menu button:focus-visible { background: var(--ink); color: var(--paper); }
+.tuning-task-status-menu button[aria-checked="true"] { color: var(--brass-strong); font-weight: 700; opacity: .7; cursor: default; }
