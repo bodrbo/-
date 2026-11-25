@@ -1800,7 +1800,7 @@ function positionPhotoCloseButton() {
   frame.style.setProperty('--photo-height', height + 'px');
   frame.style.setProperty('--photo-panel-width', panelWidth + 'px');
   var close = modal.querySelector('.photo-modal-close');
-  close.style.left = (mobile ? (frame.clientWidth + width) / 2 - close.offsetWidth : width - close.offsetWidth) + 'px';
+  close.style.left = (frame.clientWidth + 4) + 'px';
   close.style.top = (-close.offsetHeight - 4) + 'px';
 }
 var photoViewerImage = document.getElementById('photo-modal-img');
