@@ -12910,3 +12910,9 @@ button.partner-open-price-save svg {
 
 /* Positioned against the visible photo by positionPhotoCloseButton. */
 #photo-modal .photo-modal-close { top: 4px; right: auto; left: auto; z-index: 2; }
+
+#photo-modal .work-photo-visibility {
+  display: flex; flex: 0 0 auto; align-items: center; justify-content: center;
+  flex-wrap: wrap; gap: 8px; margin-top: 8px; color: #fff; font-size: 13px;
+}
+#photo-modal .work-photo-visibility select { width: auto; margin: 0; }

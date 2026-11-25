@@ -210,8 +210,10 @@ def read_offsite_status(backup_dir):
 def _photo_files(static_dir):
     """[(key, path, signature)] of the uploaded photos and documents."""
     found = []
-    for folder in PHOTO_FOLDERS:
-        base = os.path.join(static_dir, folder)
+    folders = [("static/" + folder, os.path.join(static_dir, folder)) for folder in PHOTO_FOLDERS]
+    db_path = os.environ.get("WORKHOURS_DB_PATH") or os.path.join(os.path.dirname(static_dir), "workhours.db")
+    folders.append(("private_work_photos", os.path.join(os.path.dirname(db_path), "private_work_photos")))
+    for prefix, base in folders:
         for current, _dirs, names in os.walk(base):
             for name in sorted(names):
                 if name.startswith("."):
@@ -221,7 +223,7 @@ def _photo_files(static_dir):
                     info = os.stat(path)
                 except OSError:
                     continue
-                key = "static/" + os.path.relpath(path, static_dir).replace(os.sep, "/")
+                key = prefix + "/" + os.path.relpath(path, base).replace(os.sep, "/")
                 found.append((key, path, [info.st_size, int(info.st_mtime)]))
     return found
 

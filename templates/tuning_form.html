@@ -1377,6 +1377,13 @@
       <span id="photo-modal-counter" class="photo-modal-counter hidden"></span>
       <img id="photo-modal-img" src="" alt="Фото работы">
       <p id="photo-modal-comment" class="photo-modal-comment hidden"></p>
+      <label class="work-photo-visibility">Видимость фото
+        <select id="work-photo-visibility" onchange="savePhotoVisibility(this)">
+          <option value="0">Не видна клиенту</option>
+          <option value="1">Видна клиенту</option>
+        </select>
+        <span id="work-photo-visibility-notice" role="status"></span>
+      </label>
     </div>
   </div>
 
@@ -1812,6 +1819,8 @@ function renderPhotoModal() {
   var photo = photoModalPhotos[photoModalIndex];
   if (!photo) return;
   document.getElementById('photo-modal-img').src = photo.url;
+  document.getElementById('work-photo-visibility').value = photo.client_visible ? '1' : '0';
+  document.getElementById('work-photo-visibility-notice').textContent = '';
 
   var commentEl = document.getElementById('photo-modal-comment');
   commentEl.scrollTop = 0;
@@ -1832,6 +1841,38 @@ function renderPhotoModal() {
   } else {
     counterEl.classList.add('hidden');
   }
+}
+
+async function savePhotoVisibility(select) {
+  var photo = photoModalPhotos[photoModalIndex];
+  if (!photo) return;
+  var value = select.value;
+  select.disabled = true;
+  try {
+    var response = await fetch(photo.visibility_url, {
+      method: 'POST', body: new URLSearchParams({client_visible: value})
+    });
+    if (!response.ok) throw new Error('save');
+    var result = await response.json();
+    photo.client_visible = result.client_visible;
+    // Refresh serialized galleries too, so reopening keeps the saved status.
+    document.querySelectorAll('[onclick^="openPhotoModal("]').forEach(function (button) {
+      var source = button.getAttribute('onclick');
+      try {
+        var photos = JSON.parse(source.slice('openPhotoModal('.length, -1));
+        photos.forEach(function (p) { if (p.id === photo.id) p.client_visible = result.client_visible; });
+        button.setAttribute('onclick', 'openPhotoModal(' + JSON.stringify(photos) + ')');
+      } catch (_) {}
+    });
+    if (photo === photoModalPhotos[photoModalIndex]) {
+      document.getElementById('work-photo-visibility-notice').textContent = 'Сохранено';
+    }
+  } catch (_) {
+    if (photo === photoModalPhotos[photoModalIndex]) {
+      select.value = photo.client_visible ? '1' : '0';
+      document.getElementById('work-photo-visibility-notice').textContent = 'Не удалось сохранить';
+    }
+  } finally { select.disabled = false; }
 }
 
 function showPrevPhoto() {

@@ -927,16 +927,20 @@ def _sales_channel_choices(db):
     )
 
 
-def get_work_item_photos(db, item_id):
+def get_work_item_photos(db, item_id, client_token=None):
     """All photos attached to a tuning_order_items row, oldest first, each
     with its own comment — {id, url, comment}."""
     rows = db.execute(
-        "SELECT id, filename, comment FROM work_item_photos WHERE item_id = ? ORDER BY id",
+        "SELECT id, filename, comment, client_visible FROM work_item_photos WHERE item_id = ? "
+        + ("AND client_visible = 1 " if client_token else "") + "ORDER BY id",
         (item_id,),
     ).fetchall()
     return [
-        {"id": r["id"], "url": url_for("static", filename=f"work_photos/{r['filename']}"),
-         "comment": r["comment"]}
+        {"id": r["id"], "url": (
+            url_for("client_work_photo", token=client_token, photo_id=r["id"]) if client_token
+            else url_for("admin_work_photo", photo_id=r["id"])),
+         "comment": r["comment"], "client_visible": bool(r["client_visible"]),
+         "visibility_url": url_for("set_work_photo_visibility", photo_id=r["id"])}
         for r in rows
     ]
 
@@ -3897,6 +3901,8 @@ def init_db(db_path=None, include_bootstrap_data=True):
         )
         """
     )
+    if "client_visible" not in {row[1] for row in conn.execute("PRAGMA table_info(work_item_photos)")}:
+        conn.execute("ALTER TABLE work_item_photos ADD COLUMN client_visible INTEGER NOT NULL DEFAULT 0")
     # One-time carryover: the very first version of this feature stored a
     # single photo per item as static/work_photos/<item_id>.<ext>, with its
     # comment on tuning_order_items.photo_comment. Fold any such file still
@@ -3922,6 +3928,12 @@ def init_db(db_path=None, include_bootstrap_data=True):
                          dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
                     )
                     break
+    # Private files must not be served directly by the web server's static handler.
+    for photo in conn.execute("SELECT filename FROM work_item_photos").fetchall():
+        old = os.path.join(legacy_photos_dir, photo[0])
+        if os.path.isfile(old):
+            os.makedirs(_work_photo_directory(), exist_ok=True)
+            os.replace(old, os.path.join(_work_photo_directory(), photo[0]))
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS admin_accounts (
@@ -14738,6 +14750,55 @@ def revoke_tuning_assignment(assignment_id):
     )
 
 
+def _work_photo_directory():
+    return os.path.join(os.path.dirname(DB_PATH), "private_work_photos")
+
+
+def _work_photo_response(photo):
+    response = send_from_directory(_work_photo_directory(), photo["filename"])
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+@app.route("/tuning/work-photos/<int:photo_id>")
+@admin_login_required
+def admin_work_photo(photo_id):
+    photo = get_db().execute("SELECT * FROM work_item_photos WHERE id = ?", (photo_id,)).fetchone()
+    if photo is None:
+        abort(404)
+    return _work_photo_response(photo)
+
+
+@app.route("/client/<token>/work-photos/<int:photo_id>")
+def client_work_photo(token, photo_id):
+    photo = get_db().execute(
+        "SELECT p.* FROM work_item_photos p "
+        "JOIN tuning_order_items i ON i.id = p.item_id "
+        "JOIN tuning_orders o ON o.id = i.order_id "
+        "JOIN clients c ON c.token = ? "
+        "WHERE p.id = ? AND p.client_visible = 1 AND "
+        "(o.client_id = c.id OR (o.partner_id = c.id AND o.source = ?))",
+        (token, photo_id, SUBCONTRACT_REQUEST_SOURCE),
+    ).fetchone()
+    if photo is None:
+        abort(404)
+    return _work_photo_response(photo)
+
+
+@app.route("/tuning/work-photos/<int:photo_id>/visibility", methods=["POST"])
+@admin_login_required
+def set_work_photo_visibility(photo_id):
+    visible = request.form.get("client_visible")
+    if visible not in ("0", "1"):
+        abort(400)
+    db = get_db()
+    if db.execute("SELECT 1 FROM work_item_photos WHERE id = ?", (photo_id,)).fetchone() is None:
+        abort(404)
+    db.execute("UPDATE work_item_photos SET client_visible = ? WHERE id = ?", (int(visible), photo_id))
+    db.commit()
+    return jsonify(client_visible=bool(int(visible)))
+
+
 @app.route("/tuning/<int:order_id>/item/<int:item_id>/photo", methods=["POST"])
 @admin_login_required
 def upload_tuning_item_photo(order_id, item_id):
@@ -14750,7 +14811,7 @@ def upload_tuning_item_photo(order_id, item_id):
     if item is not None and file and file.filename:
         ext = os.path.splitext(file.filename)[1].lower()
         if ext in WORK_PHOTO_EXTENSIONS:
-            photos_dir = os.path.join(app.static_folder, "work_photos")
+            photos_dir = _work_photo_directory()
             os.makedirs(photos_dir, exist_ok=True)
             filename = f"{item_id}-{secrets.token_hex(6)}{ext}"
             file.save(os.path.join(photos_dir, filename))
@@ -16201,7 +16262,8 @@ def _render_client_dashboard(
     work_photos_by_item = {}
     for order in orders:
         for item in order["work_items"]:
-            work_photos_by_item[item["id"]] = get_work_item_photos(db, item["id"])
+            work_photos_by_item[item["id"]] = get_work_item_photos(
+                db, item["id"], client_token=None if is_staff_view else client["token"])
 
     partner_income = None
     if is_tuning_partner:
