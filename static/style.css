@@ -12887,32 +12887,42 @@ button.partner-open-price-save svg {
 .tuning-task-status-menu button:hover, .tuning-task-status-menu button:focus-visible { background: var(--ink); color: var(--paper); }
 .tuning-task-status-menu button[aria-checked="true"] { color: var(--brass-strong); font-weight: 700; opacity: .7; cursor: default; }
 
-/* Work photo viewer: reserve space for captions within the viewport. */
+/* Work photo viewer: image and attached white details panel. */
 #photo-modal { box-sizing: border-box; overscroll-behavior: contain; padding-top: 40px; }
 #photo-modal .photo-modal-inner {
-  display: flex; flex-direction: column; align-items: center;
-  width: min(1100px, 100%); height: 100%; max-width: 100%; max-height: 100%;
-  min-width: 0; min-height: 0;
+  display: flex; flex-direction: row; align-items: stretch;
+  max-width: 100%; max-height: 100%; min-width: 0; min-height: 0;
 }
 #photo-modal-img {
-  flex: 1 1 0; min-height: 0; width: 100%; max-width: 100%; max-height: 100%;
-  object-fit: contain; box-shadow: none;
+  flex: 0 0 var(--photo-width); width: var(--photo-width); height: var(--photo-height);
+  max-width: 100%; max-height: 100%; min-height: 0;
+  object-fit: contain; box-shadow: none; border-radius: 12px 0 0 12px;
+}
+#photo-modal .work-photo-details {
+  display: flex; flex-direction: column; box-sizing: border-box;
+  flex: 1 1 var(--photo-panel-width); min-width: 0; min-height: 0;
+  padding: 20px; background: #fff; color: var(--ink); border-radius: 0 12px 12px 0;
+  overflow-y: auto; overscroll-behavior: contain;
 }
 #photo-modal-comment {
-  flex: 0 1 auto; box-sizing: border-box; width: 100%; max-width: 100%;
-  max-height: 30%; min-height: 0; overflow-y: auto; overflow-wrap: anywhere;
-  overscroll-behavior: contain;
+  flex: 1 1 auto; min-height: 0; max-height: none; max-width: 100%;
+  margin: 0; padding: 0; border-radius: 0; background: transparent;
+  overflow-y: auto; overflow-wrap: anywhere; overscroll-behavior: contain;
 }
+#photo-modal .work-photo-visibility {
+  display: flex; flex: 0 0 auto; flex-direction: column; align-items: stretch;
+  gap: 8px; margin: auto 0 0; padding-top: 16px; color: var(--ink); font-size: 13px;
+}
+#photo-modal .work-photo-visibility select { width: 100%; margin: 0; }
+#photo-modal .photo-modal-close { right: auto; z-index: 2; }
+#photo-modal .photo-modal-nav-next { right: auto; left: calc(var(--photo-width) - 24px); }
+#photo-modal .photo-modal-counter { left: calc(var(--photo-width) / 2); }
 @media (max-width: 560px) {
   #photo-modal { padding: 40px 22px 28px; }
-  #photo-modal-comment { padding: 10px 12px; }
+  #photo-modal .photo-modal-inner { flex-direction: column; align-items: center; }
+  #photo-modal-img { flex: 0 0 var(--photo-height); border-radius: 12px 12px 0 0; }
+  #photo-modal .work-photo-details { width: 100%; flex: 1 1 0; padding: 14px; border-radius: 0 0 12px 12px; }
+  #photo-modal .photo-modal-nav { top: calc(var(--photo-height) / 2); }
+  #photo-modal .photo-modal-nav-next { right: -16px; left: auto; }
+  #photo-modal .photo-modal-counter { left: 50%; }
 }
-
-/* Positioned against the visible photo by positionPhotoCloseButton. */
-#photo-modal .photo-modal-close { top: 4px; right: auto; left: auto; z-index: 2; }
-
-#photo-modal .work-photo-visibility {
-  display: flex; flex: 0 0 auto; align-items: center; justify-content: center;
-  flex-wrap: wrap; gap: 8px; margin-top: 8px; color: #fff; font-size: 13px;
-}
-#photo-modal .work-photo-visibility select { width: auto; margin: 0; }

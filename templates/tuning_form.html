@@ -1376,6 +1376,7 @@
       </button>
       <span id="photo-modal-counter" class="photo-modal-counter hidden"></span>
       <img id="photo-modal-img" src="" alt="Фото работы">
+      <aside class="work-photo-details" aria-label="Описание и видимость фото">
       <p id="photo-modal-comment" class="photo-modal-comment hidden"></p>
       <label class="work-photo-visibility">Видимость фото
         <select id="work-photo-visibility" onchange="savePhotoVisibility(this)">
@@ -1384,6 +1385,7 @@
         </select>
         <span id="work-photo-visibility-notice" role="status"></span>
       </label>
+      </aside>
     </div>
   </div>
 
@@ -1777,26 +1779,35 @@ var photoModalPhotos = [];
 var photoModalIndex = 0;
 var photoModalScrollStyles = null;
 
-// object-fit leaves empty space around portrait/landscape photos. Anchor
-// the close button to the painted image, rather than the viewer's frame.
+// Fit the image and attached details panel together, without cropping.
 function positionPhotoCloseButton() {
   var modal = document.getElementById('photo-modal');
   var image = document.getElementById('photo-modal-img');
   if (modal.classList.contains('hidden') || !image.naturalWidth || !image.naturalHeight) return;
-  var frame = modal.querySelector('.photo-modal-inner').getBoundingClientRect();
-  var box = image.getBoundingClientRect();
-  var scale = Math.min(box.width / image.naturalWidth, box.height / image.naturalHeight);
+  var frame = modal.querySelector('.photo-modal-inner');
+  var style = getComputedStyle(modal);
+  var availableWidth = modal.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  var availableHeight = modal.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+  var mobile = window.matchMedia('(max-width: 560px)').matches;
+  var panelWidth = mobile ? 0 : Math.min(320, availableWidth * 0.35);
+  var scale = Math.min((availableWidth - panelWidth) / image.naturalWidth,
+                       (mobile ? availableHeight * 0.60 : availableHeight) / image.naturalHeight, 1);
   var width = image.naturalWidth * scale;
   var height = image.naturalHeight * scale;
+  frame.style.width = (mobile ? Math.max(width, Math.min(availableWidth, 320)) : width + panelWidth) + 'px';
+  frame.style.height = (mobile ? availableHeight : height) + 'px';
+  frame.style.setProperty('--photo-width', width + 'px');
+  frame.style.setProperty('--photo-height', height + 'px');
+  frame.style.setProperty('--photo-panel-width', panelWidth + 'px');
   var close = modal.querySelector('.photo-modal-close');
-  close.style.left = (box.left - frame.left + (box.width + width) / 2 - close.offsetWidth) + 'px';
-  close.style.top = (box.top - frame.top + (box.height - height) / 2 - close.offsetHeight - 4) + 'px';
+  close.style.left = (mobile ? (frame.clientWidth + width) / 2 - close.offsetWidth : width - close.offsetWidth) + 'px';
+  close.style.top = (-close.offsetHeight - 4) + 'px';
 }
 var photoViewerImage = document.getElementById('photo-modal-img');
 photoViewerImage.addEventListener('load', positionPhotoCloseButton);
 window.addEventListener('resize', positionPhotoCloseButton);
 if (typeof ResizeObserver !== 'undefined') {
-  new ResizeObserver(positionPhotoCloseButton).observe(photoViewerImage);
+  new ResizeObserver(positionPhotoCloseButton).observe(document.getElementById('photo-modal'));
 }
 
 function openPhotoModal(photos) {
