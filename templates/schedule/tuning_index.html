@@ -1556,6 +1556,20 @@ function closeTaskStatusMenu() {
   if (taskStatusMenu) taskStatusMenu.remove();
   taskStatusMenu = null;
 }
+function paintTaskStatus(taskId, status) {
+  document.querySelectorAll('.tuning-calendar-card[data-editor]').forEach(function (card) {
+    var data = JSON.parse(card.dataset.editor);
+    if (data.task_id !== taskId) return;
+    taskStatusChoices.forEach(function (choice) { card.classList.remove('status-' + choice.value); });
+    card.classList.add('status-' + status);
+    data.status = status;
+    card.dataset.editor = JSON.stringify(data);
+  });
+  if (typeof tuningEditorTask !== 'undefined' && tuningEditorTask && tuningEditorTask.task_id === taskId) {
+    tuningEditorTask.status = status;
+    document.getElementById('taskEditorStatus').value = status;
+  }
+}
 function openTaskStatusMenu(event, card) {
   if (event.target.closest('a') || tuningDrag || tuningDragSaving || taskStatusSaving) return;
   event.preventDefault();
@@ -1576,7 +1590,9 @@ function openTaskStatusMenu(event, card) {
     button.addEventListener('click', function () {
       if (taskStatusSaving) return;
       taskStatusSaving = true;
+      var previousStatus = task.status;
       closeTaskStatusMenu();
+      paintTaskStatus(task.task_id, choice.value);
       fetch('/schedule/tuning/tasks/' + task.task_id + '/status', {
         method: 'POST', credentials: 'same-origin',
         headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
@@ -1584,9 +1600,12 @@ function openTaskStatusMenu(event, card) {
       }).then(function (response) {
         return response.json().then(function (data) {
           if (!response.ok || !data.ok) throw new Error(data.message || 'Не удалось изменить статус.');
-          window.location.reload();
+          paintTaskStatus(task.task_id, data.status);
+          taskStatusSaving = false;
+          showTuningNotice(data.message || 'Статус сохранён.', true);
         });
       }).catch(function (error) {
+        paintTaskStatus(task.task_id, previousStatus);
         taskStatusSaving = false;
         showTuningNotice(error.message || 'Не удалось изменить статус.', false);
       });
