@@ -228,6 +228,18 @@ def create_tuning_schedule_blueprint(
         success, message = services.update_backlog_item(get_db(), item_id, request.form)
         return respond(success, message, day)
 
+    @blueprint.route("/schedule/tuning/backlog/<int:item_id>/complete", methods=["POST"])
+    @manage_required
+    def complete_backlog(item_id):
+        db = get_db()
+        cursor = db.execute(
+            "UPDATE tuning_schedule_backlog SET status = 'done' WHERE id = ?", (item_id,)
+        )
+        db.commit()
+        if not cursor.rowcount:
+            return jsonify({"ok": False, "message": "Задача не найдена."}), 404
+        return jsonify({"ok": True})
+
     @blueprint.route("/schedule/tuning/backlog/<int:item_id>/delete", methods=["POST"])
     @manage_required
     def delete_backlog(item_id):

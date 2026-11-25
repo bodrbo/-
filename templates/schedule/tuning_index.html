@@ -488,7 +488,7 @@
 
       <div class="tuning-inbox-list" id="tuningInboxList">
         {% for item in backlog %}
-        <article class="tuning-inbox-item" data-backlog-id="{{ item.id }}">
+        <article class="tuning-inbox-item" data-backlog-id="{{ item.id }}" oncontextmenu="openInboxStatusMenu(event, this)">
           <span class="tuning-inbox-grip" data-inbox-grip title="Перетащите на календарь" aria-hidden="true">⋮⋮</span>
           <div class="tuning-inbox-item-main">
             <strong>{{ item.title }}</strong>
@@ -1165,6 +1165,51 @@ document.querySelectorAll('form[data-ajax-task-form]').forEach(function (form) {
 // «Входящие»: tasks noted down before anyone / any day is chosen.
 var TUNING_BACKLOG = {{ backlog|tojson }};
 var TUNING_BACKLOG_URL = {{ url_for('tuning_schedule.add_backlog')|tojson }};
+function openInboxStatusMenu(event, card) {
+  event.preventDefault();
+  event.stopPropagation();
+  closeTaskStatusMenu();
+  var menu = document.createElement('div');
+  menu.className = 'tuning-task-status-menu';
+  menu.setAttribute('role', 'menu');
+  var button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = 'Выполнена';
+  button.setAttribute('role', 'menuitem');
+  button.onclick = function () {
+    closeTaskStatusMenu();
+    if (card.dataset.completing) return;
+    card.dataset.completing = '1';
+    card.classList.add('is-completed');
+    var id = parseInt(card.dataset.backlogId, 10);
+    var timer = setTimeout(function () { card.hidden = true; }, 220);
+    var counter = document.querySelector('#tuningInboxToggle b');
+    if (counter) counter.textContent = Math.max(0, Number(counter.textContent) - 1);
+    fetch(TUNING_BACKLOG_URL + '/' + id + '/complete', {
+      method: 'POST', credentials: 'same-origin', headers: {'Accept': 'application/json'}
+    }).then(function (response) {
+      return response.json().then(function (data) {
+        if (!response.ok || !data.ok) throw new Error(data.message || 'Не удалось сохранить статус.');
+        TUNING_BACKLOG = TUNING_BACKLOG.filter(function (item) { return item.id !== id; });
+        closeBacklogEdit();
+      });
+    }).catch(function (error) {
+      clearTimeout(timer);
+      card.hidden = false;
+      card.classList.remove('is-completed');
+      delete card.dataset.completing;
+      if (counter) counter.textContent = Number(counter.textContent) + 1;
+      showTuningNotice(error.message || 'Не удалось сохранить статус.', false);
+    });
+  };
+  menu.appendChild(button);
+  document.body.appendChild(menu);
+  taskStatusMenu = menu;
+  menu.style.left = Math.max(4, Math.min(event.clientX, window.innerWidth - menu.offsetWidth - 4)) + 'px';
+  menu.style.top = Math.max(4, Math.min(event.clientY, window.innerHeight - menu.offsetHeight - 4)) + 'px';
+  button.focus();
+}
+
 
 // The inbox is a side panel docked to the right edge (like the main menu on
 // the left): the page makes room for it, and on wide screens it stays open
@@ -1238,7 +1283,7 @@ var inboxDrag = null;
 
 document.getElementById('tuningInboxList').addEventListener('pointerdown', function (event) {
   var card = event.target.closest('.tuning-inbox-item');
-  if (!card || event.button > 0 || event.target.closest('button, a, form')) return;
+  if (!card || card.dataset.completing || event.button > 0 || event.target.closest('button, a, form')) return;
   if (event.pointerType === 'touch' && !event.target.closest('[data-inbox-grip]')) return;
   inboxDrag = {id: parseInt(card.dataset.backlogId, 10), card: card, pointerId: event.pointerId,
                x: event.clientX, y: event.clientY, moved: false, ghost: null, column: null};

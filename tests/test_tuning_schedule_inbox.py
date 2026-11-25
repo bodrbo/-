@@ -24,6 +24,18 @@ class TuningScheduleInboxTests(_TuningScheduleFixture, unittest.TestCase):
         data.setdefault("return_date", self.DAY)
         return self.client.post("/schedule/tuning/backlog", data=data)
 
+    def test_completed_draft_is_kept_but_hidden_from_the_inbox(self):
+        self.add(titles="Готовая задача")
+        item_id = self.inbox()[0]["id"]
+        response = self.client.post(f"/schedule/tuning/backlog/{item_id}/complete")
+        self.assertEqual(response.status_code, 200)
+        with application_module.app.app_context():
+            from modules.tuning_schedule import repository
+            db = application_module.get_db()
+            self.assertEqual(repository.get_backlog_item(db, item_id)["status"], "done")
+            self.assertEqual(repository.list_backlog(db), [])
+            self.assertEqual(repository.count_backlog(db), 0)
+
     def test_one_line_is_one_task_without_anything_else(self):
         self.assertEqual(self.add(titles="Заменить трос газа").status_code, 302)
         items = self.inbox()

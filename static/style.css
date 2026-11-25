@@ -12957,3 +12957,5 @@ button.partner-open-price-save svg {
   .tuning-orders-page #orders-table .status-picker-trigger { text-align: left; }
   .tuning-orders-page #orders-table .row-actions { flex-wrap: wrap; white-space: normal; }
 }
+.tuning-inbox-item.is-completed { background: #dcefe2; border-color: var(--success); color: var(--success); pointer-events: none; }
+.tuning-inbox-item[hidden] { display: none; }

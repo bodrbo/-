@@ -504,12 +504,12 @@ def list_order_work_items(db, order_id):
 
 def list_backlog(db):
     return db.execute(
-        "SELECT * FROM tuning_schedule_backlog ORDER BY sort, id"
+        "SELECT * FROM tuning_schedule_backlog WHERE status != 'done' ORDER BY sort, id"
     ).fetchall()
 
 
 def count_backlog(db):
-    return db.execute("SELECT COUNT(*) FROM tuning_schedule_backlog").fetchone()[0]
+    return db.execute("SELECT COUNT(*) FROM tuning_schedule_backlog WHERE status != 'done'").fetchone()[0]
 
 
 def get_backlog_item(db, item_id):

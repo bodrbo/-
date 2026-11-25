@@ -134,3 +134,7 @@ def init_schema(conn):
         "CREATE INDEX IF NOT EXISTS idx_tuning_schedule_breaks_date "
         "ON tuning_schedule_breaks(work_date, employee_id)"
     )
+
+    backlog_columns = {row[1] for row in conn.execute("PRAGMA table_info(tuning_schedule_backlog)")}
+    if "status" not in backlog_columns:
+        conn.execute("ALTER TABLE tuning_schedule_backlog ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'")
