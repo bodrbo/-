@@ -342,7 +342,7 @@ BACKUP_OFFSITE = configured_backup_offsite(os.environ.get("YANDEX_DISK_TOKEN"), 
 # Bump when an additive schema migration is introduced. Demo sessions keep
 # their own SQLite files, so unlike the shared database they need an explicit
 # signal to run init_db() again after a deploy.
-DEMO_TENANT_SCHEMA_REVISION = "2026-09-22-schedule-payments-capacity"
+DEMO_TENANT_SCHEMA_REVISION = "2026-11-25-navigation-preferences"
 
 
 def _bounded_env_int(name, default, minimum, maximum):
@@ -2038,6 +2038,8 @@ def init_db(db_path=None, include_bootstrap_data=True):
     upgrade path for an existing demo tenant: schema/backfills run, while
     real company employee and account constants are never inserted."""
     conn = sqlite3.connect(db_path or DB_PATH)
+    from modules.navigation_preferences import init_schema as init_navigation_schema
+    init_navigation_schema(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS entries (
@@ -25265,6 +25267,27 @@ def _demo_tenant_template_context():
         "demo_tour_total_steps": len(DEMO_TOUR_STEPS),
     }
 
+
+def _navigation_preference_owner():
+    if session.get("demo_tenant_id"):
+        return ("demo", session["demo_tenant_id"])
+    if session.get("admin_id"):
+        account = _active_admin_account()
+        if account is not None:
+            return ("employee", account["employee_id"]) if account["employee_id"] else ("admin", account["id"])
+    if session.get("team_id"):
+        account = _active_team_account(get_db())
+        if account is not None:
+            return ("employee", account["employee_id"])
+    if session.get("investor_id"):
+        row = get_db().execute("SELECT id FROM investors WHERE id=?", (session["investor_id"],)).fetchone()
+        if row is not None:
+            return ("investor", row["id"])
+    return None
+
+
+from modules.navigation_preferences import register as register_navigation_preferences
+register_navigation_preferences(app, get_db, _navigation_preference_owner)
 
 init_db()
 
