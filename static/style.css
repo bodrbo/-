@@ -12907,3 +12907,6 @@ button.partner-open-price-save svg {
   #photo-modal { padding: 28px 22px; }
   #photo-modal-comment { padding: 10px 12px; }
 }
+
+/* Positioned against the visible photo by positionPhotoCloseButton. */
+#photo-modal .photo-modal-close { top: 4px; right: auto; left: auto; z-index: 2; }

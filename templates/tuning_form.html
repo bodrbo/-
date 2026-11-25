@@ -1737,6 +1737,7 @@ function openCreateProductModal() {
   document.getElementById('create-product-to-catalog').checked = true;
   updateCreateProductHint();
   modal.classList.remove('hidden');
+  requestAnimationFrame(positionPhotoCloseButton);
 }
 
 function updateCreateProductHint() {
@@ -1769,6 +1770,28 @@ function removeAssignEmployeeRow(btn) {
 var photoModalPhotos = [];
 var photoModalIndex = 0;
 var photoModalScrollStyles = null;
+
+// object-fit leaves empty space around portrait/landscape photos. Anchor
+// the close button to the painted image, rather than the viewer's frame.
+function positionPhotoCloseButton() {
+  var modal = document.getElementById('photo-modal');
+  var image = document.getElementById('photo-modal-img');
+  if (modal.classList.contains('hidden') || !image.naturalWidth || !image.naturalHeight) return;
+  var frame = modal.querySelector('.photo-modal-inner').getBoundingClientRect();
+  var box = image.getBoundingClientRect();
+  var scale = Math.min(box.width / image.naturalWidth, box.height / image.naturalHeight);
+  var width = image.naturalWidth * scale;
+  var height = image.naturalHeight * scale;
+  var close = modal.querySelector('.photo-modal-close');
+  close.style.left = (box.left - frame.left + (box.width + width) / 2 - close.offsetWidth - 4) + 'px';
+  close.style.top = (box.top - frame.top + (box.height - height) / 2 + 4) + 'px';
+}
+var photoViewerImage = document.getElementById('photo-modal-img');
+photoViewerImage.addEventListener('load', positionPhotoCloseButton);
+window.addEventListener('resize', positionPhotoCloseButton);
+if (typeof ResizeObserver !== 'undefined') {
+  new ResizeObserver(positionPhotoCloseButton).observe(photoViewerImage);
+}
 
 function openPhotoModal(photos) {
   photoModalPhotos = photos || [];
