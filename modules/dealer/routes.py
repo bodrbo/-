@@ -1,10 +1,11 @@
 """Administrator routes of the Дилерский центр."""
 
 import datetime as dt
+import os
 
-from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, current_app, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 
-from . import repository, services, shipping
+from . import options, repository, services, shipping
 from .constants import (
     GOODS_UNITS, ITEM_KINDS, ORDER_TYPE_EQUIPMENT, ORDER_TYPE_GOODS, PAYMENT_TYPES,
     STATUS_LABELS, STATUSES_BY_TYPE,
@@ -31,6 +32,50 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
     correction_date), .check(db, receipt_row) and .pdf_response(db, order_id,
     payment_id) -> a Flask response or (text, status); None = no receipts."""
     blueprint = Blueprint("dealer", __name__)
+
+    def option_photos_directory():
+        return current_app.config.get("DEALER_OPTION_PHOTO_DIR") or os.path.join(current_app.static_folder, "dealer_options")
+
+    @blueprint.route("/dealer/options/photos/<filename>")
+    def option_photo(filename):
+        # Product catalog photos are public assets, addressed by random filenames.
+        if not options.valid_photo_name(filename):
+            abort(404)
+        response = send_from_directory(option_photos_directory(), filename, mimetype="image/jpeg")
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
+    @blueprint.route("/dealer/options", methods=["GET", "POST"])
+    @blueprint.route("/dealer/options/<int:option_id>", methods=["GET", "POST"])
+    @access_required
+    def boat_options(option_id=None):
+        db = get_db()
+        rows = options.catalog(db)
+        selected = next((o for o in rows if o["id"] == option_id), None)
+        if option_id is not None and selected is None:
+            abort(404)
+        error = None
+        if request.method == "POST":
+            error = options.save(db, request.form, request.files.get("photo"), option_photos_directory(), option_id)
+            if error is None:
+                notice("success", "Доп. опция сохранена.")
+                return redirect(url_for("dealer.boat_options"))
+        return render_template(
+            "dealer/options.html", active_page="dealer", sub_page="options", options=rows,
+            boats=[dict(p) for p in repository.catalog_positions(db) if p["equipment_type"] == "boat"],
+            selected=selected, values=request.form if error else (selected or {}), error=error,
+            notice=session.pop("dealer_notice", None),
+        ), 400 if error else 200
+
+    @blueprint.route("/dealer/options/<int:option_id>/active", methods=["POST"])
+    @access_required
+    def option_active(option_id):
+        db = get_db()
+        db.execute("UPDATE dealer_boat_options SET active = ?, updated_at = ? WHERE id = ?",
+                   (1 if request.form.get("active") == "1" else 0, services.now_text(), option_id))
+        db.commit()
+        notice("success", "Доступность доп. опции изменена. Сохранённые заказы не изменились.")
+        return redirect(url_for("dealer.boat_options"))
 
     def catalog_maps(db):
         positions = repository.catalog_positions(db)
@@ -114,6 +159,12 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
         if order is not None:
             payments = repository.list_payments_with_receipts(db, order["id"])
             paid = repository.paid_amount(db, order["id"])
+            if form_state:
+                saved_items = {str(i["id"]): i for i in repository.list_items(db, order["id"])}
+                for item in items:
+                    previous = saved_items.get(str(item.get("id", "")))
+                    if previous:
+                        item["options"] = previous["options"]
         return render_template(
             "dealer/form.html", active_page="dealer",
             sub_page="goods" if order_type == ORDER_TYPE_GOODS else "orders",
@@ -131,6 +182,7 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
                 for p in positions
             ],
             item_kinds=ITEM_KINDS, client_choices=client_choices(db),
+            boat_options=options.catalog(db) if order_type == ORDER_TYPE_EQUIPMENT else [],
             statuses=STATUSES_BY_TYPE[order_type], status_label=STATUS_LABELS.get(order["status"]) if order else None,
             payments=payments, paid=paid,
             remaining=max(0.0, round((order["total"] - paid), 2)) if order is not None else None,
@@ -160,6 +212,7 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
                 "product_id": at("item_product_id[]"), "unit": at("item_unit[]", "piece"),
                 "serial_number": at("item_serial[]"), "quantity": at("item_quantity[]", "1"),
                 "price": at("item_price[]"),
+                "id": at("item_id[]"), "option_ids_raw": at("item_option_ids[]", "[]"),
             })
         return {key: form.get(key, "") for key in (
             "client_name", "client_id", "phone", "order_date", "deadline_date",
@@ -169,7 +222,9 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
     def save_from_request(db, order_id, order_type):
         _, known = catalog_maps(db)
         error, data = services.parse_order_form(
-            request.form, known, order_type, goods_units(db) if order_type == ORDER_TYPE_GOODS else None
+            request.form, known, order_type, goods_units(db) if order_type == ORDER_TYPE_GOODS else None,
+            known_options={o["id"]: o for o in options.catalog(db)},
+            existing_items={i["id"]: i for i in repository.list_items(db, order_id)} if order_id else {},
         )
         if error:
             return error, None

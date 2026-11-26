@@ -69,6 +69,7 @@
   <section class="panel">
     <h2>Лодки и моторы</h2>
     <p class="hint">Выберите лодку или мотор из каталога — цена подставится из прайс-листа, её можно изменить для этого заказа.</p>
+    <p class="hint">Доп. опции выбираются под каждой лодкой. Цена лодки вводится без опций; в сумме строки опции уже учтены. <a href="{{ url_for('dealer.boat_options') }}" target="_blank" rel="noopener">Каталог доп. опций</a></p>
     <div class="table-scroll">
       <table class="records dealer-items" id="dealerItems">
         <thead><tr><th>Тип</th><th>Позиция из каталога</th><th>Серийный номер</th><th>Кол-во</th><th>Цена, ₽</th><th>Сумма, ₽</th><th></th></tr></thead>
@@ -272,10 +273,13 @@
 {% else %}
 <script id="dealerCatalogData" type="application/json">{{ catalog|tojson }}</script>
 <script id="dealerItemsData" type="application/json">{{ items|tojson }}</script>
+<script id="dealerOptionsData" type="application/json">{{ boat_options|tojson }}</script>
 <script>
 (function () {
   var catalog = JSON.parse(document.getElementById('dealerCatalogData').textContent);
   var initial = JSON.parse(document.getElementById('dealerItemsData').textContent);
+  var optionCatalog = JSON.parse(document.getElementById('dealerOptionsData').textContent);
+  var optionPhotoUrl = {{ url_for('dealer.option_photo', filename='__PHOTO__')|tojson }};
   var KINDS = {{ item_kinds|tojson }};
   var rows = document.getElementById('dealerItemRows');
   var lists = {boat: document.getElementById('dealerCatalogBoat'), motor: document.getElementById('dealerCatalogMotor')};
@@ -305,8 +309,9 @@
 
   function recalc() {
     var subtotal = 0;
-    rows.querySelectorAll('tr').forEach(function (row) {
-      var line = number(row.querySelector('[name="item_quantity[]"]').value) * number(row.querySelector('[name="item_price[]"]').value);
+    rows.querySelectorAll('tr[data-equipment-row]').forEach(function (row) {
+      var extras = row.selectedOptions.reduce(function (sum, option) { return sum + number(option.price); }, 0);
+      var line = number(row.querySelector('[name="item_quantity[]"]').value) * (number(row.querySelector('[name="item_price[]"]').value) + extras);
       row.querySelector('.dealer-line-total').textContent = line ? money(line) : '—';
       if (row.querySelector('[name="item_name[]"]').value.trim()) { subtotal += line; }
     });
@@ -321,41 +326,88 @@
   function addRow(item) {
     item = item || {kind: 'boat', profile_id: '', name: '', serial_number: '', quantity: 1, price: ''};
     var row = document.createElement('tr');
+    row.setAttribute('data-equipment-row', '');
+    var snapshots = item.options || [];
+    var selectedIds = snapshots.map(function (o) { return o.id; });
+    if (item.option_ids_raw != null) {
+      try { var parsedIds = JSON.parse(item.option_ids_raw); selectedIds = Array.isArray(parsedIds) ? parsedIds : []; } catch (e) { selectedIds = []; }
+    }
+    row.selectedOptions = selectedIds.map(function (id) {
+      return snapshots.filter(function (o) { return o.id === id; })[0] || optionCatalog.filter(function (o) { return o.id === id; })[0];
+    }).filter(Boolean);
     var kindOptions = Object.keys(KINDS).map(function (key) {
       return '<option value="' + key + '"' + (key === item.kind ? ' selected' : '') + '>' + esc(KINDS[key]) + '</option>';
     }).join('');
     row.innerHTML =
       '<td><select name="item_kind[]">' + kindOptions + '</select></td>' +
       '<td><input type="text" name="item_name[]" maxlength="200" list="dealerCatalog' + (item.kind === 'motor' ? 'Motor' : 'Boat') + '" value="' + esc(item.name) + '" placeholder="Начните вводить название" autocomplete="off">' +
-        '<input type="hidden" name="item_profile_id[]" value="' + esc(item.profile_id) + '"></td>' +
+        '<input type="hidden" name="item_profile_id[]" value="' + esc(item.profile_id) + '">' +
+        '<input type="hidden" name="item_id[]" value="' + esc(item.id) + '">' +
+        '<input type="hidden" name="item_option_ids[]" value="' + esc(JSON.stringify(selectedIds)) + '"></td>' +
       '<td><input type="text" name="item_serial[]" maxlength="120" value="' + esc(item.serial_number) + '"></td>' +
       '<td><input type="text" inputmode="numeric" name="item_quantity[]" value="' + esc(item.quantity) + '" style="width:64px;"></td>' +
-      '<td><input type="text" inputmode="decimal" name="item_price[]" value="' + esc(item.price === 0 || item.price ? Math.round(item.price * 100) / 100 : '') + '" style="width:130px;"></td>' +
+      '<td><input type="text" inputmode="decimal" name="item_price[]" value="' + esc(item.base_price != null ? item.base_price : (item.price === 0 || item.price ? Math.round(item.price * 100) / 100 : '')) + '" style="width:130px;"></td>' +
       '<td class="amount dealer-line-total">—</td>' +
       '<td class="row-actions"><button type="button" class="icon-btn danger dealer-remove" title="Убрать позицию">' +
         '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l10 10M15 5L5 15"/></svg></button></td>';
     rows.appendChild(row);
+    var optionRow = document.createElement('tr');
+    optionRow.className = 'dealer-option-row';
+    optionRow.innerHTML = '<td colspan="7"><details><summary>Доп. опции лодки <span data-option-count></span></summary><div class="dealer-option-grid" data-option-choices></div><p class="hint" data-option-empty>Для этой лодки пока нет опций. Добавьте их в каталоге доп. опций.</p></details></td>';
+    rows.appendChild(optionRow);
 
     var kind = row.querySelector('[name="item_kind[]"]');
     var name = row.querySelector('[name="item_name[]"]');
     var profile = row.querySelector('[name="item_profile_id[]"]');
     var price = row.querySelector('[name="item_price[]"]');
+    function drawOptions() {
+      optionRow.hidden = kind.value !== 'boat';
+      var choices = optionRow.querySelector('[data-option-choices]');
+      choices.textContent = '';
+      var available = optionCatalog.filter(function (o) { return o.active && (!o.profile_id || String(o.profile_id) === profile.value); });
+      row.selectedOptions.forEach(function (o) {
+        available = available.filter(function (p) { return p.id !== o.id; });
+        available.push(o);
+      });
+      available.forEach(function (o) {
+        var checked = row.selectedOptions.some(function (p) { return p.id === o.id; });
+        var label = document.createElement('label');
+        label.className = 'dealer-option-card dealer-option-choice';
+        label.innerHTML = '<img src="' + esc(optionPhotoUrl.replace('__PHOTO__', encodeURIComponent(o.photo_filename))) + '" alt="' + esc(o.name) + '" loading="lazy"><span class="dealer-option-body"><span class="dealer-option-title"><input type="checkbox"' + (checked ? ' checked' : '') + '><strong>' + esc(o.name) + '</strong></span><strong>' + money(o.price) + '</strong><span class="dealer-option-description">' + esc(o.description) + '</span></span>';
+        label.querySelector('input').addEventListener('change', function (event) {
+          row.selectedOptions = row.selectedOptions.filter(function (p) { return p.id !== o.id; });
+          if (event.target.checked) { row.selectedOptions.push(o); }
+          syncOptions(); recalc();
+        });
+        choices.appendChild(label);
+      });
+      optionRow.querySelector('[data-option-empty]').hidden = available.length > 0;
+      syncOptions();
+    }
+    function syncOptions() {
+      row.querySelector('[name="item_option_ids[]"]').value = JSON.stringify(row.selectedOptions.map(function (o) { return o.id; }));
+      optionRow.querySelector('[data-option-count]').textContent = row.selectedOptions.length ? '(' + row.selectedOptions.length + ' выбрано)' : '';
+    }
     kind.addEventListener('change', function () {
       name.setAttribute('list', 'dealerCatalog' + (kind.value === 'motor' ? 'Motor' : 'Boat'));
-      name.value = ''; profile.value = ''; recalc();
+      name.value = ''; profile.value = ''; row.selectedOptions = []; drawOptions(); recalc();
     });
     name.addEventListener('input', function () {
       var match = find(kind.value, name.value);
+      var previousProfile = profile.value;
       profile.value = match ? match.id : '';
+      if (previousProfile !== profile.value || (!profile.value && name.value !== item.name)) { row.selectedOptions = []; drawOptions(); }
       if (match && match.price != null && !price.value.trim()) { price.value = match.price; }
       recalc();
     });
     row.querySelectorAll('input').forEach(function (input) { input.addEventListener('input', recalc); });
     row.querySelector('.dealer-remove').addEventListener('click', function () {
       row.remove();
+      optionRow.remove();
       if (!rows.children.length) { addRow(); }
       recalc();
     });
+    drawOptions();
     recalc();
   }
 

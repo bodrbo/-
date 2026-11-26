@@ -721,7 +721,14 @@
               <tbody>
                 {% for item in d["items"] %}
                 <tr>
-                  <td>{{ item.name }}</td>
+                  <td>{{ item.name }}{% if item.options %}
+                    <p class="hint">Доп. опции включены в цену лодки:</p>
+                    <ul class="dealer-selected-options">
+                    {% for option in item.options %}
+                      <li><a href="{{ url_for('dealer.option_photo', filename=option.photo_filename) }}" target="_blank" rel="noopener"><img src="{{ url_for('dealer.option_photo', filename=option.photo_filename) }}" alt="{{ option.name }}" loading="lazy"></a><div><strong>{{ option.name }} · {{ option.price|money }} ₽</strong><p class="dealer-option-description">{{ option.description }}</p></div></li>
+                    {% endfor %}
+                    </ul>
+                  {% endif %}</td>
                   <td>{{ item.kind_label }}</td>
                   <td>{{ item.serial_number or '—' }}</td>
                   <td>{{ '%g'|format(item.quantity) }}{% if item.unit_label %} {{ item.unit_label }}{% endif %}</td>

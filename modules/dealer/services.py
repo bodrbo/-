@@ -1,8 +1,9 @@
 """Validation and writes of the dealer center."""
 
 import datetime as dt
+import json
 
-from . import repository, shipping
+from . import options, repository, shipping
 from .constants import (
     DEFAULT_GOODS_UNIT, DEFAULT_STATUS, DISCOUNT_TYPES, FINAL_STATUS, GOODS_KIND, GOODS_RELEASE_STATUSES,
     GOODS_UNITS, ITEM_KINDS, ORDER_TYPE_EQUIPMENT, ORDER_TYPE_GOODS, PAYMENT_TYPES, SHIPPED_STATUS,
@@ -49,7 +50,7 @@ def order_totals(items, discount_type, discount_value):
     return subtotal, round(max(total, 0), 2)
 
 
-def _parse_equipment_items(form, known_profiles, errors):
+def _parse_equipment_items(form, known_profiles, errors, known_options=None, existing_items=None):
     """The boat and motor lines of the form; the problems go to `errors`."""
     kinds = form.getlist("item_kind[]")
     profile_ids = form.getlist("item_profile_id[]")
@@ -57,6 +58,8 @@ def _parse_equipment_items(form, known_profiles, errors):
     serials = form.getlist("item_serial[]")
     quantities = form.getlist("item_quantity[]")
     prices = form.getlist("item_price[]")
+    option_ids = form.getlist("item_option_ids[]")
+    item_ids = form.getlist("item_id[]")
     items = []
     for index, raw_name in enumerate(names):
         name = " ".join(raw_name.split())
@@ -83,9 +86,20 @@ def _parse_equipment_items(form, known_profiles, errors):
         if len(name) > 200 or len(serial) > 120:
             errors.append(f"{label}: слишком длинное название или серийный номер.")
             continue
+        item_id = item_ids[index] if index < len(item_ids) else ""
+        existing = (existing_items or {}).get(int(item_id)) if item_id.isdigit() else None
+        option_error, chosen = options.parse_selection(
+            option_ids[index] if index < len(option_ids) else "[]",
+            kind, profile_id, name, existing, known_options or {},
+        )
+        if option_error:
+            errors.append(f"{label}: {option_error}")
+            continue
         items.append({
             "kind": kind, "profile_id": profile_id, "product_id": None, "unit": DEFAULT_GOODS_UNIT,
-            "name": name, "serial_number": serial, "quantity": int(quantity), "price": round(price, 2),
+            "name": name, "serial_number": serial, "quantity": int(quantity),
+            "price": round(price + sum(o["price"] for o in chosen), 2),
+            "options_json": json.dumps(chosen, ensure_ascii=False),
         })
     return items
 
@@ -136,7 +150,8 @@ def _parse_goods_items(form, known_products, errors):
     return items
 
 
-def parse_order_form(form, known_profiles, order_type=ORDER_TYPE_EQUIPMENT, known_products=None):
+def parse_order_form(form, known_profiles, order_type=ORDER_TYPE_EQUIPMENT, known_products=None,
+                     known_options=None, existing_items=None):
     """Reads the order form. known_profiles: {profile_id: equipment_type} of
     the catalog of boats and motors, known_products: {product_id: unit} of
     the warehouse catalog (goods orders). Returns (error, data); the lines
@@ -177,7 +192,7 @@ def parse_order_form(form, known_profiles, order_type=ORDER_TYPE_EQUIPMENT, know
         if not items and not errors:
             errors.append("Добавьте в заказ хотя бы один товар.")
     else:
-        items = _parse_equipment_items(form, known_profiles, errors)
+        items = _parse_equipment_items(form, known_profiles, errors, known_options, existing_items)
         if not items and not errors:
             errors.append("Добавьте в заказ хотя бы одну лодку или мотор.")
 
@@ -204,9 +219,9 @@ def insert_items(db, order_id, items):
     for position, item in enumerate(items):
         db.execute(
             "INSERT INTO dealer_order_items (order_id, kind, profile_id, product_id, unit, name, serial_number, "
-            "quantity, price, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "quantity, price, position, options_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (order_id, item["kind"], item["profile_id"], item["product_id"], item["unit"], item["name"],
-             item["serial_number"], item["quantity"], item["price"], position),
+             item["serial_number"], item["quantity"], item["price"], position, item.get("options_json", "[]")),
         )
 
 

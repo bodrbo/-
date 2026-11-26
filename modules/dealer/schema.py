@@ -62,6 +62,21 @@ def init_schema(conn):
         conn.execute("ALTER TABLE dealer_order_items ADD COLUMN product_id INTEGER")
     if "unit" not in item_cols:
         conn.execute("ALTER TABLE dealer_order_items ADD COLUMN unit TEXT NOT NULL DEFAULT 'piece'")
+    if "options_json" not in item_cols:
+        conn.execute("ALTER TABLE dealer_order_items ADD COLUMN options_json TEXT NOT NULL DEFAULT '[]'")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dealer_boat_options (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            price REAL NOT NULL,
+            photo_filename TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_dealer_order_items_order ON dealer_order_items (order_id)"
     )

@@ -1,0 +1,33 @@
+{% extends 'dealer/base.html' %}
+{% block title %}Доп. опции лодок — Дилерский центр{% endblock %}
+{% block heading %}Доп. опции лодок{% endblock %}
+{% block content %}
+<section class="panel">
+  <h2>{{ 'Редактировать опцию' if selected else 'Новая доп. опция' }}</h2>
+  <p class="hint">Опции выбираются у лодки в заказе. Стоимость указана за одну лодку и входит в сумму заказа.</p>
+  {% if error %}<div class="alert" role="alert">{{ error }}</div>{% endif %}
+  <form method="post" enctype="multipart/form-data" class="entry-form">
+    <div class="field"><label for="optionName">Название</label><input id="optionName" name="name" value="{{ values.get('name', '') }}" maxlength="200" required></div>
+    <div class="field field-narrow"><label for="optionPrice">Стоимость, ₽</label><input id="optionPrice" name="price" inputmode="decimal" value="{{ values.get('price', '') }}" required></div>
+    <div class="field"><label for="optionBoat">Для лодок</label><select id="optionBoat" name="profile_id"><option value="">Все лодки</option>{% for boat in boats %}<option value="{{ boat.id }}" {{ 'selected' if values.get('profile_id')|string == boat.id|string }}>{{ boat.model_name }}</option>{% endfor %}</select></div>
+    <div class="field field-wide"><label for="optionDescription">Описание</label><textarea id="optionDescription" name="description" rows="3" maxlength="4000" required>{{ values.get('description', '') }}</textarea></div>
+    <div class="field field-wide"><label for="optionPhoto">Фотография — JPG, PNG или WebP, до 5 МБ</label><input id="optionPhoto" name="photo" type="file" accept="image/jpeg,image/png,image/webp" {{ 'required' if not selected }}>
+      {% if selected %}<a href="{{ url_for('dealer.option_photo', filename=selected.photo_filename) }}" target="_blank" rel="noopener">Текущая фотография</a>{% endif %}
+    </div>
+    <div class="field field-submit"><button type="submit">{{ 'Сохранить изменения' if selected else 'Добавить опцию' }}</button>{% if selected %}<a href="{{ url_for('dealer.boat_options') }}" class="btn-secondary">Отмена</a>{% endif %}</div>
+  </form>
+</section>
+<section class="panel">
+  <h2>Каталог доп. опций</h2>
+  <div class="dealer-option-grid">
+  {% for option in options %}
+    <article class="dealer-option-card{{ ' dealer-option-archived' if not option.active }}">
+      <a href="{{ url_for('dealer.option_photo', filename=option.photo_filename) }}" target="_blank" rel="noopener" aria-label="Фотография: {{ option.name }}"><img src="{{ url_for('dealer.option_photo', filename=option.photo_filename) }}" alt="{{ option.name }}" loading="lazy"></a>
+      <div class="dealer-option-body"><h3>{{ option.name }}</h3><strong>{{ option.price|money }} ₽</strong><p class="muted">{{ option.boat_name or 'Все лодки' }}{{ ' · В архиве' if not option.active }}</p><p class="dealer-option-description">{{ option.description }}</p>
+        <div class="dealer-option-actions"><a href="{{ url_for('dealer.boat_options', option_id=option.id) }}">Изменить</a><form method="post" action="{{ url_for('dealer.option_active', option_id=option.id) }}"><input type="hidden" name="active" value="{{ 0 if option.active else 1 }}"><button class="btn-secondary" type="submit">{{ 'В архив' if option.active else 'Вернуть в каталог' }}</button></form></div>
+      </div>
+    </article>
+  {% else %}<p class="hint">Добавьте первую опцию с фотографией, описанием и стоимостью.</p>{% endfor %}
+  </div>
+</section>
+{% endblock %}

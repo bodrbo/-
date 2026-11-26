@@ -22,7 +22,7 @@ echo "Копии базы данных…"
 rsync -az --partial --exclude '.lock' --exclude '*.partial' --exclude '.work-*' \
   "$REMOTE:$REMOTE_ROOT/backups/" "$DEST/db/"
 
-for folder in boat_documents work_photos tuning_boats checklist_photos supply_photos diplomas; do
+for folder in boat_documents work_photos tuning_boats checklist_photos supply_photos diplomas dealer_options; do
   echo "Файлы: static/$folder…"
   rsync -az --partial "$REMOTE:$REMOTE_ROOT/static/$folder/" "$DEST/static/$folder/" || echo "  (папки нет — пропускаю)"
 done

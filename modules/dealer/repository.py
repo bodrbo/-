@@ -73,9 +73,10 @@ def get_order(db, order_id):
 
 
 def list_items(db, order_id):
-    return db.execute(
+    from .options import item_view
+    return [item_view(row) for row in db.execute(
         "SELECT * FROM dealer_order_items WHERE order_id = ? ORDER BY position, id", (order_id,)
-    ).fetchall()
+    ).fetchall()]
 
 
 def list_payments(db, order_id):

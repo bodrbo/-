@@ -32,5 +32,5 @@ OFFSITE_MANUAL_BUDGET_SECONDS = 25
 # uploaded photos and documents that are sent to the Disk (folders of static/)
 PHOTO_FOLDERS = (
     "boat_documents", "work_photos", "tuning_boats", "checklist_photos",
-    "supply_photos", "diplomas",
+    "supply_photos", "diplomas", "dealer_options",
 )
