@@ -12968,15 +12968,14 @@ button.partner-open-price-save svg {
   .dealer-orders-page #dealer-orders-table td { padding: 10px clamp(5px, .6vw, 12px); overflow-wrap: anywhere; white-space: normal; }
   #dealer-orders-table .dealer-col-number { width: 5%; }
   #dealer-orders-table .dealer-col-date { width: 9%; }
-  #dealer-orders-table .dealer-col-client { width: 16%; }
-  #dealer-orders-table .dealer-col-items { width: 17%; }
+  #dealer-orders-table .dealer-col-client { width: 24%; }
+  #dealer-orders-table .dealer-col-items { width: 26%; }
   #dealer-orders-table .dealer-col-status { width: 20%; }
-  #dealer-orders-table .dealer-col-amount { width: 11%; }
+  #dealer-orders-table .dealer-col-amount { width: 16%; }
   #dealer-orders-table.dealer-orders-goods .dealer-col-number { width: 6%; }
   #dealer-orders-table.dealer-orders-goods .dealer-col-date { width: 12%; }
-  #dealer-orders-table.dealer-orders-goods .dealer-col-client { width: 26%; }
-  #dealer-orders-table.dealer-orders-goods .dealer-col-status { width: 20%; }
-  #dealer-orders-table.dealer-orders-goods .dealer-col-amount { width: 12%; }
+  #dealer-orders-table.dealer-orders-goods .dealer-col-client { width: 42%; }
+  #dealer-orders-table.dealer-orders-goods .dealer-col-status { width: 24%; }
   .dealer-orders-page #dealer-orders-table .status-picker-form,
   .dealer-orders-page #dealer-orders-table .status-picker,
   .dealer-orders-page #dealer-orders-table .status-badge { max-width: 100%; }

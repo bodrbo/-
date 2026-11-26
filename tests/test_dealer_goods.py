@@ -213,7 +213,7 @@ class DealerGoodsTests(unittest.TestCase):
         page = self.client.get("/dealer/goods").get_data(as_text=True)
         self.assertNotIn("<th>Товары</th>", page)
         self.assertNotIn("<th>Позиции</th>", page)
-        self.assertEqual(page.count("<th>"), 7)          # №, дата, клиент, статус, сумма, оплачено, остаток
+        self.assertEqual(re.findall(r"<th>(.*?)</th>", page), ["№", "Дата", "Клиент", "Итог", "Статус"])
         found = self.client.get(f"/dealer/goods?q={ROPE}").get_data(as_text=True)
         self.assertIn(CLIENT, found)
         self.assertNotIn(f"{ROPE} ×3", found)            # the goods themselves are not listed
