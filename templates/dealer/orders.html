@@ -50,7 +50,17 @@
   </form>
   {% if orders %}
   <div class="table-scroll">
-    <table class="records" id="dealer-orders-table">
+    <table class="records{{ ' dealer-orders-goods' if is_goods }}" id="dealer-orders-table">
+      <colgroup>
+        <col class="dealer-col-number">
+        <col class="dealer-col-date">
+        <col class="dealer-col-client">
+        {% if not is_goods %}<col class="dealer-col-items">{% endif %}
+        <col class="dealer-col-status">
+        <col class="dealer-col-amount">
+        <col class="dealer-col-amount">
+        <col class="dealer-col-amount">
+      </colgroup>
       <thead>
         <tr><th>№</th><th>Дата</th><th>Клиент</th>{% if not is_goods %}<th>Позиции</th>{% endif %}<th>Статус</th><th>Сумма</th><th>Оплачено</th><th>Остаток</th></tr>
       </thead>

@@ -68,7 +68,7 @@
   </div>
 </header>
 
-<main class="wrap">
+<main class="wrap{{ ' dealer-orders-page' if sub_page in ('orders', 'goods') }}">
 
   <nav class="sub-tabs">
     <a href="{{ url_for('dealer.orders') }}" class="{{ 'active' if sub_page == 'orders' }}">Лодки и моторы</a>
