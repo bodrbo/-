@@ -7,3 +7,4 @@ workhours.db
 output/
 .secret_key
 backups/
+private_tuning_request_photos/

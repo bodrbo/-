@@ -942,6 +942,17 @@
   </details>
 
   {% if events_panel %}{% include '_order_events_panel.html' %}{% endif %}
+  {% if request_photos %}
+  <section class="panel" aria-label="Фотография из заявки">
+    <h2>Фотография из заявки</h2>
+    {% for photo in request_photos %}
+    <a href="{{ url_for('tuning_request_photo', photo_id=photo.id) }}" target="_blank" rel="noopener">
+      <img src="{{ url_for('tuning_request_photo', photo_id=photo.id) }}" alt="{{ photo.original_name }}" width="240" height="180" loading="lazy" style="max-width:100%;object-fit:contain">
+    </a>
+    <p>{{ photo.original_name }}</p>
+    {% endfor %}
+  </section>
+  {% endif %}
 
   <details class="panel collapsible-panel" id="notes">
     <summary>

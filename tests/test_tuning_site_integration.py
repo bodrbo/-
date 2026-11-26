@@ -1,4 +1,7 @@
 import unittest
+import base64
+import os
+from unittest.mock import patch
 
 from support import application_module
 
@@ -25,6 +28,7 @@ class TuningSiteIntegrationTests(unittest.TestCase):
         with application_module.app.app_context():
             db = application_module.get_db()
             for table in (
+                "tuning_request_photos",
                 "tuning_order_note_reminders",
                 "tuning_order_notes",
                 "order_events",
@@ -302,6 +306,88 @@ class TuningSiteIntegrationTests(unittest.TestCase):
                 "SELECT COUNT(*) AS count FROM tuning_orders"
             ).fetchone()["count"]
         self.assertEqual(count, 0)
+
+    @staticmethod
+    def photo():
+        return {
+            "filename": "boat.png", "content_type": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aG1kAAAAASUVORK5CYII=",
+        }
+
+    def test_photo_is_saved_once_and_opens_only_for_staff(self):
+        response = self.client.post(
+            "/api/integrations/tuning-leads",
+            json=self.payload(photo=self.photo()), headers=self.auth(),
+        )
+        retry = self.client.post(
+            "/api/integrations/tuning-leads",
+            json=self.payload(photo=self.photo()), headers=self.auth(),
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.get_json()["photo_received"])
+        self.assertEqual(retry.status_code, 200)
+        with application_module.app.app_context():
+            photos = application_module.get_db().execute("SELECT * FROM tuning_request_photos").fetchall()
+        self.assertEqual(len(photos), 1)
+        self.assertEqual(photos[0]["order_id"], response.get_json()["order_id"])
+        with open(os.path.join(application_module._tuning_request_photo_directory(), photos[0]["filename"]), "rb") as source:
+            self.assertEqual(source.read(), base64.b64decode(self.photo()["data"]))
+        path = f"/tuning/request-photos/{photos[0]['id']}"
+        self.assertEqual(self.client.get(path).status_code, 302)
+        with self.client.session_transaction() as session:
+            session["admin_id"] = 1
+            session["admin_name"] = "Администратор"
+        image = self.client.get(path)
+        self.assertEqual(image.status_code, 200)
+        self.assertEqual(image.content_type, "image/png")
+        self.assertEqual(image.headers["X-Content-Type-Options"], "nosniff")
+        image.close()
+        html = self.client.get(f"/tuning/edit/{photos[0]['order_id']}").get_data(as_text=True)
+        self.assertIn("Фотография из заявки", html)
+        self.assertIn(path, html)
+
+    def test_retry_can_attach_photo_to_existing_lead_without_photo(self):
+        first = self.client.post(
+            "/api/integrations/tuning-leads", json=self.payload(), headers=self.auth(),
+        )
+        retry = self.client.post(
+            "/api/integrations/tuning-leads", json=self.payload(photo=self.photo()), headers=self.auth(),
+        )
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual(retry.get_json()["order_id"], first.get_json()["order_id"])
+        self.assertTrue(retry.get_json()["photo_received"])
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM tuning_orders").fetchone()[0], 1)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM tuning_request_photos").fetchone()[0], 1)
+
+    def test_invalid_photos_do_not_create_leads(self):
+        for photo in [
+            "photo",
+            {**self.photo(), "content_type": "image/svg+xml"},
+            {**self.photo(), "data": "invalid base64"},
+            {**self.photo(), "data": base64.b64encode(b"not a photograph").decode()},
+            {**self.photo(), "data": "A" * (4 * ((5 * 1024 * 1024 + 2) // 3) + 4)},
+        ]:
+            with self.subTest(photo_type=type(photo)):
+                response = self.client.post(
+                    "/api/integrations/tuning-leads", json=self.payload(photo=photo), headers=self.auth(),
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json()["error"], "invalid_photo")
+        with application_module.app.app_context():
+            self.assertEqual(application_module.get_db().execute("SELECT COUNT(*) FROM tuning_orders").fetchone()[0], 0)
+
+    def test_storage_failure_rolls_back_the_lead(self):
+        with patch.object(application_module, "_save_tuning_request_photo", side_effect=OSError("test storage failure")):
+            response = self.client.post(
+                "/api/integrations/tuning-leads", json=self.payload(photo=self.photo()), headers=self.auth(),
+            )
+        self.assertEqual(response.status_code, 503)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            for table in ("tuning_orders", "clients", "projects", "order_events", "tuning_request_photos"):
+                self.assertEqual(db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0)
 
     def test_missing_boat_model_does_not_erase_existing_client_model(self):
         with application_module.app.app_context():

@@ -27,6 +27,8 @@ import sqlite3
 import calendar
 import datetime as dt
 import threading
+import base64
+import binascii
 from difflib import SequenceMatcher
 from functools import wraps
 from concurrent.futures import ThreadPoolExecutor
@@ -2738,6 +2740,18 @@ def init_db(db_path=None, include_bootstrap_data=True):
             unit_price REAL NOT NULL,
             cost_price REAL NOT NULL,
             unit TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tuning_request_photos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL UNIQUE REFERENCES tuning_orders(id) ON DELETE CASCADE,
+            filename TEXT NOT NULL,
+            original_name TEXT NOT NULL,
+            mime_type TEXT NOT NULL,
             created_at TEXT NOT NULL
         )
         """
@@ -12494,6 +12508,64 @@ def _tuning_lead_json_error(status, error, message):
     return jsonify(ok=False, error=error, message=message), status
 
 
+def _validate_tuning_lead_photo(value):
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("Некорректная фотография.")
+    encoded = value.get("data")
+    name = value.get("filename")
+    mime = value.get("content_type")
+    extensions = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+    if not isinstance(mime, str) or mime not in extensions:
+        raise ValueError("Допустимы фотографии JPG, PNG и WebP.")
+    if not isinstance(name, str) or not name.strip() or len(name) > 200 or any(ord(char) < 32 for char in name):
+        raise ValueError("Некорректное имя фотографии.")
+    if not isinstance(encoded, str) or len(encoded) > 4 * ((5 * 1024 * 1024 + 2) // 3):
+        raise ValueError("Фотография должна быть не больше 5 МБ.")
+    try:
+        contents = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        raise ValueError("Не удалось прочитать фотографию.") from None
+    if not contents or len(contents) > 5 * 1024 * 1024:
+        raise ValueError("Фотография должна быть не больше 5 МБ.")
+    signatures = {
+        "image/jpeg": contents.startswith(b"\xff\xd8\xff") and contents.endswith(b"\xff\xd9"),
+        "image/png": contents.startswith(b"\x89PNG\r\n\x1a\n"),
+        "image/webp": contents.startswith(b"RIFF") and contents[8:12] == b"WEBP",
+    }
+    if not signatures[mime]:
+        raise ValueError("Содержимое фотографии не соответствует её формату.")
+    return {
+        "contents": contents, "extension": extensions[mime], "mime_type": mime,
+        "original_name": os.path.basename(name.replace("\\", "/")),
+    }
+
+
+def _tuning_request_photo_directory():
+    return os.path.join(os.path.dirname(DB_PATH), "private_tuning_request_photos")
+
+
+def _save_tuning_request_photo(db, order_id, photo, now):
+    directory = _tuning_request_photo_directory()
+    os.makedirs(directory, exist_ok=True)
+    filename = secrets.token_hex(16) + photo["extension"]
+    path = os.path.join(directory, filename)
+    try:
+        with open(path, "xb") as target:
+            target.write(photo["contents"])
+        db.execute(
+            "INSERT INTO tuning_request_photos "
+            "(order_id, filename, original_name, mime_type, created_at) VALUES (?, ?, ?, ?, ?)",
+            (order_id, filename, photo["original_name"], photo["mime_type"], now),
+        )
+    except Exception:
+        if os.path.isfile(path):
+            os.remove(path)
+        raise
+    return path
+
+
 def _validate_tuning_lead_payload(payload):
     """Validate and normalize the public tuning-site lead contract."""
     if not isinstance(payload, dict):
@@ -12649,6 +12721,10 @@ def tuning_site_lead_webhook():
         return _tuning_lead_json_error(
             400, "invalid_payload", validation_error
         )
+    try:
+        photo = _validate_tuning_lead_photo(payload.get("photo"))
+    except ValueError as error:
+        return _tuning_lead_json_error(400, "invalid_photo", str(error))
 
     db = get_db()
     if data["boat_profile_id"] is not None:
@@ -12667,6 +12743,7 @@ def tuning_site_lead_webhook():
     source_ref = f"tuning_site:{data['request_id']}"
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     order_date = _external_order_date(data["submitted_at"], now[:10])
+    pending_photo_path = None
     try:
         # Serializing this short check/create transaction makes request_id
         # idempotent even when the site retries concurrently.
@@ -12675,9 +12752,14 @@ def tuning_site_lead_webhook():
             "SELECT id FROM tuning_orders WHERE source_ref = ?", (source_ref,)
         ).fetchone()
         if existing is not None:
+            if photo and db.execute(
+                "SELECT id FROM tuning_request_photos WHERE order_id = ?", (existing["id"],)
+            ).fetchone() is None:
+                pending_photo_path = _save_tuning_request_photo(db, existing["id"], photo, now)
             db.commit()
             return jsonify(
-                ok=True, duplicate=True, order_id=existing["id"]
+                ok=True, duplicate=True, order_id=existing["id"],
+                **({"photo_received": True} if photo else {}),
             ), 200
 
         client_id = _get_or_create_client(
@@ -12722,9 +12804,13 @@ def tuning_site_lead_webhook():
             "Время отправки: " + (data["submitted_at"] or now)
         )
         add_order_new_request_event(db, "tuning", order_id, "\n".join(note_lines), now)
+        if photo:
+            pending_photo_path = _save_tuning_request_photo(db, order_id, photo, now)
         db.commit()
-    except sqlite3.Error:
+    except (sqlite3.Error, OSError):
         db.rollback()
+        if pending_photo_path and os.path.isfile(pending_photo_path):
+            os.remove(pending_photo_path)
         app.logger.exception("Failed to create tuning-site lead")
         return _tuning_lead_json_error(
             503,
@@ -12732,7 +12818,23 @@ def tuning_site_lead_webhook():
             "Не удалось сохранить заявку. Повторите запрос позже.",
         )
 
-    return jsonify(ok=True, order_id=order_id), 201
+    return jsonify(ok=True, order_id=order_id, **({"photo_received": True} if photo else {})), 201
+
+
+@app.route("/tuning/request-photos/<int:photo_id>")
+@admin_login_required
+def tuning_request_photo(photo_id):
+    photo = get_db().execute("SELECT * FROM tuning_request_photos WHERE id = ?", (photo_id,)).fetchone()
+    if photo is None:
+        abort(404)
+    response = send_from_directory(
+        _tuning_request_photo_directory(), photo["filename"],
+        mimetype=photo["mime_type"], download_name=photo["original_name"],
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Content-Security-Policy"] = "default-src 'none'; img-src 'self'; sandbox"
+    return response
 
 
 # Field names in a Tilda webhook payload are whatever the site's form
@@ -12998,6 +13100,9 @@ def edit_tuning_order(order_id):
             document_error=session.pop("tuning_document_error", None),
             document_notice=session.pop("tuning_document_notice", None),
             work_photos_by_item=work_photos_by_item,
+            request_photos=db.execute(
+                "SELECT id, original_name FROM tuning_request_photos WHERE order_id = ?", (order_id,)
+            ).fetchall(),
             work_videos_by_item=work_videos_by_item,
             video_error=session.pop("tuning_video_error", None),
             video_notice=session.pop("tuning_video_notice", None),
@@ -13176,6 +13281,14 @@ def _delete_tuning_order_records(db, order_ids):
         forget_order_events(db, "tuning", order_id, lambda task_id: _delete_visit_schedule_task(db, task_id))
     tickets_dir = os.path.join(app.static_folder, "tuning_ship_tickets")
     placeholders = ",".join("?" for _order_id in order_ids)
+    for photo in db.execute(
+        f"SELECT filename FROM tuning_request_photos WHERE order_id IN ({placeholders})", order_ids
+    ).fetchall():
+        try:
+            os.remove(os.path.join(_tuning_request_photo_directory(), photo["filename"]))
+        except FileNotFoundError:
+            pass
+    db.executemany("DELETE FROM tuning_request_photos WHERE order_id = ?", parameters)
     for ticket in db.execute(
         f"SELECT filename FROM tuning_order_ship_tickets WHERE order_id IN ({placeholders})",
         order_ids,
