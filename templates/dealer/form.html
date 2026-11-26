@@ -271,6 +271,7 @@
 {% if order %}{% include 'dealer/_ship_modal.html' %}{% endif %}
 {% include 'dealer/_goods_script.html' %}
 {% else %}
+{% include 'dealer/_option_modal.html' %}
 <script id="dealerCatalogData" type="application/json">{{ catalog|tojson }}</script>
 <script id="dealerItemsData" type="application/json">{{ items|tojson }}</script>
 <script id="dealerOptionsData" type="application/json">{{ boat_options|tojson }}</script>
@@ -279,7 +280,6 @@
   var catalog = JSON.parse(document.getElementById('dealerCatalogData').textContent);
   var initial = JSON.parse(document.getElementById('dealerItemsData').textContent);
   var optionCatalog = JSON.parse(document.getElementById('dealerOptionsData').textContent);
-  var optionPhotoUrl = {{ url_for('dealer.option_photo', filename='__PHOTO__')|tojson }};
   var KINDS = {{ item_kinds|tojson }};
   var rows = document.getElementById('dealerItemRows');
   var lists = {boat: document.getElementById('dealerCatalogBoat'), motor: document.getElementById('dealerCatalogMotor')};
@@ -353,7 +353,7 @@
     rows.appendChild(row);
     var optionRow = document.createElement('tr');
     optionRow.className = 'dealer-option-row';
-    optionRow.innerHTML = '<td colspan="7"><details><summary>Доп. опции лодки <span data-option-count></span></summary><div class="dealer-option-grid" data-option-choices></div><p class="hint" data-option-empty>Для этой лодки пока нет опций. Добавьте их в каталоге доп. опций.</p></details></td>';
+    optionRow.innerHTML = '<td colspan="7"><details><summary>Доп. опции лодки <span data-option-count></span></summary><div class="dealer-option-list" data-option-choices></div><p class="hint" data-option-empty>Для этой лодки пока нет опций. Добавьте их в прайс-листе.</p></details></td>';
     rows.appendChild(optionRow);
 
     var kind = row.querySelector('[name="item_kind[]"]');
@@ -371,15 +371,23 @@
       });
       available.forEach(function (o) {
         var checked = row.selectedOptions.some(function (p) { return p.id === o.id; });
-        var label = document.createElement('label');
-        label.className = 'dealer-option-card dealer-option-choice';
-        label.innerHTML = '<img src="' + esc(optionPhotoUrl.replace('__PHOTO__', encodeURIComponent(o.photo_filename))) + '" alt="' + esc(o.name) + '" loading="lazy"><span class="dealer-option-body"><span class="dealer-option-title"><input type="checkbox"' + (checked ? ' checked' : '') + '><strong>' + esc(o.name) + '</strong></span><strong>' + money(o.price) + '</strong><span class="dealer-option-description">' + esc(o.description) + '</span></span>';
-        label.querySelector('input').addEventListener('change', function (event) {
+        var line = document.createElement('div');
+        line.className = 'dealer-option-choice';
+        var checkbox = document.createElement('input');
+        checkbox.type = 'checkbox'; checkbox.checked = checked;
+        checkbox.setAttribute('aria-label', 'Добавить опцию: ' + o.name);
+        var link = document.createElement('button');
+        link.type = 'button'; link.className = 'client-product-link';
+        link.textContent = o.name; link.dataset.dealerOption = JSON.stringify(o);
+        var cost = document.createElement('span');
+        cost.className = 'muted'; cost.textContent = money(o.price);
+        line.appendChild(checkbox); line.appendChild(link); line.appendChild(cost);
+        checkbox.addEventListener('change', function (event) {
           row.selectedOptions = row.selectedOptions.filter(function (p) { return p.id !== o.id; });
           if (event.target.checked) { row.selectedOptions.push(o); }
           syncOptions(); recalc();
         });
-        choices.appendChild(label);
+        choices.appendChild(line);
       });
       optionRow.querySelector('[data-option-empty]').hidden = available.length > 0;
       syncOptions();

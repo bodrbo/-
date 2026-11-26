@@ -4122,30 +4122,28 @@ tr.dealer-cancelled td { opacity: 0.55; }
 .dealer-goods-items td:first-child input[type="text"] { width: 100%; min-width: 260px; }
 .dealer-goods-state { display: block; margin-top: 4px; }
 .dealer-totals { margin-top: 14px; }
-.dealer-option-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 16px; }
-.dealer-option-card { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--hairline); border-radius: 8px; overflow: hidden; background: var(--paper); }
-.dealer-option-card img { display: block; width: 100%; height: 180px; object-fit: contain; background: var(--paper-alt); }
-.dealer-option-body { display: flex; flex-direction: column; gap: 8px; padding: 14px; min-width: 0; }
-.dealer-option-body h3, .dealer-option-body p { margin: 0; }
+.dealer-price-tabs { padding-bottom: 12px; border-bottom: 1px solid var(--hairline); }
 .dealer-option-description { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
-.dealer-option-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
-.dealer-option-actions form { margin: 0; }
+.dealer-option-list-description { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; font-weight: 400; white-space: normal; }
+.dealer-option-back { display: inline-block; margin-bottom: 14px; }
+.dealer-option-detail { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+.dealer-option-detail > a { flex: none; }
+.dealer-option-detail img { display: block; width: 160px; height: 160px; object-fit: contain; background: #fff; border: 1px solid var(--hairline); border-radius: 12px; flex: none; }
+.dealer-option-facts { flex: 1 1 260px; min-width: 0; }
+.dealer-option-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 24px; border: 1px solid var(--hairline); border-radius: 12px; background: var(--paper); color: var(--ink); overflow-y: auto; }
+.dealer-option-dialog::backdrop { background: rgba(0, 20, 32, .65); }
+.dealer-option-dialog h2 { margin: 0 44px 20px 0; font-size: 20px; }
+.dealer-option-dialog .photo-modal-close { top: 10px; right: 10px; }
 .dealer-option-archived { opacity: .65; }
-.dealer-option-choice { cursor: pointer; text-transform: none; font-weight: 400; letter-spacing: normal; }
-.dealer-option-choice:has(input:checked) { border-color: var(--brass); box-shadow: inset 0 0 0 1px var(--brass); }
-.dealer-option-choice:focus-within { outline: 2px solid var(--brass); outline-offset: 2px; }
-.dealer-option-title { display: flex; align-items: center; gap: 8px; }
-.dealer-option-title input[type="checkbox"] { width: 18px; min-width: 18px; height: 18px; }
+.dealer-option-list { display: grid; gap: 10px; padding: 12px 0; }
+.dealer-option-choice { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dealer-option-choice input[type="checkbox"] { width: 18px; height: 18px; flex: none; margin: 0; }
 .dealer-option-row[hidden] { display: none; }
 .dealer-option-row details > summary { cursor: pointer; padding: 8px 0; color: var(--brass-strong); font-weight: 700; }
-.dealer-option-row .dealer-option-grid { padding: 12px 0; }
 .dealer-selected-options { list-style: none; padding: 0; margin: 8px 0; }
-.dealer-selected-options li { display: flex; gap: 10px; margin: 10px 0; }
-.dealer-selected-options img { width: 64px; height: 64px; object-fit: contain; }
-.dealer-selected-options p { margin: 4px 0 0; }
+.dealer-selected-options li { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0; }
 @media (max-width: 700px) {
   .dealer-option-row details { width: calc(100vw - 110px); max-width: 100%; }
-  .dealer-option-row .dealer-option-grid { grid-template-columns: minmax(0, 1fr); }
 }
 .status-badge.status-handed_over { background: rgba(47, 107, 79, 0.16); color: var(--success); }
 .status-badge.status-handed_over::before {

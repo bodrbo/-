@@ -1,0 +1,18 @@
+<dialog id="dealerOptionDialog" class="dealer-option-dialog" aria-labelledby="dealerOptionTitle"
+        data-photo-url="{{ url_for('dealer.option_photo', filename='__PHOTO__') }}">
+  <button type="button" class="photo-modal-close" data-close-option aria-label="Закрыть карточку опции">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></svg>
+  </button>
+  <h2 id="dealerOptionTitle"></h2>
+  <div class="dealer-option-detail">
+    <img data-option-photo alt="">
+    <div class="dealer-option-facts">
+      <table class="gloss">
+        <tr><th>Для лодок</th><td data-option-boats></td></tr>
+        <tr><th>Описание</th><td class="dealer-option-description" data-option-description></td></tr>
+        <tr><th>Цена продажи</th><td data-option-price></td></tr>
+      </table>
+    </div>
+  </div>
+</dialog>
+<script src="{{ url_for('static', filename='dealer-options.js') }}"></script>

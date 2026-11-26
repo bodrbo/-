@@ -1,4 +1,5 @@
 import io
+import html
 import json
 import sqlite3
 import tempfile
@@ -117,8 +118,9 @@ class DealerOptionsTests(unittest.TestCase):
             token = a.get_db().execute('SELECT token FROM clients WHERE id = ?', (order['client_id'],)).fetchone()['token']
         self.assertEqual(cabinet[0]['items'][0]['options'][0]['name'], option['name'])
         page = a.app.test_client().get(f'/client/{token}').get_data(as_text=True)
-        self.assertIn(option['description'], page)
-        self.assertIn('/dealer/options/photos/' + option['photo_filename'], page)
+        self.assertIn('data-dealer-option=', page)
+        self.assertIn(html.escape(json.dumps(option['description'], ensure_ascii=True)[1:-1]), page)
+        self.assertIn(option['photo_filename'], page)
         self.assertEqual(self.rows('SELECT id FROM supply_writeoffs WHERE dealer_order_id = ?', (order['id'],)), [])
 
     def test_saved_snapshots_survive_price_photo_changes_and_archiving(self):

@@ -47,6 +47,8 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
 
     @blueprint.route("/dealer/options", methods=["GET", "POST"])
     @blueprint.route("/dealer/options/<int:option_id>", methods=["GET", "POST"])
+    @blueprint.route("/dealer/prices/options", methods=["GET", "POST"])
+    @blueprint.route("/dealer/prices/options/<int:option_id>", methods=["GET", "POST"])
     @access_required
     def boat_options(option_id=None):
         db = get_db()
@@ -61,13 +63,14 @@ def create_dealer_blueprint(get_db, access_required, client_choices, resolve_cli
                 notice("success", "Доп. опция сохранена.")
                 return redirect(url_for("dealer.boat_options"))
         return render_template(
-            "dealer/options.html", active_page="dealer", sub_page="options", options=rows,
+            "dealer/options.html", active_page="dealer", sub_page="prices", price_tab="options", options=rows,
             boats=[dict(p) for p in repository.catalog_positions(db) if p["equipment_type"] == "boat"],
             selected=selected, values=request.form if error else (selected or {}), error=error,
             notice=session.pop("dealer_notice", None),
         ), 400 if error else 200
 
     @blueprint.route("/dealer/options/<int:option_id>/active", methods=["POST"])
+    @blueprint.route("/dealer/prices/options/<int:option_id>/active", methods=["POST"])
     @access_required
     def option_active(option_id):
         db = get_db()

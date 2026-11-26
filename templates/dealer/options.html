@@ -1,9 +1,28 @@
 {% extends 'dealer/base.html' %}
-{% block title %}Доп. опции лодок — Дилерский центр{% endblock %}
-{% block heading %}Доп. опции лодок{% endblock %}
+{% block title %}{{ selected.name if selected else "Доп. опции лодок" }} — Прайс-лист{% endblock %}
+{% block heading %}Прайс-лист{% endblock %}
 {% block content %}
+{% include 'dealer/_price_nav.html' %}
+{% if selected %}
+<a href="{{ url_for('dealer.boat_options') }}" class="term dealer-option-back">← Доп. опции лодок</a>
 <section class="panel">
-  <h2>{{ 'Редактировать опцию' if selected else 'Новая доп. опция' }}</h2>
+  <h2>{{ selected.name }}</h2>
+  <div class="dealer-option-detail">
+    <a href="{{ url_for('dealer.option_photo', filename=selected.photo_filename) }}" target="_blank" rel="noopener"><img src="{{ url_for('dealer.option_photo', filename=selected.photo_filename) }}" alt="{{ selected.name }}"></a>
+    <div class="dealer-option-facts">
+      <table class="gloss">
+        <tr><th>Для лодок</th><td>{{ selected.boat_name or 'Все лодки' }}</td></tr>
+        <tr><th>Описание</th><td class="dealer-option-description">{{ selected.description }}</td></tr>
+        <tr><th>Цена продажи</th><td>{{ selected.price|money }} ₽ / лодку</td></tr>
+        <tr><th>Доступность</th><td>{{ 'В каталоге' if selected.active else 'В архиве' }}</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+{% endif %}
+<details class="panel collapsible-panel" {% if error %}open{% endif %}>
+  <summary><span>{{ 'Редактировать опцию' if selected else 'Добавить доп. опцию' }}</span><span class="chev" aria-hidden="true"></span></summary>
+  <div class="collapsible-body">
   <p class="hint">Опции выбираются у лодки в заказе. Стоимость указана за одну лодку и входит в сумму заказа.</p>
   {% if error %}<div class="alert" role="alert">{{ error }}</div>{% endif %}
   <form method="post" enctype="multipart/form-data" class="entry-form">
@@ -16,18 +35,29 @@
     </div>
     <div class="field field-submit"><button type="submit">{{ 'Сохранить изменения' if selected else 'Добавить опцию' }}</button>{% if selected %}<a href="{{ url_for('dealer.boat_options') }}" class="btn-secondary">Отмена</a>{% endif %}</div>
   </form>
-</section>
-<section class="panel">
-  <h2>Каталог доп. опций</h2>
-  <div class="dealer-option-grid">
-  {% for option in options %}
-    <article class="dealer-option-card{{ ' dealer-option-archived' if not option.active }}">
-      <a href="{{ url_for('dealer.option_photo', filename=option.photo_filename) }}" target="_blank" rel="noopener" aria-label="Фотография: {{ option.name }}"><img src="{{ url_for('dealer.option_photo', filename=option.photo_filename) }}" alt="{{ option.name }}" loading="lazy"></a>
-      <div class="dealer-option-body"><h3>{{ option.name }}</h3><strong>{{ option.price|money }} ₽</strong><p class="muted">{{ option.boat_name or 'Все лодки' }}{{ ' · В архиве' if not option.active }}</p><p class="dealer-option-description">{{ option.description }}</p>
-        <div class="dealer-option-actions"><a href="{{ url_for('dealer.boat_options', option_id=option.id) }}">Изменить</a><form method="post" action="{{ url_for('dealer.option_active', option_id=option.id) }}"><input type="hidden" name="active" value="{{ 0 if option.active else 1 }}"><button class="btn-secondary" type="submit">{{ 'В архив' if option.active else 'Вернуть в каталог' }}</button></form></div>
-      </div>
-    </article>
-  {% else %}<p class="hint">Добавьте первую опцию с фотографией, описанием и стоимостью.</p>{% endfor %}
   </div>
+</details>
+{% if not selected %}
+<section class="panel">
+  <h2>Доп. опции лодок</h2>
+  {% if options %}
+  <div class="table-scroll">
+    <table class="records">
+      <thead><tr><th>Фото</th><th>Название</th><th>Для лодок</th><th>Стоимость, ₽</th><th></th></tr></thead>
+      <tbody>
+      {% for option in options %}
+        <tr class="{{ 'dealer-option-archived' if not option.active }}">
+          <td><img src="{{ url_for('dealer.option_photo', filename=option.photo_filename) }}" alt="" class="supply-thumb" loading="lazy"></td>
+          <td class="term"><a href="{{ url_for('dealer.boat_options', option_id=option.id) }}">{{ option.name }}</a><span class="dealer-option-list-description">{{ option.description }}</span></td>
+          <td>{{ option.boat_name or 'Все лодки' }}{{ ' · В архиве' if not option.active }}</td>
+          <td class="amount">{{ option.price|money }}</td>
+          <td><form method="post" action="{{ url_for('dealer.option_active', option_id=option.id) }}"><input type="hidden" name="active" value="{{ 0 if option.active else 1 }}"><button class="btn-secondary" type="submit">{{ 'В архив' if option.active else 'Вернуть в каталог' }}</button></form></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="hint">Добавьте первую опцию с фотографией, описанием и стоимостью.</p>{% endif %}
 </section>
+{% endif %}
 {% endblock %}

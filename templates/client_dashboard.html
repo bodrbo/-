@@ -725,7 +725,7 @@
                     <p class="hint">Доп. опции включены в цену лодки:</p>
                     <ul class="dealer-selected-options">
                     {% for option in item.options %}
-                      <li><a href="{{ url_for('dealer.option_photo', filename=option.photo_filename) }}" target="_blank" rel="noopener"><img src="{{ url_for('dealer.option_photo', filename=option.photo_filename) }}" alt="{{ option.name }}" loading="lazy"></a><div><strong>{{ option.name }} · {{ option.price|money }} ₽</strong><p class="dealer-option-description">{{ option.description }}</p></div></li>
+                      <li><button type="button" class="client-product-link" data-dealer-option="{{ option|tojson|forceescape }}">{{ option.name }}</button><span>{{ option.price|money }} ₽</span></li>
                     {% endfor %}
                     </ul>
                   {% endif %}</td>
@@ -779,6 +779,8 @@
   </section>
   {% endif %}
   {% endif %}
+
+  {% if dealer_orders %}{% include 'dealer/_option_modal.html' %}{% endif %}
 
   <div id="product-modal" class="photo-modal hidden" onclick="if (event.target === this) closeProductCard();">
     <div class="photo-modal-inner client-product-card" role="dialog" aria-modal="true" aria-labelledby="product-card-title">

@@ -1,0 +1,4 @@
+<nav class="sub-tabs dealer-price-tabs" aria-label="Разделы прайс-листа">
+  <a href="{{ url_for('dealer.prices') }}" class="{{ 'active' if price_tab|default('equipment') == 'equipment' }}" {% if price_tab|default('equipment') == 'equipment' %}aria-current="page"{% endif %}>Лодки и моторы</a>
+  <a href="{{ url_for('dealer.boat_options') }}" class="{{ 'active' if price_tab|default('equipment') == 'options' }}" {% if price_tab|default('equipment') == 'options' %}aria-current="page"{% endif %}>Доп. опции лодок</a>
+</nav>
