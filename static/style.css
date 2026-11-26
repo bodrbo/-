@@ -13005,3 +13005,30 @@ button.partner-open-price-save svg {
   .dealer-orders-page #dealer-orders-table .status-badge { max-width: 100%; }
   .dealer-orders-page #dealer-orders-table .status-picker-trigger { white-space: normal; text-align: left; }
 }
+
+/* Compact actions for tuning orders; the open menu lives outside the table. */
+.tuning-order-menu-cell { text-align: right; }
+.tuning-order-menu-trigger {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; padding: 0; margin: 0;
+  border: 1px solid var(--hairline); border-radius: 8px;
+  background: var(--paper); color: var(--ink-soft); cursor: pointer;
+}
+.tuning-order-menu-trigger svg { width: 20px; height: 20px; }
+.tuning-order-menu-trigger:hover, .tuning-order-menu-trigger[aria-expanded="true"] { border-color: var(--brass); background: var(--paper-alt); color: var(--brass); }
+.tuning-order-menu-trigger:focus-visible, .tuning-order-menu [role="menuitem"]:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.tuning-order-menu {
+  position: fixed; z-index: 1600; box-sizing: border-box; width: 190px; max-width: calc(100vw - 16px);
+  padding: 5px; border: 1px solid var(--hairline); border-radius: 10px;
+  background: var(--paper); box-shadow: 0 8px 24px rgba(8,44,59,.16);
+}
+.tuning-order-menu[hidden] { display: none; }
+.tuning-order-menu form { margin: 0; }
+.tuning-order-menu [role="menuitem"] {
+  display: block; box-sizing: border-box; width: 100%; margin: 0; padding: 10px 12px;
+  border: 0; border-radius: 6px; background: transparent; box-shadow: none;
+  color: var(--ink); font: inherit; font-size: 13px; text-align: left; text-decoration: none; cursor: pointer;
+}
+.tuning-order-menu [role="menuitem"]:hover, .tuning-order-menu [role="menuitem"]:focus { background: var(--paper-alt); }
+.tuning-order-menu .tuning-order-menu-danger { color: var(--danger); }
+@media (max-width: 560px) { .tuning-order-menu-trigger { width: 40px; height: 40px; } }
