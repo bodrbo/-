@@ -78,7 +78,8 @@ class CabinetCancelledOrdersTests(unittest.TestCase):
 
     def assert_stats(self, page, orders, total, paid, remaining):
         stats = self.stats(page)
-        self.assertEqual(stats["Заказов"], str(orders))
+        self.assertNotIn("Заказов", stats)
+        self.assertIn(f'<p class="hint client-orders-count">Всего заказов: {orders}</p>', page)
         self.assertEqual(stats["Сумма по заказам"], f"{total} ₽")
         self.assertEqual(stats["Оплачено"], f"{paid} ₽")
         self.assertEqual(stats["Осталось доплатить"], f"{remaining} ₽")
@@ -110,7 +111,7 @@ class CabinetCancelledOrdersTests(unittest.TestCase):
         page = self.client.get(f"/client/{self.TOKEN}").get_data(as_text=True)
         equipment = page.index('<span class="k">Техника</span>')
         terms = page.index('<span class="k">Условия</span>')
-        orders = page.index('<span class="k">Заказов</span>')
+        orders = page.index('<span class="k">Сумма по заказам</span>')
         self.assertLess(equipment, terms)
         self.assertLess(terms, orders)
         self.assertIn("Предоплата 70%", page)

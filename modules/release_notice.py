@@ -47,11 +47,10 @@ def register(app, get_db, staff_owner):
         return URLSafeTimedSerializer(app.secret_key, salt='release-notice-v1')
 
     def owner():
-        # Public client pages are identified by their existing bearer link.
-        if request.path.startswith('/client/') and (request.view_args or {}).get('token'):
-            row = get_db().execute('SELECT id FROM clients WHERE token = ?',
-                                   (request.view_args['token'],)).fetchone()
-            return ('client', row['id']) if row else None
+        # Public cabinets never receive internal announcements, including when
+        # the browser also has an authenticated staff session.
+        if request.path.startswith('/client/'):
+            return None
         return staff_owner()
 
     @bp.post('/api/me/release-acknowledgement')

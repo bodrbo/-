@@ -20,6 +20,8 @@ class ReleaseNoticeTests(unittest.TestCase):
         self.db.execute("INSERT INTO clients VALUES (8, 'client-link')")
         self.app.add_url_rule('/page', 'page', lambda: '<html><body>Page</body></html>')
         self.app.add_url_rule('/client/<token>', 'client', lambda token: '<html><body>Cabinet</body></html>')
+        self.app.add_url_rule('/client/<token>/estimate-request', 'client_estimate',
+                              lambda token: '<html><body>Estimate</body></html>')
         self.app.add_url_rule('/data', 'data', lambda: {'ok': True})
         register(self.app, lambda: self.db,
                  lambda: ('employee', session['employee_id']) if session.get('employee_id') else None)
@@ -76,13 +78,15 @@ class ReleaseNoticeTests(unittest.TestCase):
         self.assertNotIn('release-notice', self.client.get('/page', headers={'X-Requested-With': 'XMLHttpRequest'}).get_data(as_text=True))
         self.assertNotIn('release-notice', self.client.get('/page', headers={'Sec-Fetch-Dest': 'empty'}).get_data(as_text=True))
 
-    def test_client_links_have_separate_seen_state_and_client_summary(self):
-        response = self.client.get('/client/client-link')
-        config = self.config(response)
-        self.assertNotIn('переключателем видимости', response.get_data(as_text=True))
-        self.assertEqual(self.ack(config).status_code, 200)
-        self.assertNotIn('release-notice', self.client.get('/client/client-link').get_data(as_text=True))
+    def test_client_pages_never_receive_a_notice_even_with_a_staff_session(self):
+        paths = ('/client/client-link', '/client/client-link/estimate-request')
+        for path in paths:
+            with self.subTest(path=path, logged_in=False):
+                self.assertNotIn('release-notice', self.client.get(path).get_data(as_text=True))
         self.login()
+        for path in paths:
+            with self.subTest(path=path, logged_in=True):
+                self.assertNotIn('release-notice', self.client.get(path).get_data(as_text=True))
         self.config(self.client.get('/page'))
 
     def test_invalid_or_cross_site_acknowledgements_are_rejected(self):

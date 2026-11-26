@@ -252,10 +252,6 @@
     </div>
     {% endif %}
     <div class="panel total-card">
-      <span class="k">Заказов</span>
-      <span class="v">{{ orders_count }}</span>
-    </div>
-    <div class="panel total-card">
       <span class="k">Сумма по заказам</span>
       <span class="v">{{ grand_total|money }} ₽</span>
     </div>
@@ -377,10 +373,12 @@
   </section>
   {% endif %}
 
-  {% if visible_orders or not dealer_orders or is_tuning_partner %}
   <section class="client-orders" id="orders">
     <div class="partner-orders-heading">
-      <h2>{{ ('Входящие заявки' if partner_request_view == 'incoming' else 'Исходящие заявки') if is_tuning_partner else 'Ваши заказы' }}</h2>
+      <div>
+        <h2>{{ ('Входящие заявки' if partner_request_view == 'incoming' else 'Исходящие заявки') if is_tuning_partner else 'Ваши заказы' }}</h2>
+        <p class="hint client-orders-count">Всего заказов: {{ orders_count }}</p>
+      </div>
       {% if is_tuning_partner and not is_admin_view %}
       <a href="{{ url_for('partner_estimate_request', token=client.token) }}" class="btn-secondary">Создать заявку</a>
       {% endif %}
@@ -682,7 +680,6 @@
     </div>
     {% endif %}
   </section>
-  {% endif %}
 
   {% if dealer_orders %}
   <section class="client-orders client-dealer-orders" id="dealer-orders">
