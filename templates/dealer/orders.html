@@ -67,7 +67,7 @@
         <tr class="row-clickable{{ ' dealer-cancelled' if o.status == 'cancelled' }}" onclick="if (!event.target.closest('[data-status-picker-form], a, button')) window.location.href='{{ url_for('dealer.order', order_id=o.id) }}'">
           <td><a href="{{ url_for('dealer.order', order_id=o.id) }}">№{{ o.id }}</a></td>
           <td class="muted">{{ o.order_date|ru_date }}</td>
-          <td class="term">{{ o.client_name }}{% if o.phone %}<span class="muted dealer-phone">{{ o.phone }}</span>{% endif %}</td>
+          <td class="term">{% if o.client_id %}<a href="{{ url_for('admin_client_dashboard', client_id=o.client_id) }}">{{ o.client_name }}</a>{% else %}{{ o.client_name }}{% endif %}{% if o.phone %}<span class="muted dealer-phone">{{ o.phone }}</span>{% endif %}</td>
           {% if not is_goods %}<td class="muted">{{ o.items_text }}</td>{% endif %}
           <td class="amount">{{ o.total|money }}</td>
           <td>{{ status_picker(url_for('dealer.update_status', order_id=o.id), o.status, statuses, prefix='status-dealer-', next_url=request.full_path.rstrip('?'), aria='Статус заказа №' ~ o.id) }}</td>

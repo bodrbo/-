@@ -21,7 +21,7 @@
 
 <form method="post" id="dealerOrderForm" action="{{ url_for('dealer.order', order_id=order.id) if order else url_for('dealer.new_goods_order' if is_goods else 'dealer.new_order') }}">
   <section class="panel">
-    <h2>Клиент</h2>
+    <h2>Клиент{% if order and order.client_id and not form_state %} · <a href="{{ url_for('admin_client_dashboard', client_id=order.client_id) }}">{{ order.client_name }}</a>{% endif %}</h2>
     <div class="entry-form">
       <div class="field" data-tuning-client-combo>
         <label for="client_name_search">Клиент</label>
