@@ -7,12 +7,35 @@ from flask import Blueprint, jsonify, render_template, request, session, url_for
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 
+def item_key(audience, text):
+    normalized = ' '.join(text.split()).casefold()
+    return hashlib.sha256((audience + ':' + normalized).encode()).hexdigest()
+
+
 def init_schema(db):
     db.execute('''CREATE TABLE IF NOT EXISTS release_acknowledgements (
         owner_type TEXT NOT NULL, owner_id INTEGER NOT NULL,
         release_id TEXT NOT NULL, acknowledged_at TEXT NOT NULL,
         PRIMARY KEY (owner_type, owner_id, release_id)
     )''')
+    db.execute('''CREATE TABLE IF NOT EXISTS release_seen_items (
+        owner_type TEXT NOT NULL, owner_id INTEGER NOT NULL,
+        item_key TEXT NOT NULL,
+        PRIMARY KEY (owner_type, owner_id, item_key)
+    )''')
+    # Recover item-level state for announcements acknowledged before this
+    # migration. Keep these immutable snapshots in the manifest for old DBs.
+    manifest = json.loads((Path(__file__).resolve().parents[1] /
+                           'release_notes.json').read_text(encoding='utf-8'))
+    for release in manifest.get('previous_releases', []):
+        for audience in ('staff', 'client', 'investor'):
+            for item in release.get(audience, release.get('staff', [])):
+                db.execute('''INSERT OR IGNORE INTO release_seen_items
+                    SELECT owner_type, owner_id, ? FROM release_acknowledgements
+                    WHERE release_id=? AND
+                    (CASE WHEN owner_type IN ('client','investor')
+                          THEN owner_type ELSE 'staff' END)=?''',
+                           (item_key(audience, item), release['id'], audience))
 
 
 def register(app, get_db, staff_owner):
@@ -56,12 +79,21 @@ def register(app, get_db, staff_owner):
         elif list(staff_owner() or ()) != account:
             return jsonify(error='Войдите в свою учётную запись.'), 403
         db = get_db()
+        audience = account[0] if account[0] in ('client', 'investor') else 'staff'
+        allowed_keys = {item_key(audience, item)
+                        for item in release.get(audience, release['staff'])}
+        shown_keys = payload.get('items', [])
+        if not isinstance(shown_keys, list) or any(key not in allowed_keys for key in shown_keys):
+            return jsonify(error='Обновите страницу и повторите.'), 409
+        for key in shown_keys:
+            db.execute('INSERT OR IGNORE INTO release_seen_items VALUES (?, ?, ?)',
+                       (*account, key))
         exists = db.execute('SELECT 1 FROM release_acknowledgements WHERE owner_type=? AND owner_id=? AND release_id=?',
                             (*account, release['id'])).fetchone()
         if not exists:
             db.execute("INSERT OR IGNORE INTO release_acknowledgements VALUES (?, ?, ?, datetime('now'))",
                        (*account, release['id']))
-            db.commit()
+        db.commit()
         return jsonify(ok=True)
 
     app.register_blueprint(bp)
@@ -84,7 +116,16 @@ def register(app, get_db, staff_owner):
                             (*account, release['id'])).fetchone():
             return response
         audience = account[0] if account[0] in ('client', 'investor') else 'staff'
-        items = release.get(audience, release['staff'])
+        seen = {row['item_key'] for row in get_db().execute(
+            'SELECT item_key FROM release_seen_items WHERE owner_type=? AND owner_id=?', account)}
+        items = []
+        for item in release.get(audience, release['staff']):
+            key = item_key(audience, item)
+            if key not in seen:
+                items.append(item)
+                seen.add(key)
+        if not items:
+            return response
         logo = 'logo-dark.svg'
         company = 'Бодрый Боцман'
         if session.get('demo_tenant_id'):
@@ -92,7 +133,8 @@ def register(app, get_db, staff_owner):
             filename = session.get('demo_tenant_empty_state_logo') or session.get('demo_tenant_logo')
             logo = 'demo_logos/' + filename if filename else None
         config = {
-            'token': signer().dumps({'owner': account, 'release': release['id']}),
+            'token': signer().dumps({'owner': account, 'release': release['id'],
+                                    'items': [item_key(audience, item) for item in items]}),
             'endpoint': url_for('release_notice.acknowledge'),
             'storageKey': 'release-seen-' + hashlib.sha256(
                 json.dumps([account, release['id']]).encode()).hexdigest()[:24],

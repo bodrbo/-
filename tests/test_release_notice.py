@@ -49,7 +49,13 @@ class ReleaseNoticeTests(unittest.TestCase):
         self.login(second_device)
         self.assertNotIn('id="release-notice"', second_device.get('/page').get_data(as_text=True))
         self.app.config['RELEASE_NOTICE'] = dict(self.app.config['RELEASE_NOTICE'], id='next-release')
-        self.config(second_device.get('/page'))
+        self.assertNotIn('id="release-notice"', second_device.get('/page').get_data(as_text=True))
+        release = self.app.config['RELEASE_NOTICE']
+        self.app.config['RELEASE_NOTICE'] = dict(release, staff=release['staff'] + ['Совсем новая возможность.'])
+        response = second_device.get('/page')
+        self.config(response)
+        self.assertIn('Совсем новая возможность.', response.get_data(as_text=True))
+        self.assertNotIn(release['staff'][0], response.get_data(as_text=True))
         self.assertEqual(self.ack(config).status_code, 409)
 
     def test_other_accounts_must_acknowledge_for_themselves(self):
@@ -96,3 +102,29 @@ class ReleaseNoticeTests(unittest.TestCase):
         html = self.client.get('/page').get_data(as_text=True)
         self.assertIn('Чужая верфь', html)
         self.assertNotIn('src="/static/logo-dark.svg', html)
+
+    def test_old_version_acknowledgements_are_migrated(self):
+        release = self.app.config['RELEASE_NOTICE']
+        previous = release['previous_releases'][0]
+        self.db.execute("INSERT INTO release_acknowledgements VALUES ('employee', 1, ?, '2026-11-26')",
+                        (previous['id'],))
+        init_schema(self.db)
+        init_schema(self.db)  # migration is idempotent
+        self.login()
+        response = self.client.get('/page')
+        self.config(response)
+        html = response.get_data(as_text=True)
+        self.assertIn(release['staff'][0], html)
+        for item in previous['staff']:
+            self.assertNotIn(item, html)
+
+    def test_only_acknowledgement_marks_items_seen_and_new_users_see_everything(self):
+        self.login()
+        config = self.config(self.client.get('/page'))
+        self.config(self.client.get('/page'))
+        self.ack(config)
+        self.login(employee=2)
+        response = self.client.get('/page')
+        self.config(response)
+        for item in self.app.config['RELEASE_NOTICE']['staff']:
+            self.assertIn(item, response.get_data(as_text=True))

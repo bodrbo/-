@@ -344,7 +344,7 @@ BACKUP_OFFSITE = configured_backup_offsite(os.environ.get("YANDEX_DISK_TOKEN"), 
 # Bump when an additive schema migration is introduced. Demo sessions keep
 # their own SQLite files, so unlike the shared database they need an explicit
 # signal to run init_db() again after a deploy.
-DEMO_TENANT_SCHEMA_REVISION = "2026-11-25-release-notice"
+DEMO_TENANT_SCHEMA_REVISION = "2026-11-26-release-seen-items"
 
 
 def _bounded_env_int(name, default, minimum, maximum):
