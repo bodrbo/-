@@ -12091,7 +12091,9 @@ button.partner-open-price-save svg {
   border-radius: 7px;
   background: var(--ink-soft);
   color: #fff;
-  box-shadow: 0 8px 18px -13px rgba(15,42,53,.7);
+  /* Inset separators preserve exact task time bounds. */
+  box-shadow: inset 0 2px 0 #fff, inset 0 -2px 0 #173846,
+              0 8px 18px -13px rgba(15,42,53,.7);
 }
 .tuning-calendar-card.status-pending { background: #62707f; }
 .tuning-calendar-card.status-accepted { background: var(--brass); }
