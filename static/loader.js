@@ -11,6 +11,48 @@ window.addEventListener("pageshow", function (e) {
   if (e.persisted) location.reload();
 });
 
+// Short confirmations share a lifetime, including flashes replaced by AJAX.
+// Errors, ongoing jobs and notices with follow-up actions stay on screen.
+(function () {
+  var selector = '.alert.success, .alert.alert-success, .schedule-notice.success, ' +
+    '.schedule-notice.info, [class*="notice-success"], [class*="notice-info"], ' +
+    '.tuning-copy-notice, [data-auto-dismiss]';
+  var timers = new WeakMap();
+  function coveredByLoader() {
+    var loader = document.getElementById('pageLoader');
+    return loader && !loader.hidden && !loader.classList.contains('hidden');
+  }
+  function schedule(element) {
+    clearTimeout(timers.get(element));
+    if (element.closest('[data-notice-persistent]') ||
+        element.matches('.error, .warning, [class*="notice-error"], [class*="notice-warning"]') ||
+        element.querySelector('a, form, input, button:not([aria-label="Закрыть"])')) return;
+    timers.set(element, setTimeout(function () {
+      if (coveredByLoader()) { schedule(element); return; }
+      if (element.isConnected) element.remove();
+    }, 1000));
+  }
+  function scan(root) {
+    if (root.nodeType !== 1) return;
+    if (root.matches(selector)) schedule(root);
+    root.querySelectorAll(selector).forEach(schedule);
+  }
+  function start() {
+    if (coveredByLoader()) { setTimeout(start, 100); return; }
+    scan(document.body);
+    new MutationObserver(function (changes) {
+      changes.forEach(function (change) {
+        change.addedNodes.forEach(scan);
+        var parent = change.target.nodeType === 1 ? change.target : change.target.parentElement;
+        var notice = parent && parent.closest(selector);
+        if (notice) schedule(notice);
+      });
+    }).observe(document.body, {subtree: true, childList: true, characterData: true});
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
+})();
+
 (function () {
   var loader = document.getElementById("pageLoader");
   if (!loader) return;
@@ -875,7 +917,7 @@ if ("serviceWorker" in navigator) {
         setFeedback("Заявка отправлена. Спасибо!", true);
         textarea.value = "";
         if (counter) counter.textContent = "0";
-        setTimeout(closeDialog, 1100);
+        setTimeout(closeDialog, 1000);
       }).catch(function (error) {
         setFeedback(error.message || "Не удалось отправить заявку. Попробуйте ещё раз.", false);
       }).finally(function () {

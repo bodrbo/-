@@ -86,7 +86,7 @@
     <p class="hint">Подключено: копии базы и загруженные фото и документы автоматически отправляются в папку приложения на вашем Яндекс.Диске (раздел «Приложения»). Старые копии на Диске удаляются по тем же правилам хранения.</p>
     {% if offsite_status %}
     {% if offsite_status.ok %}
-    <p class="alert success">Последняя отправка {{ offsite_status.at }}: {{ offsite_status.message }}. Файлов на Диске: {{ offsite_status.files }}.</p>
+    <p class="alert success" data-notice-persistent>Последняя отправка {{ offsite_status.at }}: {{ offsite_status.message }}. Файлов на Диске: {{ offsite_status.files }}.</p>
     {% else %}
     <p class="alert" role="alert">Последняя отправка ({{ offsite_status.at }}) не удалась: {{ offsite_status.message }}.</p>
     {% endif %}

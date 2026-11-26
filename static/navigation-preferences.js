@@ -17,10 +17,11 @@
   document.body.appendChild(status);
 
   function close() { menu.hidden = true; }
-  function notify(text) {
+  function notify(text, isError) {
     status.textContent = text;
     status.hidden = false;
-    window.setTimeout(function () { status.hidden = true; }, 5000);
+    window.clearTimeout(notify.timer);
+    notify.timer = window.setTimeout(function () { status.hidden = true; }, isError ? 5000 : 1000);
   }
   function save(token) {
     if (busy) return;
@@ -37,7 +38,7 @@
         close();
         if (trigger) trigger.focus();
       });
-    }).catch(function (error) { notify(error.message || 'Проверьте соединение и повторите.'); })
+    }).catch(function (error) { notify(error.message || 'Проверьте соединение и повторите.', true); })
       .finally(function () {
         busy = false;
         menu.querySelectorAll('button').forEach(function (b) { b.disabled = false; });

@@ -38,7 +38,7 @@
       indicator.appendChild(reload);
     }
     if (kind === "saved") {
-      hideTimer = setTimeout(function () { indicator.hidden = true; }, 1800);
+      hideTimer = setTimeout(function () { indicator.hidden = true; }, 1000);
     }
   }
 

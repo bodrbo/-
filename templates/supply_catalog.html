@@ -109,7 +109,7 @@
   {% endif %}
 
   {% if marine_rocket_job %}
-  <div class="alert {{ 'alert-success' if marine_rocket_job.status != 'error' }}" role="status">
+  <div class="alert {{ 'alert-success' if marine_rocket_job.status != 'error' }}" role="status" data-notice-persistent>
     {{ marine_rocket_job.message }}
   </div>
   {% endif %}
@@ -121,7 +121,7 @@
   {% endif %}
 
   {% if thousand_sizes_job %}
-  <div class="alert {{ 'alert-success' if thousand_sizes_job.status != 'error' }}" role="status">
+  <div class="alert {{ 'alert-success' if thousand_sizes_job.status != 'error' }}" role="status" data-notice-persistent>
     {{ thousand_sizes_job.message }}
   </div>
   {% endif %}

@@ -132,7 +132,7 @@
     toast.textContent = message;
     toast.className = "offline-toast offline-toast-" + (kind || "info");
     window.clearTimeout(showToast.timer);
-    showToast.timer = window.setTimeout(function () { toast.classList.add("hidden"); }, 5000);
+    showToast.timer = window.setTimeout(function () { toast.classList.add("hidden"); }, kind === "error" ? 5000 : 1000);
   }
 
   function setConnectionState() {
