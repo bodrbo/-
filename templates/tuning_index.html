@@ -330,6 +330,10 @@
                       onsubmit="return confirm('Создать копию заказа №{{ o.id }}?');">
                   <button type="submit" role="menuitem" tabindex="-1" title="Копировать заказ" aria-label="Копировать заказ №{{ o.id }}">Дублировать</button>
                 </form>
+                <button type="button" role="menuitem" tabindex="-1" data-order-dealer-action="transfer"
+                        data-order-id="{{ o.id }}">Перенести</button>
+                <button type="button" role="menuitem" tabindex="-1" data-order-dealer-action="link"
+                        data-order-id="{{ o.id }}" data-link-url="{{ url_for('tuning_order_dealer_link', order_id=o.id) }}">Привязать</button>
                 <form action="{{ url_for('delete_tuning_order', order_id=o.id) }}" method="post" role="none"
                       onsubmit="return confirm('Удалить заказ №{{ o.id }}?');">
                   <button type="submit" role="menuitem" tabindex="-1" class="tuning-order-menu-danger">Удалить</button>
@@ -341,6 +345,7 @@
         </tbody>
       </table>
     </div>
+    {% include '_tuning_order_dealer_dialogs.html' %}
     {% else %}
     <div class="empty-state">
       {% include '_empty_state_logo.html' %}

@@ -13401,6 +13401,56 @@ def _bulk_convert_tuning_orders(db, order_ids, target, return_url, drop_works=Fa
     return redirect(return_url)
 
 
+@app.route('/tuning/<int:order_id>/dealer-link', methods=['GET', 'POST'])
+@admin_login_required
+def tuning_order_dealer_link(order_id):
+    """Attach an existing dealer order without moving either order or its data."""
+    db = get_db()
+    order = db.execute('SELECT id, client_id, dealer_order_id FROM tuning_orders WHERE id=? AND source != ?',
+                       (order_id, SUBCONTRACT_REQUEST_SOURCE)).fetchone()
+    if order is None:
+        abort(404)
+    if request.method == 'POST':
+        raw = request.form.get('dealer_order_id', '').strip()
+        back = _tuning_bulk_return_url()
+        dealer_id = int(raw) if raw.isdigit() else None
+        if raw and (dealer_id is None or dealer_id > 9223372036854775807 or db.execute('SELECT id FROM dealer_orders WHERE id=?', (dealer_id,)).fetchone() is None):
+            session['tuning_bulk_error'] = 'Дилерский заказ не найден. Обновите список и повторите привязку.'
+            return redirect(back)
+        db.execute('UPDATE tuning_orders SET dealer_order_id=?, updated_at=? WHERE id=?',
+                   (dealer_id, dt.datetime.now().strftime('%Y-%m-%d %H:%M'), order_id))
+        db.commit()
+        session['tuning_bulk_notice'] = (
+            f'Тюнинг-заказ №{order_id} привязан к заказу дилерского центра №{dealer_id}.' if dealer_id
+            else f'Связь тюнинг-заказа №{order_id} с дилерским заказом снята.')
+        return redirect(back)
+
+    query = request.args.get('q', '').strip()[:120]
+    conditions, params = [], []
+    for word in query.casefold().split():
+        conditions.append("CASEFOLD(CAST(d.id AS TEXT) || ' ' || d.client_name || ' ' || "
+                          "COALESCE((SELECT GROUP_CONCAT(i.name, ' ') FROM dealer_order_items i WHERE i.order_id=d.id), '')) LIKE ? ESCAPE '\\'")
+        params.append('%' + word.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%')
+    where = ' AND '.join(conditions) if conditions else '1=1'
+    sql = ("SELECT d.id, d.client_name, d.order_date, d.order_type, d.status, "
+           "COALESCE((SELECT GROUP_CONCAT(i.name, ', ') FROM dealer_order_items i WHERE i.order_id=d.id), '') AS equipment "
+           "FROM dealer_orders d ")
+    rows = list(db.execute(sql + 'WHERE ' + where +
+                           ' ORDER BY CASE WHEN d.client_id = ? THEN 0 ELSE 1 END, d.id DESC LIMIT 50',
+                           [*params, order['client_id']]).fetchall())
+    current = order['dealer_order_id']
+    if current and not any(row['id'] == current for row in rows):
+        existing = db.execute(sql + 'WHERE d.id=?', (current,)).fetchone()
+        if existing:
+            rows.insert(0, existing)
+    from modules.dealer.constants import STATUS_LABELS
+    return jsonify(current_id=current, orders=[{
+        'id': row['id'],
+        'label': ' · '.join(filter(None, [f"№{row['id']}", row['client_name'], format_ru_date(row['order_date']),
+                                         row['equipment'], STATUS_LABELS.get(row['status'], row['status'])])),
+    } for row in rows])
+
+
 @app.route("/tuning/bulk", methods=["POST"])
 @admin_login_required
 def bulk_edit_tuning_orders():

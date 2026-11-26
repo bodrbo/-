@@ -1,0 +1,44 @@
+{% macro return_filters() %}
+<input type="hidden" name="return_q" value="{{ search_query }}">
+<input type="hidden" name="return_status" value="{{ selected_status }}">
+<input type="hidden" name="return_date_from" value="{{ date_from }}">
+<input type="hidden" name="return_date_to" value="{{ date_to }}">
+{% endmacro %}
+<dialog class="tuning-order-dialog" id="tuning-transfer-dialog" aria-labelledby="tuning-transfer-title">
+  <div class="tuning-order-dialog-head">
+    <h3 id="tuning-transfer-title">Перенести заказ</h3>
+    <button type="button" class="tuning-order-dialog-close" data-order-dialog-close aria-label="Закрыть">×</button>
+  </div>
+  <p>Перенос создаст заказ в дилерском центре и удалит исходный тюнинг-заказ. Если в нём есть работы, потребуется отдельное подтверждение их удаления.</p>
+  <form action="{{ url_for('bulk_edit_tuning_orders') }}" method="post">
+    <input type="hidden" name="action" value="convert">
+    <input type="hidden" name="order_id">
+    {{ return_filters() }}
+    <label>Куда перенести
+      <select name="bulk_target" required>
+        <option value="" selected disabled>Выберите подраздел…</option>
+        <option value="goods">Морские товары</option>
+        <option value="equipment">Лодки и моторы</option>
+      </select>
+    </label>
+    <button type="submit" class="btn-primary">Перенести</button>
+  </form>
+</dialog>
+<dialog class="tuning-order-dialog" id="tuning-link-dialog" aria-labelledby="tuning-link-title">
+  <div class="tuning-order-dialog-head">
+    <h3 id="tuning-link-title">Привязать заказ</h3>
+    <button type="button" class="tuning-order-dialog-close" data-order-dialog-close aria-label="Закрыть">×</button>
+  </div>
+  <p>Выберите заказ дилерского центра. В тюнинг-заказе появится отметка «Куплена у Бодрого Боцмана». Данные обоих заказов сохранятся.</p>
+  <label>Найти дилерский заказ
+    <input type="search" id="tuning-link-search" placeholder="Номер, клиент или техника" autocomplete="off">
+  </label>
+  <form method="post" id="tuning-link-form">
+    {{ return_filters() }}
+    <label>Дилерский заказ
+      <select name="dealer_order_id" id="tuning-link-select" aria-describedby="tuning-link-status"></select>
+    </label>
+    <p id="tuning-link-status" role="status"></p>
+    <button type="submit" class="btn-primary" id="tuning-link-submit" disabled>Сохранить привязку</button>
+  </form>
+</dialog>
