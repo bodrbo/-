@@ -1,0 +1,29 @@
+<dialog class="tuning-terms-dialog" id="tuning-terms-dialog" aria-labelledby="tuning-terms-title">
+  <div class="tuning-terms-head">
+    <h3 id="tuning-terms-title">Условия оплаты · заказ №{{ edit_order.id }}</h3>
+    <button type="button" class="tuning-terms-close" id="tuning-terms-close" aria-label="Закрыть">×</button>
+  </div>
+  <form id="tuning-terms-form">
+    <label>Тип условий
+      <select id="tuning-terms-type"><option value="prepayment">Предоплата</option><option value="schedule">График платежей</option></select>
+    </label>
+    <div id="tuning-terms-prepayment">
+      <label>Процент предоплаты
+        <input type="text" inputmode="decimal" id="tuning-terms-percent" placeholder="Например, 30" autocomplete="off">
+      </label>
+      <p class="hint">От 0 до 100% от общей суммы заказа.</p>
+    </div>
+    <div id="tuning-terms-schedule" hidden>
+      <div class="tuning-terms-columns" aria-hidden="true"><span>Дата платежа</span><span>Сумма, ₽</span><span></span></div>
+      <div id="tuning-terms-rows"></div>
+      <button type="button" class="btn-secondary" id="tuning-terms-add">+ Добавить платёж</button>
+      <p id="tuning-terms-total" role="status"></p>
+    </div>
+    <p id="tuning-terms-error" role="alert" hidden></p>
+    <div class="tuning-terms-actions">
+      <button type="button" class="btn-secondary" id="tuning-terms-clear">Снять условия</button>
+      <button type="submit" class="btn-primary" id="tuning-terms-save">Сохранить</button>
+    </div>
+  </form>
+</dialog>
+<script id="tuning-terms-config" type="application/json">{{ {'terms': payment_terms, 'orderTotal': edit_order.total, 'endpoint': url_for('tuning_order_payment_terms', order_id=edit_order.id)}|tojson }}</script>

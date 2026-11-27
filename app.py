@@ -192,6 +192,7 @@ from modules.db_backup import (
     maybe_start_background as start_due_db_backup,
 )
 from modules.settings import repository as settings_repository
+from modules import tuning_payment_terms
 from modules.ai_assistant import (
     create_blueprint as create_ai_assistant_blueprint,
     init_schema as init_ai_assistant_schema,
@@ -344,7 +345,7 @@ BACKUP_OFFSITE = configured_backup_offsite(os.environ.get("YANDEX_DISK_TOKEN"), 
 # Bump when an additive schema migration is introduced. Demo sessions keep
 # their own SQLite files, so unlike the shared database they need an explicit
 # signal to run init_db() again after a deploy.
-DEMO_TENANT_SCHEMA_REVISION = "2026-11-26-release-seen-items"
+DEMO_TENANT_SCHEMA_REVISION = "2026-11-27-tuning-payment-terms"
 
 
 def _bounded_env_int(name, default, minimum, maximum):
@@ -3679,6 +3680,8 @@ def init_db(db_path=None, include_bootstrap_data=True):
     tuning_cols = [row[1] for row in conn.execute("PRAGMA table_info(tuning_orders)").fetchall()]
     if "client_id" not in tuning_cols:
         conn.execute("ALTER TABLE tuning_orders ADD COLUMN client_id INTEGER")
+    if "payment_terms_json" not in tuning_cols:
+        conn.execute("ALTER TABLE tuning_orders ADD COLUMN payment_terms_json TEXT")
     if "dealer_order_id" not in tuning_cols:
         # The order of the dealer center the equipment was bought on: such an
         # order is marked «Куплена у Бодрого Боцмана» in the tuning center.
@@ -12389,6 +12392,29 @@ def add_tuning_order():
     return redirect(url_for("tuning_index"))
 
 
+@app.route('/tuning/<int:order_id>/payment-terms', methods=['GET', 'POST'])
+@admin_login_required
+def tuning_order_payment_terms(order_id):
+    db = get_db()
+    order = db.execute('SELECT id, payment_terms_json FROM tuning_orders WHERE id=?', (order_id,)).fetchone()
+    if order is None:
+        abort(404)
+    if request.method == 'POST':
+        if request.headers.get('Sec-Fetch-Site') == 'cross-site':
+            return jsonify(error='Недопустимый источник запроса.'), 403
+        try:
+            terms = tuning_payment_terms.normalize_payment_terms(request.get_json(silent=True))
+        except tuning_payment_terms.TermsError as exc:
+            return jsonify(error=str(exc)), 400
+        db.execute('UPDATE tuning_orders SET payment_terms_json=?, updated_at=? WHERE id=?',
+                   (json.dumps(terms, ensure_ascii=False) if terms else None,
+                    dt.datetime.now().strftime('%Y-%m-%d %H:%M'), order_id))
+        db.commit()
+    else:
+        terms = tuning_payment_terms.read_payment_terms(order)
+    return jsonify(terms=terms, label=tuning_payment_terms.payment_terms_label(terms))
+
+
 @app.route("/tuning/<int:order_id>/copy", methods=["POST"])
 @admin_login_required
 def copy_tuning_order(order_id):
@@ -12974,6 +13000,7 @@ def edit_tuning_order(order_id):
     order = db.execute("SELECT * FROM tuning_orders WHERE id = ?", (order_id,)).fetchone()
     if order is None:
         return redirect(url_for("tuning_index"))
+    payment_terms = tuning_payment_terms.read_payment_terms(order)
     is_subcontract = order["source"] == SUBCONTRACT_REQUEST_SOURCE
     subcontract_partner = (
         db.execute(
@@ -13086,6 +13113,7 @@ def edit_tuning_order(order_id):
         reminder_recipients = _note_reminder_recipients(db)
         return render_template(
             "tuning_form.html", edit_order=order, errors=None, form_values=form_values,
+            payment_terms=payment_terms, payment_terms_label=tuning_payment_terms.payment_terms_label(payment_terms),
             pending_price_count=tuning_order_pending_price_count(db, order_id),
             deadline_view=deadline_view,
             items_prefill=items, boat_motors_prefill=boat_motors,
@@ -13163,6 +13191,7 @@ def edit_tuning_order(order_id):
         ).fetchall()
         return render_template(
             "tuning_form.html", edit_order=order, errors=errors, form_values=request.form,
+            payment_terms=payment_terms, payment_terms_label=tuning_payment_terms.payment_terms_label(payment_terms),
             pending_price_count=tuning_order_pending_price_count(db, order_id),
             deadline_view=_tuning_order_deadline_view(
                 order["deadline_date"], order["completed_at"], order["status"]

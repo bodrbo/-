@@ -206,7 +206,7 @@
     </a>
   </div>
 
-  <div class="panel order-summary-grid">
+  <div class="panel order-summary-grid tuning-order-summary">
     <div class="order-summary-item">
       <span class="k">№ заказа</span>
       <span class="v">№{{ edit_order.id }}</span>
@@ -283,7 +283,13 @@
       </span>
       {% endif %}
     </div>
+    <div class="order-summary-item" id="tuning-payment-terms-summary">
+      <span class="k">Условия</span>
+      <button type="button" class="tuning-terms-trigger" id="tuning-terms-open"
+              aria-haspopup="dialog">{{ payment_terms_label }}</button>
+    </div>
   </div>
+  {% include '_tuning_payment_terms.html' %}
 
   <div class="hero-grid" id="tuning-hero">
     <div class="hero-card">
@@ -2311,6 +2317,7 @@ document.addEventListener('DOMContentLoaded', updateYookassaSubmitState);
 <script src="{{ url_for('static', filename='sortable.js') }}"></script>
 <script src="{{ url_for('static', filename='live-save.js') }}"></script>
 <script src="{{ url_for('static', filename='status-picker.js') }}"></script>
+{% if edit_order %}<script src="{{ url_for('static', filename='tuning-payment-terms.js') }}" defer></script>{% endif %}
 
 </body>
 </html>
