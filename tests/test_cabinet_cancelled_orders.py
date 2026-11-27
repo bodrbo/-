@@ -1,3 +1,4 @@
+import json
 import re
 import unittest
 
@@ -106,20 +107,39 @@ class CabinetCancelledOrdersTests(unittest.TestCase):
         page = self.client.get(f"/client/{self.TOKEN}").get_data(as_text=True)
         self.assert_stats(page, 0, "0", "0", "0")
 
-    def test_the_terms_block_sits_right_after_the_equipment_block(self):
-        self.make_client()
+    def test_payment_terms_are_shown_in_their_own_order_cards(self):
+        client_id = self.make_client()
+        prepayment = self.add_order(client_id, "approved", 10000, 0)
+        schedule = self.add_order(client_id, "approved", 20000, 0)
+        unassigned = self.add_order(client_id, "approved", 30000, 0)
+        with application_module.app.app_context():
+            db = application_module.get_db()
+            db.executemany("UPDATE tuning_orders SET payment_terms_json = ? WHERE id = ?", [
+                (json.dumps({"type": "prepayment", "percent": "30.5"}), prepayment),
+                (json.dumps({"type": "schedule", "payments": [
+                    {"date": "2026-12-15", "amount": "5000.50"},
+                    {"date": "2026-12-01", "amount": "10000.00"},
+                ]}), schedule),
+            ])
+            db.commit()
+
         page = self.client.get(f"/client/{self.TOKEN}").get_data(as_text=True)
-        equipment = page.index('<span class="k">Техника</span>')
-        terms = page.index('<span class="k">Условия</span>')
-        orders = page.index('<span class="k">Сумма по заказам</span>')
-        self.assertLess(equipment, terms)
-        self.assertLess(terms, orders)
-        self.assertIn("Предоплата 70%", page)
+        prepayment_card = page.split(f'id="order-{prepayment}"', 1)[1].split("</details>", 1)[0]
+        schedule_card = page.split(f'id="order-{schedule}"', 1)[1].split("</details>", 1)[0]
+        unassigned_card = page.split(f'id="order-{unassigned}"', 1)[1].split("</details>", 1)[0]
+        self.assertIn("Предоплата 30,5%", prepayment_card)
+        self.assertNotIn("График платежей", prepayment_card)
+        self.assertNotIn("Предоплата", schedule_card)
+        self.assertLess(schedule_card.index("01/12/2026"), schedule_card.index("15/12/2026"))
+        self.assertIn("10\xa0000,00 ₽", schedule_card)
+        self.assertIn("5\xa0000,50 ₽", schedule_card)
+        self.assertNotIn("Условия оплаты", unassigned_card)
+        self.assertNotIn("Предоплата 70%", page)
 
     def test_the_partner_cabinet_has_no_terms_block(self):
         partner_id = self.make_client("partner")
         page = self.client.get(f"/admin/clients/{partner_id}/cabinet?section=tuning").get_data(as_text=True)
-        self.assertNotIn('<span class="k">Условия</span>', page)
+        self.assertNotIn("Условия оплаты", page)
 
     def test_the_admin_view_of_the_cabinet_counts_the_same_way(self):
         client_id = self.make_client()

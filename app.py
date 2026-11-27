@@ -16277,6 +16277,8 @@ def _render_client_dashboard(
         "motor_serial_number, discount_type, discount_value, total, status, "
         "order_date, deadline_date, completed_at, created_at, source"
     )
+    if not is_tuning_partner:
+        order_columns += ", payment_terms_json"
     if is_admin_view:
         order_columns += ", sale_channel, updated_at, source_ref"
     order_rows = []
@@ -16344,6 +16346,10 @@ def _render_client_dashboard(
             (o["id"],),
         ).fetchall()
         order = dict(o)
+        payment_terms = tuning_payment_terms.read_payment_terms(order)
+        if payment_terms:
+            order["payment_terms"] = payment_terms
+            order["payment_terms_label"] = tuning_payment_terms.payment_terms_label(payment_terms)
         order["sale_channel_label"] = sales_channel_labels.get(
             order.get("sale_channel"), order.get("sale_channel") or "Не указан"
         )

@@ -246,10 +246,6 @@
       <span class="k">Техника</span>
       <span class="v" style="font-size:20px;">{{ primary_equipment }}</span>
     </div>
-    <div class="panel total-card cabinet-terms-card">
-      <span class="k">Условия</span>
-      <span class="v" style="font-size:20px;">Предоплата 70%</span>
-    </div>
     {% endif %}
     <div class="panel total-card">
       <span class="k">Сумма по заказам</span>
@@ -447,6 +443,28 @@
             </div>
             {% endif %}
           </div>
+          {% if o.payment_terms %}
+          <section class="client-order-terms">
+            <h3>Условия оплаты</h3>
+            {% if o.payment_terms.type == 'prepayment' %}
+            <p class="hint">{{ o.payment_terms_label }}</p>
+            {% else %}
+            <div class="table-scroll">
+              <table class="records" aria-label="{{ o.payment_terms_label }}">
+                <thead><tr><th scope="col">Дата платежа</th><th scope="col" class="amount">Сумма</th></tr></thead>
+                <tbody>
+                  {% for payment in o.payment_terms.payments %}
+                  <tr>
+                    <td><time datetime="{{ payment.date }}">{{ payment.date|ru_date }}</time></td>
+                    <td class="amount">{{ payment.amount|money(2) }} ₽</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% endif %}
+          </section>
+          {% endif %}
           <h3>Работы по заказу</h3>
           {% if o.work_items %}
           <div class="table-scroll">
