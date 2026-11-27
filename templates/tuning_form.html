@@ -279,7 +279,7 @@
       {% if edit_order.equipment_type == 'boat' and boat_motors_prefill %}
       <span class="d">
         {{ 'Мотор' if boat_motors_prefill|length == 1 else 'Моторы' }}:
-        {% for motor in boat_motors_prefill %}{{ motor.motor_model }}{% if motor.motor_serial_number %} (№ {{ motor.motor_serial_number }}){% endif %}{{ ', ' if not loop.last }}{% endfor %}
+        {% for motor in boat_motors_prefill %}{% if motor.profile_id %}<a href="{{ url_for('tuning_motor_profile', profile_id=motor.profile_id) }}">{{ motor.motor_model }}</a>{% else %}{{ motor.motor_model }}{% endif %}{% if motor.motor_serial_number %} (№ {{ motor.motor_serial_number }}){% endif %}{{ ', ' if not loop.last }}{% endfor %}
       </span>
       {% endif %}
     </div>

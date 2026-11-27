@@ -13019,6 +13019,9 @@ def edit_tuning_order(order_id):
 
     if request.method == "GET":
         boat_motors = _tuning_order_motors(db, order_id)
+        for motor in boat_motors:
+            motor["profile_id"] = _tuning_equipment_profile_id(db, "motor", motor["motor_model"])
+
         items = _tuning_order_items_with_assignments(db, order_id)
         assignable_employees = _employees_with_any_position(db, TUNING_ASSIGNABLE_POSITIONS)
         assignable_partners = _tuning_partner_choices(db)
